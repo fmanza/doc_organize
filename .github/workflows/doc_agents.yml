@@ -1,0 +1,156 @@
+name: Doc Agents
+
+on:
+  workflow_dispatch:
+    inputs:
+      module_path:
+        description: "Ruta al módulo Python a documentar (relativa a la raíz)"
+        required: true
+        default: "src/doc_organize/timelog/time_utils.py"
+        type: string
+      doc_type:
+        description: "Tipo de documentación a generar"
+        required: true
+        default: "both"
+        type: choice
+        options:
+          - functional
+          - technical
+          - both
+      output_dir:
+        description: "Directorio de destino en docs/ (sin barra final)"
+        required: false
+        default: "docs/functional"
+        type: string
+      dry_run:
+        description: "Solo mostrar el output generado sin escribir archivos"
+        required: false
+        default: false
+        type: boolean
+
+  schedule:
+    # Ejecución semanal los domingos a las 02:00 UTC
+    # Genera documentación funcional del módulo principal
+    - cron: "0 2 * * 0"
+
+concurrency:
+  group: doc-agents-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate-docs:
+    name: Generar documentación con IA
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependencias
+        run: pip install -e ".[docs]"
+
+      - name: Verificar secretos disponibles
+        id: check-secrets
+        run: |
+          if [ -n "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+            echo "provider=anthropic" >> $GITHUB_OUTPUT
+            echo "Proveedor: Anthropic (Claude)"
+          elif [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
+            echo "provider=openai" >> $GITHUB_OUTPUT
+            echo "Proveedor: OpenAI (GPT)"
+          else
+            echo "provider=none" >> $GITHUB_OUTPUT
+            echo "AVISO: No se encontraron secretos ANTHROPIC_API_KEY ni OPENAI_API_KEY."
+            echo "El workflow ejecutará en modo simulación (dry-run)."
+          fi
+
+      - name: Determinar módulo objetivo (schedule)
+        if: github.event_name == 'schedule'
+        run: |
+          echo "MODULE_PATH=src/doc_organize/timelog/time_utils.py" >> $GITHUB_ENV
+          echo "DOC_TYPE=both" >> $GITHUB_ENV
+          echo "OUTPUT_DIR=docs/functional" >> $GITHUB_ENV
+          echo "DRY_RUN=false" >> $GITHUB_ENV
+
+      - name: Determinar módulo objetivo (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "MODULE_PATH=${{ inputs.module_path }}" >> $GITHUB_ENV
+          echo "DOC_TYPE=${{ inputs.doc_type }}" >> $GITHUB_ENV
+          echo "OUTPUT_DIR=${{ inputs.output_dir }}" >> $GITHUB_ENV
+          echo "DRY_RUN=${{ inputs.dry_run }}" >> $GITHUB_ENV
+
+      - name: Generar documentación con Anthropic
+        if: steps.check-secrets.outputs.provider == 'anthropic'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python .github/scripts/generate_docs.py \
+            --provider anthropic \
+            --module "$MODULE_PATH" \
+            --doc-type "$DOC_TYPE" \
+            --output-dir "$OUTPUT_DIR" \
+            $( [ "$DRY_RUN" = "true" ] && echo "--dry-run" )
+
+      - name: Generar documentación con OpenAI
+        if: steps.check-secrets.outputs.provider == 'openai'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python .github/scripts/generate_docs.py \
+            --provider openai \
+            --module "$MODULE_PATH" \
+            --doc-type "$DOC_TYPE" \
+            --output-dir "$OUTPUT_DIR" \
+            $( [ "$DRY_RUN" = "true" ] && echo "--dry-run" )
+
+      - name: Simulación sin secretos
+        if: steps.check-secrets.outputs.provider == 'none'
+        run: |
+          echo "Modo simulación: no se generan archivos."
+          echo "Configura ANTHROPIC_API_KEY o OPENAI_API_KEY en los secretos del repositorio."
+          echo "Settings → Secrets and variables → Actions → New repository secret"
+
+      - name: Validar documentación generada
+        if: steps.check-secrets.outputs.provider != 'none' && env.DRY_RUN != 'true'
+        run: mkdocs build
+        env:
+          PYTHONPATH: src
+
+      - name: Crear Pull Request con cambios
+        if: steps.check-secrets.outputs.provider != 'none' && env.DRY_RUN != 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "docs: auto-generated documentation for ${{ env.MODULE_PATH }}"
+          branch: "docs/auto-generated-${{ github.run_number }}"
+          title: "docs: documentación generada automáticamente — ${{ env.MODULE_PATH }}"
+          body: |
+            ## Documentación generada automáticamente
+
+            **Módulo**: `${{ env.MODULE_PATH }}`
+            **Tipo**: `${{ env.DOC_TYPE }}`
+            **Directorio de salida**: `${{ env.OUTPUT_DIR }}`
+            **Proveedor IA**: `${{ steps.check-secrets.outputs.provider }}`
+            **Workflow run**: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            ### Revisión requerida
+            - [ ] Diagramas Mermaid renderizan correctamente (`mkdocs serve`)
+            - [ ] Terminología de negocio es correcta
+            - [ ] Reglas de negocio reflejan el comportamiento actual del código
+            - [ ] Entrada añadida en `mkdocs.yml` nav si es necesario
+
+            > Generado con [Documentation Generator](.github/agents/documentation-generator.agent.md)
+          labels: |
+            documentation
+            automated
+          draft: false

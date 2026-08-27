@@ -1,0 +1,54 @@
+name: Docs Release ZIP
+
+# Triggered automatically on version tags (v*) and manually via workflow_dispatch.
+# Builds the documentation site and uploads a ZIP to the GitHub Release.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag / version to attach the ZIP to (e.g. v0.10.0)"
+        required: false
+
+concurrency:
+  group: docs-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-upload:
+    name: Build docs ZIP & upload to release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # required to create/update GitHub Releases
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Configure git credentials for private deps
+        run: git config --global url."https://x-access-token:${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
+
+      - name: Install docs dependencies
+        run: pip install -e ".[docs]"
+
+      - name: Build docs & create ZIP
+        run: python scripts/build_docs_zip.py --builder zensical
+        env:
+          PYTHONPATH: src
+
+      - name: Upload ZIP to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/doc_organize-docs-*.zip
+          fail_on_unmatched_files: true
+          # Creates the release if it doesn't exist yet (useful for workflow_dispatch).
+          tag_name: ${{ github.ref_name }}

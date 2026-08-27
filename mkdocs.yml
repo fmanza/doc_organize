@@ -1,0 +1,41 @@
+site_name: doc_organize
+site_description: Sistema de extracción de contenido de documentos en Markdown y JSON documentación y organización.
+site_author: Paco Manzano
+site_url: https://user.github.io/doc_organize
+
+theme:
+  name: material
+  language: es
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - search.highlight
+
+nav:
+  - Inicio: index.md
+  - Ejemplos:
+      - CLI y CI/CD:
+          - CLI: examples/example_cli_usage.md
+          - CI/CD Integration: examples/example_ci_cd_integration.md
+      - Herramientas de IA:
+          - Primeros pasos con IA: examples/ai_primer_pasos_proyecto_nuevo.md
+          - Claude Code: examples/claude_code_usage_complete_example.md
+          - Copilot Chat: examples/github_usage_complete_example.md
+          - Codex: examples/codex_usage_complete_example.md
+  - API:
+      - Referencia: api/index.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_source: true
+            show_root_heading: true
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences

@@ -1,0 +1,15 @@
+# Detectar archivos de texto automáticamente y normalizarlos a LF al subir al repo
+* text=auto
+
+# Forzar que archivos de código siempre usen LF en el repositorio
+*.js text
+*.py text
+*.html text
+*.css text
+*.json text
+*.code-workspace text
+
+# Asegurar que archivos binarios (imágenes, etc.) no se toquen
+*.png binary
+*.jpg binary
+*.gif binary

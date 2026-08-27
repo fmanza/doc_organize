@@ -1,0 +1,5 @@
+recursive-include src/doc_organize/data *.json
+recursive-include src/doc_organize/doc/data *.json *.js *.css
+recursive-include src/doc_organize/doc/templates *.j2
+include README.md
+include LICENSE

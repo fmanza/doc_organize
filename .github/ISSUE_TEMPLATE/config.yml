@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Reporte de seguridad
+    url: https://github.com/fmanza/doc_organize/blob/main/.github/SECURITY.md
+    about: Revisa la politica de seguridad antes de compartir detalles sensibles.
+  - name: Guia de contribucion
+    url: https://github.com/fmanza/doc_organize/blob/main/.github/CONTRIBUTING.md
+    about: Consulta el flujo de trabajo recomendado para proponer cambios.
