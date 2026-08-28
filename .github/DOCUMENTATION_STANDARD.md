@@ -19,11 +19,10 @@ Estandarizar instrucciones de documentación para asegurar:
 ## 2. Estado Actual
 
 ### 2.1 Estructura MkDocs
-- **Site**: `mkdocs.yml` (v1.5+, Material theme) / `zensical.toml` (alternativo, compatible)
+- **Site**: `mkdocs.yml` (v1.5+, Material theme)
 - **Webs de referencia oficial** (consultar con `--verify-tools` para validar versiones y plugins):
   - MkDocs: `https://www.mkdocs.org/about/release-notes/`
   - Material for MkDocs: `https://squidfunk.github.io/mkdocs-material/plugins/`
-  - Zensical: `https://zensical.org/`
 - **Secciones existentes**:
   - ✅ Guías (DUPLICATE_PROJECT_GUIDE, NEXT_STEPS, README_DUPLICADOR, ARCHITECTURE_VISUAL)
   - ✅ Funcional (`docs/functional/`) — 8 módulos
@@ -550,70 +549,19 @@ los grupos principales como referencia rápida:
 ```yaml
 nav:
   - Inicio: index.md
-  - Instalación: INSTALLATION.md
-
-  - Documentación Funcional:
-      - Managers:
-          - Gestión de Conexiones (Sync): functional/managers-sync.md
-          - Ciclo de vida de sesión sincrónica: functional/managers-sync-session-lifecycle.md
-          - Gestión de Conexiones (Async): functional/managers-async.md
-      - Metadatos e Introspección:
-          - Extracción de Metadatos: functional/metadata-extraction.md
-          - Selección de Driver: functional/drivers-selection.md
-      - Operaciones de Datos:
-          - Operaciones Bulk (CRUD): functional/bulk-operations.md
-          - Auditoría de Operaciones Bulk: functional/bulk-audit.md
-      - Queries y Validación:
-          - Registro de Queries: functional/query-registry.md
-          - Ejecución de Consultas: functional/query-execution.md
-          - Patrón de Validadores: functional/validators-pattern.md
-      - Comparación de Esquemas:
-          - Comparador de Esquemas: functional/schema-comparison.md
-      - Migración de Esquemas:
-          - Migración Oracle (origen): functional/migrate-oracle-mariadb.md
-          - Migración MariaDB (origen): functional/migrate-mariadb-source.md
-          - Migración SQL Server (origen): functional/migrate-sqlserver-source.md
-          - Migración PostgreSQL (origen): functional/migrate-postgresql-source.md
-      - Análisis de Relaciones:
-          - Visualización de Grafos: functional/graph-analysis.md
-      - Documentación de BD:
-          - Generación de Documentación: functional/database-documentation.md
-
-  - Referencia Técnica:
-      - Managers: api/managers-sync.md  # y otros bajo api/managers-*.md
-      - Metadatos: api/metadata-manager.md
-      - Conexiones: api/connection-factory.md
-      - Bulk: api/bulk-crud.md
-      - Queries: api/query-system.md
-      - Migración: api/migrate-oracle-mariadb.md  # y otros bajo api/migrate-*.md
-      - Análisis: api/analysis.md
-      - Documentación BD: api/database-documentation.md
-      - Excepciones: api/exceptions.md
-
-  - Ejemplos:                              # subsecciones por área, igual que Referencia Técnica
-      - Metadatos e Introspección:
-          - Conectar e Introspeccionar: examples/example-connect-introspect.md
-      - Operaciones Bulk:
-          - Bulk Insert desde CSV: examples/bulk_insert_csv.md
-      - Comparación de Esquemas:
-          - Comparación de Esquemas: examples/schema_comparison.md
-      - Migración de Esquemas:
-          - Migración Oracle (origen): examples/migrate-oracle-mariadb.md
-          - Migración MariaDB (origen): examples/migrate-mariadb-source.md
-      # ... resto de ejemplos agrupados por área en mkdocs.yml
-
-  - Guías:                                 # subsecciones temáticas (how-tos transversales)
-      - Incorporación para Desarrolladores: guides/onboarding_dev.md
-      - Conexión y Drivers:
-          - Programación Asíncrona: guides/async_guide.md
-          - Drivers PostgreSQL: guides/postgresql_driver_guide.md
-      - Errores y Diagnóstico:
-          - Excepciones: guides/exceptions.md
-          - Troubleshooting: guides/troubleshooting.md
-      - Herramientas IA:
-          - Guía completa (VS Code): guides/doc_generation_vscode_guide.md
-      # ... resto de guías agrupadas por tema en mkdocs.yml
+  - Guías:
+      - Instalación: guides/installation.md
+      - Inicio rápido: guides/quick_start.md
+      - Resolución de problemas: guides/troubleshooting.md
+  - Funcionalidad: functional/index.md
+  - API:
+      - Arquitectura y referencia: api/index.md
 ```
+
+Estado real (verificado con `mkdocs build --strict`, ver `.ai/CURRENT_STATE.md`). Si el árbol de
+módulos crece, `Funcionalidad`/`API` pueden subdividirse en subsecciones (una por módulo real de
+`src/doc_organize/`), siguiendo el mismo patrón que `§4.1` — nunca copiar aquí una jerarquía de otro
+proyecto sin verificarla contra el código actual.
 
 ---
 
@@ -645,7 +593,7 @@ nav:
 | **3. Exploración** | `Explore` | Mapear módulos existentes vs faltantes | `src/`, `docs/` | Matriz de cobertura |
 | **4. Generación** | `documentation-generator` | Crear/actualizar docs funcional + técnica | Código fuente + prompts | Archivos en `docs/` + `mkdocs.yml` |
 | **5. Auditoría** | `documentation-reviewer` | Validar completitud, ejemplos, coherencia | Docs generadas | Findings + mejoras |
-| **6. Verificación de config** (opt-in `--verify-tools`) | `documentation-generator` | Fetch webs oficiales — validar plugins y versiones en `mkdocs.yml` / `zensical.toml` | Config + webs MkDocs/Zensical/PyPI | Discrepancias por severidad |
+| **6. Verificación de config** (opt-in `--verify-tools`) | `documentation-generator` | Fetch webs oficiales — validar plugins y versiones en `mkdocs.yml` | Config + webs MkDocs/PyPI | Discrepancias por severidad |
 | **6b. Verificación de build** (opt-in `--verify-build`) | `documentation-generator` | Build + inspección HTML generado — alias bug, snippets, Mermaid, nav | `site/` (Modo A) o `localhost:8000` (Modo B `--serve`) | Hallazgos por página + acciones recomendadas |
 | **7. Cierre** | `Version Closer` | Sincronizar `CHANGELOG.md` + `COMPATIBILITY.md` | Cambios completados | Release notes |
 

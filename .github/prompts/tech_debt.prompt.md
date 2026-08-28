@@ -2,7 +2,7 @@
 
 ## Inputs requeridos
 Antes de ejecutar, confirma que dispones de:
-- **Módulo/paquete objetivo** (p.ej. `src/doc_organize/metadata/mariadb/`)
+- **Módulo/paquete objetivo** (p.ej. `src/doc_organize/converter/`)
 - **Deuda conocida o síntomas** (p.ej. "hay `Any` sueltos", "duplicación sync/async")
 - **Versión actual** y rama activa
 - **Restricciones de scope**: ¿solo análisis (PLAN+AUDIT_CODE) o también IMPLEMENT?

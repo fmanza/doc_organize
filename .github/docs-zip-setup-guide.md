@@ -1,6 +1,13 @@
 # 📦 Descarga de Documentación como ZIP
 
-Esta guía explica cómo generar y distribuir la documentación de doc_organize como ZIP, compatible con **mkdocs** y **zensical**.
+> **⚠️ Nota de verificación (2026-08-28)**: `scripts/build_docs_zip.py` (referenciado en toda esta
+> guía) no existe en el repo — la funcionalidad de ZIP de release nunca se completó (ver
+> `.github/workflows/docs-release.yml` y `docs-zip-release.yml`, ambos rotos por esta misma razón).
+> Las referencias a "Zensical" en esta guía son heredadas de una herramienta evaluada y descartada
+> (ver `.ai/DECISIONS_LOG.md`) — el proyecto usa MkDocs. Tratar esta guía como aspiracional, no como
+> documentación de algo funcional hoy.
+
+Esta guía explica cómo generar y distribuir la documentación de doc_organize como ZIP, con **mkdocs**.
 
 ---
 

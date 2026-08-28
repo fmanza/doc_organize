@@ -1,46 +1,52 @@
-# 📚 Glossary - doc_organize
+# 📚 Glossary — doc_organize
 
-## Core Concepts
+> Reemplaza una versión anterior con términos de otra librería (motores de base de datos,
+> `_drivers/`, `connection/`, `metadata/`) — la encarnación previa de este mismo repositorio.
 
-### Level 1: Foundation
-- **_core/**: Tipos básicos, excepciones, contratos (no dependencias de otra parte de la librería)
-- **_drivers/**: Registro de drivers, validación, capacidades por motor
-- **Types**: Aliases unificados (RowOrNone, Rows, QueryParams)
-- **Protocols**: Contratos (ConnectionLike, PoolLike, QueryResultLike)
+## Niveles de arquitectura
 
-### Level 2: Core Services
-- **connection/**: Pool singleton, lifecycle, parámetros de conexión
-- **metadata/**: Caché de esquema, introspection, relaciones
-- **query/**: Registro centralizado, versionado, ejecución
-- **results/**: Normalización, mapeo, conversión de resultados
+- **Nivel 1 (Fundacional)**: `core/`, `utils/` — sin dependencias del resto del paquete.
+- **Nivel 2 (Servicios independientes)**: `validators/`, `scanner/`, `converter/`, `dedup/`,
+  `cache/`, `projects/`, `auth/` — cada uno resuelve una responsabilidad, sin depender de sus pares.
+- **Nivel 3 (Orquestación)**: `scan/`, `web/`, `main.py` — coordinan Nivel 2 sin cambiar sus
+  contratos.
 
-### Level 3: Domain Logic
-- **managers/**: APIs sync/async (SyncDatabaseManager, AsyncDatabaseManager)
-- **bulk/**: CRUD masivo (insert, update, delete desde DataFrame)
-- **audit/**: Registro de auditoría en CSV
-- **analysis/**: Grafos relacionales multinivel, cardinalidad y renderizado documental
+## Entidades de dominio
 
-## Key Terms
+- **Project**: carpeta raíz de trabajo con su propia `Conversión/`, `cache.db`, `duplicados/`.
+  Pertenece a un `tenant_id` (default `"default"`).
+- **Tenant**: organización/workspace que agrupa usuarios y proyectos, aislados de otros tenants.
+- **User**: usuario dentro de un tenant (único por tenant, no globalmente); autenticado por
+  contraseña (`scrypt`).
+- **Session**: sesión de navegador activa tras `/login`; token opaco en la cookie
+  `doc_organize_session`. Logout selectivo: cerrar una no invalida las demás del mismo usuario.
+- **DocumentMetadata**: metadatos de un documento descubierto por el escaneo (ruta, nombre, tamaño,
+  hash SHA-256).
+- **CacheEntry**: entrada persistida en `cache.db` — hash, estado (new/modified/unchanged),
+  estado de conversión.
+- **DuplicateGroup**: grupo de documentos duplicados (exactos o conflicto de versión), con un
+  documento canónico y una elección opcional del usuario (`user_choice`).
+- **ScanEvent**: evento de progreso emitido por `ScanCommand.run_streaming()`
+  (`started`/`scanned`/`deduplicated`/`file_converted`/`ocr_processed`/`completed`).
 
-- **Motor**: Engine/dialect de BD (MariaDB, PostgreSQL, Oracle, etc.)
-- **Pool**: Conjunto de conexiones reutilizables
-- **Manager**: API pública sync o async para operaciones
-- **Query Registry**: Registro centralizado de SQL con versiones
-- **Metadata Cache**: Esquema en caché con TTL
-- **Audit Trail**: CSV con user, timestamp, operación, delta
-- **GraphDocument**: Modelo intermedio del grafo con nodos, aristas, niveles y resumen de niveles ocultos
-- **DiagramSummary Payload**: Contrato compartido que resume profundidad visible, niveles por sentido y ayudas de navegación para HTML y Word
-- **DiagramLegend Payload**: Contrato compartido con leyenda visual de dirección, cardinalidad, tipo de tabla y tipo de relación
-- **LevelDirection**: Sentido del recorrido relacional: `incoming`, `outgoing` o `both`
-- **Relation Graph**: Grafo de FK/PK con soporte multinivel y agrupación por nivel
+## Conceptos técnicos
 
-## Abbreviations
+- **`safe_path_join()`**: única forma permitida de construir una ruta a partir de un segmento
+  elegido por el usuario (nombre de proyecto, destino de duplicados) — previene path traversal.
+- **`hash_file()`**: única fuente de verdad de SHA-256 en todo el proyecto.
+- **`ScanCommand`**: orquestación compartida de escaneo+caché+dedup+conversión+OCR, usada tanto por
+  el CLI como por la web — vive en `scan/`, no en `main.py` ni en `web/`.
+- **`AuthMiddleware`**: exige sesión válida en toda ruta HTTP cuando el host no es loopback. **No**
+  protege conexiones WebSocket (limitación de `BaseHTTPMiddleware`, no de este proyecto).
+- **`_group_key`**: clave estable (sha256 de rutas ordenadas) usada por el Duplicates Resolver para
+  correlacionar un `GET` de detección con un `POST` de resolución sin persistir estado en servidor.
+- **REQ-00X**: identificador de requisito funcional, definido en
+  `.github/prompts/doclink_extractor_plan.md` §2.
 
-- **BD**: Base de Datos
-- **CRUD**: Create, Read, Update, Delete
-- **FK**: Foreign Key
-- **PK**: Primary Key
-- **TTL**: Time To Live
-- **ORM**: Object-Relational Mapping
-- **Core**: SQLAlchemy Core (usado aquí; no ORM)
-- **RCA**: Root Cause Analysis
+## Siglas y convenciones del proyecto
+
+- **`§N`**: referencia a una sección del PLAN (`.github/prompts/doclink_extractor_plan.md`).
+- **Fase D-2a/b/c**: sub-fases de la interfaz web (esqueleto+auth / Folder Selector+WebSocket /
+  Cache Viewer+Export+Duplicates).
+- **`.ai/doc_old/`**: historial de sesiones de la encarnación anterior de este repositorio (una
+  librería de motores de base de datos) — gitignored, no forma parte de este proyecto.

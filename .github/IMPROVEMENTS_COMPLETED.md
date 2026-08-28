@@ -75,7 +75,7 @@ sha256sum -c dist/doc_organize-docs-0.10.0.zip.sha256
 **Pasos Automáticos**:
 1. Checkout repository
 2. Setup Python 3.12 + dependencies
-3. Build documentation (`zensical build --strict`)
+3. Build documentation (`mkdocs build --strict`)
 4. Generate ZIP + SHA256 (`build_docs_zip.py`)
 5. Create GitHub Release (tag: `docs-vX.X.X`)
 6. Adjuntar artifacts: ZIP, .sha256, CHECKSUMS.txt
@@ -118,7 +118,7 @@ https://github.com/fmanza/doc_organize/releases/tag/docs-v0.10.0
    └─ docs-zip-release.yml ejecutado
 
 3. Build + Package + Hash
-   └─ zensical build
+   └─ mkdocs build --strict
    └─ build_docs_zip.py (SHA256)
 
 4. Create Release
@@ -166,13 +166,13 @@ grep "📥 Descargas" mkdocs.yml
 
 ```bash
 # Build + ZIP + SHA256
-zensical build && python scripts/build_docs_zip.py
+mkdocs build --strict && python scripts/build_docs_zip.py
 
 # Validar SHA256
 sha256sum -c dist/*.sha256
 
 # Verificar página de descargas
-zensical serve
+mkdocs serve
 # Abrir: http://localhost:8000/downloads/
 ```
 

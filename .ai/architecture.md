@@ -1,196 +1,134 @@
 # 🏗️ Arquitectura de doc_organize
 
-**Versión:** 0.10.0
-**Última Actualización:** Junio 2026
-**Estado:** Estable | Completamente Refactorizado
-**Motores Soportados:** MariaDB • MySQL • PostgreSQL • Oracle • SQLite • HSQLDB • SQL Server • Redshift • Snowflake
+**Versión:** Fase 1 (A–D2c)
+**Última actualización:** 2026-08-28
+**Estado:** Implementado, ver `§13` de `.github/prompts/doclink_extractor_plan.md`
+
+> Este documento reemplaza una versión anterior que describía una librería de acceso a múltiples
+> motores de base de datos (`_drivers/`, `connection/`, `metadata/`, `bulk/`, `migrate/`,
+> `comparar/`) — esa era la **encarnación anterior de este mismo repositorio**, antes de un pivote
+> completo de dominio. Ese historial se conserva localmente en `.ai/doc_old/` (gitignored, nunca
+> entró en el historial de este proyecto) por si hace falta contexto arqueológico, pero **no
+> describe `doc_organize` tal como existe hoy**.
 
 ---
 
-## Visión General
+## Visión general
 
-**doc_organize** es una librería que proporciona abstracción unificada para operaciones con múltiples motores de base de datos:
-
-- **Jerarquía de 3 niveles**: Foundation → Services → Specialization
-- **API moderna**: Managers sync/async con soporte nativo para async/await
-- **Type-safe**: Full type hints con validación en tiempo de desarrollo
-- **Modular**: Cada componente tiene responsabilidad única y clara
-- **Metadata canónica**: `metadata/*/tables.py` es el único punto autorizado para SQL de introspección (Regla #1–#6, `architecture.instructions.md`)
-
----
-
-## Estructura Modular (3 niveles)
+`doc_organize` escanea, convierte (Docling), deduplica y cachea documentos — por CLI o por una
+interfaz web opcional con autenticación multi-usuario/multi-tenant. Se organiza en **3 niveles**,
+regla de oro: un módulo de Nivel N solo importa de Nivel N y N-1 (nunca de otro módulo de su mismo
+nivel, nunca "hacia arriba").
 
 ```
 📦 doc_organize
 │
-├─── LEVEL 1: ABSTRACCIONES (Foundation Layer)
-│
-│    _core/                          ⭐ Core abstractions
-│    ├── types.py                    # Type aliases
-│    ├── exceptions.py               # DatabaseException y jerarquía completa
-│    ├── contracts.py                # Protocols base
-│    └── constants.py                # Enums compartidos
-│
-│    _drivers/                       🔌 Detección de drivers
-│    ├── validator.py                # DatabaseTypeValidator
-│    ├── driver_validator.py         # DriverValidator
-│    └── _config_loader.py
-│
+├─── NIVEL 1: FUNDACIONAL (sin dependencias del resto del paquete)
 │    core/
-│    └── capabilities.py             # Capacidades por motor
+│    ├── models.py        # Modelos Pydantic v2 (DocumentMetadata, Project, Tenant, User, Session,
+│    │                     #   CacheEntry, ScanEvent, DuplicateGroup, ...)
+│    ├── exceptions.py     # DocOrganizeError y su jerarquía
+│    └── constants.py      # Extensiones soportadas, límites de nombre, parámetros scrypt
 │
-├─── LEVEL 2: SERVICIOS (Services Layer)
+│    utils/
+│    ├── hash_utils.py     # hash_file() — única fuente de verdad SHA-256, async
+│    ├── path_utils.py     # safe_path_join() — anti path-traversal
+│    └── logging.py        # get_logger() — JSON estructurado
 │
-│    connection/                     🔌 Gestión de conexiones
-│    ├── factory.py                  # ConnectFactory
-│    ├── builder.py                  # build_conn_params()
-│    ├── protocols.py
-│    ├── close.py
-│    └── motors/                     # Adaptadores: mariadb, postgresql, oracle, sqlite, hsqldb, sqlserver
+├─── NIVEL 2: SERVICIOS INDEPENDIENTES (cada uno resuelve una responsabilidad, sin depender
+│    │        de sus pares de Nivel 2 — solo de Nivel 1)
+│    validators/    # FolderValidator (REQ-001), ProjectValidator (REQ-008)
+│    scanner/       # DocumentScanner (REQ-002)
+│    converter/     # DocumentConverter + OCRScheduler (REQ-003/004)
+│    dedup/         # DeduplicationManager (REQ-005)
+│    cache/         # CacheManager, SQLite+WAL (REQ-006)
+│    projects/      # ProjectRegistry (REQ-008), JSON + asyncio.Lock
+│    auth/          # AuthStore, SQLite+WAL (tenants/usuarios/sesiones)
 │
-│    query/                          ❓ Registry y ejecución
-│    ├── registry.py                 # QueryRegistry
-│    ├── resolver.py                 # QueryResolver
-│    └── queries.py                  # DatabaseQueries
-│
-│    executors/                      ⚡ Ejecución de queries
-│    ├── base.py
-│    ├── sync_query_executor.py
-│    └── async_query_executor.py
-│
-│    metadata/                       🔍 Esquemas y caché
-│    ├── cache.py                    # DatabaseMetadataCache + RelationshipMetadataCache
-│    ├── normalizer.py
-│    ├── builder.py
-│    ├── fetcher.py
-│    ├── manager.py                  # MetadataManager
-│    ├── contracts.py
-│    ├── mariadb/ mysql/ oracle/ postgresql/ sqlserver/ sqlite/
-│    │   └── tables.py               # ← ÚNICO punto canónico de SQL de introspección
-│    └── providers/                  # SyncMetadataProvider / AsyncMetadataProvider
-│
-│    results/                        📋 Tipos de retorno
-│    └── types.py, normalizer.py
-│
-│    factory/                        🏭 SQLAlchemy engines
-│    └── pool_factory.py, sqlalchemy_engine_factory.py, async_sqlalchemy_engine_factory.py
-│
-│    validators/                     ✓ Validadores de queries
-│
-├─── LEVEL 3: ESPECIALIZACIÓN (Specialization Layer)
-│
-│    managers/                       🎛️ API pública principal
-│    ├── sync_mgr.py                 # SyncDatabaseManager
-│    └── async_mgr.py                # AsyncDatabaseManager
-│
-│    bulk/                           📦 Operaciones masivas
-│    ├── crud.py                     # BulkCrud — INSERT/UPDATE/DELETE + maintenance_scope
-│    ├── audit.py                    # AuditManager, AuditTransaction (thread-safe en paralelo)
-│    ├── normalize.py                # Normalización de registros
-│    ├── parallel.py                 # ParallelBulkLoader — carga paralela por particiones
-│    ├── partition.py                # RangePartitioner (PK entera/datetime) + HashPartitioner (str/UUID)
-│    ├── strategies/                 # InsertStrategyResolver — selección automática de fast-path
-│    │   ├── postgres_copy.py        # PostgresCopyStrategy (~10× vía psycopg3 COPY)
-│    │   ├── mysql_multirow.py       # MySQLMultiRowInsertStrategy (multi-fila + SQL template cache)
-│    │   └── default.py              # Fallback executemany
-│    ├── pk_sync.py                  # PKSequenceSyncer + PKSyncResult
-│    └── mysql_variables.py          # MySQLVariableValidator + MySQLOptimalConfig
-│
-│    comparar/                       🔍 Comparación de esquemas
-│    ├── comparator.py               # SchemaComparator (cross-engine case-insensitive)
-│    ├── contracts.py
-│    ├── models.py                   # SchemaDiff
-│    └── reporters/                  # HTML (Jinja2+Mermaid), Excel, Word, Markdown, SQL, Text
-│
-│    dump/                           📤 Volcado entre motores (v0.8.0+)
-│    ├── orchestrator.py             # DumpOrchestrator (sin SchemaComparator en hot-path)
-│    ├── _constraints.py             # ConstraintManager (PG savepoints, Oracle batch, SS NOCHECK)
-│    ├── _models.py                  # DumpConfig, DumpResult, DumpAuditSummary, ConstraintResult
-│    ├── _protocols.py               # BulkInserter Protocol
-│    ├── _sql_utils.py               # Quoting helpers
-│    ├── reporters.py                # DumpReporter (Excel + texto)
-│    └── (index_manager, parallel)   # IndexManager, paralelización FK-topológica
-│
-│    migrate/                        🔄 Migración DDL (v0.8.0+, 4×3 = 12 flujos)
-│    ├── planner.py                  # MigrationPlanner
-│    ├── ir/models.py                # CanonicalTable, CanonicalView, CanonicalRoutine, MigrationPlan
-│    ├── extractors/                 # OracleSchemaExtractor, MariaDBSchemaExtractor, PostgreSQLSchemaExtractor, SQLServerSchemaExtractor
-│    ├── transformers/               # 12 transformers (origen×destino)
-│    ├── emitters/                   # OracleDDLEmitter, MariaDBDDLEmitter, PostgreSQLDDLEmitter, SQLServerDDLEmitter
-│    ├── _compat/                    # type_map_*.py (12 mapas de tipos)
-│    ├── charset.py                  # DEFAULT_COLLATION = utf8mb4_uca1400_ai_ci (MariaDB ≥10.10)
-│    └── reporters/                  # format_plan_markdown, format_plan_text (con rutinas y body)
-│
-│    analysis/                       📊 Grafos de relaciones
-│    ├── base.py                     # GraphDocument, traversal multinivel
-│    ├── graphviz.py + graphviz_ext.py
-│    └── matplotlib_graph.py
-│
-│    doc/                            📄 Documentación de BD
-│    └── (Jinja2 templates → HTML/Word/Excel)
-│
-│    async_utils.py                  # maybe_await
-│    models.py                       # Modelos de dominio compartidos
-│    __init__.py                     # API pública (re-exports)
-│    docs_build_plugin.py            # Plugin MkDocs: documentation_zip (ZIP + SHA256)
+└─── NIVEL 3: ORQUESTACIÓN (coordina Nivel 2, sin cambiar sus contratos)
+     scan/          # ScanCommand — compartido por CLI y web, no pertenece a ninguno de los dos
+     web/           # FastAPI, extra [web] — nunca importado desde el núcleo
+     main.py        # CLI (python -m doc_organize ...)
+```
+
+```mermaid
+graph TB
+    subgraph L3["Nivel 3 — Orquestación"]
+        CLI["main.py (CLI)"]
+        ScanCmd["scan/ScanCommand"]
+        Web["web/ (FastAPI)"]
+    end
+    subgraph L2["Nivel 2 — Servicios independientes"]
+        Validators["validators/"]
+        Scanner["scanner/DocumentScanner"]
+        Converter["converter/DocumentConverter + OCRScheduler"]
+        Dedup["dedup/DeduplicationManager"]
+        Cache["cache/CacheManager"]
+        Projects["projects/ProjectRegistry"]
+        Auth["auth/AuthStore"]
+    end
+    subgraph L1["Nivel 1 — Fundacional"]
+        Core["core/"]
+        Utils["utils/"]
+    end
+    CLI --> ScanCmd
+    Web --> ScanCmd
+    CLI --> Projects
+    Web --> Projects
+    Web --> Auth
+    CLI --> Auth
+    ScanCmd --> Validators
+    ScanCmd --> Scanner
+    ScanCmd --> Converter
+    ScanCmd --> Dedup
+    ScanCmd --> Cache
+    Validators --> Core
+    Scanner --> Utils
+    Dedup --> Utils
+    Cache --> Utils
+    Projects --> Utils
 ```
 
 ---
 
-## Reglas de dependencia (NO violar)
+## Por qué `scan/` es su propio módulo (no vive en `main.py` ni en `web/`)
 
-| Regla | Descripción |
-|---|---|
-| Level 1 → no importa Level 2/3 | Foundation nunca depende de servicios |
-| Level 2 → importa Level 1 únicamente | Services no importa managers ni bulk |
-| Level 3 → importa Level 1+2 | Specialization construye sobre la base |
-| `metadata/*/tables.py` = único punto canónico SQL | Ningún módulo duplica SQL de introspección |
-| Sin ciclos de importación | Orden estricto por nivel |
+`ScanCommand` orquesta escaneo+caché+dedup+conversión+OCR. Nació dentro de `main.py` (Fase D-1, solo
+CLI); al construir el equivalente web (Fase D-2b), habría exigido que `web/` importara de `main.py`
+(o viceversa), acoplando dos entry points de orquestación que deben ser independientes. Se extrajo a
+`scan/scan_command.py` — módulo Nivel 3 compartido, sin dueño único. `run()` (contrato CLI, Fase
+D-1) delega en `run_streaming()` (generador async de `ScanEvent`, Fase D-2b) — mismo pipeline, dos
+formas de consumirlo.
 
----
+## Autenticación web (host no-loopback)
 
-## APIs Públicas (importes recomendados)
+Sesión por cookie (`HttpOnly`, `SameSite=Strict`) tras `POST /login` (usuario+contraseña+tenant) —
+**no** un bearer token compartido (diseño descartado, ver `DECISIONS_LOG.md`). `AuthMiddleware`
+exige sesión en toda ruta salvo `/login`/`/logout`. Las conexiones WebSocket (`web/routes/scan.py`)
+**no** pasan por ese middleware (Starlette no lo intercepta para el scope `"websocket"`) y
+autentican la sesión explícitamente en el propio handler
+(`web/auth.py::authenticate_session()`/`requires_auth()`).
 
-```python
-from doc_organize import (
-    SyncDatabaseManager, AsyncDatabaseManager,
-    DatabaseMetadataCache, RelationshipMetadataCache,
-    SyncMetadataProvider, AsyncMetadataProvider,
-    SchemaComparator, SchemaDiff,
-    ConnectionFactory, PoolFactory, build_conn_params,
-    maybe_await,
-)
+## Multi-tenant
 
-# Bulk operations
-from doc_organize.bulk import BulkCrud, ParallelBulkLoader, AuditManager, PKSequenceSyncer
-from doc_organize.bulk import RangePartitioner, HashPartitioner
+Cada proyecto pertenece a un `tenant_id` (default `"default"` para CLI/loopback). `tenant_id`
+**nunca** se lee de un parámetro que el cliente controle — siempre de `get_tenant_id(request)`, que
+resuelve desde la sesión ya autenticada. Un usuario del tenant A nunca puede ver/tocar datos del
+tenant B, ni manipulando la petición.
 
-# Migration DDL
-from doc_organize.migrate import MigrationPlanner, MigrationPlan
+## Duplicates Resolver — por qué recalcula en el servidor
 
-# Dump
-from doc_organize.dump import DumpOrchestrator, DumpConfig, DumpResult
-
-# Exceptions (fuente canónica: _core/exceptions.py)
-from doc_organize import DatabaseException, ConnectionError, QueryError, ValidationError
-```
+`POST /api/projects/{name}/duplicates/resolve` nunca acepta una ruta de archivo directamente del
+cliente: recalcula los grupos de duplicados en el propio servidor (re-escaneo vía `folders.json`) y
+solo aplica la elección del usuario si coincide con un miembro real de un grupo recién detectado
+(correlacionado por una clave derivada del contenido, no por un ID que el cliente controle). Ver
+`web/routes/duplicates.py::_group_key()`.
 
 ---
 
-## Decisiones Arquitectónicas Clave
+## Referencias
 
-| ID | Decisión | Motivo |
-|---|---|---|
-| D1 | 3 niveles en lugar de 1/2 | Separación de concerns; Foundation estable, Specialization evoluciona |
-| D2 | `metadata/*/tables.py` punto canónico | Evitar duplicación de SQL de introspección entre migrate/ y metadata/ |
-| D3 | Managers en Level 3 | Dependen de TODOS los servicios Level 2; ponerlos en Level 2 causaría ciclos |
-| D4 | InsertStrategyResolver | Elegir fast-path (COPY/multi-fila/executemany) sin modificar la API de BulkCrud |
-| D5 | DumpOrchestrator sin SchemaComparator en hot-path | Eliminar cascada N+1 queries; skipped_columns se calcula en _common_columns |
-| D6 | utf8mb4_uca1400_ai_ci por defecto (MariaDB ≥10.10) | Mejora de UCA 1400; utf8mb4_unicode_ci sigue siendo opción válida para versiones anteriores |
-| D7 | PKSequenceSyncer post-bulk | Evitar errores de PK duplicada tras INSERT masivo sin IDENTITY/SERIAL |
-| D8 | MigrationPlanner pass-through v1 para rutinas | Las rutinas se extraen con su DDL original; transformación semántica es revisión manual |
-
----
-
-*Documento actualizado: Junio 2026 - alineado a v0.10.0*
+- Especificación completa y auditada: `.github/prompts/doclink_extractor_plan.md`
+- Referencia técnica generada desde docstrings: `docs/api/index.md`
+- Registro de decisiones: `.ai/DECISIONS_LOG.md`
+- Convención de niveles: `.github/instructions/architecture.instructions.md`

@@ -37,14 +37,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[docs]"
 
-      - name: 🏗️ Build documentation (Zensical)
+      - name: 🏗️ Build documentation (MkDocs)
         run: |
-          zensical build --strict
+          mkdocs build --strict
           echo "✅ Documentation built successfully"
 
+      # NOTA: scripts/build_docs_zip.py no existe en el repo (herencia de un experimento de
+      # migracion a "Zensical" que nunca se completo, ver .ai/DECISIONS_LOG.md revision 12 -- la
+      # decision fue quedarse en mkdocs). Este paso fallara hasta que se escriba ese script.
       - name: 📚 Generate ZIP + Checksums
         run: |
-          python scripts/build_docs_zip.py --builder zensical
+          python scripts/build_docs_zip.py --builder mkdocs
           echo "✅ ZIP and checksums generated"
           # Show the generated files
           ls -lh dist/

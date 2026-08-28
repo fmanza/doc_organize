@@ -138,8 +138,8 @@ on:
 ### Pasos Automáticos (6 steps)
 1. ✅ **Checkout** — Clonar repo
 2. ✅ **Setup Python 3.12** — Environment
-3. ✅ **Install deps** — zensical, mkdocs-material, mkdocstrings
-4. ✅ **Build docs** — `zensical build --strict` → `site/`
+3. ✅ **Install deps** — mkdocs, mkdocs-material, mkdocstrings
+4. ✅ **Build docs** — `mkdocs build --strict` → `site/`
 5. ✅ **Generate ZIP + SHA256** — `build_docs_zip.py` → `dist/`
 6. ✅ **Create Release** — GitHub Release con artifacts
 
@@ -187,7 +187,7 @@ Status:   Public + downloadable
 ### Local (Dev)
 ```bash
 # Generar ZIP + SHA256 automáticamente
-zensical build && python scripts/build_docs_zip.py
+mkdocs build --strict && python scripts/build_docs_zip.py
 
 # Validar integridad
 sha256sum -c dist/*.sha256

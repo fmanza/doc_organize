@@ -246,17 +246,19 @@ Este enlace facilita navegación y retroalimentación de IA (agentes pueden vali
        - Node.js: `package.json`
        - Go: `go.mod` (extraer versión del tag o var)
        - Java: `pom.xml`
-     - Línea 43: `[builder, "build"]` → comando build del destino
-       - Python: `zensical build` / `mkdocs build`
-       - Node.js: `docusaurus build` / `npm run build:docs`
-       - Go: `hugo` / `make docs`
-     - Línea 21: builder default (`zensical`) → el del destino (`mkdocs`, `docusaurus`, etc.)
+     - Comando build: `mkdocs build --strict` (Python) → equivalente del destino
+       (Node.js: `docusaurus build` / `npm run build:docs`; Go: `hugo` / `make docs`)
+     > **Nota**: `scripts/build_docs_zip.py` no existe todavía en este repo origen (herencia de un
+     > experimento de migración a "Zensical" nunca completado, ver `.ai/DECISIONS_LOG.md`) — no
+     > copiar como si fuera un script funcional; escribirlo desde cero en el destino si esa
+     > funcionalidad de ZIP de release hace falta.
 
-3. **`.github/workflows/docs-zip-release.yml`** — Workflow CI/CD
+3. **`.github/workflows/docs-zip-release.yml`** — Workflow CI/CD (actualmente roto en el origen,
+   ver nota arriba — adaptar con cautela, no asumir que funciona)
    - **Copiar y adaptar**:
      - Setup Python/Node/Go según lenguaje destino
-     - Comando build: `zensical build --strict` → equivalente del destino
-     - Script: `python scripts/build_docs_zip.py` → equivalente del destino
+     - Comando build: `mkdocs build --strict` → equivalente del destino
+     - Script: `python scripts/build_docs_zip.py` → equivalente del destino (escribir desde cero)
      - Secrets: mantener `GITHUB_TOKEN` (nativo en GH Actions)
 
 ### Características clave (comunes a todos los destinos)
@@ -280,8 +282,8 @@ Este enlace facilita navegación y retroalimentación de IA (agentes pueden vali
 | Componente | Python + MkDocs | Node.js + Docusaurus | Go + Hugo |
 |---|---|---|---|
 | Versión desde | `pyproject.toml` | `package.json` | `git describe` o var |
-| Builder | `zensical` / `mkdocs` | `docusaurus` | `hugo` |
-| Build cmd | `zensical build --strict` | `docusaurus build` | `hugo` |
+| Builder | `mkdocs` | `docusaurus` | `hugo` |
+| Build cmd | `mkdocs build --strict` | `docusaurus build` | `hugo` |
 | Output dir | `site/` | `build/` | `public/` |
 | ZIP script | `python scripts/build_docs_zip.py` | `node scripts/build-docs-zip.js` | `./scripts/build-docs-zip.sh` |
 | CI language | Python 3.12 | Node.js 20 | Go 1.22 |

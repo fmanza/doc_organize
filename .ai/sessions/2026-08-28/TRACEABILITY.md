@@ -3,8 +3,11 @@
 ## Sesión
 - **Fecha**: 2026-08-28 (cierre; el trabajo cubre varias sesiones encadenadas desde el scaffold inicial)
 - **Tipo**: `feature` (ciclo completo PLAN → AUDIT_PLAN → IMPLEMENT → AUDIT_CODE, Fase 1 de `doc_organize`)
+  + `chore` (regeneración de `.ai/` y limpieza repo-wide de contenido del proyecto anterior, ver punto 9)
 - **Rama**: `develop`
-- **Estado**: ✅ COMPLETADA (Fase 1 A–D2c; queda Fase E abierta, ver "Siguientes Pasos")
+- **Estado**: ✅ COMPLETADA (Fase 1 A–D2c commiteada en `6d7c40e`; queda Fase E abierta, ver
+  "Siguientes Pasos"). Limpieza de `.ai/`/`.github/`/`.claude/` (punto 9) hecha en working tree,
+  **pendiente de commit** — ver mensaje preparado en esta misma sesión.
 
 ## Objetivo
 Llevar `doc_organize` desde un scaffold vacío hasta una Fase 1 funcional completa: escaneo,
@@ -109,6 +112,48 @@ Verificación del repo real (no solo lo que decía el propio PLAN) — hallazgos
   no se encontraron en `main.py` (el resto de `_run_*` solo tiene un `return` cada uno) — quedan
   pendientes de que el usuario las señale específicamente.
 
+### ✅ 9. Regeneración de `.ai/` + limpieza repo-wide de contenido del proyecto anterior
+Tras confirmarse el commit `6d7c40e` (Fase 1), el usuario pidió (a) revisar `.ai/` y dejar solo lo
+relacionado con `doc_organize`, y luego (b) extender esa limpieza a **todo el repositorio**,
+eliminando cualquier resto del proyecto anterior que ocupó este mismo repo (una librería
+multi-motor de migración/comparación de bases de datos, también llamada `doc_organize` en su
+momento: módulos `_core/`, `_drivers/`, `connection/`, `metadata/`, `bulk/`, `dump/`, `comparar/`,
+`migrate/`, motores MariaDB/MySQL/PostgreSQL/Oracle/SQLServer/HSQLDB/Redshift/Snowflake, clases
+`BulkCrud`, `SchemaComparator`, `MySQLVariableValidator`, etc.).
+
+- **`.ai/doc_old/`** (70 carpetas de sesión, 2026-03-22 a 2026-05-28, del proyecto anterior):
+  confirmado gitignorado (`.gitignore:68`) y nunca trackeado (`git ls-files` = 0) → **no se tocó**,
+  es archivo histórico legítimo tras el pivote, no plantilla contaminada.
+- **Los 7 ficheros `.ai/*.md`** (`product.md`, `architecture.md`, `CURRENT_STATE.md`,
+  `DECISIONS_LOG.md`, `glossary.md`, `runtime.md`, `standards.md`): regenerados por completo —
+  describían o el proyecto de BBDD o un tercer dominio fabricado ("Doclink Extractor"/GitLab
+  timelog), nunca actualizados desde el scaffold. Reescritos contra el código real
+  (`pyproject.toml`, historial de revisiones del PLAN, `pytest`/`ruff` reales).
+- **Tercer dominio fabricado descubierto**: `.github/scripts/generate_docs.py` describía
+  `doc_organize` como un "extractor de timelogs de GitLab" (`python-gitlab`, `xlsxwriter`,
+  `pandas`) — corregido a la descripción real (escaneo/conversión/dedup/caché).
+- **~28 ficheros en `.github/`+`.claude/`** con vocabulario/ejemplos del proyecto de BBDD
+  (`zensical` como builder de docs nunca adoptado, ejemplos con `postgres`/`mariadb`/`Oracle`,
+  `SyncDatabaseManager`/`AsyncDatabaseManager`, rutas `metadata/mariadb/`, `bulk/crud.py`, la
+  sección completa "Sync/Async Contract Validation" en `TESTING_GUIDE.md` que importaba
+  `SyncDatabaseManager` y mencionaba "Util_bbdd" por nombre): corregidos con ejemplos reales de
+  `doc_organize` (scanner/converter/dedup/cache/auth), o marcados con nota de verificación cuando
+  el artefacto que describían (`scripts/build_docs_zip.py`, `docs_build_plugin.py`) no existe en
+  el repo.
+- **Distinción preservada** (memoria de sesiones previas): la documentación de gobernanza fabricada
+  por una sesión anterior de Copilot sobre el dominio *actual* (`BLOCKERS_RESOLUTION.md`,
+  `EXECUTIVE_SUMMARY.md`, ADRs, `PHASE_1_READINESS_REPORT.md`) ya se había corregido in-place con
+  notas, no se borró — esa categoría **no** se tocó en esta pasada, solo el contenido del proyecto
+  de BBDD.
+- **No editado deliberadamente**: `.claude/settings.json` (gitignorado, config personal del
+  usuario — solo señalado, no modificado); `scripts/build_docs_zip.py` (no existe, escribirlo sería
+  feature nueva, no limpieza).
+
+Verificación final: sweep con `ripgrep` (respeta `.gitignore`) sobre todo el repo para
+`postgres|mysql|mariadb|oracle|sqlserver|hsqldb|redshift|snowflake` y nombres de clase del proyecto
+anterior — sin coincidencias fuera de `.ai/doc_old/` y tres notas históricas ya correctamente
+enmarcadas como "antes de la corrección".
+
 ---
 
 ## Impacto
@@ -127,6 +172,12 @@ Verificación del repo real (no solo lo que decía el propio PLAN) — hallazgos
   `DOC_ORGANIZE_API_TOKEN`/bearer compartido en favor de sesión por usuario.
 - **NO BREAKING**: `ScanCommand.run()` (CLI) mantiene su firma y tipo de retorno de Fase D-1 pese a
   la reescritura interna de `run_streaming()`.
+
+### Documentación (punto 9)
+- **30 ficheros modificados** en `.ai/`, `.github/`, `.claude/` (solo Markdown + 1 `.py` + 2 `.yml`)
+- **Sin cambios de código fuente ni tests** — `pytest`/`ruff`/`mypy` no vuelven a correr por este
+  punto, no aplica
+- **Cambios funcionales**: no — solo documentación/gobernanza IA
 
 ---
 
@@ -158,13 +209,17 @@ detecta un grupo real, export ZIP descarga un fichero válido.
 ---
 
 ## Siguientes Pasos (Recomendado)
-1. `git add`/commit/push de este trabajo (ver mensaje preparado para GitHub, entregado aparte).
+1. `git add`/commit/push de la limpieza de documentación (punto 9, working tree — ver mensaje
+   preparado para GitHub, entregado aparte).
 2. Confirmar en verde la matriz de CI ampliada (3.10-3.14) en el próximo push.
 3. Probar las 6 páginas web en un navegador real (Chrome como mínimo).
 4. Fase E: tests de integración adicionales, documentación ampliada.
 5. Rate-limiting en `/login` antes de exponer fuera de loopback.
 6. Revisar `§14`/`§15` del PLAN (`.github/prompts/doclink_extractor_plan.md`) para las decisiones de
    alcance abiertas de baja prioridad (tokens de API personales, roles por tenant).
+7. Decidir si escribir `scripts/build_docs_zip.py` (no existe; dos workflows y varias guías lo
+   referencian) o retirar esa funcionalidad aspiracional de raíz — decisión de producto, no de
+   limpieza.
 
 ---
 
@@ -200,6 +255,13 @@ detecta un grupo real, export ZIP descarga un fichero válido.
   de este mismo repositorio (un comparador de esquemas de BBDD, módulo `comparar/` que ya no
   existe) — es archivo histórico legítimo tras un pivote de proyecto, no plantilla contaminada; no
   usar su contenido como referencia de dominio, solo (si acaso) como referencia de formato.
+- **[dos categorías distintas de "contenido incorrecto" en `.github/`/`.claude/`]**: (1) vocabulario
+  del proyecto de BBDD anterior (motores, `SyncDatabaseManager`, `bulk/`, `migrate/`, etc.) — el
+  usuario autorizó explícitamente **borrar/reemplazar** esto en la sesión del punto 9; (2)
+  documentación de gobernanza IA fabricada por una sesión previa de Copilot sobre el dominio
+  *actual* (aprobaciones inventadas, versiones/conteos falsos) — el usuario pidió **corregir
+  in-place con nota, nunca borrar**. Antes de tocar cualquier fichero de `.github/`/`.claude/` con
+  contenido sospechoso, identificar a cuál de las dos categorías pertenece.
 - **[herramientas]**: `hashlib.scrypt`, `getpass`, `secrets` son operaciones síncronas/bloqueantes
   que se ejecutan vía `asyncio.to_thread()` en este proyecto — patrón ya establecido, replicarlo
   para cualquier operación CPU-bound o de I/O bloqueante nueva.
@@ -229,8 +291,10 @@ detecta un grupo real, export ZIP descarga un fichero válido.
 - ⬜ Verificación en navegador real y confirmación de CI en verde — pendientes, no asumidos como hechos
 
 **Evidencia**:
-- Branch: `develop` (sin commitear — ver mensaje de GitHub preparado en esta misma sesión)
-- Commits: ninguno todavía; todo el trabajo de esta sesión está en el working tree
-- Tests: 182 passed, 97% cobertura
+- Branch: `develop`
+- Commits: `6d7c40e` (Fase 1 completa, feat) ya en el historial; la limpieza de documentación
+  (punto 9) sigue en el working tree, sin commitear — ver mensaje de GitHub preparado en esta misma
+  sesión
+- Tests: 182 passed, 97% cobertura (sin cambios desde `6d7c40e`, el punto 9 no toca código)
 
 **Sesión cerrada**: 2026-08-28

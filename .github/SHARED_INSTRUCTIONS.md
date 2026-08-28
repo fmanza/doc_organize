@@ -225,9 +225,9 @@ mkdocs build --strict                       # build con validación de links
 
 **Comandos locales**:
 ```bash
-zensical build && python scripts/build_docs_zip.py    # Build + ZIP
-python scripts/build_docs_zip.py --no-build           # ZIP sin build
-sha256sum -c dist/*.sha256                             # Validar checksums
+mkdocs build --strict && python scripts/build_docs_zip.py    # Build + ZIP
+python scripts/build_docs_zip.py --no-build                  # ZIP sin build
+sha256sum -c dist/*.sha256                                    # Validar checksums
 ```
 
 **Bootstrap para otros proyectos**:
@@ -235,12 +235,14 @@ sha256sum -c dist/*.sha256                             # Validar checksums
 - Sección: "📦 Descarga de Documentación Offline (Capa B)"
 - Matriz de equivalencias: Python + MkDocs, Node.js + Docusaurus, Go + Hugo, Java + Sphinx
 - ✅ Reorganización funcional/técnica/ejemplos → validar que `nav:` mantiene apartados separados
-- ✅ Ejecutar `zensical serve` (o `mkdocs serve`) localmente antes de publicar
-- ✅ Verificar que `zensical build` (o `mkdocs build`) pase sin warnings
+- ✅ Ejecutar `mkdocs serve` localmente antes de publicar
+- ✅ Verificar que `mkdocs build --strict` pase sin warnings ni links rotos
 
 #### Estándar de generación documental
 
-- Usa Zensical (o MkDocs con Material for MkDocs, recíprocamente compatibles) como salida estática de referencia.
+- Usa MkDocs con Material for MkDocs como salida estática de referencia (`mkdocs build --strict`,
+  ver `.github/instructions/sync.instructions.md`). No `zensical`: se evaluó como alternativa más
+  rápida y se descartó — no es una dependencia instalada en este proyecto (ver `.ai/DECISIONS_LOG.md`).
 - Usa Mermaid.js para diagramas de flujo, secuencia o clases cuando aporte claridad.
 - Unifica creación y actualización: busca primero documentación existente y actualízala si es el punto de entrada correcto.
 - Para documentación de proyecto completo, revisa README, `docs/`, `docs/examples/`, docstrings públicos, prompts/agentes IA y `mkdocs.yml`.
@@ -253,23 +255,19 @@ sha256sum -c dist/*.sha256                             # Validar checksums
 #### Estándar: Docstrings Google-style
 
 ```python
-class SyncDatabaseManager:
-    """Manager sincrónico para operaciones de base de datos.
+class CacheManager:
+    """Caché transaccional (SQLite + WAL) de hashes de documentos (REQ-006).
 
-    Gestiona conexión (directa o pooled), introspección de esquemas y
-    ejecución de queries para los motores soportados.
+    Clasifica cada documento como nuevo, modificado o sin cambios frente a
+    la última pasada, delegando siempre el hashing en `utils.hash_utils`.
 
     Attributes:
-        db_type (str): Tipo de motor declarado en la instancia.
-        conn_params (dict): Parámetros de conexión normalizados.
+        db_path (Path): Ruta al archivo SQLite de caché.
+        logger (logging.Logger): Logger estructurado de la instancia.
 
     Example:
-        >>> manager = SyncDatabaseManager(
-        ...     db_type="postgresql",
-        ...     conn_params={"host": "localhost", "database": "mydb", ...}
-        ... )
-        >>> tables = manager.get_tables()
-        >>> manager.close()
+        >>> async with CacheManager("./cache.db") as cache:
+        ...     entries = await cache.load_cache()
     """
 ```
 
@@ -313,11 +311,11 @@ chore:    mantenimiento (deps, config, herramientas)
 
 **Ejemplo**:
 ```
-feat: añadir soporte para exportación Parquet en bulk/
+feat: añadir Cache Viewer a la interfaz web (Fase D-2c)
 
-- Añade bulk_export_to_parquet() en bulk/crud.py
-- Tests en tests/unit/bulk/test_export_parquet.py
-- Actualiza docstring y ejemplos en docs/api/bulk.md
+- Añade GET /api/projects/{name}/cache en web/routes/cache.py
+- Tests en tests/unit/test_web_cache.py
+- Actualiza docstring y §2.7.4 del PLAN
 ```
 
 ---

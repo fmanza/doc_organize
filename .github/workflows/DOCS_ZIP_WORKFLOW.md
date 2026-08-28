@@ -12,7 +12,7 @@ El workflow **`docs-zip-release.yml`** se dispara automáticamente cuando:
 2. **Manualmente** — Desde la pestaña "Actions" en GitHub UI
 
 **Tareas**:
-- 🏗️ Build documentación con Zensical
+- 🏗️ Build documentación con MkDocs
 - 📚 Generar ZIP comprimido
 - 🔐 Calcular SHA256 para integridad
 - 📤 Crear/actualizar GitHub Release
@@ -57,10 +57,10 @@ git push origin develop
    └─ Python 3.12 + cache de pip
 
 3. Install dependencies
-   └─ zensical, mkdocs-material, mkdocstrings
+   └─ mkdocs, mkdocs-material, mkdocstrings
 
 4. Build documentation
-   └─ zensical build --strict
+   └─ mkdocs build --strict
    └─ ✅ 150+ archivos HTML generados
 
 5. Generate ZIP + Checksums

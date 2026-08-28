@@ -357,16 +357,16 @@ escalares, no como clases. El resultado es que los métodos no se expanden y el 
 queda sin documentar.
 
 ```python
-# crud.py — línea al final del archivo
-bulk_crud = BulkCrud   # ← ALIAS de variable, NO la clase real
+# cache_manager.py — línea al final del archivo
+cache_manager = CacheManager   # ← ALIAS de variable, NO la clase real
 ```
 
 ```markdown
 # ❌ INCORRECTO — no expande los miembros de la clase
-::: doc_organize.bulk.crud.bulk_crud
+::: doc_organize.cache.cache_manager.cache_manager
 
 # ✅ CORRECTO — usa siempre el nombre real de la clase
-::: doc_organize.bulk.crud.BulkCrud
+::: doc_organize.cache.cache_manager.CacheManager
 ```
 
 **Checklist antes de escribir una directiva autodoc:**
@@ -558,11 +558,13 @@ Activar cuando el usuario solicite comprobar compatibilidad de versiones o plugi
 |---|---|
 | MkDocs | `https://www.mkdocs.org/about/release-notes/` |
 | Material for MkDocs | `https://squidfunk.github.io/mkdocs-material/plugins/` |
-| Zensical | `https://zensical.org/` |
+
+> Este proyecto usa MkDocs, no Zensical: se evaluó como alternativa más rápida y se descartó por no
+> estar disponible como dependencia instalable (ver `.ai/DECISIONS_LOG.md`).
 
 #### Procedimiento
 
-1. Fetch la documentación oficial según el generador activo (`mkdocs.yml` → `theme.name`, o `zensical.toml`).
+1. Fetch la documentación oficial según el generador activo (`mkdocs.yml` → `theme.name`).
 2. Contrasta las directivas del fichero de configuración con la documentación oficial.
 3. Reporta discrepancias con severidad:
    - **Nivel 1** — plugin o directiva inexistente en la versión instalada (build roto).
@@ -579,7 +581,7 @@ Activar tras la generación de documentación para detectar errores solo visible
 #### Modo A — build (por defecto)
 
 ```bash
-zensical build --strict   # o: mkdocs build --strict
+mkdocs build --strict
 ```
 
 Leer páginas clave de `site/` con el tool `Read`. Priorizar páginas con directivas `:::`, bloques Mermaid o snippets `--8<--`.
@@ -596,7 +598,7 @@ Leer páginas clave de `site/` con el tool `Read`. Priorizar páginas con direct
 #### Modo B — serve (activar con `--verify-build --serve`)
 
 ```bash
-zensical serve   # o: mkdocs serve  — confirmar con el usuario antes de arrancar
+mkdocs serve   # confirmar con el usuario antes de arrancar
 ```
 
 Usar `WebFetch` sobre `http://localhost:8000/` para las mismas verificaciones que el Modo A.

@@ -160,16 +160,16 @@ El comando emite estructuras Markdown en este orden específico:
 **Usuario proporciona:**
 
 ```
-Objetivo: Implementar soporte para Oracle 11g
-Contexto: Ya tenemos PostgreSQL, MariaDB, SQLite
-Restricciones: Oracle 11g deprecated pero clientes legados lo usan; mantener compatibility con actuales
+Objetivo: Implementar detección de duplicados por hash perceptual en imágenes
+Contexto: Ya tenemos deduplicación exacta por SHA-256 en cache/
+Restricciones: Sin dependencias nuevas de ML; usar solo lo disponible en Pillow
 ```
 ```
 
 **Criterios:**
 - Caso concreto, pequeño (3-5 líneas)
 - **Determinista**: mismo input siempre produce mismo análisis
-- Valores reales, NO placeholders genéricos (ej: "REAL motor Oracle", no "<DATABASE>")
+- Valores reales, NO placeholders genéricos (ej: "REAL detección de duplicados", no "<FEATURE>")
 - Sin credenciales o paths hardcoded
 - Usa backticks o bloque code
 
@@ -182,17 +182,17 @@ Restricciones: Oracle 11g deprecated pero clientes legados lo usan; mantener com
 
 ### PLAN
 [30-50 líneas de análisis]
-- Objetivo: Soporte Oracle 11g
-- Rutas: src/connection/motors/oracle11g.py, tests/integration/test_oracle11g_connection.py
-- Componentes: ConnectionFactory, DialectAdapter, QueryExecutor
-- Riesgos: R1 (API compatibility), R2 (LoC limit), R3 (test time)
+- Objetivo: Deduplicación por hash perceptual en imágenes
+- Rutas: src/doc_organize/dedup/perceptual_hash.py, tests/unit/test_perceptual_hash.py
+- Componentes: PerceptualHasher, DuplicateResolver
+- Riesgos: R1 (falsos positivos), R2 (LoC limit), R3 (test time)
 
 ### AUDIT_PLAN
 [20 líneas]
-- Riesgos funcionales: Oracle 11g features no soportadas en versión actual
-- Riesgos técnicos: Timeout en conexión legacy
-- Riesgos de seguridad: Credenciales en connection strings sin encryption
-- Veredicto: GO_CONDICIONAL (si agregamos encryption)
+- Riesgos funcionales: hash perceptual puede fallar en imágenes muy comprimidas
+- Riesgos técnicos: coste de cómputo en carpetas grandes
+- Riesgos de seguridad: N/A (no hay entrada de red ni credenciales)
+- Veredicto: GO_CONDICIONAL (si añadimos umbral configurable)
 
 [Continúa con IMPLEMENT, AUDIT_CODE, VERSION...]
 ```
@@ -301,4 +301,5 @@ Si mantienes múltiples comandos, valida:
 
 | Versión | Fecha | Cambios |
 |---------|-------|---------|
-| v0.6.7 | 10 abr 2026 | Initial: 10 secciones, 2 checklists, ejemplos Oracle |
+| v0.6.7 | 10 abr 2026 | Initial: 10 secciones, 2 checklists |
+| 2026-08-28 | 28 ago 2026 | Ejemplos actualizados a dominio doc_organize (deduplicación de documentos) — antes referenciaban la encarnación anterior de este repo (motores de base de datos) |

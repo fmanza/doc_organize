@@ -11,7 +11,7 @@ graph LR
     A["💾 Push a develop/main<br/>(cambios en docs/)"] -->|Git Hook| B["🤖 GitHub Actions<br/>docs-zip-release.yml"]
     B -->|1. Checkout| C["📥 Clone repo"]
     C -->|2. Setup| D["🐍 Python 3.12<br/>+ dependencies"]
-    D -->|3. Build| E["🏗️ Zensical build<br/>→ site/"]
+    D -->|3. Build| E["🏗️ MkDocs build<br/>→ site/"]
     E -->|4. Package| F["📦 build_docs_zip.py<br/>→ dist/*.zip"]
     F -->|5. Hash| G["🔐 SHA256<br/>→ dist/*.sha256"]
     G -->|6. Release| H["🏷️ GitHub Release<br/>docs-vX.X.X"]
@@ -65,8 +65,8 @@ on:
 # Workflow Steps:
 ✓ Checkout code
 ✓ Setup Python 3.12
-✓ Install dependencies (zensical, mkdocs-material, etc.)
-✓ zensical build --strict
+✓ Install dependencies (mkdocs, mkdocs-material, etc.)
+✓ mkdocs build --strict
   ├─ Parse 150+ markdown files
   ├─ Render Mermaid diagrams
   ├─ Generate search index
@@ -81,7 +81,7 @@ on:
 
 ```bash
 # Script: scripts/build_docs_zip.py
-python scripts/build_docs_zip.py --builder zensical
+python scripts/build_docs_zip.py --builder mkdocs
 
 # Output:
 dist/
@@ -90,7 +90,7 @@ dist/
 └── CHECKSUMS.txt                     (200 bytes)
 
 # Log:
-[build_docs_zip] Built with builder: zensical
+[build_docs_zip] Built with builder: mkdocs
 [build_docs_zip] Created: dist/doc_organize-docs-0.10.0.zip
 [build_docs_zip] 🔐 SHA256: abc123def456...
 [build_docs_zip] 📄 Checksum saved to: doc_organize-docs-0.10.0.zip.sha256
@@ -215,7 +215,7 @@ start index.html  # Windows PowerShell
 
 | Archivo | Tamaño | Generado Por | Propósito |
 |---|---|---|---|
-| `site/` (temp) | ~10 MB | `zensical build` | Build intermedio |
+| `site/` (temp) | ~10 MB | `mkdocs build --strict` | Build intermedio |
 | `dist/*.zip` | ~2.5 MB | `build_docs_zip.py` | ZIP final distribuible |
 | `dist/*.sha256` | ~100 B | `build_docs_zip.py` | Hash SHA256 |
 | `dist/CHECKSUMS.txt` | ~200 B | `build_docs_zip.py` | Histórico de hashes |

@@ -9,7 +9,7 @@ Auditoría técnica de código. Emite veredicto final con evidencias concretas.
 
 ## Inputs requeridos (OBLIGATORIO completar TODOS)
 
-- [ ] **Archivos a revisar**: Rutas completas o globs (ej. `src/doc_organize/metadata/`)
+- [ ] **Archivos a revisar**: Rutas completas o globs (ej. `src/doc_organize/dedup/`)
 - [ ] **Contexto**: Qué cambió recientemente o por qué se audita
 - [ ] **Foco**: Bugs, seguridad, tipado, tests, o todo lo anterior
 
@@ -50,7 +50,7 @@ Auditoría técnica de código. Emite veredicto final con evidencias concretas.
 ## Ejemplo de entrada
 
 ```
-Archivos: src/doc_organize/metadata/
+Archivos: src/doc_organize/dedup/
 
 Contexto: Auditoría post-refactor para detectar regresiones
 
@@ -65,20 +65,20 @@ Foco: bugs, edge cases, tipado, tests
 **Hallazgos**:
 
 ### Bugs potenciales
-- `mariadb.py:156`: Missing check en cursor.execute() result (puede ser None)
-- `fetcher.py:89`: Loop sobre tabla con None puede fallar
+- `hash_resolver.py:156`: Missing check en resultado de `hashlib.sha256()` (puede ser None si el stream falla)
+- `duplicate_finder.py:89`: Loop sobre lista de candidatos con None puede fallar
 
 ### Edge cases
-- Tabla vacía sin columnas → `SchemaFetcher.build_columns()` crashea
-- FK a tabla no existente → no hay validación
+- Carpeta vacía sin documentos → `DuplicateResolver.find_groups()` crashea
+- Documento con hash duplicado pero tamaño distinto → no hay validación
 
 ### Tipado
-- `fetcher.py:45`: Variable `result` typed as `Any`
-- `builder.py:120`: Missing type hint en parámetro `metadata`
+- `hash_resolver.py:45`: Variable `result` typed as `Any`
+- `duplicate_finder.py:120`: Missing type hint en parámetro `candidates`
 
 ### Tests
-- Falta test para tabla vacía con 0 columnas
+- Falta test para carpeta vacía sin documentos
 
 **Veredicto**: APROBADO CON CONDICIONES
-- Condiciones: Fijar Any en fetcher.py + test para tabla vacía
+- Condiciones: Fijar Any en hash_resolver.py + test para carpeta vacía
 ```

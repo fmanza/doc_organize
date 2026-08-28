@@ -1,6 +1,14 @@
 # ✅ Checklist: Descarga de Documentación ZIP
 
-Validación de la integración de descarga ZIP en doc_organize (mkdocs + zensical).
+> **⚠️ Nota de verificación (2026-08-28)**: este checklist marca como `[x]` hecho varios artefactos
+> que **no existen en el repo real** — `docs_build_plugin.py`, el registro de entry point
+> `mkdocs.plugins` en `pyproject.toml`, y `scripts/build_docs_zip.py` (tampoco existe). El plugin
+> real de `mkdocs.yml` es solo `search` + `mkdocstrings`. Este documento describe una integración
+> que nunca se completó — no asumir que nada de lo aquí listado funciona sin verificarlo primero
+> contra el código. También hereda referencias a "Zensical", herramienta evaluada y descartada (ver
+> `.ai/DECISIONS_LOG.md`) — el proyecto usa MkDocs.
+
+Validación de la integración de descarga ZIP en doc_organize (mkdocs).
 
 ## 🔍 Archivos Creados/Modificados
 

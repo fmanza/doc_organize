@@ -21,9 +21,10 @@ Generas documentación técnica precisa con diagramas Mermaid.js para equipos de
 Usas terminología técnica exacta con tipos Python explícitos."""
 
 FUNCTIONAL_PROMPT = """\
-Analiza el siguiente módulo Python de doc_organize (extractor de timelogs de GitLab).
-doc_organize extrae timelogs de GitLab vía REST API y genera reportes en Excel, CSV y JSON.
-Sus usuarios son jefes de proyecto, responsables de calidad y equipos de datos.
+Analiza el siguiente módulo Python de doc_organize (escaneo, conversión y organización de documentos).
+doc_organize escanea carpetas de documentos heterogéneos (PDF, Word, Excel, imágenes), los convierte
+a Markdown + JSON con Docling, detecta y resuelve duplicados, y mantiene un caché incremental.
+Sus usuarios son equipos de documentación que necesitan normalizar repositorios heterogéneos.
 
 MÓDULO: {module_name}
 ```python
@@ -51,8 +52,9 @@ Qué NO hace este módulo. Máximo 5 ítems.
 Restricciones: NO expliques implementación interna. Responde SOLO con el Markdown."""
 
 TECHNICAL_PROMPT = """\
-Analiza el siguiente módulo Python de doc_organize (extractor de timelogs de GitLab).
-doc_organize usa: python-gitlab, xlsxwriter, pandas, TOML config, Decimal para precisión.
+Analiza el siguiente módulo Python de doc_organize (escaneo, conversión y organización de documentos).
+doc_organize usa: Docling (conversión/OCR), Pydantic v2, aiosqlite (caché y auth), aiofiles, FastAPI
+(interfaz web opcional, extra [web]).
 
 MÓDULO: {module_name}
 ```python

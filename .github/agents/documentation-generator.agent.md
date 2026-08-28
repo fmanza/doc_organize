@@ -76,9 +76,8 @@ Solo ejecutar cuando el usuario solicite verificar compatibilidad de versiones o
 
 - Fetch MkDocs release notes: `https://www.mkdocs.org/about/release-notes/`
 - Fetch Material for MkDocs plugins: `https://squidfunk.github.io/mkdocs-material/plugins/`
-- Fetch Zensical docs: `https://zensical.org/`
 
-**Propósito**: verificar que las directivas en `mkdocs.yml` / `zensical.toml` son válidas para la versión instalada.
+**Propósito**: verificar que las directivas en `mkdocs.yml` son válidas para la versión instalada.
 
 **Resultado**: lista de discrepancias detectadas (plugin renombrado, sintaxis cambiada, versión mínima requerida).
 No modifica ningún archivo sin confirmación explícita del usuario.
@@ -97,7 +96,7 @@ Ejecutar tras la fase de generación y validación cuando el usuario solicite co
 #### Modo A — build (por defecto dentro de `--verify-build`)
 
 ```bash
-zensical build --strict   # o: mkdocs build --strict
+mkdocs build --strict
 ```
 
 Leer páginas clave de `site/` con el tool `Read` y comprobar:
@@ -116,7 +115,7 @@ Páginas a inspeccionar: priorizar las que contienen directivas `:::`, bloques M
 #### Modo B — serve (activar con `--verify-build --serve`)
 
 ```bash
-zensical serve   # o: mkdocs serve
+mkdocs serve
 # lanza en background; confirmar con el usuario antes de arrancar el servidor
 ```
 
@@ -225,7 +224,7 @@ Actualiza `mkdocs.yml`: añade sección `Normativa` entre `Funcional` y `Arquite
 - Valida que el Mermaid generado es sintácticamente correcto antes de escribir.
 - Si el módulo ya tiene documentación en `docs/`, actualízala conservando contenido vigente; no borres secciones útiles sin razón explícita.
 - No uses APIs de IA externas para generar contenido documental.
-- Puedes consultar webs de referencia oficial (MkDocs, Zensical, PyPI) cuando el usuario activa `--verify-tools`.
+- Puedes consultar webs de referencia oficial (MkDocs, PyPI) cuando el usuario activa `--verify-tools`.
 
 ## Formato de salida al usuario
 

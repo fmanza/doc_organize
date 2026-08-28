@@ -40,8 +40,14 @@ jobs:
       - name: Install docs dependencies
         run: pip install -e ".[docs]"
 
+      # NOTA: este paso invoca scripts/build_docs_zip.py, que no existe en el repo (herencia de
+      # un experimento de migración a "Zensical" que nunca se completó, ver .ai/DECISIONS_LOG.md
+      # revision 12 -- la decision fue quedarse en mkdocs). Este workflow fallara hasta que se
+      # escriba ese script (o se elimine el workflow si la funcionalidad de ZIP de release no
+      # hace falta). Se corrige aqui el builder a mkdocs para no dejar una referencia a una
+      # herramienta no instalada, pero el script en si sigue sin existir.
       - name: Build docs & create ZIP
-        run: python scripts/build_docs_zip.py --builder zensical
+        run: python scripts/build_docs_zip.py --builder mkdocs
         env:
           PYTHONPATH: src
 

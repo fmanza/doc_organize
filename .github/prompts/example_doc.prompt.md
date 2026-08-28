@@ -108,11 +108,11 @@ Si un `.md` existente tiene código inline ≥30 líneas que debería estar en u
 ```
 docs/examples/
 ├── [patron].py          # Ejemplos standalone en raíz
-├── database/            # Conexión, introspección, pool
-├── bulk/                # CRUD masivo, auditoría, paralelismo
-├── migration/           # Migración DDL entre motores
-├── async/               # Operaciones asincrónicas
-└── reporting/           # Reportes y análisis
+├── scanner/              # Escaneo de carpetas, filtros por extensión
+├── converter/             # Conversión a Markdown/JSON con Docling
+├── dedup/                # Detección y resolución de duplicados
+├── cache/                 # Caché incremental (SQLite + WAL)
+└── web/                  # API FastAPI, auth multi-tenant, WebSocket
 ```
 
 ## Output esperado

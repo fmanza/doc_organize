@@ -79,14 +79,11 @@ Genera la guía de usuario del área indicada siguiendo las instrucciones del pr
 
 | Archivo | Tipo de guía |
 |---|---|
-| `docs/ASYNC_GUIDE.md` | Configuración de programación asíncrona |
-| `docs/POSTGRESQL_DRIVER_GUIDE.md` | Configuración de driver PostgreSQL |
-| `docs/EXCEPTIONS.md` | Referencia de excepciones y manejo de errores |
-| `docs/TROUBLESHOOTING.md` | Solución de problemas |
-| `docs/COMPARATOR.md` | Uso del comparador de esquemas |
-| `docs/MIGRATION_GUIDE.md` | Guía de migración entre versiones |
-| `docs/BENCHMARKS.md` | Benchmarks y verificación de rendimiento |
-| `docs/API_REFERENCE.md` | Referencia rápida de API |
+| `docs/guides/installation.md` | Instalación y extras opcionales (`[web]`) |
+| `docs/guides/quick_start.md` | Inicio rápido: escaneo, conversión y caché |
+| `docs/guides/troubleshooting.md` | Solución de problemas |
+| `docs/functional/index.md` | Referencia funcional (scanner, converter, cache, dedup, auth, web) |
+| `docs/api/index.md` | Referencia de API (mkdocstrings) |
 | Guías de herramientas IA | Configuración y uso de asistentes IA |
 
 ## Output esperado
