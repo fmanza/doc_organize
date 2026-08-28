@@ -89,21 +89,20 @@ class MyProcessor:
 - `DIP`: orquestadores y servicios dependen de `Protocol`/`ABC`, no de clases concretas.
 
 ## Diseño de API
-- Expón modelos de metadatos (Schema, Table, Column, Relationship).
-- Separa: extracción (introspección) vs render (generación de docs).
-- Las transformaciones de renderizado sin estado se implementan como `@staticmethod` dentro de la clase renderizadora.
-- Usa `Protocol` (o `ABC` cuando proceda) para contratos de adaptadores por motor.
-- Evita condicionales por motor dispersos; centraliza resolución en factorías/registro.
+- Expón los modelos de `core/models.py` (`DocumentMetadata`, `ConversionResult`, `CacheEntry`, etc.), nunca tipos ad-hoc equivalentes definidos en otro módulo.
+- Separa: escaneo (descubrimiento de documentos) vs. conversión (Docling) vs. deduplicación vs. caché — cada uno en su propio módulo, sin lógica cruzada.
+- Las transformaciones sin estado se implementan como `@staticmethod` dentro de la clase responsable.
+- Usa `Protocol` (o `ABC` cuando proceda) para contratos de adaptadores por motor (p.ej. motores de OCR).
+- Evita condicionales por motor/formato dispersos; centraliza resolución en factorías/registro (ver `DocumentConverter._get_docling`).
 
 ## Patrones recomendados
-- `Strategy` para variaciones por motor o formato.
-- `Factory Method` o `Abstract Factory` para construir conectores/adaptadores.
-- `Adapter` para encapsular diferencias entre librerías/driver SQL.
-- `Template Method` para flujos base de introspección y render con pasos extensibles.
-- `Builder` para salidas documentales complejas por etapas.
-- `Query Object`, `Repository`, `Data Mapper` e `Identity Map` cuando ayuden a aislar SQL, mapear modelos y evitar cargas repetidas.
+- `Strategy` para variaciones por motor de OCR o formato de salida.
+- `Factory Method` para construir adaptadores/conectores (p.ej. instancias de Docling por modo).
+- `Adapter` para encapsular diferencias entre librerías externas (p.ej. Docling).
+- `Template Method` para flujos base de escaneo/conversión con pasos extensibles.
+- `Builder` para salidas documentales complejas por etapas (reportes, snapshots de caché).
 - No introducir patrones si una solución simple y explícita cubre el caso sin deuda.
 
 ## Errores
-- Define excepciones propias (p.ej., `IntrospectionError`, `RenderError`).
+- Define excepciones propias en `core/exceptions.py` (`DocumentError`, `ConversionError`, `CacheError`, `InvalidPathError`).
 - Mensajes de error accionables (qué falló y cómo corregir).

@@ -13,17 +13,13 @@ theme:
 
 nav:
   - Inicio: index.md
-  - Ejemplos:
-      - CLI y CI/CD:
-          - CLI: examples/example_cli_usage.md
-          - CI/CD Integration: examples/example_ci_cd_integration.md
-      - Herramientas de IA:
-          - Primeros pasos con IA: examples/ai_primer_pasos_proyecto_nuevo.md
-          - Claude Code: examples/claude_code_usage_complete_example.md
-          - Copilot Chat: examples/github_usage_complete_example.md
-          - Codex: examples/codex_usage_complete_example.md
+  - Guías:
+      - Instalación: guides/installation.md
+      - Inicio rápido: guides/quick_start.md
+      - Resolución de problemas: guides/troubleshooting.md
+  - Funcionalidad: functional/index.md
   - API:
-      - Referencia: api/index.md
+      - Arquitectura y referencia: api/index.md
 
 plugins:
   - search
@@ -38,4 +34,8 @@ plugins:
 markdown_extensions:
   - admonition
   - pymdownx.highlight
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format

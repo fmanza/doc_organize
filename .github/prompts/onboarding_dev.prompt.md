@@ -15,13 +15,13 @@ solo información verificable del código, configuración real y ficheros del re
 
 <!-- ÚNICO BLOQUE EDITABLE PARA ESTE PROYECTO — no modificar el resto del fichero -->
 
-- **Proyecto**: doc_organize — librería Python multimotor de bases de datos (sync/async)
+- **Proyecto**: doc_organize — librería Python de escaneo, conversión (vía Docling), deduplicación y caché de documentos, con interfaz web opcional (FastAPI, Fase D)
 - **Rol del modelo**: Senior Developer Experience Engineer especializado en librerías Python open-source
-- **Tipo de proyecto**: librería Python (no tiene servidor local ni base de datos propia)
-- **Stack**: Python 3.12+, SQLAlchemy 2, pandas, pyproject.toml, pip
+- **Tipo de proyecto**: librería Python (opcionalmente expone una app web local vía extra `[web]`)
+- **Stack**: Python >=3.10, Docling (+ extra `rapidocr` para OCR), Pydantic v2, aiosqlite, aiofiles, pyproject.toml, pip
 - **Build tool**: `pip install -e ".[dev]"` / `python -m build`
-- **Infraestructura local §5**: *No aplica* — los tests usan SQLite en memoria (`:memory:`); no requiere BD ni Docker
-- **Ejecutar en local §6**: *No aplica* — librería; se importa o se ejecutan los tests directamente
+- **Infraestructura local §5**: *No aplica para desarrollo* — el cache transaccional usa un archivo SQLite local (`cache.db`, vía `aiosqlite`, modo WAL); no requiere servidor de BD ni Docker
+- **Ejecutar en local §6**: *No aplica* — librería; se importa o se ejecutan los tests directamente. La interfaz web opcional (Fase D) se arranca con `python -m doc_organize web` una vez implementada
 - **Herramientas de calidad**: ruff (lint + format), mypy (type-check), pytest (tests)
 - **Audiencia**: desarrolladores Python que contribuyen o extienden la librería
 - **Tiempo estimado**: 20–40 minutos para tener el entorno operativo

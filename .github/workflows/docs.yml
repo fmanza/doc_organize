@@ -43,8 +43,11 @@ jobs:
         run: pip install -e ".[docs]"
 
       - name: Build docs (validate)
-        # Zenical build is faster than MkDocs (80ms vs 300ms)
-        run: zensical build
+        # mkdocs, no zensical: es lo que declara el extra [docs] en pyproject.toml
+        # (mkdocs/mkdocs-material/mkdocstrings) y lo que documenta CLAUDE.md/README.md
+        # -- zensical no es una dependencia instalada, este paso fallaria "command not
+        # found" en un runner limpio. --strict convierte links rotos en fallo de build.
+        run: mkdocs build --strict
         env:
           PYTHONPATH: src
 

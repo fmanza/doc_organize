@@ -47,7 +47,7 @@ async def hash_file(file_path: str, chunk_size: int = 65536) -> str:
         raise FileNotFoundError(f"File not found: {file_path}")
 
     if not path.is_file():
-        raise IOError(f"Path is not a file: {file_path}")
+        raise OSError(f"Path is not a file: {file_path}")
 
     sha256_hash = hashlib.sha256()
 
@@ -58,7 +58,7 @@ async def hash_file(file_path: str, chunk_size: int = 65536) -> str:
                 if not chunk:
                     break
                 sha256_hash.update(chunk)
-    except IOError as e:
-        raise IOError(f"Cannot read file {file_path}: {e}") from e
+    except OSError as e:
+        raise OSError(f"Cannot read file {file_path}: {e}") from e
 
     return sha256_hash.hexdigest()

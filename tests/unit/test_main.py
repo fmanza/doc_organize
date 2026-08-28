@@ -1,0 +1,558 @@
+"""Tests de main.py (CLI, Fase D-1): resolucion de rutas y orquestacion de `scan`."""
+
+from pathlib import Path
+
+import pytest
+
+from doc_organize.core.exceptions import DocOrganizeError
+from doc_organize.core.models import ConversionStatus, ScanEventType
+from doc_organize.main import ScanCommand, _resolve_scan_paths, build_parser, main
+from doc_organize.projects import ProjectRegistry
+
+_SAMPLE_TEXT = "Informe de prueba doc_organize.\nDocumento de fixture para tests del CLI."
+
+
+def _make_native_pdf(path: Path) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig = plt.figure(figsize=(8.27, 11.69))
+    fig.text(0.1, 0.7, _SAMPLE_TEXT, fontsize=14, family="sans-serif")
+    fig.savefig(path, format="pdf")
+    plt.close(fig)
+
+
+def _make_scanned_pdf(path: Path) -> None:
+    from PIL import Image, ImageDraw, ImageFont
+
+    img = Image.new("RGB", (1240, 1754), color="white")
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype("arial.ttf", 36)
+    except OSError:
+        font = ImageFont.load_default()
+    draw.multiline_text((80, 200), _SAMPLE_TEXT, fill="black", font=font, spacing=12)
+    img.save(path, "PDF", resolution=150.0)
+
+
+# ===== _resolve_scan_paths =====
+
+
+class _Args:
+    def __init__(self, **kwargs: object) -> None:
+        self.project = kwargs.get("project")
+        self.output_dir = kwargs.get("output_dir")
+        self.cache_file = kwargs.get("cache_file")
+        self.duplicates_dir = kwargs.get("duplicates_dir")
+
+
+@pytest.mark.asyncio
+async def test_resolve_scan_paths_from_project(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("doc_organize.main.ProjectRegistry", lambda: _FakeRegistry(tmp_path / "proj"))
+    args = _Args(project="Mi Proyecto")
+
+    output_dir, cache_db, duplicates_dir, folders_json = await _resolve_scan_paths(args)
+
+    root = tmp_path / "proj"
+    assert output_dir == root / "Conversión"
+    assert cache_db == root / "cache.db"
+    assert duplicates_dir == root / "duplicados"
+    assert folders_json == root / "folders.json"
+
+
+@pytest.mark.asyncio
+async def test_resolve_scan_paths_explicit_flags_without_project() -> None:
+    args = _Args(output_dir="/tmp/out", cache_file="/tmp/cache.db")
+
+    output_dir, cache_db, duplicates_dir, folders_json = await _resolve_scan_paths(args)
+
+    assert output_dir == Path("/tmp/out")
+    assert cache_db == Path("/tmp/cache.db")
+    assert duplicates_dir == Path("/tmp/duplicados")
+
+
+@pytest.mark.asyncio
+async def test_resolve_scan_paths_requires_project_or_explicit_flags() -> None:
+    args = _Args()
+    with pytest.raises(DocOrganizeError):
+        await _resolve_scan_paths(args)
+
+
+@pytest.mark.asyncio
+async def test_resolve_scan_paths_explicit_overrides_project(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("doc_organize.main.ProjectRegistry", lambda: _FakeRegistry(tmp_path / "proj"))
+    args = _Args(project="Mi Proyecto", cache_file=str(tmp_path / "custom_cache.db"))
+
+    output_dir, cache_db, duplicates_dir, folders_json = await _resolve_scan_paths(args)
+
+    root = tmp_path / "proj"
+    assert cache_db == tmp_path / "custom_cache.db"  # el flag explicito gana
+    assert output_dir == root / "Conversión"  # el resto sigue derivado del proyecto
+
+
+class _FakeProject:
+    def __init__(self, root_path: Path) -> None:
+        self.root_path = str(root_path)
+
+
+class _FakeRegistry:
+    def __init__(self, root_path: Path) -> None:
+        self._root_path = root_path
+
+    async def __aenter__(self) -> "_FakeRegistry":
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        return None
+
+    async def get_project(self, name: str) -> _FakeProject:
+        return _FakeProject(self._root_path)
+
+
+# ===== build_parser =====
+
+
+def test_build_parser_scan_requires_paths() -> None:
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["scan"])
+
+
+def test_build_parser_scan_parses_flags() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["scan", "--paths", "/a", "/b", "--project", "Foo", "--deduplicate", "--use-ocr"])
+    assert args.paths == ["/a", "/b"]
+    assert args.project == "Foo"
+    assert args.deduplicate is True
+    assert args.use_ocr is True
+    assert args.use_gpu is False
+
+
+def test_build_parser_project_create() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["project", "create", "Mi Proyecto", "--location", "/repo"])
+    assert args.command == "project"
+    assert args.project_command == "create"
+    assert args.name == "Mi Proyecto"
+    assert args.location == "/repo"
+
+
+# ===== ScanCommand end-to-end (Docling real, sin mocks) =====
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_scan_command_converts_new_documents(tmp_path) -> None:
+    base = tmp_path / "workspaces"
+    base.mkdir()
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        project = await registry.create_project("Proyecto Scan", base)
+    root = Path(project.root_path)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    _make_native_pdf(input_dir / "native.pdf")
+
+    summary = await ScanCommand().run(
+        paths=[str(input_dir)],
+        output_dir=root / "Conversión",
+        cache_db=root / "cache.db",
+        duplicates_dir=root / "duplicados",
+        folders_json=root / "folders.json",
+        deduplicate=False,
+        use_ocr=False,
+        use_gpu=False,
+    )
+
+    assert summary.scanned == 1
+    assert summary.new == 1
+    assert summary.converted == 1
+    assert summary.conversion_errors == 0
+    assert summary.ocr_required == 0
+    # DocumentConverter replica la ruta de origen completa bajo output_dir (REQ-003),
+    # asi que se busca el .md generado en vez de asumir una ubicacion plana.
+    generated = list((root / "Conversión").rglob("native.md"))
+    assert len(generated) == 1
+    assert (root / "folders.json").exists()
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_scan_command_run_streaming_emits_expected_event_sequence(tmp_path) -> None:
+    # Fase D-2b (SS2.7.3): run_streaming() es la orquestacion real; run() (probado arriba)
+    # es ahora un envoltorio delgado sobre ella. Este test cubre la secuencia de eventos
+    # que web/routes/scan.py retransmitira por WebSocket.
+    base = tmp_path / "workspaces"
+    base.mkdir()
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        project = await registry.create_project("Proyecto Streaming", base)
+    root = Path(project.root_path)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    _make_native_pdf(input_dir / "native.pdf")
+
+    events = [
+        event
+        async for event in ScanCommand().run_streaming(
+            paths=[str(input_dir)],
+            output_dir=root / "Conversión",
+            cache_db=root / "cache.db",
+            duplicates_dir=root / "duplicados",
+            folders_json=root / "folders.json",
+            deduplicate=False,
+            use_ocr=False,
+            use_gpu=False,
+        )
+    ]
+
+    event_types = [event.event for event in events]
+    assert event_types == [
+        ScanEventType.STARTED,
+        ScanEventType.SCANNED,
+        ScanEventType.FILE_CONVERTED,
+        ScanEventType.COMPLETED,
+    ]
+    assert events[-1].data["scanned"] == 1
+    assert events[-1].data["converted"] == 1
+    file_converted = events[2]
+    assert file_converted.data["success"] is True
+    assert file_converted.data["path"].endswith("native.pdf")
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_scan_command_second_run_skips_unchanged(tmp_path) -> None:
+    base = tmp_path / "workspaces"
+    base.mkdir()
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        project = await registry.create_project("Proyecto Cache", base)
+    root = Path(project.root_path)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    _make_native_pdf(input_dir / "native.pdf")
+
+    run_kwargs = {
+        "paths": [str(input_dir)],
+        "output_dir": root / "Conversión",
+        "cache_db": root / "cache.db",
+        "duplicates_dir": root / "duplicados",
+        "folders_json": root / "folders.json",
+        "deduplicate": False,
+        "use_ocr": False,
+        "use_gpu": False,
+    }
+
+    first = await ScanCommand().run(**run_kwargs)
+    second = await ScanCommand().run(**run_kwargs)
+
+    assert first.new == 1
+    assert second.new == 0
+    assert second.unchanged == 1
+    assert second.converted == 0  # no se reconvierte lo que no cambio
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_scan_command_ocr_pending_then_processed_on_next_run(tmp_path) -> None:
+    base = tmp_path / "workspaces"
+    base.mkdir()
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        project = await registry.create_project("Proyecto OCR", base)
+    root = Path(project.root_path)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    _make_scanned_pdf(input_dir / "scanned.pdf")
+
+    base_kwargs = {
+        "paths": [str(input_dir)],
+        "output_dir": root / "Conversión",
+        "cache_db": root / "cache.db",
+        "duplicates_dir": root / "duplicados",
+        "folders_json": root / "folders.json",
+        "deduplicate": False,
+        "use_gpu": False,
+    }
+
+    first = await ScanCommand().run(use_ocr=False, **base_kwargs)
+    assert first.new == 1
+    assert first.ocr_required == 1
+    assert first.ocr_processed == 0
+
+    from doc_organize.cache import CacheManager
+
+    async with CacheManager(root / "cache.db") as cache:
+        entries = await cache.load_cache()
+    file_path = str((input_dir / "scanned.pdf").resolve())
+    assert entries[file_path].conversion_status == ConversionStatus.OCR_PENDING
+
+    # Segunda pasada: el documento no cambio (mismo hash), pero --use-ocr debe
+    # recogerlo igualmente porque seguia OCR_PENDING en cache.
+    second = await ScanCommand().run(use_ocr=True, **base_kwargs)
+    assert second.new == 0
+    assert second.unchanged == 1
+    assert second.ocr_processed == 1
+
+    async with CacheManager(root / "cache.db") as cache:
+        entries = await cache.load_cache()
+    assert entries[file_path].conversion_status == ConversionStatus.SUCCESS
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_scan_command_deduplicate_moves_exact_duplicate(tmp_path) -> None:
+    base = tmp_path / "workspaces"
+    base.mkdir()
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        project = await registry.create_project("Proyecto Dedup", base)
+    root = Path(project.root_path)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    _make_native_pdf(input_dir / "original.pdf")
+    # Copia exacta (mismo contenido) con otro nombre -> duplicado exacto.
+    (input_dir / "copia.pdf").write_bytes((input_dir / "original.pdf").read_bytes())
+
+    summary = await ScanCommand().run(
+        paths=[str(input_dir)],
+        output_dir=root / "Conversión",
+        cache_db=root / "cache.db",
+        duplicates_dir=root / "duplicados",
+        folders_json=root / "folders.json",
+        deduplicate=True,
+        use_ocr=False,
+        use_gpu=False,
+    )
+
+    assert summary.duplicate_groups == 1
+    assert summary.converted == 1  # solo el canonico se convierte
+    assert (root / "duplicados" / "DEDUP_REPORT.json").exists()
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_scan_command_run_streaming_emits_deduplicated_event(tmp_path) -> None:
+    base = tmp_path / "workspaces"
+    base.mkdir()
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        project = await registry.create_project("Proyecto Dedup Streaming", base)
+    root = Path(project.root_path)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    _make_native_pdf(input_dir / "original.pdf")
+    (input_dir / "copia.pdf").write_bytes((input_dir / "original.pdf").read_bytes())
+
+    events = [
+        event
+        async for event in ScanCommand().run_streaming(
+            paths=[str(input_dir)],
+            output_dir=root / "Conversión",
+            cache_db=root / "cache.db",
+            duplicates_dir=root / "duplicados",
+            folders_json=root / "folders.json",
+            deduplicate=True,
+            use_ocr=False,
+            use_gpu=False,
+        )
+    ]
+
+    event_types = [event.event for event in events]
+    assert ScanEventType.DEDUPLICATED in event_types
+    dedup_event = next(event for event in events if event.event is ScanEventType.DEDUPLICATED)
+    assert dedup_event.data["duplicate_groups"] == 1
+    # DEDUPLICATED llega antes que el/los FILE_CONVERTED, no despues.
+    assert event_types.index(ScanEventType.DEDUPLICATED) < event_types.index(ScanEventType.FILE_CONVERTED)
+
+
+# ===== main() end-to-end (usa --registry-path para no tocar ~/.doc_organize/) =====
+
+
+def test_main_project_create_and_list(tmp_path, capsys) -> None:
+    registry_path = str(tmp_path / "projects.json")
+    base = tmp_path / "workspaces"
+    base.mkdir()
+
+    exit_code = main(["project", "create", "Mi Proyecto", "--location", str(base), "--registry-path", registry_path])
+    assert exit_code == 0
+    assert "Mi Proyecto" in capsys.readouterr().out
+    assert (base / "Mi Proyecto").is_dir()
+
+    exit_code = main(["project", "list", "--registry-path", registry_path])
+    assert exit_code == 0
+    assert "Mi Proyecto" in capsys.readouterr().out
+
+
+def test_main_project_list_empty(tmp_path, capsys) -> None:
+    exit_code = main(["project", "list", "--registry-path", str(tmp_path / "projects.json")])
+    assert exit_code == 0
+    assert "No hay proyectos registrados" in capsys.readouterr().out
+
+
+def test_main_project_create_invalid_name_reports_error(tmp_path, capsys) -> None:
+    base = tmp_path / "workspaces"
+    base.mkdir()
+
+    exit_code = main(["project", "create", "CON", "--location", str(base), "--registry-path", str(tmp_path / "projects.json")])
+
+    assert exit_code == 1
+    assert "Error" in capsys.readouterr().err
+    assert list(base.iterdir()) == []
+
+
+@pytest.mark.slow
+def test_main_scan_end_to_end(tmp_path, capsys) -> None:
+    registry_path = str(tmp_path / "projects.json")
+    base = tmp_path / "workspaces"
+    base.mkdir()
+    main(["project", "create", "Proyecto CLI", "--location", str(base), "--registry-path", registry_path])
+    capsys.readouterr()
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    _make_native_pdf(input_dir / "native.pdf")
+
+    exit_code = main(
+        [
+            "scan",
+            "--paths",
+            str(input_dir),
+            "--project",
+            "Proyecto CLI",
+            "--registry-path",
+            registry_path,
+        ]
+    )
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Documentos escaneados: 1" in output
+    assert "Convertidos: 1" in output
+    assert list((base / "Proyecto CLI" / "Conversión").rglob("native.md"))
+
+
+# ===== `web` subcommand =====
+# Revision 8 (SS2.7.2): ya no hay un DOC_ORGANIZE_API_TOKEN compartido que exigir al
+# arrancar -- la autenticacion es multi-usuario (login via /login), asi que el
+# proceso arranca igual en loopback y en no-loopback; sin usuarios provisionados,
+# el host no-loopback simplemente queda inaccesible (nadie puede autenticarse).
+
+
+def test_main_web_starts_on_non_loopback_without_any_provisioned_user(tmp_path, monkeypatch) -> None:
+    calls: list[dict] = []
+    monkeypatch.setattr("uvicorn.run", lambda app, host, port: calls.append({"app": app, "host": host, "port": port}))
+
+    exit_code = main(
+        [
+            "web",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "9000",
+            "--registry-path",
+            str(tmp_path / "p.json"),
+            "--auth-db-path",
+            str(tmp_path / "auth.db"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert len(calls) == 1
+    assert calls[0]["host"] == "0.0.0.0"
+    assert calls[0]["port"] == 9000
+
+
+def test_main_web_starts_on_loopback(tmp_path, monkeypatch) -> None:
+    calls: list[dict] = []
+    monkeypatch.setattr("uvicorn.run", lambda app, host, port: calls.append({"app": app, "host": host, "port": port}))
+
+    exit_code = main(
+        ["web", "--registry-path", str(tmp_path / "p.json"), "--auth-db-path", str(tmp_path / "auth.db")]
+    )
+
+    assert exit_code == 0
+    assert len(calls) == 1
+    assert calls[0]["host"] == "127.0.0.1"
+
+
+# ===== `tenant create` / `user create` subcommands (revision 8, SS2.7.2, sub-paso 4/4) =====
+
+
+def test_build_parser_tenant_create_requires_name() -> None:
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["tenant", "create"])
+
+
+def test_build_parser_user_create_requires_tenant_and_username() -> None:
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["user", "create", "alice"])  # falta --tenant
+
+
+def test_main_tenant_create(tmp_path, capsys) -> None:
+    exit_code = main(["tenant", "create", "Acme Corp", "--auth-db-path", str(tmp_path / "auth.db")])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "acme-corp" in output
+    assert "Acme Corp" in output
+
+
+def test_main_tenant_create_duplicate_reports_error(tmp_path, capsys) -> None:
+    auth_db_path = str(tmp_path / "auth.db")
+    main(["tenant", "create", "Acme Corp", "--auth-db-path", auth_db_path])
+
+    exit_code = main(["tenant", "create", "Acme Corp", "--auth-db-path", auth_db_path])
+
+    assert exit_code == 1
+    assert "Error" in capsys.readouterr().err
+
+
+def test_main_user_create_prompts_password_via_getpass_not_cli_arg(tmp_path, monkeypatch, capsys) -> None:
+    auth_db_path = str(tmp_path / "auth.db")
+    main(["tenant", "create", "Acme Corp", "--auth-db-path", auth_db_path])
+
+    prompts: list[str] = []
+    monkeypatch.setattr("doc_organize.main.getpass.getpass", lambda prompt="": (prompts.append(prompt), "s3cr3t-password")[1])
+
+    exit_code = main(["user", "create", "alice", "--tenant", "acme-corp", "--auth-db-path", auth_db_path])
+
+    assert exit_code == 0
+    assert len(prompts) == 1  # la contraseña se pidio interactivamente, no vino de sys.argv
+    output = capsys.readouterr().out
+    assert "alice" in output
+    assert "acme-corp" in output
+
+
+def test_main_user_create_unknown_tenant_reports_error(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr("doc_organize.main.getpass.getpass", lambda prompt="": "s3cr3t-password")
+
+    exit_code = main(["user", "create", "alice", "--tenant", "no-existe", "--auth-db-path", str(tmp_path / "auth.db")])
+
+    assert exit_code == 1
+    assert "Error" in capsys.readouterr().err
+
+
+def test_main_user_create_then_authenticate_succeeds(tmp_path, monkeypatch) -> None:
+    from doc_organize.auth import AuthStore
+
+    auth_db_path = tmp_path / "auth.db"
+    monkeypatch.setattr("doc_organize.main.getpass.getpass", lambda prompt="": "s3cr3t-password")
+
+    main(["tenant", "create", "Acme Corp", "--auth-db-path", str(auth_db_path)])
+    main(["user", "create", "alice", "--tenant", "acme-corp", "--auth-db-path", str(auth_db_path)])
+
+    import asyncio
+
+    async def _authenticate() -> object:
+        async with AuthStore(auth_db_path) as store:
+            return await store.authenticate("acme-corp", "alice", "s3cr3t-password")
+
+    user = asyncio.run(_authenticate())
+    assert user is not None
+    assert user.username == "alice"

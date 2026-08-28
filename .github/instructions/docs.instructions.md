@@ -250,7 +250,7 @@ Para las páginas de entrada de nivel raíz del `nav:` — **Inicio**, **Instala
 # Variante B — Instalación (docs/INSTALLATION.md)
 ## 1. Requisitos Previos
 ## 2. Instalación del Paquete
-## 3. Drivers por Motor
+## 3. Extras Opcionales (p.ej. `[web]`, `[ocr-gpu]`)
 ## 4. Verificación
 ## 5. Solución de Problemas
 
@@ -298,13 +298,11 @@ subsecciones** (no listas planas).
   con nombres **consistentes entre las tres secciones**, de modo que un mismo dominio aparece bajo el
   mismo rótulo en funcional, técnica y ejemplos:
 
-  `Managers` · `Metadatos e Introspección` · `Conexiones` · `Operaciones Bulk` · `Sistema de Queries` ·
-  `Comparación de Esquemas` · `Volcado de Datos` · `Migración de Esquemas` · `Análisis de Relaciones` ·
-  `Documentación de BD`
+  `Scanner` · `Converter` · `Deduplicación` · `Caché` · `Web` (Fase D) · `Validators` · `Utils`
 
 - En `Guías` los grupos son **temáticos** (how-tos transversales). Pueden reusar nombres de área de
-  dominio cuando la guía trata de un módulo concreto (`Comparación de Esquemas`, `Volcado de Datos`,
-  `Migración de Esquemas`) o usar rótulos propios para temas transversales (`Conexión y Drivers` ·
+  dominio cuando la guía trata de un módulo concreto (`Scanner`, `Converter`, `Deduplicación`,
+  `Caché`) o usar rótulos propios para temas transversales (`Configuración de OCR` ·
   `Errores y Diagnóstico` · `Rendimiento` · `Migración de Versión` · `Herramientas IA`).
 
 - Una subsección con **un solo documento es válida** (igual que en `Referencia Técnica`).
@@ -678,15 +676,15 @@ No modifica ningún fichero basándose solo en hallazgos del HTML. Propone corre
 ✅ **CORRECTO:**
 ```markdown
 ```python
---8<-- "examples/database/pool_setup.py"
+--8<-- "examples/scanner/scan_folders_basic.py"
 ```
 ```
 
 ❌ **INCORRECTO:** Mezclar código inline con directiva:
 ```markdown
 ```python
-from sqlalchemy import create_engine
---8<-- "examples/database/pool_setup.py"
+from doc_organize.scanner import DocumentScanner
+--8<-- "examples/scanner/scan_folders_basic.py"
 ```
 ```
 
@@ -704,10 +702,10 @@ from sqlalchemy import create_engine
 
 Cada archivo `.py` en `docs/examples/` debe:
 
-1. **Tener nombre descriptivo:** `partition_ranges.py`, `pool_setup.py`, NO `example.py` o `snippet.py`
+1. **Tener nombre descriptivo:** `scan_folders_basic.py`, `convert_with_ocr.py`, NO `example.py` o `snippet.py`
 2. **Incluir docstring de módulo (1-2 líneas):**
    ```python
-   """Ejemplo: Cálculo automático de rangos de partición para ParallelBulkLoader."""
+   """Ejemplo: escaneo recursivo de una carpeta y conteo de documentos por extensión."""
    ```
 3. **Ser sintácticamente válido** (testeable con `python -m py_compile`)
 4. **No contener credenciales reales** (usar placeholders como `"user://"` o comentarios `# replace with`)
@@ -717,16 +715,15 @@ Cada archivo `.py` en `docs/examples/` debe:
 
 ```
 docs/examples/
-├── database/            # Conexión, introspección, volcado, carga
-│   ├── partition_ranges.py
-│   ├── pool_setup.py
+├── scanner/             # Escaneo recursivo de carpetas
+│   ├── scan_folders_basic.py
 │   └── ...
-├── bulk/                # CRUD masivo, auditoría
-│   ├── bulk_insert_from_df.py
+├── converter/           # Conversión a Markdown/JSON, OCR
+│   ├── convert_with_ocr.py
 │   └── ...
-├── migration/           # Migración de esquemas
-├── async/               # Operaciones asincrónicas
-└── reporting/           # Reportes y análisis
+├── dedup/               # Deduplicación y resolución de versiones
+├── cache/               # Caché transaccional (SQLite)
+└── web/                 # Uso de la interfaz web (Fase D)
 ```
 
 ### Validación antes de documentar

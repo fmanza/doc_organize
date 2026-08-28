@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}doc_organize — Proyectos{% endblock %}
+{% block content %}
+<h1>Proyectos</h1>
+
+<form id="create-form">
+    <label for="name" class="sr-only">Nombre del proyecto</label>
+    <input type="text" id="name" placeholder="Nombre del proyecto" required>
+    <label for="location" class="sr-only">Ubicación (carpeta padre)</label>
+    <input type="text" id="location" placeholder="Ubicación (carpeta padre)" required>
+    <button type="submit">Crear proyecto</button>
+</form>
+<p id="create-error" class="error"></p>
+
+{% if projects %}
+<table>
+    <thead><tr><th>Nombre</th><th>Ubicación</th><th>Creado</th></tr></thead>
+    <tbody>
+    {% for project in projects %}
+        <tr>
+            <td><a href="/projects/{{ project.name | urlencode }}">{{ project.name }}</a></td>
+            <td>{{ project.root_path }}</td>
+            <td>{{ project.created_at }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No hay proyectos todavía.</p>
+{% endif %}
+
+<script>
+document.getElementById("create-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = document.getElementById("name").value;
+    const base_location = document.getElementById("location").value;
+    const response = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name, base_location: base_location }),
+    });
+    if (response.ok) {
+        window.location.reload();
+    } else {
+        const data = await response.json();
+        document.getElementById("create-error").textContent = data.detail || "Error al crear el proyecto.";
+    }
+});
+</script>
+{% endblock %}

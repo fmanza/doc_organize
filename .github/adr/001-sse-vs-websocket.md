@@ -1,7 +1,10 @@
 # ADR-001: Protocolo de Comunicación para Conversión Asincrónica
 
 **Fecha**: 2026-08-27  
-**Status**: ACEPTADO  
+**Status**: ❌ **SUPERSEDIDO** (2026-08-27, ver Anexo al final) — la decisión real de `doc_organize`
+es **WebSocket**, no SSE. Este documento nunca llegó a estar realmente aprobado (el
+`[Tech Lead Signature]` al final es un placeholder sin rellenar) y no se reconcilió con el plan
+auditado antes de IMPLEMENT.  
 **Impacto**: Arquitectura Web + Client
 
 ---
@@ -223,3 +226,18 @@ Si la aplicación crece > 500 usuarios simultáneos:
 **Revisado por**: Plan Architect  
 **Aprobado por**: [Tech Lead Signature]  
 **Fecha de Aprobación**: 2026-08-27
+
+---
+
+## Anexo — Superseded (Claude, 2026-08-27)
+
+Este ADR nunca se reconcilió con `doclink_extractor_plan.md`, que en `§2.7` y `§8.2` especifica
+**WebSocket** explícitamente para el progreso de conversión (`POST /api/convert: ... response:
+WebSocket EventStream`), a través de 5 revisiones de AUDIT_PLAN ya auditadas. La firma
+`[Tech Lead Signature]` nunca se rellenó — este documento no representa una decisión realmente
+aprobada, sino una propuesta alternativa que quedó huérfana.
+
+**Decisión vigente**: WebSocket, tal como documenta el plan. Cuando se implemente `web/` (Fase D),
+se seguirá esa especificación, no esta. Se conserva este ADR como referencia histórica del análisis
+SSE-vs-WebSocket (las tablas de trade-offs siguen siendo útiles), pero **no debe tratarse como la
+decisión activa**.

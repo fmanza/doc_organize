@@ -1,129 +1,109 @@
 # doc_organize
 
-> Sistema de extracción de contenido de documentos en Markdown y JSON documentación y organización.
+> Escanea, convierte a Markdown/JSON, deduplica y cachea documentos — por línea de
+> comandos o desde una interfaz web opcional con autenticación multi-usuario y
+> multi-tenant.
 
-## 🚀 Descripción
+## Descripción
 
-Proyecto desarrollado como parte de la arquitectura modular de utilidades IA.
+`doc_organize` escanea carpetas de documentos (PDF, Word, Excel, PowerPoint,
+imágenes), calcula su hash SHA-256, los convierte a Markdown + JSON con
+[Docling](https://github.com/docling-project/docling) (con detección y
+reprocesado de OCR), detecta y resuelve duplicados, y mantiene un caché
+incremental para no reconvertir lo que no ha cambiado. Cada conjunto de trabajo
+se organiza como un **proyecto**: una carpeta raíz propia con su conversión, su
+caché y sus duplicados.
 
-## 📋 Requisitos
+Incluye una interfaz web opcional (extra `[web]`) con progreso en tiempo real
+por WebSocket; en modo no-loopback exige autenticación por usuario con soporte
+multi-tenant (varias organizaciones, cada una con sus propios usuarios y
+proyectos, aisladas entre sí).
+
+## Requisitos
 
 - Python 3.10+
-- pip o conda
 
-## 🔧 Instalación
+## Instalación
+
+```bash
+pip install doc_organize            # núcleo: CLI, OCR en CPU incluido
+pip install doc_organize[web]       # + interfaz web
+```
 
 ### Desarrollo
 
 ```bash
-# Crear entorno virtual
 python -m venv .venv
-source .venv/bin/activate  # En Windows: .venv\\Scripts\\activate
+source .venv/bin/activate  # En Windows: .venv\Scripts\activate
 
-# Instalar con dependencias de desarrollo
-pip install -e ".[dev,docs]"
+pip install -e ".[dev,web,docs]"
 ```
 
-### Producción
+## Uso básico
 
 ```bash
-pip install doc_organize
+# Crear un proyecto y escanear una carpeta
+python -m doc_organize project create "Mi Proyecto" --location /ruta/a/workspaces
+python -m doc_organize scan --project "Mi Proyecto" --paths /ruta/a/documentos
+
+# Interfaz web (loopback, sin autenticación)
+pip install doc_organize[web]
+python -m doc_organize web
 ```
 
-## 📚 Uso Básico
+Ver la [documentación completa](https://user.github.io/doc_organize) —
+[instalación](docs/guides/installation.md), [inicio rápido](docs/guides/quick_start.md)
+y [funcionalidad por módulo](docs/functional/index.md).
 
-```python
-from doc_organize import MyService
-
-service = MyService()
-result = service.do_something()
-```
-
-## 🧪 Testing
+## Testing
 
 ```bash
-# Ejecutar todos los tests
-python -m pytest
-
-# Con cobertura
-python -m pytest --cov=src
-
-# Tests específicos
-python -m pytest tests/unit/test_module.py::TestClass::test_method
+python -m pytest                    # todos los tests
+python -m pytest -k "not slow"      # sin los de integración con Docling real
+python -m pytest --cov=src          # con cobertura
 ```
 
-## 🔍 Linting y Type Checking
+## Linting y type checking
 
 ```bash
-# Linting con ruff
 python -m ruff check src tests
-
-# Formateo automático
 python -m ruff format src tests
-
-# Type checking con mypy
 python -m mypy src
 ```
 
-## 📖 Documentación
+## Documentación
 
 ```bash
-# Servir documentación localmente
-mkdocs serve
-
-# Generar documentación estática
-mkdocs build
+mkdocs serve    # documentación local (http://127.0.0.1:8000)
+mkdocs build    # sitio estático en ./site
 ```
 
-## 🏗️ Estructura del Proyecto
+## Estructura del proyecto
 
 ```
 doc_organize/
-├── src/
-│   └── doc_organize/
-│       ├── __init__.py
-│       ├── core/
-│       │   └── __init__.py
-│       └── utils/
-│           └── __init__.py
+├── src/doc_organize/
+│   ├── core/            # modelos, excepciones, constantes (Nivel 1)
+│   ├── utils/            # hash_file, safe_path_join, logging (Nivel 1)
+│   ├── validators/       # FolderValidator, ProjectValidator (Nivel 2)
+│   ├── scanner/           # DocumentScanner (Nivel 2)
+│   ├── converter/         # DocumentConverter, OCRScheduler (Nivel 2)
+│   ├── dedup/              # DeduplicationManager (Nivel 2)
+│   ├── cache/               # CacheManager, SQLite+WAL (Nivel 2)
+│   ├── projects/             # ProjectRegistry (Nivel 2)
+│   ├── auth/                  # AuthStore: usuarios/tenants/sesiones (Nivel 2)
+│   ├── scan/                   # ScanCommand: orquestación compartida CLI/web (Nivel 3)
+│   ├── web/                     # interfaz web opcional, FastAPI (Nivel 3, extra [web])
+│   └── main.py                   # CLI (Nivel 3)
 ├── tests/
 │   ├── unit/
-│   ├── integration/
 │   └── conftest.py
 ├── docs/
-│   └── examples/
-├── .github/
-│   └── copilot-instructions.md   ← instrucciones para GitHub Copilot
-├── .claude/
-│   └── settings.json             ← configuración para Claude Code
-├── AGENTS.md                      ← instrucciones para Codex
 ├── pyproject.toml
-├── README.md
-├── CLAUDE.md
-└── doc_organize.code-workspace
+└── README.md
 ```
 
-## 🤖 IA y Desarrollo
-
-### Claude Code
-
-Este proyecto está configurado para trabajar con Claude Code.
-
-### Codex en VS Code
-
-Este proyecto incluye `AGENTS.md` para orientar a Codex. En VS Code, instala la extensión `OpenAI.chatgpt`, abre el workspace y trabaja desde el panel de Codex.
-
-### Comandos Disponibles
-
-- `/new-feature` — Nueva funcionalidad
-- `/hotfix` — Corrección de bug
-- `/refactor` — Refactoring
-- `/audit-code` — Auditoría técnica
-- `/security-review` — Revisión de seguridad
-
-## 📝 Convenciones
-
-### Commits
+## Commits
 
 Usar [Conventional Commits](https://www.conventionalcommits.org/):
 
@@ -136,15 +116,10 @@ docs:     solo documentación
 chore:    mantenimiento
 ```
 
-## 📧 Contacto
+## Contacto
 
-Autor: Paco Manzano
-Email: fmanzano.trabajo@gmail.com
+Autor: Paco Manzano — fmanzano.trabajo@gmail.com
 
-## 📄 Licencia
+## Licencia
 
 MIT License. Ver LICENSE para más detalles.
-
----
-
-*Generado con Project Generator v3*

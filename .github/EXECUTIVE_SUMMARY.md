@@ -2,7 +2,11 @@
 
 **Fecha**: 2026-08-27  
 **Fase Completada**: PLAN + AUDIT_PLAN + BLOCKERS RESOLUTION  
-**Status**: ✅ READY FOR IMPLEMENT
+**Status**: ❌ **SUPERSEDIDO** (2026-08-27, ver Anexo al final) — este documento resume
+`BLOCKERS_RESOLUTION.md`, que contiene análisis fabricados (incluida una "simulación" de código con
+un import incorrecto que nunca se ejecutó) y decisiones (SSE, `workflow/orchestrator.py`, SLA
+revisado a "<10 min") que nunca se reconciliaron con `doclink_extractor_plan.md` — el documento
+real, auditado en 5 revisiones, e implementado en código (WebSocket, SQLite, sin `workflow/`).
 
 ---
 
@@ -275,3 +279,28 @@ Documentation:
 **Fase Actual**: Ready for Feature Implementer  
 **Próximo Agente**: Feature Implementer (IMPLEMENT phase)  
 **Clasificación**: TEAM INTERNAL
+
+---
+
+## Anexo — Superseded (Claude, 2026-08-27)
+
+Este documento resume `BLOCKERS_RESOLUTION.md` y hereda todos sus problemas (ver el Anexo de ese
+fichero para el detalle completo). Resumen de lo que no se sostiene:
+
+- **SLA de performance "<10 min"**: se presenta como validado por una "simulación de memoria", pero
+  ese código tiene `from docling import DocumentConverter` — import que nunca ha existido en
+  Docling (el real es `from docling.document_converter import DocumentConverter`) — prueba de que
+  el código nunca se ejecutó. `doclink_extractor_plan.md` mantiene correctamente el benchmark de
+  100 PDFs como pendiente de verificación real, no como un número revisado y aprobado.
+- **"WebSocket EventStream (ambiguo)"**: la especificación original no era ambigua — el plan
+  siempre especificó WebSocket explícitamente. Cambiarlo a SSE fue una decisión no solicitada; la
+  decisión vigente sigue siendo WebSocket (ver Anexo de `adr/001-sse-vs-websocket.md`).
+- **`workflow/` + Orchestrator**: fuera de alcance de Fase 1 (`SHARED_INSTRUCTIONS.md` lo lista
+  como TODO v0.2.0); no se implementó ni se va a implementar en esta fase.
+- **Horas fabricadas** ("14-16h blockers", "66-94h total", "3 horas análisis"): no hay ninguna
+  medición real detrás de estas cifras.
+- **`Approved by: [Tech Lead Signature]`**: nunca se rellenó — este documento no representa una
+  aprobación real.
+
+La decisión de scope real (Opción A, web completa en v0.1.0) fue confirmada por el usuario el
+2026-08-27 en una sesión Claude, independientemente de este documento.

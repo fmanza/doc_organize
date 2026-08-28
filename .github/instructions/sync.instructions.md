@@ -25,7 +25,7 @@ Aplica este checklist en la fase **VERSION** de cualquier flujo:
 
 - [ ] La versión nueva tiene entrada bajo `## [X.Y.Z] — YYYY-MM-DD`
 - [ ] Secciones presentes según cambios: `Added`, `Changed`, `Fixed`, `Removed`, `Deprecated`
-- [ ] Cada ítem referencia el módulo afectado: `timelog/`, `common/`, `export_gitlab_time.py`
+- [ ] Cada ítem referencia el módulo afectado: `scanner/`, `converter/`, `dedup/`, `cache/`
 - [ ] No hay entradas bajo `Unreleased` que deban estar en la versión cerrada
 
 ### 2. docs/CHANGELOG.md (si existe copia en docs/)
@@ -43,7 +43,7 @@ Aplica este checklist en la fase **VERSION** de cualquier flujo:
 ### 4. pyproject.toml
 
 - [ ] `version = "X.Y.Z"` actualizado y coincide con el CHANGELOG.md
-- [ ] `requires-python = ">=3.12"` sin modificar (no incrementar sin decisión explícita)
+- [ ] `requires-python = ">=3.10"` sin modificar (no incrementar sin decisión explícita)
 
 ### 5. MkDocs
 
@@ -56,16 +56,16 @@ Aplica este checklist en la fase **VERSION** de cualquier flujo:
 ## Formato de entrada CHANGELOG
 
 ```markdown
-## [0.8.2] — 2026-05-14
+## [0.2.0] — 2026-05-14
 
 ### Added
-- `timelog/export_parquet.py`: exportación a formato Parquet via `pandas.DataFrame.to_parquet()`
+- `converter/ocr_scheduler.py`: soporte de OCR con motor acelerado por GPU (`use_gpu=True`)
 
 ### Fixed
-- `common/decimal_utils.py`: corregido redondeo incorrecto en valores negativos (`safe_decimal_round`)
+- `dedup/deduplication.py`: corregida colisión de nombres al mover duplicados a `duplicados/`
 
 ### Changed
-- `export_gitlab_time.py`: CLI ahora acepta `--output-format parquet`
+- CLI: `python -m doc_organize scan` ahora acepta `--use-cache`
 ```
 
 ---

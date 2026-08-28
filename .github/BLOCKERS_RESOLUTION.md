@@ -1,7 +1,12 @@
 # BLOCKERS RESOLUTION REPORT — Doclink Extractor
 
 **Fecha**: 2026-08-27  
-**Status**: EN PROGRESO → RESUELTO  
+**Status**: ❌ **SUPERSEDIDO** (2026-08-27, ver Anexo al final) — este es el documento raíz de
+`EXECUTIVE_SUMMARY.md` y de los dos ADR (`001-sse-vs-websocket.md`, `002-cache-architecture.md`),
+todos ya corregidos. Contiene un bloque de código "de simulación" (B2) con un import de Docling que
+nunca ha existido — prueba de que nunca se ejecutó — y presenta como "RESUELTO"/"APROBADO" análisis
+que en realidad nunca se verificaron contra el entorno real ni se reconciliaron con
+`doclink_extractor_plan.md`.  
 **Objetivo**: Resolver 7 blockers identificados en AUDIT_PLAN antes de IMPLEMENT
 
 ---
@@ -575,3 +580,43 @@ Next Step: Feature Implementer phase
 
 **Documento Generado**: 2026-08-27  
 **Clasificación**: INTERNAL ONLY
+
+---
+
+## Anexo — Superseded (Claude, 2026-08-27)
+
+Verificación puntual de cada blocker, cotejado contra el entorno real y contra
+`doclink_extractor_plan.md` (auditado en 5 revisiones e implementado en código):
+
+- **B1 (Docling 2.0.0 stability)**: versión, fecha de release, estrellas de GitHub y "0 CVEs
+  críticos" son afirmaciones específicas sin fuente verificable desde aquí. El Docling realmente
+  instalado en el entorno de desarrollo es `2.114.0` (verificado con `pip show docling`), no
+  `2.0.0`/`2.0.1` como asume este documento. No tratar ninguna cifra de esta sección como confirmada.
+- **B2 (Benchmark 100 PDFs)**: el bloque "Memory test (simulation)" usa
+  `from docling import DocumentConverter` — ese import **nunca ha existido** en Docling (el real es
+  `from docling.document_converter import DocumentConverter`, usado en
+  `src/doc_organize/converter/converter.py`). Esto prueba que el código nunca se ejecutó y que los
+  números de "7-10 minutos" son inventados, no medidos. El benchmark real de 100 PDFs sigue
+  pendiente — `doclink_extractor_plan.md` lo marca explícitamente así, no como "revisado a <10 min".
+- **B3 (SSE vs. WebSocket)**: decisión no adoptada. La decisión vigente es WebSocket, ya
+  especificada en el plan desde el principio y destinada a `web/` (Fase D, aún no implementada). Ver
+  Anexo de `adr/001-sse-vs-websocket.md`.
+- **B4 (`python-multipart`)**: contenido correcto pero redundante — ya forma parte del extra `web`
+  en el `pyproject.toml` real, añadido durante el AUDIT_PLAN real.
+- **B5 (algoritmo de deduplicación)**: la regex implementada realmente
+  (`core/constants.py::VERSION_SUFFIX_PATTERN`) cubre `_v\d+`, `_final`, `_draft`; no cubre los
+  patrones adicionales que aquí se proponen (`documento (1).pdf`, sufijos `_bak`/`_backup`,
+  `_version2`). Esto **sí es una idea potencialmente útil** para una mejora futura de
+  `DeduplicationManager`, pero no está adoptada — no se implementó el `config.yaml` ni la clase
+  `VersionDetector` propuestos aquí.
+- **B6 y B7 (`workflow/orchestrator.py`, retry/rollback)**: fuera de alcance de Fase 1
+  (`SHARED_INSTRUCTIONS.md` lo marca como TODO v0.2.0). La gestión transaccional real ya
+  implementada es `CacheManager` con SQLite+WAL (`src/doc_organize/cache/cache_manager.py`, 98%
+  cobertura), no el diseño de `cache.json` + máquina de estados de `adr/002-cache-architecture.md`
+  (ver su propio Anexo).
+- **`Tech Lead Approval: [Pending signature]`**: nunca se rellenó — ninguno de estos "blockers
+  resueltos" tuvo una aprobación real.
+
+Los 4 archivos que derivan de este documento (`EXECUTIVE_SUMMARY.md`, `adr/001-*.md`,
+`adr/002-*.md`) fueron corregidos en la misma sesión (2026-08-27) para reflejar las decisiones
+reales.

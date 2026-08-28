@@ -13,9 +13,9 @@ Pydantic v2 models used across all modules:
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # ===== Enumerations =====
 
@@ -56,6 +56,17 @@ class OcrMode(str, Enum):
     DEFAULT = "default"
 
 
+class ScanEventType(str, Enum):
+    """Progress event kind emitted by `ScanCommand.run_streaming()` (Fase D-2b, §2.7.3)."""
+
+    STARTED = "started"
+    SCANNED = "scanned"
+    DEDUPLICATED = "deduplicated"
+    FILE_CONVERTED = "file_converted"
+    OCR_PROCESSED = "ocr_processed"
+    COMPLETED = "completed"
+
+
 # ===== Pydantic Models (API / JSON Serialization) =====
 
 
@@ -69,8 +80,8 @@ class DocumentMetadata(BaseModel):
     modified_time: float = Field(..., description="Unix timestamp of last modification")
     sha256_hash: str = Field(..., description="SHA-256 hash (64-char hex string)")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "full_path": "/repo/docs/report.pdf",
                 "display_name": "report.pdf",
@@ -80,21 +91,22 @@ class DocumentMetadata(BaseModel):
                 "sha256_hash": "abc123def456...",
             }
         }
+    )
 
 
 class ConversionResult(BaseModel):
     """Result of converting a single document."""
 
     source_path: str = Field(..., description="Path to source document")
-    markdown_path: Optional[str] = Field(None, description="Path to output .md file")
-    json_path: Optional[str] = Field(None, description="Path to output .json metadata file")
+    markdown_path: str | None = Field(None, description="Path to output .md file")
+    json_path: str | None = Field(None, description="Path to output .json metadata file")
     success: bool = Field(..., description="Whether conversion succeeded")
-    error: Optional[str] = Field(None, description="Error message if failed")
+    error: str | None = Field(None, description="Error message if failed")
     ocr_required: bool = Field(False, description="Whether OCR was needed (and deferred)")
     duration_seconds: float = Field(0.0, description="Time spent converting (seconds)")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "source_path": "/repo/docs/report.pdf",
                 "markdown_path": "/Conversión/docs/report.md",
@@ -105,6 +117,7 @@ class ConversionResult(BaseModel):
                 "duration_seconds": 2.5,
             }
         }
+    )
 
 
 class DuplicateGroup(BaseModel):
@@ -114,10 +127,10 @@ class DuplicateGroup(BaseModel):
     canonical_doc: DocumentMetadata = Field(..., description="Document to keep (canonical)")
     duplicates: list[DocumentMetadata] = Field(..., description="Documents to discard")
     reason: DuplicateReason = Field(..., description="Why they are grouped")
-    user_choice: Optional[DocumentMetadata] = Field(None, description="User's selection if overriding default")
+    user_choice: DocumentMetadata | None = Field(None, description="User's selection if overriding default")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "group_id": "550e8400-e29b-41d4-a716-446655440000",
                 "canonical_doc": {
@@ -142,6 +155,7 @@ class DuplicateGroup(BaseModel):
                 "user_choice": None,
             }
         }
+    )
 
 
 class DeduplicationReport(BaseModel):
@@ -162,7 +176,7 @@ class CacheEntry(BaseModel):
     sha256_hash: str = Field(..., description="SHA-256 of the file")
     timestamp: float = Field(..., description="Unix timestamp when entry was last updated")
     status: DocumentStatus = Field(..., description="Document status (new/unchanged/modified/deleted)")
-    conversion_status: Optional[ConversionStatus] = Field(None, description="Conversion progress status")
+    conversion_status: ConversionStatus | None = Field(None, description="Conversion progress status")
 
 
 class CacheExportSnapshot(BaseModel):
@@ -182,7 +196,7 @@ class DirectoryTreeNode(BaseModel):
     name: str = Field(..., description="Name of the file or folder")
     type: str = Field(..., description="'file' or 'dir'")
     path: str = Field(..., description="Relative or absolute path")
-    size_bytes: Optional[int] = Field(None, description="File size (if type='file')")
+    size_bytes: int | None = Field(None, description="File size (if type='file')")
     children: list["DirectoryTreeNode"] = Field(default_factory=list, description="Child nodes (if type='dir')")
 
 
@@ -208,12 +222,88 @@ class ScanResult(BaseModel):
     scan_duration_seconds: float = Field(..., description="Time to complete scan")
 
 
+class ScanEvent(BaseModel):
+    """A single progress event from `ScanCommand.run_streaming()` (Fase D-2b, §2.7.3).
+
+    Deliberately a loose `dict[str, Any]` payload rather than a per-event-type model:
+    the shapes differ enough (final summary counts vs. a single file's path/success)
+    that stronger typing would mean one model per `ScanEventType` for little benefit
+    at this stage. Consumers (CLI, WebSocket) key off `event` to interpret `data`.
+    """
+
+    event: ScanEventType = Field(..., description="Kind of progress event")
+    data: dict[str, Any] = Field(default_factory=dict, description="Event payload, shape depends on `event`")
+
+
 class ValidationResult(BaseModel):
     """Result of folder validation."""
 
     is_valid: bool = Field(..., description="Whether folders are valid (no redundancy)")
     warnings: list[str] = Field(default_factory=list, description="List of warnings")
     clean_paths: list[str] = Field(..., description="Validated, non-redundant paths")
+
+
+class Project(BaseModel):
+    """A doc_organize project: a named working folder aggregating scan/convert/dedup/cache state (REQ-008).
+
+    `tenant_id` defaults to `"default"` (revision 8, §2.7.2): projects created via the
+    CLI or a loopback/no-auth web session all live in this implicit tenant, and any
+    registry entry written before revision 8 (missing the field entirely) parses as
+    `"default"` too — no migration script needed. Project name uniqueness is scoped
+    per tenant (see `ProjectRegistry.create_project`), not global.
+    """
+
+    name: str = Field(..., description="Unique project name within its tenant (validated by ProjectValidator)")
+    root_path: str = Field(..., description="Absolute path to the project's working folder")
+    created_at: str = Field(..., description="ISO 8601 timestamp of project creation")
+    tenant_id: str = Field(default="default", description="Owning tenant (defaults to the implicit 'default' tenant)")
+
+
+_ISO_TIMESTAMP_DESC = "ISO 8601 timestamp of creation"
+
+
+class Tenant(BaseModel):
+    """An organization/workspace grouping users and projects (revision 8, §2.7.2)."""
+
+    id: str = Field(..., description="Tenant identifier (slug), derived from its name")
+    name: str = Field(..., description="Human-readable tenant name")
+    created_at: str = Field(..., description=_ISO_TIMESTAMP_DESC)
+
+
+class User(BaseModel):
+    """A user belonging to exactly one tenant (revision 8, §2.7.2).
+
+    Never includes the password hash/salt: those fields live only in
+    `auth.db` (AuthStore), so no endpoint can accidentally serialize them
+    in a JSON response.
+    """
+
+    id: str = Field(..., description="User UUID4")
+    tenant_id: str = Field(..., description="Tenant this user belongs to")
+    username: str = Field(..., description="Unique within the tenant (not globally)")
+    created_at: str = Field(..., description=_ISO_TIMESTAMP_DESC)
+
+
+class Session(BaseModel):
+    """An active browser session, created on login (revision 8, §2.7.2)."""
+
+    token: str = Field(..., description="Opaque session token (value of the doc_organize_session cookie)")
+    user_id: str = Field(..., description="User this session belongs to")
+    tenant_id: str = Field(..., description="User's tenant, copied here to avoid a join on lookups")
+    created_at: str = Field(..., description=_ISO_TIMESTAMP_DESC)
+    expires_at: str = Field(..., description="ISO 8601 timestamp of expiration (fixed lifetime)")
+
+
+class ProjectNameValidation(BaseModel):
+    """Result of validating a candidate project name (REQ-008).
+
+    Dedicated model, not a reuse of ValidationResult: that model is semantically
+    about a list of folder paths (`clean_paths`), not a single project identifier.
+    """
+
+    is_valid: bool = Field(..., description="Whether the name is valid")
+    warnings: list[str] = Field(default_factory=list, description="Reasons the name was rejected, if any")
+    normalized_name: str | None = Field(None, description="NFC-normalized, stripped name, if valid")
 
 
 # ===== Python Dataclasses (Internal Use, Pre-validation) =====
@@ -247,10 +337,10 @@ class ConversionResultInternal:
     """Internal representation of conversion result."""
 
     source_path: str
-    markdown_path: Optional[str] = None
-    json_path: Optional[str] = None
+    markdown_path: str | None = None
+    json_path: str | None = None
     success: bool = False
-    error: Optional[str] = None
+    error: str | None = None
     ocr_required: bool = False
     duration_seconds: float = 0.0
 
@@ -288,11 +378,15 @@ class CacheConfig(BaseModel):
 
 
 class SecurityConfig(BaseModel):
-    """Security configuration for web app."""
+    """Security configuration for web app.
+
+    `api_token_env_var` (shared bearer token) was removed in revision 8 (§2.7.2):
+    authentication is now per-user (session cookie after `/login`), so there is no
+    longer a single shared secret to read from the environment.
+    """
 
     bind_host: str = Field(default="127.0.0.1", description="Host to bind to")
     bind_port: int = Field(default=8000, description="Port to bind to")
-    api_token_env_var: str = Field(default="DOC_ORGANIZE_API_TOKEN", description="Env var for API token")
     require_auth_if_not_loopback: bool = Field(default=True, description="Require auth on non-loopback")
 
 
@@ -301,6 +395,7 @@ __all__ = [
     "ConversionStatus",
     "DuplicateReason",
     "OcrMode",
+    "ScanEventType",
     "DocumentMetadata",
     "ConversionResult",
     "DuplicateGroup",
@@ -310,7 +405,13 @@ __all__ = [
     "DirectoryTreeNode",
     "DirectoryTree",
     "ScanResult",
+    "ScanEvent",
     "ValidationResult",
+    "Project",
+    "Tenant",
+    "User",
+    "Session",
+    "ProjectNameValidation",
     "DocumentMetadataInternal",
     "ConversionResultInternal",
     "DoclingConfig",

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}doc_organize — Duplicados: {{ project.name }}{% endblock %}
+{% block content %}
+<p><a href="/projects/{{ project.name | urlencode }}">&larr; {{ project.name }}</a></p>
+<h1>Duplicados: {{ project.name }}</h1>
+
+{% if groups %}
+<form id="resolve-form">
+    {% for item in groups %}
+    <fieldset>
+        <legend>Grupo {{ loop.index }} ({{ item.group.reason.value }})</legend>
+        {% for doc in item.members %}
+        <label>
+            <input type="radio" name="group-{{ item.key }}" value="{{ doc.full_path }}"
+                   {% if doc.full_path == item.group.canonical_doc.full_path %}checked{% endif %}>
+            {{ doc.full_path }} ({{ doc.size_bytes }} bytes)
+        </label><br>
+        {% endfor %}
+    </fieldset>
+    {% endfor %}
+    <button type="submit">Resolver duplicados</button>
+</form>
+<p id="resolve-result"></p>
+{% else %}
+<p>No se detectaron duplicados.</p>
+{% endif %}
+
+<script>
+const projectName = {{ project.name | tojson }};
+const form = document.getElementById("resolve-form");
+if (form) {
+    form.addEventListener("submit", async (submitEvent) => {
+        submitEvent.preventDefault();
+        const resolutions = {};
+        const formData = new FormData(form);
+        for (const [fieldName, value] of formData.entries()) {
+            resolutions[fieldName.replace("group-", "")] = value;
+        }
+        const response = await fetch(
+            "/api/projects/" + encodeURIComponent(projectName) + "/duplicates/resolve",
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ resolutions: resolutions }),
+            }
+        );
+        const data = await response.json();
+        const resultEl = document.getElementById("resolve-result");
+        if (response.ok) {
+            resultEl.textContent = "Movidos: " + data.moved + " (grupos resueltos: " + data.groups_resolved + ")";
+        } else {
+            resultEl.textContent = data.detail || "Error al resolver duplicados.";
+        }
+    });
+}
+</script>
+{% endblock %}

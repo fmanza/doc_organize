@@ -1,7 +1,11 @@
 # ADR-002: Arquitectura de Caché Transaccional para cache.json
 
 **Fecha**: 2026-08-27  
-**Status**: ACEPTADO  
+**Status**: ❌ **SUPERSEDIDO** (2026-08-27, ver Anexo al final) — la decisión real de `doc_organize`
+es **SQLite + WAL** (no `cache.json`), y `CacheManager` ya está implementado, probado (98% cobertura)
+y en uso por Fase C. El `workflow/orchestrator.py` propuesto aquí está fuera de alcance de Fase 1.
+Este documento nunca llegó a estar realmente aprobado (el `[Tech Lead Signature]` al final es un
+placeholder sin rellenar) y usa terminología (`sha3_hash`) previa a la corrección a SHA-256.  
 **Impacto**: Módulos core, scanner, converter, dedup, cache
 
 ---
@@ -513,3 +517,31 @@ Si > 5000 docs simultáneos:
 **Revisado por**: Plan Architect  
 **Aprobado por**: [Tech Lead Signature]  
 **Fecha**: 2026-08-27
+
+---
+
+## Anexo — Superseded (Claude, 2026-08-27)
+
+Este ADR nunca se reconcilió con `doclink_extractor_plan.md`. El AUDIT_PLAN (revisión 1) ya había
+identificado el mismo problema de fondo que motiva este ADR (`cache.json` reescrito por requests
+concurrentes de la web app), pero lo resolvió de forma distinta: **SQLite con modo WAL y
+transacciones ACID nativas** (`§2.6`), no un JSON con backup/rollback manual ni un `workflow/`
+orchestrator con máquina de estados. Esa decisión ya está implementada:
+
+- `src/doc_organize/cache/cache_manager.py` — `CacheManager` real, con `aiosqlite`, WAL,
+  `compute_hash()` delegando en `utils/hash_utils.hash_file()`, y `get_changes()` como función pura
+  (recibe el cache cargado y los documentos actuales, sin estado mutable interno) — 5 tests, 98% cobertura.
+- `CacheEntry` en `core/models.py` usa `sha256_hash` (Pydantic), no `sha3_hash`/`sha2_hash` como
+  este ADR — señal de que el ADR se escribió antes de (o sin conocer) la corrección SHA-256 del plan.
+
+El `workflow/orchestrator.py` con máquina de estados (`DocumentState`, retry exponencial,
+`Orchestrator.start_conversion_batch()`) tampoco forma parte de Fase 1: `SHARED_INSTRUCTIONS.md`
+lista `workflow/` explícitamente como **TODO v0.2.0**, no v0.1.0. Introducirlo ahora sería expandir
+el alcance de esta fase sin que nadie lo haya decidido realmente (la firma
+`[Tech Lead Signature]` nunca se rellenó).
+
+**Decisión vigente**: `CacheManager` con SQLite+WAL, tal como está implementado. Retry/backoff y
+orquestación centralizada quedan como candidatos reales para v0.2.0, no como algo ya aprobado. Se
+conserva este ADR como referencia histórica (el análisis de por qué un JSON plano no basta sigue
+siendo válido — es la misma razón por la que se eligió SQLite), pero **no debe tratarse como la
+decisión activa**.

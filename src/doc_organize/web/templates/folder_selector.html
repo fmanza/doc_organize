@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}doc_organize — Escanear: {{ project.name }}{% endblock %}
+{% block content %}
+<p><a href="/projects/{{ project.name | urlencode }}">&larr; {{ project.name }}</a></p>
+<h1>Escanear: {{ project.name }}</h1>
+
+<form id="scan-form">
+    <label for="paths" class="sr-only">Carpetas a escanear (una por línea)</label>
+    <textarea id="paths" placeholder="Una carpeta por línea" rows="5" required style="width: 100%; padding: 0.4rem;"></textarea>
+    <p>
+        <label><input type="checkbox" id="deduplicate"> Deduplicar</label>
+        <label><input type="checkbox" id="use_ocr"> Usar OCR si hace falta</label>
+        <label><input type="checkbox" id="use_gpu"> OCR con GPU</label>
+    </p>
+    <button type="submit">Escanear</button>
+</form>
+<p id="scan-error" class="error"></p>
+
+<ul id="progress"></ul>
+
+<script>
+const projectName = {{ project.name | tojson }};
+const form = document.getElementById("scan-form");
+const progressList = document.getElementById("progress");
+const errorEl = document.getElementById("scan-error");
+
+function appendProgress(event) {
+    const li = document.createElement("li");
+    li.textContent = event.event + ": " + JSON.stringify(event.data);
+    progressList.appendChild(li);
+}
+
+form.addEventListener("submit", async (submitEvent) => {
+    submitEvent.preventDefault();
+    errorEl.textContent = "";
+    progressList.innerHTML = "";
+
+    const paths = document.getElementById("paths").value.split("\n").map((p) => p.trim()).filter(Boolean);
+    const deduplicate = document.getElementById("deduplicate").checked;
+    const use_ocr = document.getElementById("use_ocr").checked;
+    const use_gpu = document.getElementById("use_gpu").checked;
+
+    const validateResponse = await fetch(
+        "/api/projects/" + encodeURIComponent(projectName) + "/folders/validate",
+        {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ paths: paths }),
+        }
+    );
+    const validation = await validateResponse.json();
+    if (!validateResponse.ok || !validation.valid) {
+        errorEl.textContent = (validation.warnings || []).join("; ") || "Rutas inválidas.";
+        return;
+    }
+
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(
+        protocol + "//" + window.location.host + "/api/projects/" + encodeURIComponent(projectName) + "/scan"
+    );
+
+    ws.onopen = () => {
+        ws.send(JSON.stringify({ paths: validation.clean_paths, deduplicate: deduplicate, use_ocr: use_ocr, use_gpu: use_gpu }));
+    };
+    ws.onmessage = (message) => {
+        const scanEvent = JSON.parse(message.data);
+        appendProgress(scanEvent);
+        if (scanEvent.event === "completed") {
+            ws.close();
+        }
+    };
+    ws.onerror = () => {
+        errorEl.textContent = "Error de conexión durante el escaneo.";
+    };
+});
+</script>
+{% endblock %}

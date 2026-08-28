@@ -1,24 +1,15 @@
 ---
 applyTo: "src/**/render/**/*.py"
 ---
-# Renderizado de documentación
+# Renderizado de documentación — No aplica a doc_organize
 
-> **TL;DR** — Salida determinista (orden alfabético estable). Funciones de render puras: reciben el modelo IR, devuelven contenido sin efectos secundarios. Librería específica por formato (openpyxl, python-docx, Jinja2). Sin servicios externos ni dependencias pesadas. Tests de snapshot o asserts sobre fragmentos clave.
+Este fichero describía un módulo de renderizado propio de esquemas de base de datos a
+Markdown/Excel/Word/HTML (`Tablas, Columnas, PK, FK, Índices, Vistas`), heredado de un proyecto de
+introspección de bases de datos. `doc_organize` no tiene ni necesita un módulo `render/`: la
+conversión a Markdown la realiza Docling internamente
+(`docling_result.document.export_to_markdown()`, ver `src/doc_organize/converter/converter.py`).
 
-- La salida debe ser determinista: ordena alfabéticamente schemas/tablas/columnas.
-- Formato Markdown con secciones consistentes: Resumen, Tablas, Columnas, PK, FK, Índices, Vistas.
-- Incluye enlaces internos o anchors cuando el formato destino los soporte de forma estable y predecible.
-- Para Excel, genera un formato propio y usa una librería específica (p.ej. openpyxl).
-- Para Word, genera un formato propio y usa una librería específica (p.ej. python-docx).
-- Para HTML, genera un formato propio y usa una librería específica (p.ej. Jinja2).
-- Evita dependencias pesadas; prioriza soluciones ligeras y sin servicios externos.
-- Mantén funciones de renderizado puras, recibiendo el modelo de metadatos y devolviendo el resultado sin efectos secundarios.
-- Documenta claramente qué información se incluye en la documentación generada y cómo se estructura.
-- Proporciona tests de integración que validen la salida generada contra un modelo de metadatos conocido.
-- Si la generación de documentación no puede incluir cierta información (p.ej. comentarios de columnas en SQLite), documenta esta limitación y sugiere alternativas (p.ej. input manual o modelo intermedio).
-
-## Patrones recomendados para render
-- `Template Method`: define pipeline común de render y sobreescribe solo pasos específicos por formato.
-- `Builder`: construye el documento por secciones para evitar funciones monolíticas.
-- `Strategy`: encapsula variaciones por salida (Markdown, HTML, Word, Excel) sin `if/elif` dispersos.
-- `Facade`: expone una API simple de alto nivel para el flujo completo de documentación.
+Si en el futuro `doc_organize` necesitara post-procesar o generar salida adicional a partir del
+Markdown/JSON ya producido por Docling (p.ej. un reporte HTML propio para la web, REQ-007), ese
+código debería documentarse aquí con reglas específicas a `doc_organize`, no reutilizando las
+reglas de esquemas de base de datos de la versión anterior de este fichero.
