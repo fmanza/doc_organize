@@ -58,4 +58,4 @@ def is_subpath(child: str | Path, parent: str | Path) -> bool:
     return child_resolved == parent_resolved or parent_resolved in child_resolved.parents
 
 
-__all__ = ["safe_path_join", "is_subpath"]
+__all__ = ["is_subpath", "safe_path_join"]

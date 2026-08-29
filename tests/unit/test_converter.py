@@ -6,12 +6,18 @@ servicios/componentes reales en tests. Son mas lentos que el resto de la
 suite (carga de modelos de Docling), de ahi el marcador `slow`.
 """
 
+import asyncio
 import json
 
 import pytest
 
 from doc_organize.converter import DocumentConverter
 from doc_organize.core.models import DocumentMetadata
+
+
+def _read_text(path) -> str:
+    with open(path, encoding="utf-8") as f:
+        return f.read()
 
 
 def _metadata_for(path) -> DocumentMetadata:
@@ -39,10 +45,10 @@ async def test_convert_native_pdf_extracts_text_without_ocr(native_pdf, tmp_path
     assert result.ocr_required is False
     assert result.error is None
 
-    markdown_text = open(result.markdown_path, encoding="utf-8").read()
+    markdown_text = await asyncio.to_thread(_read_text, result.markdown_path)
     assert "Informe de prueba" in markdown_text
 
-    metadata = json.loads(open(result.json_path, encoding="utf-8").read())
+    metadata = json.loads(await asyncio.to_thread(_read_text, result.json_path))
     assert metadata["sha256_hash"] == doc.sha256_hash
     assert metadata["ocr_required"] is False
 
@@ -70,7 +76,7 @@ async def test_convert_scanned_pdf_with_ocr_recovers_text(scanned_pdf, tmp_path)
         result = await converter.convert_document(doc, output_dir, use_ocr=True)
 
     assert result.success is True
-    markdown_text = open(result.markdown_path, encoding="utf-8").read()
+    markdown_text = await asyncio.to_thread(_read_text, result.markdown_path)
     assert "Informe de prueba" in markdown_text
 
 

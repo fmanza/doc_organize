@@ -36,10 +36,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/user/doc_organize"
-Documentation = "https://user.github.io/doc_organize"
-Repository = "https://github.com/user/doc_organize.git"
-Issues = "https://github.com/user/doc_organize/issues"
+Homepage = "https://github.com/fmanza/doc_organize"
+Documentation = "https://fmanza.github.io/doc_organize"
+Repository = "https://github.com/fmanza/doc_organize.git"
+Issues = "https://github.com/fmanza/doc_organize/issues"
 
 [project.optional-dependencies]
 dev = [

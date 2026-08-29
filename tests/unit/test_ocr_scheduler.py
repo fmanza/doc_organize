@@ -1,9 +1,16 @@
 """Tests unitarios de OCRScheduler (REQ-004). Usan Docling real, sin mocks."""
 
+import asyncio
+
 import pytest
 
 from doc_organize.converter import OCRScheduler
 from doc_organize.core.models import DocumentMetadata
+
+
+def _read_text(path) -> str:
+    with open(path, encoding="utf-8") as f:
+        return f.read()
 
 
 def _metadata_for(path) -> DocumentMetadata:
@@ -30,5 +37,5 @@ async def test_process_with_ocr_recovers_text_for_candidates(scanned_pdf, tmp_pa
     assert len(results) == 1
     result = results[0]
     assert result.success is True
-    markdown_text = open(result.markdown_path, encoding="utf-8").read()
+    markdown_text = await asyncio.to_thread(_read_text, result.markdown_path)
     assert "Informe de prueba" in markdown_text

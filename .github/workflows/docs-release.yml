@@ -34,9 +34,6 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Configure git credentials for private deps
-        run: git config --global url."https://x-access-token:${{ secrets.GH_PAT }}@github.com/".insteadOf "https://github.com/"
-
       - name: Install docs dependencies
         run: pip install -e ".[docs]"
 

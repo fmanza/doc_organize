@@ -45,6 +45,13 @@ python -m build                           → doc_organize-0.2.0.tar.gz + .whl s
 mkdocs build --strict                     → exit 0, sin links rotos
 ```
 
+> **Nota (2026-08-29, maturity-assessment)**: re-verificado en vivo. `pytest`/`mkdocs build --strict`
+> siguen en verde tal cual. `ruff check` había pasado a fallar con 26 errores tras un bump de
+> versión de la herramienta (0.15.18 → 0.16.4, reglas nuevas `RUF022`/`RUF059`/`ASYNC230`/`PYI034`
+> no existían cuando se escribió esta tabla) — corregido en esta misma sesión, ver `git log`.
+> `mypy` fallaba por `types-aiofiles` ausente en el entorno local (dependencia de `[dev]` no
+> reinstalada), no por un error de tipos real.
+
 Benchmark real (100 PDFs nativos, sin OCR): **84.6s, 70.9 docs/min, 0 errores** — cumple el NFR
 "< 2 minutos" del PLAN.
 
@@ -90,9 +97,11 @@ src/doc_organize/
 
 ## Próximos pasos
 
-1. `git add`/commit/push del trabajo acumulado (Fase 1 completa + revisión 13 de seguridad) — mensaje
-   preparado en `.ai/sessions/2026-08-29/TRACEABILITY.md` (revisión 13) y, antes, en
-   `.ai/sessions/2026-08-28/TRACEABILITY.md` (Fase 1). Ningún commit ejecutado todavía.
+1. ~~`git add`/commit/push del trabajo acumulado (Fase 1 completa + revisión 13 de seguridad)~~ —
+   **hecho**: `git log` confirma los commits `2d71628`/`34d6133`/`83504cc`/`3a21ba0` ya en `develop`.
+   Este punto había quedado desactualizado (nota añadida 2026-08-29, maturity-assessment) —
+   mensaje de referencia seguía en `.ai/sessions/2026-08-29/TRACEABILITY.md` (revisión 13) y
+   `.ai/sessions/2026-08-28/TRACEABILITY.md` (Fase 1).
 2. Fase E: tests de integración adicionales, documentación ampliada.
 3. Cerrar los pendientes de la sección anterior según prioridad real (no la del orden en que se
    listaron originalmente en el PLAN — ver `§15` para el reordenamiento por severidad).

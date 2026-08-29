@@ -133,9 +133,8 @@ async def test_scan_websocket_rejects_missing_project(tmp_path) -> None:
     app = create_app(registry_path=tmp_path / "projects.json")
     client = TestClient(app)
 
-    with pytest.raises(WebSocketDisconnect) as exc_info:
-        with client.websocket_connect("/api/projects/No Existe/scan") as websocket:
-            websocket.receive_json()
+    with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect("/api/projects/No Existe/scan") as websocket:
+        websocket.receive_json()
     assert exc_info.value.code == 1008
 
 
@@ -147,9 +146,8 @@ async def test_scan_websocket_non_loopback_requires_session(tmp_path) -> None:
     app = create_app(security=security, registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     client = TestClient(app)
 
-    with pytest.raises(WebSocketDisconnect) as exc_info:
-        with client.websocket_connect(f"/api/projects/{project.name}/scan") as websocket:
-            websocket.receive_json()
+    with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect(f"/api/projects/{project.name}/scan") as websocket:
+        websocket.receive_json()
     assert exc_info.value.code == 1008
 
 
@@ -206,10 +204,9 @@ async def test_scan_websocket_non_admin_role_rejects_path_outside_allowed_roots(
     outside_path.mkdir()
 
     client = TestClient(app, cookies={SESSION_COOKIE_NAME: session.token})
-    with pytest.raises(WebSocketDisconnect) as exc_info:
-        with client.websocket_connect(f"/api/projects/{project.name}/scan") as websocket:
-            websocket.send_json({"paths": [str(outside_path)], "deduplicate": False, "use_ocr": False, "use_gpu": False})
-            websocket.receive_json()
+    with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect(f"/api/projects/{project.name}/scan") as websocket:
+        websocket.send_json({"paths": [str(outside_path)], "deduplicate": False, "use_ocr": False, "use_gpu": False})
+        websocket.receive_json()
     assert exc_info.value.code == 1008
 
 
@@ -264,10 +261,9 @@ async def test_scan_websocket_non_admin_role_without_allowed_roots_rejects_any_p
     somewhere.mkdir()
 
     client = TestClient(app, cookies={SESSION_COOKIE_NAME: session.token})
-    with pytest.raises(WebSocketDisconnect) as exc_info:
-        with client.websocket_connect(f"/api/projects/{project.name}/scan") as websocket:
-            websocket.send_json({"paths": [str(somewhere)], "deduplicate": False, "use_ocr": False, "use_gpu": False})
-            websocket.receive_json()
+    with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect(f"/api/projects/{project.name}/scan") as websocket:
+        websocket.send_json({"paths": [str(somewhere)], "deduplicate": False, "use_ocr": False, "use_gpu": False})
+        websocket.receive_json()
     assert exc_info.value.code == 1008
 
 
@@ -287,7 +283,6 @@ async def test_scan_websocket_non_loopback_rejects_other_tenants_project(tmp_pat
     app = create_app(security=security, registry_path=registry_path, auth_db_path=auth_db_path)
 
     client = TestClient(app, cookies={SESSION_COOKIE_NAME: session.token})
-    with pytest.raises(WebSocketDisconnect) as exc_info:
-        with client.websocket_connect(f"/api/projects/{project.name}/scan") as websocket:
-            websocket.receive_json()
+    with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect(f"/api/projects/{project.name}/scan") as websocket:
+        websocket.receive_json()
     assert exc_info.value.code == 1008

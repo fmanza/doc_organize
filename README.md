@@ -51,7 +51,7 @@ pip install doc_organize[web]
 python -m doc_organize web
 ```
 
-Ver la [documentación completa](https://user.github.io/doc_organize) —
+Ver la [documentación completa](https://fmanza.github.io/doc_organize) —
 [instalación](docs/guides/installation.md), [inicio rápido](docs/guides/quick_start.md)
 y [funcionalidad por módulo](docs/functional/index.md).
 

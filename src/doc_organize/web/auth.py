@@ -195,9 +195,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 
 __all__ = [
+    "SESSION_COOKIE_NAME",
     "AuthMiddleware",
     "LoginRateLimiter",
-    "SESSION_COOKIE_NAME",
     "authenticate_session",
     "is_loopback",
     "requires_auth",

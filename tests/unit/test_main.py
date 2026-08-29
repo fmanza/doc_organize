@@ -1,6 +1,7 @@
 """Tests de main.py (CLI, Fase D-1): resolucion de rutas y orquestacion de `scan`."""
 
 from pathlib import Path
+from typing import Self
 
 import pytest
 
@@ -66,7 +67,7 @@ async def test_resolve_scan_paths_from_project(tmp_path, monkeypatch) -> None:
 async def test_resolve_scan_paths_explicit_flags_without_project() -> None:
     args = _Args(output_dir="/tmp/out", cache_file="/tmp/cache.db")
 
-    output_dir, cache_db, duplicates_dir, folders_json = await _resolve_scan_paths(args)
+    output_dir, cache_db, duplicates_dir, _folders_json = await _resolve_scan_paths(args)
 
     assert output_dir == Path("/tmp/out")
     assert cache_db == Path("/tmp/cache.db")
@@ -85,7 +86,7 @@ async def test_resolve_scan_paths_explicit_overrides_project(tmp_path, monkeypat
     monkeypatch.setattr("doc_organize.main.ProjectRegistry", lambda: _FakeRegistry(tmp_path / "proj"))
     args = _Args(project="Mi Proyecto", cache_file=str(tmp_path / "custom_cache.db"))
 
-    output_dir, cache_db, duplicates_dir, folders_json = await _resolve_scan_paths(args)
+    output_dir, cache_db, _duplicates_dir, _folders_json = await _resolve_scan_paths(args)
 
     root = tmp_path / "proj"
     assert cache_db == tmp_path / "custom_cache.db"  # el flag explicito gana
@@ -101,7 +102,7 @@ class _FakeRegistry:
     def __init__(self, root_path: Path) -> None:
         self._root_path = root_path
 
-    async def __aenter__(self) -> "_FakeRegistry":
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, *exc_info: object) -> None:

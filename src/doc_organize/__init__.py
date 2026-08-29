@@ -14,7 +14,6 @@ from doc_organize.validators import FolderValidator, ProjectValidator
 __version__ = "0.1.0"
 
 __all__ = [
-    "__version__",
     "CacheManager",
     "DeduplicationManager",
     "DocumentConverter",
@@ -23,4 +22,5 @@ __all__ = [
     "OCRScheduler",
     "ProjectRegistry",
     "ProjectValidator",
+    "__version__",
 ]

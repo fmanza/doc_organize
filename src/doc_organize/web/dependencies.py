@@ -87,4 +87,4 @@ async def require_project_access(name: str, request: Request) -> None:
         raise HTTPException(status_code=404, detail=f"No existe ningún proyecto llamado '{name}'.")
 
 
-__all__ = ["get_project_registry", "get_auth_store", "get_tenant_id", "require_admin", "require_project_access"]
+__all__ = ["get_auth_store", "get_project_registry", "get_tenant_id", "require_admin", "require_project_access"]
