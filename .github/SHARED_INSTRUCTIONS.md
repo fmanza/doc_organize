@@ -28,7 +28,7 @@ Actúa como senior de ingeniería Python especializado en:
 - **Organización en pipelines**: composición modular de operaciones (scan → convert → dedup → cache)
 
 **Versión canónica**: consultar `pyproject.toml` antes de cerrar releases.
-**Python**: `>=3.10` según `pyproject.toml`.
+**Python**: `>=3.11` según `pyproject.toml`.
 
 ### Capacidades principales (v0.1.0 MVP)
 

@@ -5,7 +5,7 @@
 
 ## Requisitos
 
-- Python **≥3.10** (`pyproject.toml`: `requires-python`; classifiers declaran 3.10–3.14)
+- Python **≥3.11** (`pyproject.toml`: `requires-python`; classifiers declaran 3.11–3.14)
 - Sin Docker ni servicios externos: los tests no dependen de bases de datos reales.
 
 ## Setup de desarrollo
@@ -53,7 +53,7 @@ python -m doc_organize user create alice --tenant mi-organizacion   # contraseñ
 
 ## CI real (`.github/workflows/`)
 
-- `tests.yml`: matriz `os: [ubuntu-latest, windows-latest]` × `python-version: [3.10, 3.11, 3.12,
+- `tests.yml`: matriz `os: [ubuntu-latest, windows-latest]` × `python-version: [3.11, 3.12,
   3.13, 3.14]` — `ruff check`, `mypy src`, `pytest --cov`.
 - `docs.yml`: `pip install -e ".[docs]"` + `mkdocs build --strict` (no `zensical` — ese binario no
   es una dependencia declarada; ver `.ai/DECISIONS_LOG.md` revisión 12 para el porqué).

@@ -13,6 +13,7 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Self
 from uuid import uuid4
 
 import aiosqlite
@@ -195,7 +196,7 @@ class AuthStore:
         self.logger = get_logger(__name__)
         self._conn: aiosqlite.Connection | None = None
 
-    async def __aenter__(self) -> "AuthStore":
+    async def __aenter__(self) -> Self:
         await asyncio.to_thread(self.db_path.parent.mkdir, parents=True, exist_ok=True)
         self._conn = await aiosqlite.connect(self.db_path)
         await self._conn.execute("PRAGMA journal_mode=WAL")

@@ -43,7 +43,7 @@ Aplica este checklist en la fase **VERSION** de cualquier flujo:
 ### 4. pyproject.toml
 
 - [ ] `version = "X.Y.Z"` actualizado y coincide con el CHANGELOG.md
-- [ ] `requires-python = ">=3.10"` sin modificar (no incrementar sin decisión explícita)
+- [ ] `requires-python = ">=3.11"` sin modificar (no incrementar sin decisión explícita)
 
 ### 5. MkDocs
 

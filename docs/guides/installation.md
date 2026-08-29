@@ -2,7 +2,7 @@
 
 ## Requisitos
 
-- Python 3.10 o superior.
+- Python 3.11 o superior.
 
 ## Núcleo (CLI)
 

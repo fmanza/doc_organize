@@ -21,7 +21,7 @@ proyectos, aisladas entre sí).
 
 ## Requisitos
 
-- Python 3.10+
+- Python 3.11+
 
 ## Instalación
 

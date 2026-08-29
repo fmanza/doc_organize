@@ -11,7 +11,7 @@ autenticación multi-usuario y multi-tenant.
 **Propósito primario**: normalizar repositorios heterogéneos de documentos en Markdown versionado,
 sin perder la estructura de carpetas original ni duplicar trabajo entre ejecuciones.
 
-**Versión**: Fase 1 completa (A–D2c) | **Estado**: IMPLEMENT — ver `§13` del PLAN | **Python**: ≥3.10
+**Versión**: Fase 1 completa (A–D2c) | **Estado**: IMPLEMENT — ver `§13` del PLAN | **Python**: ≥3.11
 
 > Este documento sustituye una versión anterior (fechada 2026-08-27) que describía un MVP
 > "PRE-IMPLEMENT" con módulos (`workflow/`), rutas (SSE, 8 páginas web) y comandos CLI

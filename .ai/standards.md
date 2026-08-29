@@ -8,14 +8,14 @@
 - **Formatter**: `ruff format` (`quote-style = "double"`, `indent-style = "space"`)
 - **Linter**: `ruff check` (`extend-select = ["E", "W", "F", "I", "B", "C4", "UP", "N"]`,
   `ignore = ["E501"]` — línea larga permitida, `line-length = 150`)
-- **Type checker**: `mypy` (`python_version = "3.10"`, `plugins = ["pydantic.mypy"]`,
+- **Type checker**: `mypy` (`python_version = "3.11"`, `plugins = ["pydantic.mypy"]`,
   `warn_return_any = true`, `strict = false`). `docling.*` con `follow_imports = "skip"`
   deliberadamente — sus stubs (vía `scipy-stubs`) usan sintaxis de Python 3.12+ que rompería el
-  type-check de código compatible con 3.10.
+  type-check de código compatible con 3.11.
 - **Import sort**: `ruff` isort (`known-first-party = ["doc_organize"]`,
   `combine-as-imports = true`)
-- **Python**: `>=3.10` (declarado en `requires-python` y en `classifiers` hasta 3.14); CI testea
-  3.10–3.14 en Ubuntu y Windows (`tests.yml`)
+- **Python**: `>=3.11` (declarado en `requires-python` y en `classifiers` hasta 3.14); CI testea
+  3.11–3.14 en Ubuntu y Windows (`tests.yml`)
 
 ## Tipado
 
