@@ -12,7 +12,6 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from doc_organize.core.exceptions import ProjectNotFoundError
 from doc_organize.core.models import DuplicateGroup, Project
 from doc_organize.dedup import DeduplicationManager
 from doc_organize.scanner import DocumentScanner
@@ -53,11 +52,10 @@ def _group_key(group: DuplicateGroup) -> str:
 
 
 async def _get_project(request: Request, name: str) -> Project:
+    # ProjectNotFoundError se propaga sin capturar: el handler global de
+    # web/app.py (_EXCEPTION_STATUS_CODES) la traduce a 404.
     async with get_project_registry(request) as registry:
-        try:
-            return await registry.get_project(name, tenant_id=get_tenant_id(request))
-        except ProjectNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return await registry.get_project(name, tenant_id=get_tenant_id(request))
 
 
 async def _detect_duplicates(project: Project) -> list[DuplicateGroup]:

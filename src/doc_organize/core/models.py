@@ -1,27 +1,26 @@
 """
-Core data models for doc_organize.
+Modelos de datos base de doc_organize.
 
-Pydantic v2 models used across all modules:
-- DocumentMetadata: File metadata with SHA-256 hash
-- ConversionResult: Output of document conversion
-- DuplicateGroup: Group of duplicate/version-conflicted documents
-- DeduplicationReport: Result of deduplication
-- CacheEntry: Single cache entry in SQLite
-- DirectoryTree: Hierarchical directory structure
-- CacheExportSnapshot: Read-only export of cache for ZIP download
+Modelos Pydantic v2 usados en todos los módulos:
+- DocumentMetadata: metadatos de fichero con hash SHA-256
+- ConversionResult: resultado de la conversión de un documento
+- DuplicateGroup: grupo de documentos duplicados/en conflicto de versión
+- DeduplicationReport: resultado de la deduplicación
+- CacheEntry: entrada individual del cache en SQLite
+- DirectoryTree: estructura jerárquica de directorios
+- CacheExportSnapshot: exportación de solo lectura del cache para descarga ZIP
 """
 
-from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# ===== Enumerations =====
+# ===== Enumeraciones =====
 
 
 class DocumentStatus(str, Enum):
-    """Status of a document in the pipeline."""
+    """Estado de un documento en el pipeline."""
 
     NEW = "new"
     UNCHANGED = "unchanged"
@@ -30,7 +29,7 @@ class DocumentStatus(str, Enum):
 
 
 class ConversionStatus(str, Enum):
-    """Conversion progress status."""
+    """Estado de progreso de la conversión."""
 
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
@@ -41,14 +40,14 @@ class ConversionStatus(str, Enum):
 
 
 class DuplicateReason(str, Enum):
-    """Reason for grouping documents as duplicates."""
+    """Motivo por el que se agrupan documentos como duplicados."""
 
     EXACT_DUPLICATE = "exact_duplicate"
     VERSION_CONFLICT = "version_conflict"
 
 
 class OcrMode(str, Enum):
-    """OCR processing mode for Docling."""
+    """Modo de procesamiento OCR para Docling."""
 
     FULL_PAGE = "full_page"
     LAYOUT_REGIONS = "layout_regions"
@@ -57,7 +56,7 @@ class OcrMode(str, Enum):
 
 
 class ScanEventType(str, Enum):
-    """Progress event kind emitted by `ScanCommand.run_streaming()` (Fase D-2b, §2.7.3)."""
+    """Tipo de evento de progreso emitido por `ScanCommand.run_streaming()` (Fase D-2b, §2.7.3)."""
 
     STARTED = "started"
     SCANNED = "scanned"
@@ -67,18 +66,18 @@ class ScanEventType(str, Enum):
     COMPLETED = "completed"
 
 
-# ===== Pydantic Models (API / JSON Serialization) =====
+# ===== Modelos Pydantic (API / serialización JSON) =====
 
 
 class DocumentMetadata(BaseModel):
-    """Metadata for a discovered document file."""
+    """Metadatos de un fichero de documento descubierto."""
 
-    full_path: str = Field(..., description="Absolute path to the document file")
-    display_name: str = Field(..., description="Display name for UI (handles uniqueness)")
-    extension: str = Field(..., description="File extension (e.g., 'pdf', 'docx')")
-    size_bytes: int = Field(..., description="File size in bytes")
-    modified_time: float = Field(..., description="Unix timestamp of last modification")
-    sha256_hash: str = Field(..., description="SHA-256 hash (64-char hex string)")
+    full_path: str = Field(..., description="Ruta absoluta al fichero del documento")
+    display_name: str = Field(..., description="Nombre para mostrar en la UI (gestiona unicidad)")
+    extension: str = Field(..., description="Extensión del fichero (p. ej. 'pdf', 'docx')")
+    size_bytes: int = Field(..., description="Tamaño del fichero en bytes")
+    modified_time: float = Field(..., description="Timestamp Unix de la última modificación")
+    sha256_hash: str = Field(..., description="Hash SHA-256 (cadena hexadecimal de 64 caracteres)")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -95,15 +94,15 @@ class DocumentMetadata(BaseModel):
 
 
 class ConversionResult(BaseModel):
-    """Result of converting a single document."""
+    """Resultado de convertir un único documento."""
 
-    source_path: str = Field(..., description="Path to source document")
-    markdown_path: str | None = Field(None, description="Path to output .md file")
-    json_path: str | None = Field(None, description="Path to output .json metadata file")
-    success: bool = Field(..., description="Whether conversion succeeded")
-    error: str | None = Field(None, description="Error message if failed")
-    ocr_required: bool = Field(False, description="Whether OCR was needed (and deferred)")
-    duration_seconds: float = Field(0.0, description="Time spent converting (seconds)")
+    source_path: str = Field(..., description="Ruta al documento de origen")
+    markdown_path: str | None = Field(None, description="Ruta al fichero .md de salida")
+    json_path: str | None = Field(None, description="Ruta al fichero .json de metadatos de salida")
+    success: bool = Field(..., description="Si la conversión tuvo éxito")
+    error: str | None = Field(None, description="Mensaje de error si falló")
+    ocr_required: bool = Field(False, description="Si se necesitó OCR (y quedó diferido)")
+    duration_seconds: float = Field(0.0, description="Tiempo empleado en convertir (segundos)")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -121,13 +120,13 @@ class ConversionResult(BaseModel):
 
 
 class DuplicateGroup(BaseModel):
-    """Group of documents identified as duplicates or version conflicts."""
+    """Grupo de documentos identificados como duplicados o conflictos de versión."""
 
-    group_id: str = Field(..., description="Unique ID for this group (UUID)")
-    canonical_doc: DocumentMetadata = Field(..., description="Document to keep (canonical)")
-    duplicates: list[DocumentMetadata] = Field(..., description="Documents to discard")
-    reason: DuplicateReason = Field(..., description="Why they are grouped")
-    user_choice: DocumentMetadata | None = Field(None, description="User's selection if overriding default")
+    group_id: str = Field(..., description="ID único de este grupo (UUID)")
+    canonical_doc: DocumentMetadata = Field(..., description="Documento a conservar (canónico)")
+    duplicates: list[DocumentMetadata] = Field(..., description="Documentos a descartar")
+    reason: DuplicateReason = Field(..., description="Motivo por el que se agrupan")
+    user_choice: DocumentMetadata | None = Field(None, description="Selección del usuario si sobrescribe la elección por defecto")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -159,264 +158,218 @@ class DuplicateGroup(BaseModel):
 
 
 class DeduplicationReport(BaseModel):
-    """Result of deduplication process."""
+    """Resultado del proceso de deduplicación."""
 
-    timestamp: str = Field(..., description="ISO 8601 timestamp when dedup was run")
-    total_exact_duplicates: int = Field(..., description="Count of exact duplicate files moved")
-    total_version_conflicts: int = Field(..., description="Count of version conflicts resolved")
-    duplicates_folder_path: str = Field(..., description="Path to folder where duplicates were moved")
-    audit_json_path: str = Field(..., description="Path to DEDUP_REPORT.json file")
-    groups: list[DuplicateGroup] = Field(default_factory=list, description="Detailed groups")
+    timestamp: str = Field(..., description="Timestamp ISO 8601 de cuándo se ejecutó la deduplicación")
+    total_exact_duplicates: int = Field(..., description="Número de ficheros duplicados exactos movidos")
+    total_version_conflicts: int = Field(..., description="Número de conflictos de versión resueltos")
+    duplicates_folder_path: str = Field(..., description="Ruta a la carpeta donde se movieron los duplicados")
+    audit_json_path: str = Field(..., description="Ruta al fichero DEDUP_REPORT.json")
+    groups: list[DuplicateGroup] = Field(default_factory=list, description="Grupos detallados")
 
 
 class CacheEntry(BaseModel):
-    """Single entry in the cache database."""
+    """Entrada individual en la base de datos de cache."""
 
-    file_path: str = Field(..., description="Absolute path to the file (PK in cache.db)")
-    sha256_hash: str = Field(..., description="SHA-256 of the file")
-    timestamp: float = Field(..., description="Unix timestamp when entry was last updated")
-    status: DocumentStatus = Field(..., description="Document status (new/unchanged/modified/deleted)")
-    conversion_status: ConversionStatus | None = Field(None, description="Conversion progress status")
+    file_path: str = Field(..., description="Ruta absoluta al fichero (PK en cache.db)")
+    sha256_hash: str = Field(..., description="SHA-256 del fichero")
+    timestamp: float = Field(..., description="Timestamp Unix de la última actualización de la entrada")
+    status: DocumentStatus = Field(..., description="Estado del documento (new/unchanged/modified/deleted)")
+    conversion_status: ConversionStatus | None = Field(None, description="Estado de progreso de la conversión")
 
 
 class CacheExportSnapshot(BaseModel):
-    """Read-only snapshot of cache for download/export."""
+    """Instantánea de solo lectura del cache para descarga/exportación."""
 
-    export_timestamp: str = Field(..., description="ISO 8601 timestamp when exported")
-    total_entries: int = Field(..., description="Total files in cache")
-    new_files: list[str] = Field(default_factory=list, description="Paths of new files")
-    modified_files: list[str] = Field(default_factory=list, description="Paths of modified files")
-    unchanged_files: list[str] = Field(default_factory=list, description="Paths of unchanged files")
-    entries: list[CacheEntry] = Field(default_factory=list, description="All cache entries")
+    export_timestamp: str = Field(..., description="Timestamp ISO 8601 de cuándo se exportó")
+    total_entries: int = Field(..., description="Total de ficheros en cache")
+    new_files: list[str] = Field(default_factory=list, description="Rutas de ficheros nuevos")
+    modified_files: list[str] = Field(default_factory=list, description="Rutas de ficheros modificados")
+    unchanged_files: list[str] = Field(default_factory=list, description="Rutas de ficheros sin cambios")
+    entries: list[CacheEntry] = Field(default_factory=list, description="Todas las entradas del cache")
 
 
 class DirectoryTreeNode(BaseModel):
-    """Single node in directory tree (file or folder)."""
+    """Nodo individual del árbol de directorios (fichero o carpeta)."""
 
-    name: str = Field(..., description="Name of the file or folder")
-    type: str = Field(..., description="'file' or 'dir'")
-    path: str = Field(..., description="Relative or absolute path")
-    size_bytes: int | None = Field(None, description="File size (if type='file')")
-    children: list["DirectoryTreeNode"] = Field(default_factory=list, description="Child nodes (if type='dir')")
+    name: str = Field(..., description="Nombre del fichero o carpeta")
+    type: str = Field(..., description="'file' o 'dir'")
+    path: str = Field(..., description="Ruta relativa o absoluta")
+    size_bytes: int | None = Field(None, description="Tamaño del fichero (si type='file')")
+    children: list["DirectoryTreeNode"] = Field(default_factory=list, description="Nodos hijos (si type='dir')")
 
 
-DirectoryTreeNode.model_rebuild()  # Required for self-referential model
+DirectoryTreeNode.model_rebuild()  # Necesario para un modelo autorreferencial
 
 
 class DirectoryTree(BaseModel):
-    """Hierarchical directory structure from scanning."""
+    """Estructura jerárquica de directorios obtenida del escaneo."""
 
-    root_name: str = Field(..., description="Name of root directory")
-    root_path: str = Field(..., description="Absolute path of root")
-    root_node: DirectoryTreeNode = Field(..., description="Tree structure rooted here")
-    total_files: int = Field(..., description="Count of files found")
-    file_extension_counts: dict[str, int] = Field(default_factory=dict, description="Count by extension")
+    root_name: str = Field(..., description="Nombre del directorio raíz")
+    root_path: str = Field(..., description="Ruta absoluta de la raíz")
+    root_node: DirectoryTreeNode = Field(..., description="Estructura de árbol con raíz aquí")
+    total_files: int = Field(..., description="Número de ficheros encontrados")
+    file_extension_counts: dict[str, int] = Field(default_factory=dict, description="Conteo por extensión")
 
 
 class ScanResult(BaseModel):
-    """Result of scanning folders for documents."""
+    """Resultado de escanear carpetas en busca de documentos."""
 
-    documents: list[DocumentMetadata] = Field(..., description="All documents found")
-    summary: dict[str, int] = Field(..., description="File count by extension")
-    tree: DirectoryTree = Field(..., description="Directory structure")
-    scan_duration_seconds: float = Field(..., description="Time to complete scan")
+    documents: list[DocumentMetadata] = Field(..., description="Todos los documentos encontrados")
+    summary: dict[str, int] = Field(..., description="Conteo de ficheros por extensión")
+    tree: DirectoryTree = Field(..., description="Estructura de directorios")
+    scan_duration_seconds: float = Field(..., description="Tiempo empleado en completar el escaneo")
 
 
 class ScanEvent(BaseModel):
-    """A single progress event from `ScanCommand.run_streaming()` (Fase D-2b, §2.7.3).
+    """Un evento de progreso emitido por `ScanCommand.run_streaming()` (Fase D-2b, §2.7.3).
 
-    Deliberately a loose `dict[str, Any]` payload rather than a per-event-type model:
-    the shapes differ enough (final summary counts vs. a single file's path/success)
-    that stronger typing would mean one model per `ScanEventType` for little benefit
-    at this stage. Consumers (CLI, WebSocket) key off `event` to interpret `data`.
+    Deliberadamente un payload `dict[str, Any]` laxo en vez de un modelo por tipo de
+    evento: las formas difieren lo suficiente (contadores del resumen final frente a
+    la ruta/éxito de un único fichero) como para que un tipado más estricto supusiera
+    un modelo por `ScanEventType` con poco beneficio en esta etapa. Los consumidores
+    (CLI, WebSocket) usan `event` para interpretar `data`.
     """
 
-    event: ScanEventType = Field(..., description="Kind of progress event")
-    data: dict[str, Any] = Field(default_factory=dict, description="Event payload, shape depends on `event`")
+    event: ScanEventType = Field(..., description="Tipo de evento de progreso")
+    data: dict[str, Any] = Field(default_factory=dict, description="Payload del evento; su forma depende de `event`")
 
 
 class ValidationResult(BaseModel):
-    """Result of folder validation."""
+    """Resultado de la validación de carpetas."""
 
-    is_valid: bool = Field(..., description="Whether folders are valid (no redundancy)")
-    warnings: list[str] = Field(default_factory=list, description="List of warnings")
-    clean_paths: list[str] = Field(..., description="Validated, non-redundant paths")
+    is_valid: bool = Field(..., description="Si las carpetas son válidas (sin redundancia)")
+    warnings: list[str] = Field(default_factory=list, description="Lista de avisos")
+    clean_paths: list[str] = Field(..., description="Rutas validadas, sin redundancia")
 
 
 class Project(BaseModel):
-    """A doc_organize project: a named working folder aggregating scan/convert/dedup/cache state (REQ-008).
+    """Un proyecto de doc_organize: una carpeta de trabajo con nombre que agrega el estado de scan/convert/dedup/cache (REQ-008).
 
-    `tenant_id` defaults to `"default"` (revision 8, §2.7.2): projects created via the
-    CLI or a loopback/no-auth web session all live in this implicit tenant, and any
-    registry entry written before revision 8 (missing the field entirely) parses as
-    `"default"` too — no migration script needed. Project name uniqueness is scoped
-    per tenant (see `ProjectRegistry.create_project`), not global.
+    `tenant_id` vale `"default"` por defecto (revisión 8, §2.7.2): los proyectos creados
+    vía CLI o una sesión web loopback/sin auth viven todos en este tenant implícito, y
+    cualquier entrada del registro escrita antes de la revisión 8 (sin el campo) se
+    parsea también como `"default"` — sin necesidad de script de migración. La
+    unicidad del nombre de proyecto es por tenant (ver `ProjectRegistry.create_project`),
+    no global.
     """
 
-    name: str = Field(..., description="Unique project name within its tenant (validated by ProjectValidator)")
-    root_path: str = Field(..., description="Absolute path to the project's working folder")
-    created_at: str = Field(..., description="ISO 8601 timestamp of project creation")
-    tenant_id: str = Field(default="default", description="Owning tenant (defaults to the implicit 'default' tenant)")
+    name: str = Field(..., description="Nombre único del proyecto dentro de su tenant (validado por ProjectValidator)")
+    root_path: str = Field(..., description="Ruta absoluta a la carpeta de trabajo del proyecto")
+    created_at: str = Field(..., description="Timestamp ISO 8601 de creación del proyecto")
+    tenant_id: str = Field(default="default", description="Tenant propietario (por defecto el tenant implícito 'default')")
 
 
-_ISO_TIMESTAMP_DESC = "ISO 8601 timestamp of creation"
+_ISO_TIMESTAMP_DESC = "Timestamp ISO 8601 de creación"
 
 
 class Tenant(BaseModel):
-    """An organization/workspace grouping users and projects (revision 8, §2.7.2)."""
+    """Una organización/espacio de trabajo que agrupa usuarios y proyectos (revisión 8, §2.7.2)."""
 
-    id: str = Field(..., description="Tenant identifier (slug), derived from its name")
-    name: str = Field(..., description="Human-readable tenant name")
+    id: str = Field(..., description="Identificador del tenant (slug), derivado de su nombre")
+    name: str = Field(..., description="Nombre legible del tenant")
     created_at: str = Field(..., description=_ISO_TIMESTAMP_DESC)
 
 
 class Role(BaseModel):
-    """A named permission set within a tenant (revision 9, roles y gestión de usuarios).
+    """Un conjunto de permisos con nombre dentro de un tenant (revisión 9, roles y gestión de usuarios).
 
-    `is_admin=True` sees every project in the tenant, present and future —
-    `project_names` must then be empty (enforced by `AuthStore.create_role`/
-    `update_role`, not by this model, to keep the model a plain data container).
-    A non-admin role only sees the projects listed in `project_names`.
+    `is_admin=True` ve todos los proyectos del tenant, presentes y futuros —
+    `project_names` debe entonces estar vacío (impuesto por `AuthStore.create_role`/
+    `update_role`, no por este modelo, para que el modelo siga siendo un simple
+    contenedor de datos). Un rol no-admin solo ve los proyectos listados en
+    `project_names`.
     """
 
-    id: str = Field(..., description="Role UUID4")
-    tenant_id: str = Field(..., description="Tenant this role belongs to")
-    name: str = Field(..., description="Unique within the tenant (not globally)")
-    is_admin: bool = Field(default=False, description="Whether this role sees every project in the tenant")
-    project_names: list[str] = Field(default_factory=list, description="Projects this role can access (ignored if is_admin)")
+    id: str = Field(..., description="UUID4 del rol")
+    tenant_id: str = Field(..., description="Tenant al que pertenece este rol")
+    name: str = Field(..., description="Único dentro del tenant (no globalmente)")
+    is_admin: bool = Field(default=False, description="Si este rol ve todos los proyectos del tenant")
+    project_names: list[str] = Field(default_factory=list, description="Proyectos a los que este rol puede acceder (se ignora si is_admin)")
     allowed_scan_roots: list[str] = Field(
         default_factory=list,
         description=(
-            "Filesystem roots this role may scan via /api/projects/{name}/scan (ignored if is_admin, "
-            "which may scan anywhere). Empty means no external folder can be scanned — a restricted "
-            "role cannot bypass its project_names by pointing the scan at an arbitrary server path."
+            "Raíces del sistema de ficheros que este rol puede escanear vía /api/projects/{name}/scan "
+            "(se ignora si is_admin, que puede escanear cualquier ruta). Vacío significa que no puede "
+            "escanear ninguna carpeta externa — un rol restringido no puede eludir su project_names "
+            "apuntando el escaneo a una ruta arbitraria del servidor."
         ),
     )
     created_at: str = Field(..., description=_ISO_TIMESTAMP_DESC)
 
 
 class User(BaseModel):
-    """A user belonging to exactly one tenant and exactly one role (revision 8 §2.7.2, revision 9).
+    """Un usuario que pertenece exactamente a un tenant y exactamente a un rol (revisión 8 §2.7.2, revisión 9).
 
-    Never includes the password hash/salt: those fields live only in
-    `auth.db` (AuthStore), so no endpoint can accidentally serialize them
-    in a JSON response.
+    Nunca incluye el hash/salt de la contraseña: esos campos viven solo en
+    `auth.db` (AuthStore), así que ningún endpoint puede serializarlos
+    accidentalmente en una respuesta JSON.
     """
 
-    id: str = Field(..., description="User UUID4")
-    tenant_id: str = Field(..., description="Tenant this user belongs to")
-    username: str = Field(..., description="Unique within the tenant (not globally)")
-    role_id: str = Field(..., description="Role this user is assigned to (revision 9)")
+    id: str = Field(..., description="UUID4 del usuario")
+    tenant_id: str = Field(..., description="Tenant al que pertenece este usuario")
+    username: str = Field(..., description="Único dentro del tenant (no globalmente)")
+    role_id: str = Field(..., description="Rol asignado a este usuario (revisión 9)")
     must_change_password: bool = Field(
-        default=False, description="True until the user changes a bootstrap-assigned password (revision 9)"
+        default=False, description="True hasta que el usuario cambie una contraseña asignada por bootstrap (revisión 9)"
     )
     created_at: str = Field(..., description=_ISO_TIMESTAMP_DESC)
 
 
 class Session(BaseModel):
-    """An active browser session, created on login (revision 8, §2.7.2)."""
+    """Una sesión de navegador activa, creada al hacer login (revisión 8, §2.7.2)."""
 
-    token: str = Field(..., description="Opaque session token (value of the doc_organize_session cookie)")
-    user_id: str = Field(..., description="User this session belongs to")
-    tenant_id: str = Field(..., description="User's tenant, copied here to avoid a join on lookups")
+    token: str = Field(..., description="Token de sesión opaco (valor de la cookie doc_organize_session)")
+    user_id: str = Field(..., description="Usuario al que pertenece esta sesión")
+    tenant_id: str = Field(..., description="Tenant del usuario, copiado aquí para evitar un join en las consultas")
     created_at: str = Field(..., description=_ISO_TIMESTAMP_DESC)
-    expires_at: str = Field(..., description="ISO 8601 timestamp of expiration (fixed lifetime)")
+    expires_at: str = Field(..., description="Timestamp ISO 8601 de expiración (vida fija)")
 
 
 class ProjectNameValidation(BaseModel):
-    """Result of validating a candidate project name (REQ-008).
+    """Resultado de validar un nombre de proyecto candidato (REQ-008).
 
-    Dedicated model, not a reuse of ValidationResult: that model is semantically
-    about a list of folder paths (`clean_paths`), not a single project identifier.
+    Modelo dedicado, no una reutilización de ValidationResult: ese modelo trata
+    semánticamente de una lista de rutas de carpetas (`clean_paths`), no de un
+    único identificador de proyecto.
     """
 
-    is_valid: bool = Field(..., description="Whether the name is valid")
-    warnings: list[str] = Field(default_factory=list, description="Reasons the name was rejected, if any")
-    normalized_name: str | None = Field(None, description="NFC-normalized, stripped name, if valid")
+    is_valid: bool = Field(..., description="Si el nombre es válido")
+    warnings: list[str] = Field(default_factory=list, description="Motivos por los que se rechazó el nombre, si los hay")
+    normalized_name: str | None = Field(None, description="Nombre normalizado a NFC y sin espacios, si es válido")
 
 
-# ===== Python Dataclasses (Internal Use, Pre-validation) =====
-
-
-@dataclass
-class DocumentMetadataInternal:
-    """Internal representation of document metadata (before Pydantic validation)."""
-
-    full_path: str
-    display_name: str
-    extension: str
-    size_bytes: int
-    modified_time: float
-    sha256_hash: str
-
-    def to_pydantic(self) -> DocumentMetadata:
-        """Convert to Pydantic model for API serialization."""
-        return DocumentMetadata(
-            full_path=self.full_path,
-            display_name=self.display_name,
-            extension=self.extension,
-            size_bytes=self.size_bytes,
-            modified_time=self.modified_time,
-            sha256_hash=self.sha256_hash,
-        )
-
-
-@dataclass
-class ConversionResultInternal:
-    """Internal representation of conversion result."""
-
-    source_path: str
-    markdown_path: str | None = None
-    json_path: str | None = None
-    success: bool = False
-    error: str | None = None
-    ocr_required: bool = False
-    duration_seconds: float = 0.0
-
-    def to_pydantic(self) -> ConversionResult:
-        """Convert to Pydantic model."""
-        return ConversionResult(
-            source_path=self.source_path,
-            markdown_path=self.markdown_path,
-            json_path=self.json_path,
-            success=self.success,
-            error=self.error,
-            ocr_required=self.ocr_required,
-            duration_seconds=self.duration_seconds,
-        )
-
-
-# ===== Configuration Models =====
+# ===== Modelos de configuración =====
 
 
 class DoclingConfig(BaseModel):
-    """Configuration for Docling document conversion."""
+    """Configuración para la conversión de documentos con Docling."""
 
-    ocr_mode: OcrMode = Field(default=OcrMode.DEFAULT, description="OCR mode to use")
-    do_ocr: bool = Field(default=False, description="Enable OCR for documents")
-    use_gpu: bool = Field(default=False, description="Use GPU if available (torch/cuda)")
-    max_workers: int = Field(default=4, description="Number of async workers for conversion")
+    ocr_mode: OcrMode = Field(default=OcrMode.DEFAULT, description="Modo de OCR a usar")
+    do_ocr: bool = Field(default=False, description="Activar OCR para los documentos")
+    use_gpu: bool = Field(default=False, description="Usar GPU si está disponible (torch/cuda)")
+    max_workers: int = Field(default=4, description="Número de workers async para la conversión")
 
 
 class CacheConfig(BaseModel):
-    """Configuration for cache database."""
+    """Configuración de la base de datos de cache."""
 
-    cache_db_path: str = Field(default="cache.db", description="Path to SQLite cache database")
-    enable_wal: bool = Field(default=True, description="Enable WAL mode for concurrency")
-    auto_backup: bool = Field(default=True, description="Auto-backup cache.db before mass writes")
+    cache_db_path: str = Field(default="cache.db", description="Ruta a la base de datos SQLite de cache")
+    enable_wal: bool = Field(default=True, description="Activar modo WAL para concurrencia")
+    auto_backup: bool = Field(default=True, description="Backup automático de cache.db antes de escrituras masivas")
 
 
 class SecurityConfig(BaseModel):
-    """Security configuration for web app.
+    """Configuración de seguridad de la app web.
 
-    `api_token_env_var` (shared bearer token) was removed in revision 8 (§2.7.2):
-    authentication is now per-user (session cookie after `/login`), so there is no
-    longer a single shared secret to read from the environment.
+    `api_token_env_var` (bearer token compartido) se eliminó en la revisión 8
+    (§2.7.2): la autenticación es ahora por usuario (cookie de sesión tras
+    `/login`), así que ya no hay un único secreto compartido que leer del entorno.
     """
 
-    bind_host: str = Field(default="127.0.0.1", description="Host to bind to")
-    bind_port: int = Field(default=8000, description="Port to bind to")
-    require_auth_if_not_loopback: bool = Field(default=True, description="Require auth on non-loopback")
+    bind_host: str = Field(default="127.0.0.1", description="Host al que hacer bind")
+    bind_port: int = Field(default=8000, description="Puerto al que hacer bind")
+    require_auth_if_not_loopback: bool = Field(default=True, description="Exigir autenticación si no es loopback")
 
 
 __all__ = [
@@ -442,8 +395,6 @@ __all__ = [
     "User",
     "Session",
     "ProjectNameValidation",
-    "DocumentMetadataInternal",
-    "ConversionResultInternal",
     "DoclingConfig",
     "CacheConfig",
     "SecurityConfig",

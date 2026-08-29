@@ -20,31 +20,6 @@ def _metadata_for(path) -> DocumentMetadata:
 
 @pytest.mark.slow
 @pytest.mark.asyncio
-async def test_detect_ocr_candidates_separates_native_from_scanned(native_pdf, scanned_pdf) -> None:
-    native_doc = _metadata_for(native_pdf)
-    scanned_doc = _metadata_for(scanned_pdf)
-
-    scheduler = OCRScheduler()
-    candidates = await scheduler.detect_ocr_candidates([native_doc, scanned_doc])
-
-    assert candidates == [scanned_doc]
-
-
-@pytest.mark.slow
-@pytest.mark.asyncio
-async def test_detect_ocr_candidates_writes_no_files(scanned_pdf) -> None:
-    scanned_doc = _metadata_for(scanned_pdf)
-
-    scheduler = OCRScheduler()
-    await scheduler.detect_ocr_candidates([scanned_doc])
-
-    # detect_ocr_candidates no recibe output_dir: no debe crear ningun archivo
-    # nuevo junto al documento de origen.
-    assert set(scanned_pdf.parent.iterdir()) == {scanned_pdf}
-
-
-@pytest.mark.slow
-@pytest.mark.asyncio
 async def test_process_with_ocr_recovers_text_for_candidates(scanned_pdf, tmp_path) -> None:
     scanned_doc = _metadata_for(scanned_pdf)
     output_dir = tmp_path / "Conversión"

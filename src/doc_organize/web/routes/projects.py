@@ -4,15 +4,9 @@ Rutas de gestión de proyectos (REQ-008 vía HTTP, contrato REQ-007 §8.2).
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
-from doc_organize.core.exceptions import (
-    ProjectAlreadyExistsError,
-    ProjectError,
-    ProjectNameError,
-    ProjectNotFoundError,
-)
 from doc_organize.utils.logging import get_logger
 from doc_organize.web.dependencies import get_auth_store, get_project_registry, get_tenant_id, require_admin, require_project_access
 
@@ -42,16 +36,12 @@ class ProjectListResponse(BaseModel):
 
 @router.post("", response_model=ProjectResponse, status_code=201, dependencies=[Depends(require_admin)])
 async def create_project(payload: CreateProjectRequest, request: Request) -> ProjectResponse:
+    # ProjectAlreadyExistsError/ProjectNameError/ProjectError se propagan sin
+    # capturar: el handler global de web/app.py (_EXCEPTION_STATUS_CODES) las
+    # traduce a 409/422/400 respectivamente.
     tenant_id = get_tenant_id(request)
-    try:
-        async with get_project_registry(request) as registry:
-            project = await registry.create_project(payload.name, Path(payload.base_location), tenant_id=tenant_id)
-    except ProjectAlreadyExistsError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except ProjectNameError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except ProjectError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    async with get_project_registry(request) as registry:
+        project = await registry.create_project(payload.name, Path(payload.base_location), tenant_id=tenant_id)
     return ProjectResponse(name=project.name, root_path=project.root_path, created_at=project.created_at)
 
 
@@ -86,11 +76,10 @@ async def list_projects(request: Request) -> ProjectListResponse:
 
 @router.get("/{name}", response_model=ProjectResponse, dependencies=[Depends(require_project_access)])
 async def get_project(name: str, request: Request) -> ProjectResponse:
-    try:
-        async with get_project_registry(request) as registry:
-            project = await registry.get_project(name, tenant_id=get_tenant_id(request))
-    except ProjectNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # ProjectNotFoundError se propaga sin capturar: el handler global de
+    # web/app.py (_EXCEPTION_STATUS_CODES) la traduce a 404.
+    async with get_project_registry(request) as registry:
+        project = await registry.get_project(name, tenant_id=get_tenant_id(request))
     return ProjectResponse(name=project.name, root_path=project.root_path, created_at=project.created_at)
 
 

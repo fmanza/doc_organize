@@ -4,14 +4,13 @@ Cache Viewer: lectura de `cache.db`, de solo lectura (Fase D-2c, §2.7.4).
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from doc_organize.cache import CacheManager
 from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME
-from doc_organize.core.exceptions import ProjectNotFoundError
 from doc_organize.core.models import Project
 from doc_organize.web.dependencies import get_project_registry, get_tenant_id, require_project_access
 
@@ -35,11 +34,10 @@ class CacheListResponse(BaseModel):
 
 
 async def _load_project_and_entries(request: Request, name: str) -> tuple[Project, list[CacheEntryResponse]]:
+    # ProjectNotFoundError se propaga sin capturar: el handler global de
+    # web/app.py (_EXCEPTION_STATUS_CODES) la traduce a 404.
     async with get_project_registry(request) as registry:
-        try:
-            project = await registry.get_project(name, tenant_id=get_tenant_id(request))
-        except ProjectNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        project = await registry.get_project(name, tenant_id=get_tenant_id(request))
 
     cache_db = Path(project.root_path) / DEFAULT_CACHE_DB_NAME
     async with CacheManager(cache_db) as cache:

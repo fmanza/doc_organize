@@ -856,8 +856,18 @@ class AuthStore:
     # ===== Sesiones =====
 
     async def create_session(self, user: User) -> Session:
-        """Crea una sesión nueva para `user`, con vida fija (`SESSION_LIFETIME_HOURS`)."""
+        """Crea una sesión nueva para `user`, con vida fija (`SESSION_LIFETIME_HOURS`).
+
+        Antes de insertar, purga cualquier sesión ya expirada (de cualquier
+        usuario/tenant): único punto de limpieza de `sessions` — se ejecuta una
+        vez por login, no en cada apertura de `AuthStore` (que sí ocurre en cada
+        petición autenticada vía `authenticate_session()`, demasiado caliente
+        para una escritura). `get_session()`/`get_session_with_access()` ya
+        filtran las expiradas en lectura, pero nunca las borraban — sin este
+        barrido la tabla crecía sin límite a lo largo de la vida de `auth.db`.
+        """
         now = datetime.now(timezone.utc)
+        await self._connection.execute("DELETE FROM sessions WHERE expires_at < ?", (now.isoformat(),))
         session = Session(
             token=secrets.token_urlsafe(32),
             user_id=user.id,

@@ -14,14 +14,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
-from doc_organize.core.exceptions import (
-    AuthError,
-    RoleAlreadyExistsError,
-    RoleInUseError,
-    RoleNotFoundError,
-    UserAlreadyExistsError,
-    UserNotFoundError,
-)
+from doc_organize.core.exceptions import RoleNotFoundError
 from doc_organize.core.models import Role, User
 from doc_organize.web.dependencies import get_auth_store, get_project_registry, get_tenant_id, require_admin
 
@@ -120,62 +113,51 @@ async def list_roles(request: Request) -> RoleListResponse:
 
 @router.post("/api/roles", response_model=RoleResponse, status_code=201)
 async def create_role(payload: CreateRoleRequest, request: Request) -> RoleResponse:
-    try:
-        async with get_auth_store(request) as store:
-            role = await store.create_role(
-                get_tenant_id(request),
-                payload.name,
-                is_admin=payload.is_admin,
-                project_names=payload.project_names,
-                allowed_scan_roots=payload.allowed_scan_roots,
-            )
-    except RoleAlreadyExistsError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except AuthError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # RoleAlreadyExistsError/AuthError se propagan sin capturar: el handler
+    # global de web/app.py (_EXCEPTION_STATUS_CODES) las traduce a 409/422.
+    async with get_auth_store(request) as store:
+        role = await store.create_role(
+            get_tenant_id(request),
+            payload.name,
+            is_admin=payload.is_admin,
+            project_names=payload.project_names,
+            allowed_scan_roots=payload.allowed_scan_roots,
+        )
     return _role_response(role)
 
 
 @router.get("/api/roles/{role_id}", response_model=RoleResponse)
 async def get_role(role_id: str, request: Request) -> RoleResponse:
-    try:
-        async with get_auth_store(request) as store:
-            role = await store.get_role(get_tenant_id(request), role_id)
-    except RoleNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # RoleNotFoundError se propaga sin capturar: el handler global de
+    # web/app.py (_EXCEPTION_STATUS_CODES) la traduce a 404.
+    async with get_auth_store(request) as store:
+        role = await store.get_role(get_tenant_id(request), role_id)
     return _role_response(role)
 
 
 @router.patch("/api/roles/{role_id}", response_model=RoleResponse)
 async def update_role(role_id: str, payload: UpdateRoleRequest, request: Request) -> RoleResponse:
-    try:
-        async with get_auth_store(request) as store:
-            role = await store.update_role(
-                get_tenant_id(request),
-                role_id,
-                name=payload.name,
-                is_admin=payload.is_admin,
-                project_names=payload.project_names,
-                allowed_scan_roots=payload.allowed_scan_roots,
-            )
-    except RoleNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except RoleAlreadyExistsError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except AuthError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # RoleNotFoundError/RoleAlreadyExistsError/AuthError se propagan sin
+    # capturar: el handler global de web/app.py (_EXCEPTION_STATUS_CODES)
+    # las traduce a 404/409/422 respectivamente.
+    async with get_auth_store(request) as store:
+        role = await store.update_role(
+            get_tenant_id(request),
+            role_id,
+            name=payload.name,
+            is_admin=payload.is_admin,
+            project_names=payload.project_names,
+            allowed_scan_roots=payload.allowed_scan_roots,
+        )
     return _role_response(role)
 
 
 @router.delete("/api/roles/{role_id}", status_code=204)
 async def delete_role(role_id: str, request: Request) -> None:
-    try:
-        async with get_auth_store(request) as store:
-            await store.delete_role(get_tenant_id(request), role_id)
-    except RoleNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except RoleInUseError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # RoleNotFoundError/RoleInUseError se propagan sin capturar: el handler
+    # global de web/app.py (_EXCEPTION_STATUS_CODES) las traduce a 404/409.
+    async with get_auth_store(request) as store:
+        await store.delete_role(get_tenant_id(request), role_id)
 
 
 @router.get("/api/users", response_model=UserListResponse)
@@ -187,55 +169,58 @@ async def list_users(request: Request) -> UserListResponse:
 
 @router.post("/api/users", response_model=UserResponse, status_code=201)
 async def create_user(payload: CreateUserRequest, request: Request) -> UserResponse:
+    """Crea un usuario.
+
+    `RoleNotFoundError` se captura explícitamente aquí (a diferencia de las demás
+    rutas de este router): el handler global de `web/app.py` la traduce a 404 —
+    correcto cuando el rol es el recurso direccionado por la URL (`/api/roles/{id}`),
+    pero engañoso aquí, donde `role_id` es solo una referencia dentro del payload
+    de un usuario y un 422 (entrada inválida) describe mejor el fallo.
+    `UserAlreadyExistsError`/`AuthError` sí se propagan sin capturar: el handler
+    global las traduce a 409/422 correctamente sin necesitar este matiz.
+    """
     try:
         async with get_auth_store(request) as store:
             user = await store.create_user(
                 get_tenant_id(request), payload.username, payload.password, role_id=payload.role_id
             )
-    except UserAlreadyExistsError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except RoleNotFoundError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except AuthError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _user_response(user)
 
 
 @router.get("/api/users/{user_id}", response_model=UserResponse)
 async def get_user(user_id: str, request: Request) -> UserResponse:
-    try:
-        async with get_auth_store(request) as store:
-            user = await store.get_user(get_tenant_id(request), user_id)
-    except UserNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # UserNotFoundError se propaga sin capturar: el handler global de
+    # web/app.py (_EXCEPTION_STATUS_CODES) la traduce a 404.
+    async with get_auth_store(request) as store:
+        user = await store.get_user(get_tenant_id(request), user_id)
     return _user_response(user)
 
 
 @router.patch("/api/users/{user_id}", response_model=UserResponse)
 async def update_user(user_id: str, payload: UpdateUserRequest, request: Request) -> UserResponse:
+    """Actualiza el rol y/o restablece la contraseña de un usuario.
+
+    Mismo matiz que `create_user`: `RoleNotFoundError` se captura aquí y se
+    remapea a 422 porque `role_id` es una referencia en el payload, no el
+    recurso de la URL. `UserNotFoundError`/`RoleInUseError`/`AuthError` se
+    propagan sin capturar (404/409/422 vía el handler global).
+    """
     try:
         async with get_auth_store(request) as store:
             user = await store.update_user(get_tenant_id(request), user_id, role_id=payload.role_id, password=payload.password)
-    except UserNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RoleNotFoundError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except RoleInUseError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except AuthError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _user_response(user)
 
 
 @router.delete("/api/users/{user_id}", status_code=204)
 async def delete_user(user_id: str, request: Request) -> None:
-    try:
-        async with get_auth_store(request) as store:
-            await store.delete_user(get_tenant_id(request), user_id)
-    except UserNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except RoleInUseError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # UserNotFoundError/RoleInUseError se propagan sin capturar: el handler
+    # global de web/app.py (_EXCEPTION_STATUS_CODES) las traduce a 404/409.
+    async with get_auth_store(request) as store:
+        await store.delete_user(get_tenant_id(request), user_id)
 
 
 __all__ = ["router"]

@@ -113,10 +113,15 @@ parcialmente, de datos del documento — previene path traversal.
 
 ### REGLA #3 — MODELOS: ÚNICA FUENTE EN `core/models.py`
 Todo tipo de datos compartido entre módulos (`DocumentMetadata`, `ConversionResult`, `CacheEntry`,
-`DuplicateGroup`, etc.) vive en `core/models.py` como modelo Pydantic. Los servicios pueden usar
-dataclasses internas (`XxxInternal`) solo como optimización del hot path (evitar overhead de
-validación Pydantic en escaneos de 10K+ archivos), con un método `.to_pydantic()` para convertir en
-el límite del sistema — patrón ya establecido por `DocumentMetadataInternal`/`ConversionResultInternal`.
+`DuplicateGroup`, etc.) vive en `core/models.py` como modelo Pydantic. Un servicio puede usar una
+dataclass interna, privada al módulo (no exportada en `core/models.py`), solo como optimización del
+hot path (evitar overhead de validación Pydantic en escaneos de 10K+ archivos) — patrón real:
+`DocumentScanner._DiscoveredFile` en `scanner/document_scanner.py`, construida durante el recorrido
+de directorios y convertida a `DocumentMetadata` (con el hash ya calculado) antes de salir del
+servicio; no un modelo `XxxInternal` compartido en `core/models.py` con método `.to_pydantic()`
+—ese patrón (`DocumentMetadataInternal`/`ConversionResultInternal`) se definió en `core/models.py`
+pero ningún servicio llegó a adoptarlo; se eliminó por deuda técnica (código muerto, sesión
+2026-08-29) en favor de la dataclass privada por módulo que sí estaba en uso.
 
 ### REGLA #4 — CONTRATOS ANTES QUE IMPLEMENTACIONES
 Si un módulo nuevo necesita abstraer un servicio externo (p.ej. un motor de OCR alternativo):

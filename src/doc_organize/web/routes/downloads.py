@@ -10,13 +10,12 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
 from doc_organize.cache import CacheManager
 from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME
-from doc_organize.core.exceptions import ProjectNotFoundError
 from doc_organize.core.models import CacheEntry, CacheExportSnapshot, DocumentStatus
 from doc_organize.web.dependencies import get_project_registry, get_tenant_id, require_project_access
 
@@ -72,11 +71,10 @@ async def export_project(name: str, request: Request) -> FileResponse:
     existe ningún fichero de log por proyecto que empaquetar (recorte explícito del
     DoD original, `§2.7.4`).
     """
+    # ProjectNotFoundError se propaga sin capturar: el handler global de
+    # web/app.py (_EXCEPTION_STATUS_CODES) la traduce a 404.
     async with get_project_registry(request) as registry:
-        try:
-            project = await registry.get_project(name, tenant_id=get_tenant_id(request))
-        except ProjectNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        project = await registry.get_project(name, tenant_id=get_tenant_id(request))
 
     project_root = Path(project.root_path)
     cache_db = project_root / DEFAULT_CACHE_DB_NAME

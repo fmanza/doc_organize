@@ -91,7 +91,8 @@ class LoginRateLimiter:
     def __init__(self, max_attempts: int = LOGIN_MAX_ATTEMPTS, lockout_seconds: float = LOGIN_LOCKOUT_SECONDS) -> None:
         self.max_attempts = max_attempts
         self.lockout_seconds = lockout_seconds
-        self._failures: dict[str, tuple[int, float]] = {}  # key -> (count, locked_until_monotonic)
+        #: key -> (count, locked_until_monotonic, last_failure_monotonic)
+        self._failures: dict[str, tuple[int, float, float]] = {}
 
     @staticmethod
     def _key(tenant_id: str, username: str) -> str:
@@ -103,7 +104,7 @@ class LoginRateLimiter:
         entry = self._failures.get(key)
         if entry is None:
             return False
-        count, locked_until = entry
+        count, locked_until, _ = entry
         if count < self.max_attempts:
             return False
         if time.monotonic() >= locked_until:
@@ -113,14 +114,31 @@ class LoginRateLimiter:
 
     def record_failure(self, tenant_id: str, username: str) -> None:
         """Cuenta un intento fallido; bloquea `lockout_seconds` al llegar a `max_attempts`."""
+        now = time.monotonic()
+        self._prune_stale(now)
         key = self._key(tenant_id, username)
-        count = self._failures.get(key, (0, 0.0))[0] + 1
-        locked_until = time.monotonic() + self.lockout_seconds if count >= self.max_attempts else 0.0
-        self._failures[key] = (count, locked_until)
+        count = self._failures.get(key, (0, 0.0, 0.0))[0] + 1
+        locked_until = now + self.lockout_seconds if count >= self.max_attempts else 0.0
+        self._failures[key] = (count, locked_until, now)
 
     def record_success(self, tenant_id: str, username: str) -> None:
         """Limpia el contador de fallos tras un login correcto."""
         self._failures.pop(self._key(tenant_id, username), None)
+
+    def _prune_stale(self, now: float) -> None:
+        """Purga entradas sin fallos nuevos desde hace más de `lockout_seconds`.
+
+        Sin esto, un fallo aislado (por debajo de `max_attempts`, nunca bloqueado)
+        para un username que no vuelve a intentar login queda en memoria para
+        siempre — `is_locked()` solo libera memoria de forma perezosa cuando
+        alguien vuelve a consultar esa misma clave. `lockout_seconds` es también
+        la ventana de retención correcta para las entradas ya bloqueadas: cuando
+        ha pasado ese tiempo desde el último fallo, cualquier bloqueo activo ya
+        habría expirado igualmente.
+        """
+        stale_keys = [key for key, (_, _, last_failure) in self._failures.items() if now - last_failure > self.lockout_seconds]
+        for key in stale_keys:
+            del self._failures[key]
 
 
 class AuthMiddleware(BaseHTTPMiddleware):

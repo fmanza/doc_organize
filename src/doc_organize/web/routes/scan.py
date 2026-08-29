@@ -4,7 +4,7 @@ Folder Selector + escaneo/conversión vía web con progreso WebSocket (Fase D-2b
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -37,11 +37,10 @@ class ValidateFoldersResponse(BaseModel):
 
 @router.get("/projects/{name}/scan", response_class=HTMLResponse, dependencies=[Depends(require_project_access)])
 async def folder_selector(name: str, request: Request) -> HTMLResponse:
-    try:
-        async with get_project_registry(request) as registry:
-            project = await registry.get_project(name, tenant_id=get_tenant_id(request))
-    except ProjectNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # ProjectNotFoundError se propaga sin capturar: el handler global de
+    # web/app.py (_EXCEPTION_STATUS_CODES) la traduce a 404.
+    async with get_project_registry(request) as registry:
+        project = await registry.get_project(name, tenant_id=get_tenant_id(request))
     return _templates.TemplateResponse(request, "folder_selector.html", {"project": project})
 
 
@@ -54,11 +53,10 @@ async def validate_folders(name: str, payload: ValidateFoldersRequest, request: 
     # Confirma que el proyecto existe y pertenece al tenant de la sesion, aunque esta
     # ruta en si no lo toca -- evita usar este endpoint para sondear nombres de
     # proyecto de otro tenant sin pasar por ningun chequeo de pertenencia.
+    # ProjectNotFoundError se propaga sin capturar: el handler global de
+    # web/app.py (_EXCEPTION_STATUS_CODES) la traduce a 404.
     async with get_project_registry(request) as registry:
-        try:
-            await registry.get_project(name, tenant_id=get_tenant_id(request))
-        except ProjectNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        await registry.get_project(name, tenant_id=get_tenant_id(request))
 
     result = FolderValidator().validate_folder_set(payload.paths)
     return ValidateFoldersResponse(valid=result.is_valid, warnings=result.warnings, clean_paths=result.clean_paths)

@@ -10,15 +10,15 @@ from doc_organize.utils.logging import get_logger
 
 
 class OCRScheduler:
-    """Detecta que documentos necesitan OCR y los reprocesa en una segunda pasada.
+    """Reprocesa con OCR los documentos que lo necesitan.
 
-    `detect_ocr_candidates()` usa `DocumentConverter.probe_needs_ocr()` (una
-    pasada rapida con `do_ocr=False`, sin escribir archivos) apoyandose en la
-    señal confirmada por spike (2026-08-27, ver plan §2.4):
-    `result.confidence.parse_score` es `NaN` cuando el documento no tiene
-    capa de texto nativa. `process_with_ocr()` reconvierte esos documentos
-    con OCR activado; `use_gpu` solo selecciona un motor acelerado (EasyOCR)
-    en vez del motor CPU por defecto (RapidOCR) — no es un requisito
+    La detección de qué documentos necesitan OCR no vive aquí: ocurre gratis
+    durante la conversión normal de `ScanCommand` (`DocumentConverter._needs_ocr()`
+    sobre `result.confidence.parse_score` siendo `NaN`, señal confirmada por spike
+    2026-08-27, ver plan §2.4), que ya marca cada `ConversionResult.ocr_required`
+    en su única pasada de conversión. `process_with_ocr()` reconvierte esos
+    documentos con OCR activado; `use_gpu` solo selecciona un motor acelerado
+    (EasyOCR) en vez del motor CPU por defecto (RapidOCR) — no es un requisito
     funcional, es una optimizacion de velocidad (AUDIT_PLAN revision 5).
 
     Attributes:
@@ -29,25 +29,12 @@ class OCRScheduler:
         >>> from pathlib import Path
         >>> async def main():
         ...     scheduler = OCRScheduler()
-        ...     candidates = await scheduler.detect_ocr_candidates(docs)
         ...     results = await scheduler.process_with_ocr(candidates, Path("./Conversión"))
         >>> asyncio.run(main())
     """
 
     def __init__(self) -> None:
         self.logger = get_logger(__name__)
-
-    async def detect_ocr_candidates(self, docs: list[DocumentMetadata]) -> list[DocumentMetadata]:
-        """Identifica, sin escribir ningun archivo, que documentos de `docs`
-        no tienen capa de texto nativa y por tanto requieren OCR."""
-        candidates: list[DocumentMetadata] = []
-        async with DocumentConverter() as converter:
-            for doc in docs:
-                if await converter.probe_needs_ocr(doc.full_path):
-                    candidates.append(doc)
-
-        self.logger.info(f"OCR: {len(candidates)} de {len(docs)} documentos requieren OCR")
-        return candidates
 
     async def process_with_ocr(
         self,

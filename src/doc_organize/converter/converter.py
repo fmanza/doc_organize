@@ -72,15 +72,6 @@ class DocumentConverter:
             self._docling_by_mode[key] = DoclingConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)})
         return self._docling_by_mode[key]
 
-    async def probe_needs_ocr(self, source_path: str) -> bool:
-        """Determina si `source_path` necesita OCR, sin escribir ningun archivo.
-
-        Ejecuta una conversion rapida con `do_ocr=False` y comprueba si el
-        documento tiene capa de texto nativa (usado por `OCRScheduler`, REQ-004).
-        """
-        docling_result = await asyncio.to_thread(self._get_docling(use_ocr=False).convert, source_path)
-        return self._needs_ocr(docling_result)
-
     async def convert_document(
         self,
         source_doc: DocumentMetadata,
