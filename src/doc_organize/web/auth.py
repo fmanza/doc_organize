@@ -18,14 +18,19 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
-from doc_organize.auth import AuthStore
-from doc_organize.core.models import SecurityConfig, Session
+from doc_organize.auth import AuthenticatedSession, AuthStore
+from doc_organize.core.models import SecurityConfig
 
 SESSION_COOKIE_NAME = "doc_organize_session"
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 _PROTECTED_PREFIXES = ("/api/", "/downloads/")
 _EXEMPT_PATHS = frozenset({"/login", "/logout"})
+#: Ruta alcanzable aunque `must_change_password=True` (revisión 9) — sin esta
+#: excepción, un usuario con contraseña pendiente de cambio quedaría atrapado sin
+#: poder llegar a la propia página que se lo permite. `/logout` no hace falta
+#: aquí: ya sale por `_EXEMPT_PATHS` antes de llegar a esta comprobación.
+_PASSWORD_CHANGE_EXEMPT = frozenset({"/change-password"})
 _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
@@ -39,21 +44,23 @@ def requires_auth(security: SecurityConfig) -> bool:
     return security.require_auth_if_not_loopback and not is_loopback(security.bind_host)
 
 
-async def authenticate_session(cookies: Mapping[str, str], auth_db_path: str | Path | None) -> Session | None:
-    """Resuelve la cookie de sesión contra `AuthStore`, o `None` si falta/no es válida.
+async def authenticate_session(cookies: Mapping[str, str], auth_db_path: str | Path | None) -> AuthenticatedSession | None:
+    """Resuelve la cookie de sesión (+ rol) contra `AuthStore`, o `None` si falta/no es válida.
 
     Compartida entre `AuthMiddleware` (rutas HTTP) y `web/routes/scan.py` (WebSocket,
     Fase D-2b, §2.7.3): `starlette.middleware.base.BaseHTTPMiddleware` **no** intercepta
     conexiones WebSocket (Starlette pasa el scope `"websocket"` directo a la app interna
     sin llamar a `dispatch()`), así que un handler WS debe autenticar la sesión a mano,
-    llamando a esta misma función — nunca reimplementar la lógica.
+    llamando a esta misma función — nunca reimplementar la lógica. Devuelve
+    `AuthenticatedSession` (no `Session`) desde la revisión 9: incluye `role_id`/
+    `is_admin`/`must_change_password` resueltos en la misma consulta.
     """
     token = cookies.get(SESSION_COOKIE_NAME)
     if not token:
         return None
     store = AuthStore(auth_db_path) if auth_db_path else AuthStore()
     async with store as opened_store:
-        return await opened_store.get_session(token)
+        return await opened_store.get_session_with_access(token)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -79,14 +86,21 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not requires_auth(self.security) or request.url.path in _EXEMPT_PATHS:
             return await call_next(request)
 
-        session = await authenticate_session(request.cookies, self.auth_db_path)
-        if session is None:
+        authenticated = await authenticate_session(request.cookies, self.auth_db_path)
+        if authenticated is None:
             if request.url.path.startswith(_PROTECTED_PREFIXES):
                 return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
             return RedirectResponse("/login", status_code=303)
 
-        request.state.user_id = session.user_id
-        request.state.tenant_id = session.tenant_id
+        request.state.user_id = authenticated.session.user_id
+        request.state.tenant_id = authenticated.session.tenant_id
+        request.state.role_id = authenticated.role_id
+        request.state.is_admin = authenticated.is_admin
+
+        if authenticated.must_change_password and request.url.path not in _PASSWORD_CHANGE_EXEMPT:
+            if request.url.path.startswith(_PROTECTED_PREFIXES):
+                return JSONResponse(status_code=403, content={"detail": "Password change required"})
+            return RedirectResponse("/change-password", status_code=303)
 
         if request.method in _WRITE_METHODS:
             origin = request.headers.get("origin") or request.headers.get("referer")

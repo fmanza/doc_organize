@@ -7,7 +7,7 @@ import json
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -17,7 +17,7 @@ from doc_organize.core.models import DuplicateGroup, Project
 from doc_organize.dedup import DeduplicationManager
 from doc_organize.scanner import DocumentScanner
 from doc_organize.utils.logging import get_logger
-from doc_organize.web.dependencies import get_project_registry, get_tenant_id
+from doc_organize.web.dependencies import get_project_registry, get_tenant_id, require_project_access
 
 logger = get_logger(__name__)
 
@@ -83,7 +83,7 @@ async def _detect_duplicates(project: Project) -> list[DuplicateGroup]:
     return DeduplicationManager().find_duplicates(scan_result.documents)
 
 
-@router.get("/projects/{name}/duplicates", response_class=HTMLResponse)
+@router.get("/projects/{name}/duplicates", response_class=HTMLResponse, dependencies=[Depends(require_project_access)])
 async def duplicates_resolver_page(name: str, request: Request) -> HTMLResponse:
     project = await _get_project(request, name)
     groups = await _detect_duplicates(project)
@@ -96,14 +96,18 @@ async def duplicates_resolver_page(name: str, request: Request) -> HTMLResponse:
     )
 
 
-@router.get("/api/projects/{name}/duplicates", response_model=DuplicatesResponse)
+@router.get("/api/projects/{name}/duplicates", response_model=DuplicatesResponse, dependencies=[Depends(require_project_access)])
 async def get_duplicates(name: str, request: Request) -> DuplicatesResponse:
     project = await _get_project(request, name)
     groups = await _detect_duplicates(project)
     return DuplicatesResponse(groups=groups)
 
 
-@router.post("/api/projects/{name}/duplicates/resolve", response_model=ResolveDuplicatesResponse)
+@router.post(
+    "/api/projects/{name}/duplicates/resolve",
+    response_model=ResolveDuplicatesResponse,
+    dependencies=[Depends(require_project_access)],
+)
 async def resolve_duplicates(name: str, payload: ResolveDuplicatesRequest, request: Request) -> ResolveDuplicatesResponse:
     """Resuelve los duplicados detectados en un re-escaneo propio del servidor.
 

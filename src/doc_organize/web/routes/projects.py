@@ -4,7 +4,7 @@ Rutas de gestión de proyectos (REQ-008 vía HTTP, contrato REQ-007 §8.2).
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from doc_organize.core.exceptions import (
@@ -14,7 +14,7 @@ from doc_organize.core.exceptions import (
     ProjectNotFoundError,
 )
 from doc_organize.utils.logging import get_logger
-from doc_organize.web.dependencies import get_project_registry, get_tenant_id
+from doc_organize.web.dependencies import get_auth_store, get_project_registry, get_tenant_id, require_admin, require_project_access
 
 logger = get_logger(__name__)
 
@@ -40,7 +40,7 @@ class ProjectListResponse(BaseModel):
     projects: list[ProjectListItem]
 
 
-@router.post("", response_model=ProjectResponse, status_code=201)
+@router.post("", response_model=ProjectResponse, status_code=201, dependencies=[Depends(require_admin)])
 async def create_project(payload: CreateProjectRequest, request: Request) -> ProjectResponse:
     tenant_id = get_tenant_id(request)
     try:
@@ -57,8 +57,21 @@ async def create_project(payload: CreateProjectRequest, request: Request) -> Pro
 
 @router.get("", response_model=ProjectListResponse)
 async def list_projects(request: Request) -> ProjectListResponse:
+    """Lista los proyectos del tenant, filtrados por acceso (revisión 9).
+
+    Un rol `is_admin` ve todos; un rol restringido solo los de su `project_names`.
+    Sin sesión resuelta (loopback/sin auth), no se aplica ningún filtro — mismo
+    criterio que `get_tenant_id`.
+    """
     async with get_project_registry(request) as registry:
         projects = await registry.list_projects(tenant_id=get_tenant_id(request))
+
+    if getattr(request.state, "is_admin", None) is False:
+        async with get_auth_store(request) as store:
+            role = await store.get_role(get_tenant_id(request), request.state.role_id)
+        allowed_names = {allowed.lower() for allowed in role.project_names}
+        projects = [project for project in projects if project.name.lower() in allowed_names]
+
     items = [
         ProjectListItem(
             name=project.name,
@@ -71,7 +84,7 @@ async def list_projects(request: Request) -> ProjectListResponse:
     return ProjectListResponse(projects=items)
 
 
-@router.get("/{name}", response_model=ProjectResponse)
+@router.get("/{name}", response_model=ProjectResponse, dependencies=[Depends(require_project_access)])
 async def get_project(name: str, request: Request) -> ProjectResponse:
     try:
         async with get_project_registry(request) as registry:

@@ -22,6 +22,7 @@
 | §2.7.3 (rev. 10) | Folder Selector + escaneo web con WebSocket (2 sub-pasos) | ✅ Completa |
 | §2.7.4 (rev. 11) | Cache Viewer + Export ZIP + Duplicates Resolver (3 sub-pasos) | ✅ Completa |
 | §15 (rev. 12) | AUDIT_PLAN + IMPLEMENT del roadmap restante (docs, CI, benchmark) | ✅ Completa |
+| Rev. 9 | Roles y gestión de usuarios (`Role`, admin/admin por defecto, `/admin/users`) | ✅ Completa |
 | Fase E | Tests de integración adicionales, documentación ampliada | ⬜ Abierta |
 
 **Fuente de verdad detallada** (historial de revisiones, AUDIT_PLAN de cada pieza, decisiones de
@@ -33,8 +34,8 @@ alcance): `.github/prompts/doclink_extractor_plan.md`.
 
 ```
 python -m ruff check src tests    → All checks passed
-python -m mypy src                 → Success: no issues found in 40 source files
-python -m pytest                    → 182 passed, 97% cobertura
+python -m mypy src                 → Success: no issues found in 42 source files
+python -m pytest                    → 233 passed, 95% cobertura
 mkdocs build --strict                → exit 0, sin links rotos
 ```
 
@@ -64,8 +65,6 @@ src/doc_organize/
   real; sigue pendiente una verificación genuina en Chrome/Firefox/Safari.
 - Rate-limiting en `/login` antes de exponer fuera de loopback.
 - Tokens de API personales por usuario (acceso programático sin sesión de navegador).
-- Roles/permisos dentro de un tenant (hoy todos los usuarios de un tenant gestionan todos sus
-  proyectos por igual — simplificación deliberada).
 - Dos decisiones de alcance analizadas con opciones pero no implementadas (`§14` del PLAN):
   validación `AuthStore.tenant_exists()` en `ProjectRegistry`, y anidamiento de rutas de salida en
   `DocumentConverter` (riesgo de `MAX_PATH` en Windows con carpetas de entrada muy profundas).

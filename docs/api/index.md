@@ -72,6 +72,22 @@ conexiones WebSocket (`web/routes/scan.py`) no pasan por el middleware HTTP
 (Starlette no lo intercepta para el scope `"websocket"`) y autentican la sesión
 explícitamente en el propio handler.
 
+## Roles y gestión de usuarios
+
+Cada tenant nuevo (`AuthStore.create_tenant`) crea automáticamente, en una única
+transacción, un rol `admin` (`is_admin=True`, ve todos los proyectos del tenant)
+y un usuario `admin`/`admin` marcado con `must_change_password=True`. Mientras
+esa marca esté activa y el host no sea loopback, `AuthMiddleware` bloquea toda
+ruta salvo `/change-password` y `/logout`.
+
+Un rol no-admin solo ve los proyectos listados explícitamente en
+`Role.project_names`; `AuthStore.can_access_project()` es la única fuente de
+verdad para esa comprobación, usada tanto por `require_project_access`
+(`web/dependencies.py`, aplicada por firma en cada ruta `{name}`-scoped) como
+por el handler WebSocket de escaneo. Gestión de roles/usuarios: `/api/roles` y
+`/api/users` (`web/routes/admin.py`), protegidas por `require_admin` a nivel de
+router — ningún endpoint nuevo puede olvidarse de exigirlo.
+
 ## Referencia
 
 Generada desde los docstrings del código (Google-style).

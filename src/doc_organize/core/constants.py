@@ -81,6 +81,24 @@ SCRYPT_MAXMEM = 256 * 1024 * 1024
 #: refrescar `expires_at`.
 SESSION_LIFETIME_HOURS = 24
 
+#: Longitud maxima del nombre de un rol (revision 9, roles y gestion de usuarios).
+ROLE_NAME_MAX_LENGTH = 50
+
+#: Caracteres permitidos en el nombre de un rol: letras, numeros, espacios, punto,
+#: guion y guion bajo (mismo criterio que USERNAME_PATTERN, mas el espacio porque
+#: los nombres de rol son mas descriptivos, p.ej. "Editor de proyectos").
+ROLE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._\- ]+$")
+
+#: Nombre del rol admin creado automaticamente para cada tenant nuevo (revision 9).
+DEFAULT_ADMIN_ROLE_NAME = "admin"
+
+#: Usuario admin creado automaticamente para cada tenant nuevo (revision 9). La
+#: contrasena es deliberadamente conocida/publica: `User.must_change_password` se
+#: fija a `True` para forzar su cambio antes de poder usar el resto de la app en
+#: modo no-loopback (ver `AuthMiddleware`).
+DEFAULT_ADMIN_USERNAME = "admin"
+DEFAULT_ADMIN_PASSWORD = "admin"
+
 __all__ = [
     "SUPPORTED_EXTENSIONS",
     "IGNORED_NAMES",
@@ -99,4 +117,9 @@ __all__ = [
     "SCRYPT_DKLEN",
     "SCRYPT_MAXMEM",
     "SESSION_LIFETIME_HOURS",
+    "ROLE_NAME_MAX_LENGTH",
+    "ROLE_NAME_PATTERN",
+    "DEFAULT_ADMIN_ROLE_NAME",
+    "DEFAULT_ADMIN_USERNAME",
+    "DEFAULT_ADMIN_PASSWORD",
 ]

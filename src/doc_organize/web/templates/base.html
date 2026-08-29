@@ -19,9 +19,17 @@
             position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
             overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
         }
+        nav.session-nav { text-align: right; font-size: 0.85em; margin-bottom: 0.5rem; }
+        nav.session-nav button.link { all: unset; cursor: pointer; color: #06c; }
     </style>
 </head>
 <body>
+    {% if request.state.user_id is defined %}
+    <nav class="session-nav">
+        {% if request.state.is_admin %}<a href="/admin/users">Gestión de usuarios</a> ·{% endif %}
+        <form method="post" action="/logout" style="display:inline;"><button type="submit" class="link">Cerrar sesión</button></form>
+    </nav>
+    {% endif %}
     {% block content %}{% endblock %}
 </body>
 </html>

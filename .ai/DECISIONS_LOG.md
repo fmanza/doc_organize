@@ -121,3 +121,48 @@ esa propia decisión.
 **Impacto actual**: `mkdocs build --strict` es el comando de validación real (documentado en
 `.github/instructions/sync.instructions.md`). No asumir que `zensical` es una herramienta disponible
 en este proyecto.
+
+## Revisión 9 — Roles, gestión de usuarios y usuario admin por defecto
+
+**Decisión**: `Role` (rol reutilizable por tenant, `is_admin` + lista de proyectos permitidos) en vez
+de flags sueltos en `User`, o un motor RBAC granular por acción; `AuthStore.create_tenant()` crea
+automáticamente, en una única transacción, un rol `admin` y un usuario `admin`/`admin` marcado
+`must_change_password=True`; `require_project_access`/`require_admin` como dependencies de FastAPI
+declaradas por firma en cada ruta `{name}`-scoped, no lógica repetida dentro de cada handler.
+**Alternativas descartadas**: `is_admin`/`allowed_projects` directos en `User` (duplica configuración
+usuario a usuario, sin rol reutilizable); permisos granulares leer/escribir por proyecto (nadie lo
+pidió, sobre-ingeniería); contraseña `admin`/`admin` sin ninguna mitigación (credencial pública
+conocida, expuesta indefinidamente si nadie la cambia).
+**Razón**: sin un bootstrap automático no había forma de crear el primer usuario de un tenant nuevo
+(gap real, no solo teórico — no existía ningún comando CLI ni ruta web para ello antes de esta
+revisión). `must_change_password` cierra la ventana de exposición de la credencial por defecto sin
+renunciar a la conveniencia de un admin/admin conocido para el primer login.
+**Impacto actual**: `create_user()` acepta `role_id` opcional — si se omite, se resuelve al rol admin
+del tenant (siempre existe), preservando el comportamiento previo a esta revisión (todo usuario
+nuevo gestionaba todos los proyectos del tenant por igual) sin romper ningún llamador existente.
+Migración idempotente en `AuthStore.__aenter__` (`ALTER TABLE` + backfill) para bases de datos
+creadas antes de esta revisión: usuarios preexistentes sin rol se retro-asignan siempre al rol admin
+del tenant, nunca a un rol restringido — nunca reduce accesos.
+
+## Revisión 9, sub-paso 2 — Endurecimiento tras AUDIT_CODE
+
+**Decisión**: `create_tenant`/`create_role`/`create_user` capturan `aiosqlite.IntegrityError` en el
+`INSERT` (no solo el `SELECT` previo) y lo traducen a la excepción de dominio correspondiente;
+`update_role` exige `project_names` explícito al degradar `is_admin` de `True` a `False`; `role_id`
+pasa a ser obligatorio en `POST /api/users`; el selector de proyectos de un rol en `/admin/users` pasa
+de texto libre separado por comas a checkboxes de los proyectos reales del tenant.
+**Alternativas descartadas**: dejar el pre-check (`SELECT` antes del `INSERT`) como única defensa
+contra duplicados — funciona en el caso común pero deja una ventana de carrera real entre dos
+peticiones concurrentes; dejar `update_role` vaciando `project_names` en silencio al degradar un rol
+admin sin pedirlo explícitamente.
+**Razón**: hallazgos de AUDIT_CODE sobre la implementación de roles/usuarios (revisión 9, sub-paso 1).
+El pre-check de duplicados seguía el mismo patrón usado desde la revisión 8 para tenants/usuarios —
+esta revisión lo corrige ahí también, no solo en el código nuevo de roles. `role_id` opcional en
+`AuthStore.create_user()` seguía siendo el default correcto para llamadores internos (preserva
+compatibilidad tras la revisión 9, sub-paso 1); el problema era exponer ese default hasta la API
+pública de gestión de usuarios, no el default en sí.
+**Impacto actual**: ningún cambio de firma pública salvo `CreateUserRequest.role_id` (ahora
+obligatorio en la API HTTP, ver `docs/api/index.md`); `AuthStore.create_user()` mantiene `role_id`
+opcional para no romper compatibilidad interna. `update_role` con `is_admin=False` y sin
+`project_names` ahora lanza `AuthError` en vez de vaciar la lista en silencio — cualquier integración
+existente que dependiera de ese vaciado implícito debe pasar `project_names=[]` explícitamente.

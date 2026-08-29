@@ -1,7 +1,8 @@
 """
-Dependencias compartidas de las rutas web (REQ-007).
+Dependencias compartidas de las rutas web (REQ-007, revisión 9 roles y gestión de usuarios).
 """
 
+from fastapi import HTTPException, Request
 from starlette.requests import HTTPConnection
 
 from doc_organize.auth import AuthStore
@@ -48,4 +49,42 @@ def get_tenant_id(conn: HTTPConnection) -> str:
     return getattr(conn.state, "tenant_id", "default")
 
 
-__all__ = ["get_project_registry", "get_auth_store", "get_tenant_id"]
+def require_admin(request: Request) -> None:
+    """Bloquea la ruta si la sesión activa no tiene un rol `is_admin` (revisión 9).
+
+    En loopback/sin auth no hay sesión que resolver (mismo criterio que
+    `get_tenant_id`): no se aplica ninguna restricción, igual que hoy no la hay
+    para nada del resto de la app en ese modo.
+    """
+    is_admin = getattr(request.state, "is_admin", None)
+    if is_admin is None:
+        return
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="Esta operación requiere un rol admin.")
+
+
+async def require_project_access(name: str, request: Request) -> None:
+    """Bloquea el acceso a un proyecto si el rol de la sesión no lo permite (revisión 9).
+
+    `name` se resuelve automáticamente del path param del endpoint que declare esta
+    dependencia. Un rol `is_admin` accede a cualquier proyecto del tenant; un rol
+    restringido solo a los de su lista. `404` (no `403`) en ambos casos de "no
+    acceso", igual que "proyecto inexistente" — no revela si el proyecto existe
+    fuera del alcance del usuario (mismo criterio de no-enumeración que
+    `ProjectRegistry.get_project()`).
+    """
+    is_admin = getattr(request.state, "is_admin", None)
+    if is_admin is None:  # sin sesión resuelta (loopback/no-auth): sin restricciones
+        return
+    if is_admin:
+        return
+
+    role_id = request.state.role_id
+    tenant_id = get_tenant_id(request)
+    async with get_auth_store(request) as store:
+        allowed = await store.can_access_project(tenant_id, role_id, name)
+    if not allowed:
+        raise HTTPException(status_code=404, detail=f"No existe ningún proyecto llamado '{name}'.")
+
+
+__all__ = ["get_project_registry", "get_auth_store", "get_tenant_id", "require_admin", "require_project_access"]

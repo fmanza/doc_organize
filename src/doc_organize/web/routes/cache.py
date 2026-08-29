@@ -4,7 +4,7 @@ Cache Viewer: lectura de `cache.db`, de solo lectura (Fase D-2c, §2.7.4).
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -13,7 +13,7 @@ from doc_organize.cache import CacheManager
 from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME
 from doc_organize.core.exceptions import ProjectNotFoundError
 from doc_organize.core.models import Project
-from doc_organize.web.dependencies import get_project_registry, get_tenant_id
+from doc_organize.web.dependencies import get_project_registry, get_tenant_id, require_project_access
 
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 _templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
@@ -58,13 +58,13 @@ async def _load_project_and_entries(request: Request, name: str) -> tuple[Projec
     return project, entries
 
 
-@router.get("/projects/{name}/cache", response_class=HTMLResponse)
+@router.get("/projects/{name}/cache", response_class=HTMLResponse, dependencies=[Depends(require_project_access)])
 async def cache_viewer(name: str, request: Request) -> HTMLResponse:
     project, entries = await _load_project_and_entries(request, name)
     return _templates.TemplateResponse(request, "cache_viewer.html", {"project": project, "entries": entries})
 
 
-@router.get("/api/projects/{name}/cache", response_model=CacheListResponse)
+@router.get("/api/projects/{name}/cache", response_model=CacheListResponse, dependencies=[Depends(require_project_access)])
 async def get_cache(name: str, request: Request) -> CacheListResponse:
     _, entries = await _load_project_and_entries(request, name)
     return CacheListResponse(entries=entries, total=len(entries))

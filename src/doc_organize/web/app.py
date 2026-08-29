@@ -4,16 +4,18 @@ FastAPI app factory (REQ-007, Fase D-2a).
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from doc_organize.core.exceptions import ProjectNotFoundError
 from doc_organize.core.models import SecurityConfig
 from doc_organize.web.auth import AuthMiddleware
-from doc_organize.web.dependencies import get_project_registry, get_tenant_id
+from doc_organize.web.dependencies import get_auth_store, get_project_registry, get_tenant_id, require_project_access
+from doc_organize.web.routes.admin import router as admin_router
 from doc_organize.web.routes.auth import router as auth_router
 from doc_organize.web.routes.cache import router as cache_router
+from doc_organize.web.routes.change_password import router as change_password_router
 from doc_organize.web.routes.downloads import router as downloads_router
 from doc_organize.web.routes.duplicates import router as duplicates_router
 from doc_organize.web.routes.projects import router as projects_router
@@ -52,6 +54,8 @@ def create_app(
     app.state.security = security
     app.add_middleware(AuthMiddleware, security=security, auth_db_path=auth_db_path)
     app.include_router(auth_router)
+    app.include_router(change_password_router)
+    app.include_router(admin_router)
     app.include_router(projects_router)
     app.include_router(scan_router)
     app.include_router(cache_router)
@@ -64,9 +68,16 @@ def create_app(
     async def project_selector(request: Request) -> HTMLResponse:
         async with get_project_registry(request) as registry:
             projects = await registry.list_projects(tenant_id=get_tenant_id(request))
+
+        if getattr(request.state, "is_admin", None) is False:
+            async with get_auth_store(request) as store:
+                role = await store.get_role(get_tenant_id(request), request.state.role_id)
+            allowed_names = {allowed.lower() for allowed in role.project_names}
+            projects = [project for project in projects if project.name.lower() in allowed_names]
+
         return templates.TemplateResponse(request, "project_selector.html", {"projects": projects})
 
-    @app.get("/projects/{name}", response_class=HTMLResponse)
+    @app.get("/projects/{name}", response_class=HTMLResponse, dependencies=[Depends(require_project_access)])
     async def dashboard(name: str, request: Request) -> HTMLResponse:
         try:
             async with get_project_registry(request) as registry:

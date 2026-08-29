@@ -10,7 +10,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
@@ -18,7 +18,7 @@ from doc_organize.cache import CacheManager
 from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME
 from doc_organize.core.exceptions import ProjectNotFoundError
 from doc_organize.core.models import CacheEntry, CacheExportSnapshot, DocumentStatus
-from doc_organize.web.dependencies import get_project_registry, get_tenant_id
+from doc_organize.web.dependencies import get_project_registry, get_tenant_id, require_project_access
 
 router = APIRouter(tags=["downloads"])
 
@@ -64,7 +64,7 @@ def _build_export_zip(project_root: Path, cached_entries: dict[str, CacheEntry])
     return tmp_path
 
 
-@router.get("/downloads/projects/{name}/export.zip")
+@router.get("/downloads/projects/{name}/export.zip", dependencies=[Depends(require_project_access)])
 async def export_project(name: str, request: Request) -> FileResponse:
     """Descarga un ZIP con `Conversión/` + `cache_export.json` + `DEDUP_REPORT.json` (si existe).
 

@@ -270,8 +270,25 @@ class Tenant(BaseModel):
     created_at: str = Field(..., description=_ISO_TIMESTAMP_DESC)
 
 
+class Role(BaseModel):
+    """A named permission set within a tenant (revision 9, roles y gestión de usuarios).
+
+    `is_admin=True` sees every project in the tenant, present and future —
+    `project_names` must then be empty (enforced by `AuthStore.create_role`/
+    `update_role`, not by this model, to keep the model a plain data container).
+    A non-admin role only sees the projects listed in `project_names`.
+    """
+
+    id: str = Field(..., description="Role UUID4")
+    tenant_id: str = Field(..., description="Tenant this role belongs to")
+    name: str = Field(..., description="Unique within the tenant (not globally)")
+    is_admin: bool = Field(default=False, description="Whether this role sees every project in the tenant")
+    project_names: list[str] = Field(default_factory=list, description="Projects this role can access (ignored if is_admin)")
+    created_at: str = Field(..., description=_ISO_TIMESTAMP_DESC)
+
+
 class User(BaseModel):
-    """A user belonging to exactly one tenant (revision 8, §2.7.2).
+    """A user belonging to exactly one tenant and exactly one role (revision 8 §2.7.2, revision 9).
 
     Never includes the password hash/salt: those fields live only in
     `auth.db` (AuthStore), so no endpoint can accidentally serialize them
@@ -281,6 +298,10 @@ class User(BaseModel):
     id: str = Field(..., description="User UUID4")
     tenant_id: str = Field(..., description="Tenant this user belongs to")
     username: str = Field(..., description="Unique within the tenant (not globally)")
+    role_id: str = Field(..., description="Role this user is assigned to (revision 9)")
+    must_change_password: bool = Field(
+        default=False, description="True until the user changes a bootstrap-assigned password (revision 9)"
+    )
     created_at: str = Field(..., description=_ISO_TIMESTAMP_DESC)
 
 
@@ -409,6 +430,7 @@ __all__ = [
     "ValidationResult",
     "Project",
     "Tenant",
+    "Role",
     "User",
     "Session",
     "ProjectNameValidation",

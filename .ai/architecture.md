@@ -109,6 +109,20 @@ exige sesión en toda ruta salvo `/login`/`/logout`. Las conexiones WebSocket (`
 autentican la sesión explícitamente en el propio handler
 (`web/auth.py::authenticate_session()`/`requires_auth()`).
 
+## Roles y gestión de usuarios (revisión 9)
+
+`AuthStore.create_tenant()` crea, en una única transacción, un rol `admin`
+(`is_admin=True`) y un usuario `admin`/`admin` con `must_change_password=True` —
+sin este bootstrap no habría forma de crear el primer usuario de un tenant nuevo.
+`AuthMiddleware` bloquea toda ruta salvo `/change-password`/`/logout` mientras esa
+marca siga activa. Un rol no-admin solo ve los proyectos de su `project_names`;
+`require_project_access` (`web/dependencies.py`), declarada por firma en cada
+ruta `{name}`-scoped (`projects`, `scan`, `cache`, `downloads`, `duplicates`, más
+el handler WebSocket a mano), es la única puerta de esa comprobación —
+`AuthStore.can_access_project()` es la fuente de verdad, nunca reimplementada por
+ruta. `/api/roles` y `/api/users` (`web/routes/admin.py`) están protegidas por
+`require_admin` a nivel de router, no por endpoint.
+
 ## Multi-tenant
 
 Cada proyecto pertenece a un `tenant_id` (default `"default"` para CLI/loopback). `tenant_id`

@@ -59,6 +59,22 @@ class UserAlreadyExistsError(AuthError):
     """Ya existe un usuario con ese nombre dentro del tenant."""
 
 
+class UserNotFoundError(AuthError):
+    """No hay ningun usuario registrado con ese id dentro del tenant."""
+
+
+class RoleAlreadyExistsError(AuthError):
+    """Ya existe un rol con ese nombre dentro del tenant."""
+
+
+class RoleNotFoundError(AuthError):
+    """No hay ningun rol registrado con ese id dentro del tenant."""
+
+
+class RoleInUseError(AuthError):
+    """El rol no se puede eliminar: lo usan usuarios, o es el ultimo rol admin del tenant."""
+
+
 __all__ = [
     "DocOrganizeError",
     "InvalidPathError",
@@ -73,4 +89,8 @@ __all__ = [
     "TenantAlreadyExistsError",
     "TenantNotFoundError",
     "UserAlreadyExistsError",
+    "UserNotFoundError",
+    "RoleAlreadyExistsError",
+    "RoleNotFoundError",
+    "RoleInUseError",
 ]

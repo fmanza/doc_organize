@@ -4,7 +4,7 @@ Folder Selector + escaneo/conversión vía web con progreso WebSocket (Fase D-2b
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -14,7 +14,7 @@ from doc_organize.scan import ScanCommand
 from doc_organize.utils.logging import get_logger
 from doc_organize.validators import FolderValidator
 from doc_organize.web.auth import authenticate_session, requires_auth
-from doc_organize.web.dependencies import get_project_registry, get_tenant_id
+from doc_organize.web.dependencies import get_auth_store, get_project_registry, get_tenant_id, require_project_access
 
 logger = get_logger(__name__)
 
@@ -34,7 +34,7 @@ class ValidateFoldersResponse(BaseModel):
     clean_paths: list[str]
 
 
-@router.get("/projects/{name}/scan", response_class=HTMLResponse)
+@router.get("/projects/{name}/scan", response_class=HTMLResponse, dependencies=[Depends(require_project_access)])
 async def folder_selector(name: str, request: Request) -> HTMLResponse:
     try:
         async with get_project_registry(request) as registry:
@@ -44,7 +44,11 @@ async def folder_selector(name: str, request: Request) -> HTMLResponse:
     return _templates.TemplateResponse(request, "folder_selector.html", {"project": project})
 
 
-@router.post("/api/projects/{name}/folders/validate", response_model=ValidateFoldersResponse)
+@router.post(
+    "/api/projects/{name}/folders/validate",
+    response_model=ValidateFoldersResponse,
+    dependencies=[Depends(require_project_access)],
+)
 async def validate_folders(name: str, payload: ValidateFoldersRequest, request: Request) -> ValidateFoldersResponse:
     # Confirma que el proyecto existe y pertenece al tenant de la sesion, aunque esta
     # ruta en si no lo toca -- evita usar este endpoint para sondear nombres de
@@ -75,11 +79,17 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
     auth_db_path = getattr(websocket.app.state, "auth_db_path", None)
 
     if requires_auth(security):
-        session = await authenticate_session(websocket.cookies, auth_db_path)
-        if session is None:
+        authenticated = await authenticate_session(websocket.cookies, auth_db_path)
+        if authenticated is None:
             await websocket.close(code=1008, reason="Unauthorized")
             return
-        tenant_id = session.tenant_id
+        tenant_id = authenticated.session.tenant_id
+        if not authenticated.is_admin:
+            async with get_auth_store(websocket) as store:
+                allowed = await store.can_access_project(tenant_id, authenticated.role_id, name)
+            if not allowed:
+                await websocket.close(code=1008, reason="Project not found")
+                return
     else:
         tenant_id = "default"
 

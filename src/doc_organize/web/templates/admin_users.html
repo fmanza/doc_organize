@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}doc_organize — Gestión de usuarios{% endblock %}
+{% block content %}
+<p><a href="/">&larr; Proyectos</a></p>
+<h1>Roles</h1>
+
+<form id="create-role-form">
+    <label for="role-name" class="sr-only">Nombre del rol</label>
+    <input type="text" id="role-name" placeholder="Nombre del rol" required>
+    <label><input type="checkbox" id="role-is-admin"> Admin (ve todos los proyectos)</label>
+    <fieldset id="role-projects-fieldset">
+        <legend class="sr-only">Proyectos permitidos</legend>
+        {% if projects %}
+        {% for project in projects %}
+        <label><input type="checkbox" class="role-project-checkbox" value="{{ project.name }}"> {{ project.name }}</label>
+        {% endfor %}
+        {% else %}
+        <span>No hay proyectos todavía.</span>
+        {% endif %}
+    </fieldset>
+    <button type="submit">Crear rol</button>
+</form>
+<p id="role-error" class="error"></p>
+
+<table>
+    <thead><tr><th>Nombre</th><th>Admin</th><th>Proyectos</th><th></th></tr></thead>
+    <tbody>
+    {% for role in roles %}
+        <tr data-role-id="{{ role.id }}">
+            <td>{{ role.name }}</td>
+            <td>{{ "Sí" if role.is_admin else "No" }}</td>
+            <td>{{ role.project_names | join(", ") if role.project_names else "—" }}</td>
+            <td><button type="button" class="delete-role" data-role-id="{{ role.id }}">Eliminar</button></td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+<h1>Usuarios</h1>
+
+<form id="create-user-form">
+    <label for="user-username" class="sr-only">Usuario</label>
+    <input type="text" id="user-username" placeholder="Usuario" required>
+    <label for="user-password" class="sr-only">Contraseña</label>
+    <input type="password" id="user-password" placeholder="Contraseña" required>
+    <label for="user-role" class="sr-only">Rol</label>
+    <select id="user-role" required>
+        {% for role in roles %}
+        <option value="{{ role.id }}">{{ role.name }}</option>
+        {% endfor %}
+    </select>
+    <button type="submit">Crear usuario</button>
+</form>
+<p id="user-error" class="error"></p>
+
+<table>
+    <thead><tr><th>Usuario</th><th>Rol</th><th>Debe cambiar contraseña</th><th></th></tr></thead>
+    <tbody>
+    {% for user in users %}
+        <tr data-user-id="{{ user.id }}">
+            <td>{{ user.username }}</td>
+            <td>{{ roles_by_id[user.role_id].name if user.role_id in roles_by_id else "—" }}</td>
+            <td>{{ "Sí" if user.must_change_password else "No" }}</td>
+            <td><button type="button" class="delete-user" data-user-id="{{ user.id }}">Eliminar</button></td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+<script>
+async function postJson(url, method, body) {
+    const response = await fetch(url, {
+        method: method,
+        headers: { "Content-Type": "application/json" },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || `Error ${response.status}`);
+    }
+    return response.status === 204 ? null : response.json();
+}
+
+const roleIsAdminCheckbox = document.getElementById("role-is-admin");
+const roleProjectsFieldset = document.getElementById("role-projects-fieldset");
+
+function syncRoleProjectsFieldset() {
+    const disabled = roleIsAdminCheckbox.checked;
+    roleProjectsFieldset.querySelectorAll(".role-project-checkbox").forEach((checkbox) => {
+        checkbox.disabled = disabled;
+        if (disabled) checkbox.checked = false;
+    });
+}
+roleIsAdminCheckbox.addEventListener("change", syncRoleProjectsFieldset);
+syncRoleProjectsFieldset();
+
+document.getElementById("create-role-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = document.getElementById("role-name").value;
+    const is_admin = roleIsAdminCheckbox.checked;
+    const project_names = Array.from(roleProjectsFieldset.querySelectorAll(".role-project-checkbox:checked")).map(
+        (checkbox) => checkbox.value
+    );
+    try {
+        await postJson("/api/roles", "POST", { name, is_admin, project_names });
+        window.location.reload();
+    } catch (err) {
+        document.getElementById("role-error").textContent = err.message;
+    }
+});
+
+document.getElementById("create-user-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const username = document.getElementById("user-username").value;
+    const password = document.getElementById("user-password").value;
+    const role_id = document.getElementById("user-role").value;
+    try {
+        await postJson("/api/users", "POST", { username, password, role_id });
+        window.location.reload();
+    } catch (err) {
+        document.getElementById("user-error").textContent = err.message;
+    }
+});
+
+document.querySelectorAll(".delete-role").forEach((button) => {
+    button.addEventListener("click", async () => {
+        try {
+            await postJson(`/api/roles/${button.dataset.roleId}`, "DELETE");
+            window.location.reload();
+        } catch (err) {
+            document.getElementById("role-error").textContent = err.message;
+        }
+    });
+});
+
+document.querySelectorAll(".delete-user").forEach((button) => {
+    button.addEventListener("click", async () => {
+        try {
+            await postJson(`/api/users/${button.dataset.userId}`, "DELETE");
+            window.location.reload();
+        } catch (err) {
+            document.getElementById("user-error").textContent = err.message;
+        }
+    });
+});
+</script>
+{% endblock %}
