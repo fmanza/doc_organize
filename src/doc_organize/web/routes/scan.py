@@ -78,42 +78,53 @@ def _paths_within_roots(paths: list[str], allowed_roots: list[str]) -> bool:
     return all(any(is_subpath(path, root) for root in allowed_roots) for path in paths)
 
 
-@router.websocket("/api/projects/{name}/scan")
-async def scan_websocket(name: str, websocket: WebSocket) -> None:
-    """Escanea/convierte el proyecto `name`, retransmitiendo cada `ScanEvent` como JSON.
+async def _authorize_scan_websocket(websocket: WebSocket, project_name: str) -> tuple[str, list[str] | None] | None:
+    """Autentica (si aplica) y resuelve `tenant_id` + `allowed_scan_roots` para la conexión.
 
     Autenticación manual (Fase D-2b, §2.7.3): `AuthMiddleware` extiende
     `BaseHTTPMiddleware`, que **no** intercepta conexiones WebSocket — Starlette pasa
     el scope `"websocket"` directo a la app interna sin llamar a `dispatch()`. Sin
     esta comprobación explícita, esta ruta quedaría accesible sin sesión aunque el
     resto de la app la exija en modo no-loopback.
-    """
-    await websocket.accept()
 
+    Devuelve `None` si ya se cerró el websocket (sin sesión válida, o sin acceso al
+    proyecto) — el llamador no debe hacer nada más. `allowed_scan_roots` es `None`
+    cuando no hay restricción de rutas (admin o loopback/sin auth); una lista
+    (posiblemente vacía) restringe los `paths` aceptados a esas raíces.
+    """
     security = websocket.app.state.security
     auth_db_path = getattr(websocket.app.state, "auth_db_path", None)
 
-    #: `None` = sin restricción de rutas (admin o loopback/sin auth); una lista
-    #: (posiblemente vacía) restringe los `paths` aceptados a esas raíces.
-    allowed_scan_roots: list[str] | None = None
+    if not requires_auth(security):
+        return "default", None
 
-    if requires_auth(security):
-        authenticated = await authenticate_session(websocket.cookies, auth_db_path)
-        if authenticated is None:
-            await websocket.close(code=1008, reason="Unauthorized")
-            return
-        tenant_id = authenticated.session.tenant_id
-        if not authenticated.is_admin:
-            async with get_auth_store(websocket) as store:
-                allowed = await store.can_access_project(tenant_id, authenticated.role_id, name)
-                if allowed:
-                    role = await store.get_role(tenant_id, authenticated.role_id)
-                    allowed_scan_roots = role.allowed_scan_roots
-            if not allowed:
-                await websocket.close(code=1008, reason="Project not found")
-                return
-    else:
-        tenant_id = "default"
+    authenticated = await authenticate_session(websocket.cookies, auth_db_path)
+    if authenticated is None:
+        await websocket.close(code=1008, reason="Unauthorized")
+        return None
+
+    tenant_id = authenticated.session.tenant_id
+    if authenticated.is_admin:
+        return tenant_id, None
+
+    async with get_auth_store(websocket) as store:
+        allowed = await store.can_access_project(tenant_id, authenticated.role_id, project_name)
+        if not allowed:
+            await websocket.close(code=1008, reason="Project not found")
+            return None
+        role = await store.get_role(tenant_id, authenticated.role_id)
+        return tenant_id, role.allowed_scan_roots
+
+
+@router.websocket("/api/projects/{name}/scan")
+async def scan_websocket(name: str, websocket: WebSocket) -> None:
+    """Escanea/convierte el proyecto `name`, retransmitiendo cada `ScanEvent` como JSON."""
+    await websocket.accept()
+
+    auth_result = await _authorize_scan_websocket(websocket, name)
+    if auth_result is None:
+        return
+    tenant_id, allowed_scan_roots = auth_result
 
     async with get_project_registry(websocket) as registry:
         try:

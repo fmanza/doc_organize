@@ -3,6 +3,7 @@ Cache transaccional (SQLite + WAL) de hashes de documentos (REQ-006).
 """
 
 from pathlib import Path
+from typing import Self
 
 import aiosqlite
 
@@ -56,7 +57,7 @@ class CacheManager:
         self.logger = get_logger(__name__)
         self._conn: aiosqlite.Connection | None = None
 
-    async def __aenter__(self) -> "CacheManager":
+    async def __aenter__(self) -> Self:
         self._conn = await aiosqlite.connect(self.db_path)
         await self._conn.execute("PRAGMA journal_mode=WAL")
         await self._conn.execute(_SCHEMA)

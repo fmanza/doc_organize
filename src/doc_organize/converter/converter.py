@@ -8,7 +8,7 @@ import math
 import time
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import EasyOcrOptions, PdfPipelineOptions
@@ -49,7 +49,7 @@ class DocumentConverter:
         self.logger = get_logger(__name__)
         self._docling_by_mode: dict[tuple[bool, bool], DoclingConverter] | None = None
 
-    async def __aenter__(self) -> "DocumentConverter":
+    async def __aenter__(self) -> Self:
         self._docling_by_mode = {}
         return self
 

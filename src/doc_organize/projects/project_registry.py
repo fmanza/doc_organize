@@ -9,6 +9,7 @@ import shutil
 
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Self
 
 from doc_organize.core.exceptions import (
     ProjectAlreadyExistsError,
@@ -55,7 +56,7 @@ class ProjectRegistry:
         self._validator = ProjectValidator()
         self._lock = asyncio.Lock()
 
-    async def __aenter__(self) -> "ProjectRegistry":
+    async def __aenter__(self) -> Self:
         await asyncio.to_thread(self.registry_path.parent.mkdir, parents=True, exist_ok=True)
         return self
 

@@ -7,6 +7,7 @@ import time
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Self
 
 from doc_organize.core.constants import IGNORED_NAMES, SUPPORTED_EXTENSIONS
 from doc_organize.core.models import DirectoryTree, DirectoryTreeNode, DocumentMetadata, ScanResult
@@ -54,7 +55,7 @@ class DocumentScanner:
         self.logger = get_logger(__name__)
         self._max_concurrent_hashes = max_concurrent_hashes
 
-    async def __aenter__(self) -> "DocumentScanner":
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, *exc_info: object) -> None:

@@ -289,6 +289,22 @@ class AuthStore:
                 [(role.id, root_path) for root_path in role.allowed_scan_roots],
             )
 
+    async def _replace_role_associations(self, role_id: str, project_names: list[str], scan_roots: list[str]) -> None:
+        """Reemplaza por completo `role_projects`/`role_scan_roots` de `role_id` (usado por
+        `update_role`, sin commit — el llamador decide la transaccion)."""
+        await self._connection.execute("DELETE FROM role_projects WHERE role_id = ?", (role_id,))
+        if project_names:
+            await self._connection.executemany(
+                "INSERT INTO role_projects (role_id, project_name) VALUES (?, ?)",
+                [(role_id, project_name) for project_name in project_names],
+            )
+        await self._connection.execute("DELETE FROM role_scan_roots WHERE role_id = ?", (role_id,))
+        if scan_roots:
+            await self._connection.executemany(
+                "INSERT INTO role_scan_roots (role_id, root_path) VALUES (?, ?)",
+                [(role_id, root_path) for root_path in scan_roots],
+            )
+
     async def _insert_user_row(self, user: User, password_hash: str, salt: str) -> None:
         await self._connection.execute(
             "INSERT INTO users (id, tenant_id, username, password_hash, password_salt, role_id, must_change_password, created_at) "
@@ -386,10 +402,16 @@ class AuthStore:
         cursor = await self._connection.execute("SELECT 1 FROM tenants WHERE id = ?", (tenant_id,))
         return await cursor.fetchone() is not None
 
-    async def _role_name_taken(self, tenant_id: str, name: str) -> bool:
-        cursor = await self._connection.execute(
-            "SELECT 1 FROM roles WHERE tenant_id = ? AND name = ? COLLATE NOCASE", (tenant_id, name)
-        )
+    async def _role_name_taken(self, tenant_id: str, name: str, *, exclude_role_id: str | None = None) -> bool:
+        if exclude_role_id is None:
+            cursor = await self._connection.execute(
+                "SELECT 1 FROM roles WHERE tenant_id = ? AND name = ? COLLATE NOCASE", (tenant_id, name)
+            )
+        else:
+            cursor = await self._connection.execute(
+                "SELECT 1 FROM roles WHERE tenant_id = ? AND name = ? COLLATE NOCASE AND id != ?",
+                (tenant_id, name, exclude_role_id),
+            )
         return await cursor.fetchone() is not None
 
     async def _username_taken(self, tenant_id: str, username: str) -> bool:
@@ -500,6 +522,45 @@ class AuthStore:
             project_names=project_names, allowed_scan_roots=allowed_scan_roots, created_at=row[4],
         )
 
+    @staticmethod
+    def _resolve_role_update(
+        current: Role,
+        *,
+        name: str | None,
+        is_admin: bool | None,
+        project_names: list[str] | None,
+        allowed_scan_roots: list[str] | None,
+    ) -> tuple[str, bool, list[str], list[str]]:
+        """Calcula name/is_admin/project_names/allowed_scan_roots nuevos para `update_role`
+        a partir de `current` y los campos pasados (solo los no-`None` cambian), validando
+        las combinaciones prohibidas. No toca la base de datos.
+
+        Raises:
+            AuthError: Ver `update_role`.
+        """
+        if is_admin is False and current.is_admin and project_names is None:
+            raise AuthError(
+                "Al quitar is_admin a un rol, hay que indicar explícitamente project_names "
+                "(puede ser una lista vacía) — de lo contrario el rol quedaría sin acceso a ningún "
+                "proyecto sin que se haya pedido explícitamente."
+            )
+
+        new_name = current.name if name is None else _validate_role_name(name)
+        new_is_admin = current.is_admin if is_admin is None else is_admin
+        new_project_names = current.project_names if project_names is None else list(dict.fromkeys(project_names))
+        new_scan_roots = (
+            current.allowed_scan_roots if allowed_scan_roots is None else list(dict.fromkeys(allowed_scan_roots))
+        )
+        if is_admin is False and current.allowed_scan_roots and allowed_scan_roots is None:
+            new_scan_roots = []
+
+        if new_is_admin and new_project_names:
+            raise AuthError("Un rol admin ve todos los proyectos del tenant; no se le puede asignar una lista de proyectos.")
+        if new_is_admin and new_scan_roots:
+            raise AuthError("Un rol admin puede escanear cualquier ruta; no se le puede asignar una lista de raíces de escaneo.")
+
+        return new_name, new_is_admin, new_project_names, new_scan_roots
+
     async def update_role(
         self,
         tenant_id: str,
@@ -527,50 +588,23 @@ class AuthStore:
                 acceso previamente concedido a ese rol.
         """
         current = await self.get_role(tenant_id, role_id)
-
-        if is_admin is False and current.is_admin and project_names is None:
-            raise AuthError(
-                "Al quitar is_admin a un rol, hay que indicar explícitamente project_names "
-                "(puede ser una lista vacía) — de lo contrario el rol quedaría sin acceso a ningún "
-                "proyecto sin que se haya pedido explícitamente."
-            )
-
-        new_name = current.name if name is None else _validate_role_name(name)
-        new_is_admin = current.is_admin if is_admin is None else is_admin
-        new_project_names = current.project_names if project_names is None else list(dict.fromkeys(project_names))
-        new_scan_roots = (
-            current.allowed_scan_roots if allowed_scan_roots is None else list(dict.fromkeys(allowed_scan_roots))
+        new_name, new_is_admin, new_project_names, new_scan_roots = self._resolve_role_update(
+            current,
+            name=name,
+            is_admin=is_admin,
+            project_names=project_names,
+            allowed_scan_roots=allowed_scan_roots,
         )
-        if is_admin is False and current.allowed_scan_roots and allowed_scan_roots is None:
-            new_scan_roots = []
-        if new_is_admin and new_project_names:
-            raise AuthError("Un rol admin ve todos los proyectos del tenant; no se le puede asignar una lista de proyectos.")
-        if new_is_admin and new_scan_roots:
-            raise AuthError("Un rol admin puede escanear cualquier ruta; no se le puede asignar una lista de raíces de escaneo.")
 
-        if new_name.lower() != current.name.lower():
-            cursor = await self._connection.execute(
-                "SELECT 1 FROM roles WHERE tenant_id = ? AND name = ? COLLATE NOCASE AND id != ?",
-                (tenant_id, new_name, role_id),
-            )
-            if await cursor.fetchone() is not None:
-                raise RoleAlreadyExistsError(f"Ya existe un rol '{new_name}' en el tenant '{tenant_id}'.")
+        if new_name.lower() != current.name.lower() and await self._role_name_taken(
+            tenant_id, new_name, exclude_role_id=role_id
+        ):
+            raise RoleAlreadyExistsError(f"Ya existe un rol '{new_name}' en el tenant '{tenant_id}'.")
 
         await self._connection.execute(
             "UPDATE roles SET name = ?, is_admin = ? WHERE id = ?", (new_name, int(new_is_admin), role_id)
         )
-        await self._connection.execute("DELETE FROM role_projects WHERE role_id = ?", (role_id,))
-        if new_project_names:
-            await self._connection.executemany(
-                "INSERT INTO role_projects (role_id, project_name) VALUES (?, ?)",
-                [(role_id, project_name) for project_name in new_project_names],
-            )
-        await self._connection.execute("DELETE FROM role_scan_roots WHERE role_id = ?", (role_id,))
-        if new_scan_roots:
-            await self._connection.executemany(
-                "INSERT INTO role_scan_roots (role_id, root_path) VALUES (?, ?)",
-                [(role_id, root_path) for root_path in new_scan_roots],
-            )
+        await self._replace_role_associations(role_id, new_project_names, new_scan_roots)
         await self._connection.commit()
         return Role(
             id=role_id, tenant_id=tenant_id, name=new_name, is_admin=new_is_admin,
