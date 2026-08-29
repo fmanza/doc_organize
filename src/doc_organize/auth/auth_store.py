@@ -67,6 +67,11 @@ CREATE TABLE IF NOT EXISTS role_projects (
     project_name TEXT NOT NULL,
     PRIMARY KEY (role_id, project_name)
 );
+CREATE TABLE IF NOT EXISTS role_scan_roots (
+    role_id TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    root_path TEXT NOT NULL,
+    PRIMARY KEY (role_id, root_path)
+);
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -277,6 +282,11 @@ class AuthStore:
                 "INSERT INTO role_projects (role_id, project_name) VALUES (?, ?)",
                 [(role.id, project_name) for project_name in role.project_names],
             )
+        if role.allowed_scan_roots:
+            await self._connection.executemany(
+                "INSERT INTO role_scan_roots (role_id, root_path) VALUES (?, ?)",
+                [(role.id, root_path) for root_path in role.allowed_scan_roots],
+            )
 
     async def _insert_user_row(self, user: User, password_hash: str, salt: str) -> None:
         await self._connection.execute(
@@ -297,6 +307,12 @@ class AuthStore:
     async def _load_role_project_names(self, role_id: str) -> list[str]:
         cursor = await self._connection.execute(
             "SELECT project_name FROM role_projects WHERE role_id = ? ORDER BY project_name", (role_id,)
+        )
+        return [row[0] for row in await cursor.fetchall()]
+
+    async def _load_role_scan_roots(self, role_id: str) -> list[str]:
+        cursor = await self._connection.execute(
+            "SELECT root_path FROM role_scan_roots WHERE role_id = ? ORDER BY root_path", (role_id,)
         )
         return [row[0] for row in await cursor.fetchall()]
 
@@ -384,21 +400,38 @@ class AuthStore:
     # ===== Roles =====
 
     async def create_role(
-        self, tenant_id: str, name: str, is_admin: bool = False, project_names: list[str] | None = None
+        self,
+        tenant_id: str,
+        name: str,
+        is_admin: bool = False,
+        project_names: list[str] | None = None,
+        allowed_scan_roots: list[str] | None = None,
     ) -> Role:
         """Crea un rol dentro de `tenant_id`; `name` es único por tenant (case-insensitive).
 
+        Args:
+            allowed_scan_roots: Rutas del sistema de archivos que este rol puede
+                escanear vía `/api/projects/{name}/scan` (revisión de seguridad:
+                sin esto, cualquier rol con acceso a un proyecto podía escanear
+                cualquier ruta legible por el servidor, evadiendo `project_names`).
+                Vacía por defecto — un rol restringido no puede escanear ninguna
+                ruta externa hasta que un admin le asigne al menos una.
+
         Raises:
             AuthError: Si `name` no cumple las reglas mínimas, o si `is_admin=True`
-                se combina con una lista de proyectos no vacía (un rol admin ve
-                todos los proyectos del tenant; una lista explícita sería ambigua).
+                se combina con una lista de proyectos o de raíces de escaneo no
+                vacía (un rol admin ve todos los proyectos del tenant y puede
+                escanear cualquier ruta; una lista explícita sería ambigua).
             TenantNotFoundError: Si `tenant_id` no existe.
             RoleAlreadyExistsError: Si ya existe ese `name` en el tenant.
         """
         stripped_name = _validate_role_name(name)
         deduped_projects = list(dict.fromkeys(project_names or []))
+        deduped_scan_roots = list(dict.fromkeys(allowed_scan_roots or []))
         if is_admin and deduped_projects:
             raise AuthError("Un rol admin ve todos los proyectos del tenant; no se le puede asignar una lista de proyectos.")
+        if is_admin and deduped_scan_roots:
+            raise AuthError("Un rol admin puede escanear cualquier ruta; no se le puede asignar una lista de raíces de escaneo.")
 
         if not await self.tenant_exists(tenant_id):
             raise TenantNotFoundError(f"No existe ningún tenant con id '{tenant_id}'.")
@@ -412,6 +445,7 @@ class AuthStore:
             name=stripped_name,
             is_admin=is_admin,
             project_names=deduped_projects,
+            allowed_scan_roots=deduped_scan_roots,
             created_at=_now_iso(),
         )
         try:
@@ -435,8 +469,12 @@ class AuthStore:
         roles = []
         for row in rows:
             project_names = await self._load_role_project_names(row[0])
+            allowed_scan_roots = await self._load_role_scan_roots(row[0])
             roles.append(
-                Role(id=row[0], tenant_id=row[1], name=row[2], is_admin=bool(row[3]), project_names=project_names, created_at=row[4])
+                Role(
+                    id=row[0], tenant_id=row[1], name=row[2], is_admin=bool(row[3]),
+                    project_names=project_names, allowed_scan_roots=allowed_scan_roots, created_at=row[4],
+                )
             )
         return roles
 
@@ -455,7 +493,11 @@ class AuthStore:
         if row is None:
             raise RoleNotFoundError(f"No existe ningún rol '{role_id}' en el tenant '{tenant_id}'.")
         project_names = await self._load_role_project_names(row[0])
-        return Role(id=row[0], tenant_id=row[1], name=row[2], is_admin=bool(row[3]), project_names=project_names, created_at=row[4])
+        allowed_scan_roots = await self._load_role_scan_roots(row[0])
+        return Role(
+            id=row[0], tenant_id=row[1], name=row[2], is_admin=bool(row[3]),
+            project_names=project_names, allowed_scan_roots=allowed_scan_roots, created_at=row[4],
+        )
 
     async def update_role(
         self,
@@ -465,18 +507,23 @@ class AuthStore:
         name: str | None = None,
         is_admin: bool | None = None,
         project_names: list[str] | None = None,
+        allowed_scan_roots: list[str] | None = None,
     ) -> Role:
-        """Actualiza nombre/`is_admin`/proyectos de un rol. Solo los campos pasados cambian.
+        """Actualiza nombre/`is_admin`/proyectos/raíces de escaneo de un rol. Solo los
+        campos pasados cambian.
 
-        `project_names`, si se pasa, reemplaza la lista completa (no la combina con
-        la existente).
+        `project_names`/`allowed_scan_roots`, si se pasan, reemplazan la lista
+        completa (no la combinan con la existente).
 
         Raises:
             AuthError: Si `is_admin` pasa explícitamente de `True` a `False` sin
                 pasar `project_names` en la misma llamada — degradar un rol admin
                 sin decir a qué proyectos queda restringido dejaría la lista vacía
                 en silencio (pierde todo acceso sin que quien llama lo pidiera
-                explícitamente).
+                explícitamente). `allowed_scan_roots` no tiene esta misma exigencia:
+                queda vacía por defecto tras degradar (sin capacidad de escaneo
+                externo), que es el lado seguro, no una pérdida sorprendente de
+                acceso previamente concedido a ese rol.
         """
         current = await self.get_role(tenant_id, role_id)
 
@@ -490,8 +537,15 @@ class AuthStore:
         new_name = current.name if name is None else _validate_role_name(name)
         new_is_admin = current.is_admin if is_admin is None else is_admin
         new_project_names = current.project_names if project_names is None else list(dict.fromkeys(project_names))
+        new_scan_roots = (
+            current.allowed_scan_roots if allowed_scan_roots is None else list(dict.fromkeys(allowed_scan_roots))
+        )
+        if is_admin is False and current.allowed_scan_roots and allowed_scan_roots is None:
+            new_scan_roots = []
         if new_is_admin and new_project_names:
             raise AuthError("Un rol admin ve todos los proyectos del tenant; no se le puede asignar una lista de proyectos.")
+        if new_is_admin and new_scan_roots:
+            raise AuthError("Un rol admin puede escanear cualquier ruta; no se le puede asignar una lista de raíces de escaneo.")
 
         if new_name.lower() != current.name.lower():
             cursor = await self._connection.execute(
@@ -510,10 +564,16 @@ class AuthStore:
                 "INSERT INTO role_projects (role_id, project_name) VALUES (?, ?)",
                 [(role_id, project_name) for project_name in new_project_names],
             )
+        await self._connection.execute("DELETE FROM role_scan_roots WHERE role_id = ?", (role_id,))
+        if new_scan_roots:
+            await self._connection.executemany(
+                "INSERT INTO role_scan_roots (role_id, root_path) VALUES (?, ?)",
+                [(role_id, root_path) for root_path in new_scan_roots],
+            )
         await self._connection.commit()
         return Role(
             id=role_id, tenant_id=tenant_id, name=new_name, is_admin=new_is_admin,
-            project_names=new_project_names, created_at=current.created_at,
+            project_names=new_project_names, allowed_scan_roots=new_scan_roots, created_at=current.created_at,
         )
 
     async def delete_role(self, tenant_id: str, role_id: str) -> None:

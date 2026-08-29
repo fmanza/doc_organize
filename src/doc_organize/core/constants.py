@@ -81,6 +81,14 @@ SCRYPT_MAXMEM = 256 * 1024 * 1024
 #: refrescar `expires_at`.
 SESSION_LIFETIME_HOURS = 24
 
+#: Mitigacion de fuerza bruta en `POST /login` (revision de seguridad, revision 9):
+#: tras `LOGIN_MAX_ATTEMPTS` fallos consecutivos para el mismo (tenant_id, username),
+#: se bloquean nuevos intentos durante `LOGIN_LOCKOUT_SECONDS`. En memoria del
+#: proceso (ver `web.auth.LoginRateLimiter`), no persistido: suficiente para frenar
+#: el adivinado del admin/admin de bootstrap sin anadir infraestructura nueva.
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_LOCKOUT_SECONDS = 60.0
+
 #: Longitud maxima del nombre de un rol (revision 9, roles y gestion de usuarios).
 ROLE_NAME_MAX_LENGTH = 50
 
@@ -117,6 +125,8 @@ __all__ = [
     "SCRYPT_DKLEN",
     "SCRYPT_MAXMEM",
     "SESSION_LIFETIME_HOURS",
+    "LOGIN_MAX_ATTEMPTS",
+    "LOGIN_LOCKOUT_SECONDS",
     "ROLE_NAME_MAX_LENGTH",
     "ROLE_NAME_PATTERN",
     "DEFAULT_ADMIN_ROLE_NAME",

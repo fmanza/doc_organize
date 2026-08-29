@@ -98,6 +98,32 @@ async def test_admin_can_create_role_and_user_via_api(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_role_with_allowed_scan_roots(tmp_path) -> None:
+    await _create_tenant(tmp_path)
+    app = _non_loopback_app(tmp_path)
+    async with _client(app) as client:
+        await _login_admin_and_change_password(client)
+        create_role = await client.post(
+            "/api/roles",
+            json={"name": "Lector", "is_admin": False, "project_names": ["Proyecto A"], "allowed_scan_roots": ["/repo/entrada"]},
+        )
+    assert create_role.status_code == 201
+    assert create_role.json()["allowed_scan_roots"] == ["/repo/entrada"]
+
+
+@pytest.mark.asyncio
+async def test_create_role_admin_with_scan_roots_returns_422(tmp_path) -> None:
+    await _create_tenant(tmp_path)
+    app = _non_loopback_app(tmp_path)
+    async with _client(app) as client:
+        await _login_admin_and_change_password(client)
+        response = await client.post(
+            "/api/roles", json={"name": "Super", "is_admin": True, "allowed_scan_roots": ["/repo/entrada"]}
+        )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_create_role_admin_with_projects_returns_422(tmp_path) -> None:
     await _create_tenant(tmp_path)
     app = _non_loopback_app(tmp_path)

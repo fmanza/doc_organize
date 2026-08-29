@@ -36,6 +36,7 @@ class RoleResponse(BaseModel):
     name: str
     is_admin: bool
     project_names: list[str]
+    allowed_scan_roots: list[str]
     created_at: str
 
 
@@ -47,12 +48,14 @@ class CreateRoleRequest(BaseModel):
     name: str
     is_admin: bool = False
     project_names: list[str] = []
+    allowed_scan_roots: list[str] = []
 
 
 class UpdateRoleRequest(BaseModel):
     name: str | None = None
     is_admin: bool | None = None
     project_names: list[str] | None = None
+    allowed_scan_roots: list[str] | None = None
 
 
 class UserResponse(BaseModel):
@@ -80,7 +83,8 @@ class UpdateUserRequest(BaseModel):
 
 def _role_response(role: Role) -> RoleResponse:
     return RoleResponse(
-        id=role.id, name=role.name, is_admin=role.is_admin, project_names=role.project_names, created_at=role.created_at
+        id=role.id, name=role.name, is_admin=role.is_admin, project_names=role.project_names,
+        allowed_scan_roots=role.allowed_scan_roots, created_at=role.created_at,
     )
 
 
@@ -119,7 +123,11 @@ async def create_role(payload: CreateRoleRequest, request: Request) -> RoleRespo
     try:
         async with get_auth_store(request) as store:
             role = await store.create_role(
-                get_tenant_id(request), payload.name, is_admin=payload.is_admin, project_names=payload.project_names
+                get_tenant_id(request),
+                payload.name,
+                is_admin=payload.is_admin,
+                project_names=payload.project_names,
+                allowed_scan_roots=payload.allowed_scan_roots,
             )
     except RoleAlreadyExistsError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -148,6 +156,7 @@ async def update_role(role_id: str, payload: UpdateRoleRequest, request: Request
                 name=payload.name,
                 is_admin=payload.is_admin,
                 project_names=payload.project_names,
+                allowed_scan_roots=payload.allowed_scan_roots,
             )
     except RoleNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

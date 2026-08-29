@@ -10,6 +10,8 @@ no, nadie podría autenticarse nunca). Las escrituras además validan que
 `SameSite=Strict`, no CSRF-token clásico).
 """
 
+import time
+
 from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import urlparse
@@ -19,6 +21,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from doc_organize.auth import AuthenticatedSession, AuthStore
+from doc_organize.core.constants import LOGIN_LOCKOUT_SECONDS, LOGIN_MAX_ATTEMPTS
 from doc_organize.core.models import SecurityConfig
 
 SESSION_COOKIE_NAME = "doc_organize_session"
@@ -61,6 +64,63 @@ async def authenticate_session(cookies: Mapping[str, str], auth_db_path: str | P
     store = AuthStore(auth_db_path) if auth_db_path else AuthStore()
     async with store as opened_store:
         return await opened_store.get_session_with_access(token)
+
+
+class LoginRateLimiter:
+    """Bloqueo temporal de `POST /login` tras demasiados fallos consecutivos para el
+    mismo (tenant_id, username) (revisión de seguridad, revisión 9).
+
+    Mitiga la adivinación del admin/admin de bootstrap (`DEFAULT_ADMIN_USERNAME`/
+    `DEFAULT_ADMIN_PASSWORD`) antes de que el admin legítimo complete su primer
+    login. En memoria del proceso — un reinicio del servidor limpia los contadores,
+    aceptable: no es un mecanismo de auditoría, solo de frenado.
+
+    Attributes:
+        max_attempts (int): Fallos consecutivos antes de bloquear.
+        lockout_seconds (float): Duración del bloqueo tras alcanzar `max_attempts`.
+
+    Example:
+        >>> limiter = LoginRateLimiter(max_attempts=3, lockout_seconds=30)
+        >>> limiter.is_locked("acme-corp", "admin")
+        False
+        >>> for _ in range(3): limiter.record_failure("acme-corp", "admin")
+        >>> limiter.is_locked("acme-corp", "admin")
+        True
+    """
+
+    def __init__(self, max_attempts: int = LOGIN_MAX_ATTEMPTS, lockout_seconds: float = LOGIN_LOCKOUT_SECONDS) -> None:
+        self.max_attempts = max_attempts
+        self.lockout_seconds = lockout_seconds
+        self._failures: dict[str, tuple[int, float]] = {}  # key -> (count, locked_until_monotonic)
+
+    @staticmethod
+    def _key(tenant_id: str, username: str) -> str:
+        return f"{tenant_id}:{username.strip().lower()}"
+
+    def is_locked(self, tenant_id: str, username: str) -> bool:
+        """`True` si (`tenant_id`, `username`) sigue dentro de su ventana de bloqueo."""
+        key = self._key(tenant_id, username)
+        entry = self._failures.get(key)
+        if entry is None:
+            return False
+        count, locked_until = entry
+        if count < self.max_attempts:
+            return False
+        if time.monotonic() >= locked_until:
+            del self._failures[key]  # ventana expirada: libera el contador
+            return False
+        return True
+
+    def record_failure(self, tenant_id: str, username: str) -> None:
+        """Cuenta un intento fallido; bloquea `lockout_seconds` al llegar a `max_attempts`."""
+        key = self._key(tenant_id, username)
+        count = self._failures.get(key, (0, 0.0))[0] + 1
+        locked_until = time.monotonic() + self.lockout_seconds if count >= self.max_attempts else 0.0
+        self._failures[key] = (count, locked_until)
+
+    def record_success(self, tenant_id: str, username: str) -> None:
+        """Limpia el contador de fallos tras un login correcto."""
+        self._failures.pop(self._key(tenant_id, username), None)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -116,4 +176,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return origin_netloc == request_host
 
 
-__all__ = ["AuthMiddleware", "SESSION_COOKIE_NAME", "authenticate_session", "is_loopback", "requires_auth"]
+__all__ = [
+    "AuthMiddleware",
+    "LoginRateLimiter",
+    "SESSION_COOKIE_NAME",
+    "authenticate_session",
+    "is_loopback",
+    "requires_auth",
+]

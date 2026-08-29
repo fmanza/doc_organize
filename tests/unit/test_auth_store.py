@@ -266,6 +266,52 @@ async def test_create_role_rejects_duplicate_name_case_insensitive(tmp_path) -> 
 
 
 @pytest.mark.asyncio
+async def test_create_role_rejects_admin_with_scan_roots(tmp_path) -> None:
+    async with AuthStore(tmp_path / "auth.db") as store:
+        tenant = await store.create_tenant("Acme Corp")
+        with pytest.raises(AuthError):
+            await store.create_role(tenant.id, "Super Admin", is_admin=True, allowed_scan_roots=["/repo"])
+
+
+@pytest.mark.asyncio
+async def test_create_role_default_has_no_allowed_scan_roots(tmp_path) -> None:
+    async with AuthStore(tmp_path / "auth.db") as store:
+        tenant = await store.create_tenant("Acme Corp")
+        role = await store.create_role(tenant.id, "Lector", project_names=["Proyecto A"])
+    assert role.allowed_scan_roots == []
+
+
+@pytest.mark.asyncio
+async def test_create_role_with_allowed_scan_roots(tmp_path) -> None:
+    async with AuthStore(tmp_path / "auth.db") as store:
+        tenant = await store.create_tenant("Acme Corp")
+        role = await store.create_role(
+            tenant.id, "Lector", project_names=["Proyecto A"], allowed_scan_roots=["/repo/entrada"]
+        )
+        fetched = await store.get_role(tenant.id, role.id)
+    assert role.allowed_scan_roots == ["/repo/entrada"]
+    assert fetched.allowed_scan_roots == ["/repo/entrada"]
+
+
+@pytest.mark.asyncio
+async def test_update_role_replaces_scan_roots(tmp_path) -> None:
+    async with AuthStore(tmp_path / "auth.db") as store:
+        tenant = await store.create_tenant("Acme Corp")
+        role = await store.create_role(tenant.id, "Lector", allowed_scan_roots=["/repo/a"])
+        updated = await store.update_role(tenant.id, role.id, allowed_scan_roots=["/repo/b"])
+    assert updated.allowed_scan_roots == ["/repo/b"]
+
+
+@pytest.mark.asyncio
+async def test_update_role_rejects_admin_with_scan_roots(tmp_path) -> None:
+    async with AuthStore(tmp_path / "auth.db") as store:
+        tenant = await store.create_tenant("Acme Corp")
+        role = await store.create_role(tenant.id, "Lector", allowed_scan_roots=["/repo/a"])
+        with pytest.raises(AuthError):
+            await store.update_role(tenant.id, role.id, is_admin=True, project_names=[])
+
+
+@pytest.mark.asyncio
 async def test_create_role_with_restricted_projects(tmp_path) -> None:
     async with AuthStore(tmp_path / "auth.db") as store:
         tenant = await store.create_tenant("Acme Corp")

@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from doc_organize.core.exceptions import ProjectNotFoundError
 from doc_organize.scan import ScanCommand
 from doc_organize.utils.logging import get_logger
+from doc_organize.utils.path_utils import is_subpath
 from doc_organize.validators import FolderValidator
 from doc_organize.web.auth import authenticate_session, requires_auth
 from doc_organize.web.dependencies import get_auth_store, get_project_registry, get_tenant_id, require_project_access
@@ -63,6 +64,22 @@ async def validate_folders(name: str, payload: ValidateFoldersRequest, request: 
     return ValidateFoldersResponse(valid=result.is_valid, warnings=result.warnings, clean_paths=result.clean_paths)
 
 
+def _paths_within_roots(paths: list[str], allowed_roots: list[str]) -> bool:
+    """`True` si cada ruta de `paths` es (o está dentro de) alguna de `allowed_roots`.
+
+    Sin `allowed_roots` configuradas, un rol restringido no puede escanear ninguna
+    ruta externa: antes de esta comprobación, cualquier rol con acceso a un
+    proyecto podía indicar cualquier ruta legible por el proceso servidor,
+    evadiendo por completo la restricción de `project_names` (revisión de
+    seguridad, revisión 9 roles y gestión de usuarios).
+    """
+    if not paths:
+        return True
+    if not allowed_roots:
+        return False
+    return all(any(is_subpath(path, root) for root in allowed_roots) for path in paths)
+
+
 @router.websocket("/api/projects/{name}/scan")
 async def scan_websocket(name: str, websocket: WebSocket) -> None:
     """Escanea/convierte el proyecto `name`, retransmitiendo cada `ScanEvent` como JSON.
@@ -78,6 +95,10 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
     security = websocket.app.state.security
     auth_db_path = getattr(websocket.app.state, "auth_db_path", None)
 
+    #: `None` = sin restricción de rutas (admin o loopback/sin auth); una lista
+    #: (posiblemente vacía) restringe los `paths` aceptados a esas raíces.
+    allowed_scan_roots: list[str] | None = None
+
     if requires_auth(security):
         authenticated = await authenticate_session(websocket.cookies, auth_db_path)
         if authenticated is None:
@@ -87,6 +108,9 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
         if not authenticated.is_admin:
             async with get_auth_store(websocket) as store:
                 allowed = await store.can_access_project(tenant_id, authenticated.role_id, name)
+                if allowed:
+                    role = await store.get_role(tenant_id, authenticated.role_id)
+                    allowed_scan_roots = role.allowed_scan_roots
             if not allowed:
                 await websocket.close(code=1008, reason="Project not found")
                 return
@@ -106,6 +130,10 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
         return
 
     paths = [str(p) for p in request_payload.get("paths", [])]
+    if allowed_scan_roots is not None and not _paths_within_roots(paths, allowed_scan_roots):
+        await websocket.close(code=1008, reason="Forbidden path")
+        return
+
     deduplicate = bool(request_payload.get("deduplicate", False))
     use_ocr = bool(request_payload.get("use_ocr", False))
     use_gpu = bool(request_payload.get("use_gpu", False))

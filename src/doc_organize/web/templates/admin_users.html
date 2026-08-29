@@ -18,18 +18,24 @@
         <span>No hay proyectos todavía.</span>
         {% endif %}
     </fieldset>
+    <fieldset id="role-scan-roots-fieldset">
+        <legend class="sr-only">Raíces de escaneo permitidas</legend>
+        <label for="role-scan-roots">Raíces de escaneo permitidas (una ruta por línea; vacío = no puede escanear carpetas externas)</label>
+        <textarea id="role-scan-roots" rows="3" placeholder="C:\ruta\permitida"></textarea>
+    </fieldset>
     <button type="submit">Crear rol</button>
 </form>
 <p id="role-error" class="error"></p>
 
 <table>
-    <thead><tr><th>Nombre</th><th>Admin</th><th>Proyectos</th><th></th></tr></thead>
+    <thead><tr><th>Nombre</th><th>Admin</th><th>Proyectos</th><th>Raíces de escaneo</th><th></th></tr></thead>
     <tbody>
     {% for role in roles %}
         <tr data-role-id="{{ role.id }}">
             <td>{{ role.name }}</td>
             <td>{{ "Sí" if role.is_admin else "No" }}</td>
             <td>{{ role.project_names | join(", ") if role.project_names else "—" }}</td>
+            <td>{{ role.allowed_scan_roots | join(", ") if role.allowed_scan_roots else "—" }}</td>
             <td><button type="button" class="delete-role" data-role-id="{{ role.id }}">Eliminar</button></td>
         </tr>
     {% endfor %}
@@ -83,6 +89,7 @@ async function postJson(url, method, body) {
 
 const roleIsAdminCheckbox = document.getElementById("role-is-admin");
 const roleProjectsFieldset = document.getElementById("role-projects-fieldset");
+const roleScanRootsTextarea = document.getElementById("role-scan-roots");
 
 function syncRoleProjectsFieldset() {
     const disabled = roleIsAdminCheckbox.checked;
@@ -90,6 +97,8 @@ function syncRoleProjectsFieldset() {
         checkbox.disabled = disabled;
         if (disabled) checkbox.checked = false;
     });
+    roleScanRootsTextarea.disabled = disabled;
+    if (disabled) roleScanRootsTextarea.value = "";
 }
 roleIsAdminCheckbox.addEventListener("change", syncRoleProjectsFieldset);
 syncRoleProjectsFieldset();
@@ -101,8 +110,12 @@ document.getElementById("create-role-form").addEventListener("submit", async (ev
     const project_names = Array.from(roleProjectsFieldset.querySelectorAll(".role-project-checkbox:checked")).map(
         (checkbox) => checkbox.value
     );
+    const allowed_scan_roots = roleScanRootsTextarea.value
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
     try {
-        await postJson("/api/roles", "POST", { name, is_admin, project_names });
+        await postJson("/api/roles", "POST", { name, is_admin, project_names, allowed_scan_roots });
         window.location.reload();
     } catch (err) {
         document.getElementById("role-error").textContent = err.message;

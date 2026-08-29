@@ -166,3 +166,33 @@ obligatorio en la API HTTP, ver `docs/api/index.md`); `AuthStore.create_user()` 
 opcional para no romper compatibilidad interna. `update_role` con `is_admin=False` y sin
 `project_names` ahora lanza `AuthError` en vez de vaciar la lista en silencio — cualquier integración
 existente que dependiera de ese vaciado implícito debe pasar `project_names=[]` explícitamente.
+
+## Revisión 13 — Auditoría de seguridad post-revisión 9: `allowed_scan_roots`, cookie `Secure`, rate limiting de login
+
+**Decisión**: `Role.allowed_scan_roots: list[str]` (default `[]`) como allow-list explícita de
+raíces del sistema de archivos que un rol no-admin puede escanear vía `WS
+/api/projects/{name}/scan`; cookie de sesión marcada `Secure` cuando `request.url.scheme ==
+"https"`; `LoginRateLimiter` en memoria (`app.state.login_rate_limiter`) que bloquea `POST /login`
+60s tras 5 fallos consecutivos del mismo `(tenant_id, username)`.
+**Alternativas descartadas**: para el hallazgo de rutas de escaneo, (a) restringir la elección de
+carpeta nueva a roles `is_admin=True` únicamente — más simple, pero le quita a los roles
+restringidos la posibilidad de añadir carpetas de origen nuevas por su cuenta; (b) solo documentar
+el riesgo sin tocar código. El usuario, consultado explícitamente, eligió la allow-list por rol
+(opción (c)) por preservar la autonomía de los roles restringidos. Para la cookie, marcar `Secure`
+incondicionalmente — descartado porque rompe el flujo sobre HTTP puro (loopback, tests con
+`httpx.AsyncClient`/`http.cookiejar`, que no reenvía cookies `Secure` fuera de HTTPS).
+**Razón**: auditoría de seguridad (`/security-review`) encontró que `FolderValidator` solo valida
+existencia/redundancia de una ruta, nunca su procedencia — un rol restringido a `project_names`
+concretos podía indicar cualquier ruta legible por el proceso servidor (incluidos proyectos de
+otros tenants), evadiendo por completo esa restricción y exfiltrando sus documentos vía
+`export.zip`. La cookie sin `Secure` permitía que el token de sesión viajara en claro sobre HTTP en
+modo no-loopback. La ausencia de rate limiting en `/login`, combinada con el admin/admin de
+bootstrap (slug de tenant determinista), permitía fuerza bruta sin fricción antes del primer login
+legítimo.
+**Impacto actual**: un rol no-admin sin `allowed_scan_roots` asignadas explícitamente **no puede
+escanear ninguna ruta externa** (antes sí podía, de forma no intencionada) — cualquier tenant en
+producción con roles restringidos debe recibir esa asignación de un admin tras desplegar esta
+versión, o esos roles no podrán iniciar ningún escaneo nuevo. `Role.allowed_scan_roots` persiste en
+tabla nueva `role_scan_roots` (mismo patrón que `role_projects`, sin migración manual). Detalle
+completo, hallazgos y evidencia: `.ai/sessions/2026-08-29/TRACEABILITY.md`. Cierra v0.2.0
+(`CHANGELOG.md`, primera versión con changelog formal del proyecto).

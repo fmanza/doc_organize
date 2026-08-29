@@ -86,6 +86,58 @@ async def test_login_with_unknown_username_returns_same_401_as_wrong_password(tm
 
 
 @pytest.mark.asyncio
+async def test_login_cookie_not_marked_secure_over_plain_http(tmp_path) -> None:
+    # Revision de seguridad (revision 9): `secure` solo cuando la peticion es https,
+    # para que la cookie siga funcionando sobre HTTP puro (loopback local, tests).
+    await _provision_user(tmp_path / "auth.db")
+    app = _non_loopback_app(tmp_path)
+    async with _client(app) as client:
+        response = await _login(client)
+    assert "secure" not in response.headers["set-cookie"].lower()
+
+
+@pytest.mark.asyncio
+async def test_login_cookie_marked_secure_over_https(tmp_path) -> None:
+    await _provision_user(tmp_path / "auth.db")
+    app = _non_loopback_app(tmp_path)
+    async with _client(app, base_url="https://example.com") as client:
+        response = await _login(client)
+    assert "secure" in response.headers["set-cookie"].lower()
+
+
+@pytest.mark.asyncio
+async def test_login_locks_out_after_repeated_failures(tmp_path) -> None:
+    await _provision_user(tmp_path / "auth.db")
+    app = _non_loopback_app(tmp_path)
+    async with _client(app) as client:
+        for _ in range(5):
+            response = await _login(client, password="contraseña-incorrecta")
+            assert response.status_code == 401
+
+        locked = await _login(client, password="contraseña-incorrecta")
+        assert locked.status_code == 429
+
+        # Ni siquiera la contraseña correcta pasa mientras dure el bloqueo.
+        still_locked = await _login(client)
+        assert still_locked.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_login_success_resets_failure_counter(tmp_path) -> None:
+    await _provision_user(tmp_path / "auth.db")
+    app = _non_loopback_app(tmp_path)
+    async with _client(app) as client:
+        for _ in range(4):
+            await _login(client, password="contraseña-incorrecta")
+
+        success = await _login(client)
+        assert success.status_code == 303
+
+        after_reset = await _login(client, password="contraseña-incorrecta")
+        assert after_reset.status_code == 401  # no 429: el contador se limpio tras el exito
+
+
+@pytest.mark.asyncio
 async def test_login_with_unknown_tenant_returns_same_401(tmp_path) -> None:
     await _provision_user(tmp_path / "auth.db")
     app = _non_loopback_app(tmp_path)

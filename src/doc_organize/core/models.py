@@ -284,6 +284,14 @@ class Role(BaseModel):
     name: str = Field(..., description="Unique within the tenant (not globally)")
     is_admin: bool = Field(default=False, description="Whether this role sees every project in the tenant")
     project_names: list[str] = Field(default_factory=list, description="Projects this role can access (ignored if is_admin)")
+    allowed_scan_roots: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Filesystem roots this role may scan via /api/projects/{name}/scan (ignored if is_admin, "
+            "which may scan anywhere). Empty means no external folder can be scanned — a restricted "
+            "role cannot bypass its project_names by pointing the scan at an arbitrary server path."
+        ),
+    )
     created_at: str = Field(..., description=_ISO_TIMESTAMP_DESC)
 
 

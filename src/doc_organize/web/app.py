@@ -10,7 +10,7 @@ from fastapi.templating import Jinja2Templates
 
 from doc_organize.core.exceptions import ProjectNotFoundError
 from doc_organize.core.models import SecurityConfig
-from doc_organize.web.auth import AuthMiddleware
+from doc_organize.web.auth import AuthMiddleware, LoginRateLimiter
 from doc_organize.web.dependencies import get_auth_store, get_project_registry, get_tenant_id, require_project_access
 from doc_organize.web.routes.admin import router as admin_router
 from doc_organize.web.routes.auth import router as auth_router
@@ -52,6 +52,10 @@ def create_app(
     # web/routes/scan.py necesita `security` para autenticar a mano (Fase D-2b,
     # §2.7.3 — BaseHTTPMiddleware no protege rutas WebSocket).
     app.state.security = security
+    # Compartido entre peticiones de /login (revision de seguridad, revision 9): un
+    # objeto por app, no por peticion, para que el conteo de fallos sobreviva entre
+    # llamadas.
+    app.state.login_rate_limiter = LoginRateLimiter()
     app.add_middleware(AuthMiddleware, security=security, auth_db_path=auth_db_path)
     app.include_router(auth_router)
     app.include_router(change_password_router)
