@@ -143,6 +143,80 @@ unique_docs = dedup.deduplicate(docs)  # por SHA256 hash
 - Evita `.format()`, `%` formatting y concatenación para interpolación.
 - Strings estáticos, docstrings y ejemplos sin parámetros están permitidos.
 
+### Plantillas Jinja2 (módulo `web/`)
+
+Aplica a las plantillas de `src/doc_organize/web/templates/` (9 ficheros a fecha de esta
+revisión), renderizadas vía `fastapi.templating.Jinja2Templates`.
+
+**Sintaxis y espaciado**
+- Deja un espacio tras `{{`/`{%` y antes de `}}`/`%}`: `{{ project.name }}`, `{% if condicion %}`.
+  - ❌ Incorrecto: `{{project.name}}`, `{%if condicion%}`
+  - ✅ Correcto: `{{ project.name }}`, `{% if condicion %}`
+- Usa el control de espacios en blanco (`{%- -%}`) solo cuando sea necesario eliminar un salto
+  de línea concreto del HTML resultante; no lo apliques por defecto en todos los bloques.
+
+**Estructura y organización**
+- Extensión de fichero: usa `.html.j2` en toda plantilla de `web/templates/` — permite que el
+  editor active resaltado de sintaxis Jinja2 sobre el HTML, distinguiéndola de HTML estático. Al
+  crear una plantilla nueva, referencia el nombre completo con `.html.j2` tanto en
+  `{% extends "..." %}` como en el segundo argumento de `TemplateResponse(request, "...", ...)` —
+  `Jinja2Templates` no añade la extensión automáticamente.
+- Herencia limitada a 2 niveles hoy (`base.html.j2` → página). Si se necesita un nivel intermedio
+  de "layout" compartido por varias páginas, no superar 3 niveles en total.
+- En bloques que superen ~15-20 líneas, nombra el `endblock` para legibilidad:
+  `{% block content %} ... {% endblock content %}`. Los `endblock` de las plantillas actuales
+  son anónimos (`{% endblock %}`); nómbralos al tocar o crear una plantilla nueva.
+- Antes de instanciar un nuevo `Jinja2Templates(...)` en un router, valora si el módulo puede
+  depender de una instancia compartida en vez de crear la suya propia (patrón actual: cada
+  fichero de `web/routes/` y `web/app.py` crea la suya); centralizarla en `web/dependencies.py`
+  es preferible para routers nuevos, sin que esto implique refactorizar los existentes.
+
+**Lógica y buenas prácticas**
+- La lógica de negocio y la preparación de datos van en las rutas (`web/routes/*.py`); la
+  plantilla solo presenta el contexto ya resuelto.
+- Usa el filtro `default` para valores opcionales: `{{ variable | default('—') }}`.
+- No desactives el autoescape de Jinja2 ni uses el filtro `| safe` sobre contenido derivado de
+  entrada de usuario (nombres de proyecto, rutas de carpeta, etc.). Ninguna plantilla actual usa
+  `| safe`; mantenlo así salvo necesidad justificada y contenido explícitamente saneado.
+- Si aparecen 3 o más fragmentos de HTML repetidos (botones, tarjetas, filas de tabla), extráelos
+  a macros en `web/templates/macros/` e impórtalos con
+  `{% from "macros/nombre.html.j2" import macro_nombre %}`. No existen macros todavía en el
+  proyecto; créalas cuando surja la repetición real, no de forma anticipada.
+
+**CSS y componentes — Tailwind CSS (obligatorio)**
+- Tailwind CSS es **obligatorio** para todo el CSS de `web/templates/` (decisión de producto, no
+  técnica — ver `.ai/DECISIONS_LOG.md`, revisión 14). Se carga vía CDN en `base.html.j2`
+  (`<script src="https://cdn.tailwindcss.com">`, play CDN, sin toolchain de build). No añadas
+  `<style>` propio, ficheros `.css`, ni otro framework CSS a una plantilla salvo que se decida
+  explícitamente sustituir Tailwind.
+- Escribe las clases de Tailwind directamente en el HTML de la plantilla/macro (utility-first). No
+  extraigas CSS a fichero ni definas clases propias que reimplementen una utilidad ya existente en
+  Tailwind (p.ej. no crear `.error` cuando `text-red-700` cubre lo mismo).
+- Tailwind (vía preflight) resetea el estilo por defecto de `a`, `button`, `input`, `table`, etc. —
+  cualquier etiqueta de estas necesita sus propias clases explícitas (color, subrayado, padding,
+  borde) en cada plantilla; no asumas que el navegador aplicará un estilo "razonable" por defecto.
+- Al crear una macro con estilo propio (tarjeta, alerta, botón), dale una clase contenedora única
+  y estable con prefijo `c-` (p.ej. `.c-tarjeta`) además de las utilidades Tailwind, para poder
+  referenciar/testear el componente sin depender de las clases utilitarias exactas.
+- Para clases puramente visuales condicionadas por estado, usa el operador ternario inline de
+  Jinja2 en la plantilla en vez de construir la clase en Python:
+  `<div class="{{ 'text-green-700' if exito else 'text-red-700' }}">`.
+- Si el CSS de una página necesita algo que Tailwind CDN no cubre (p.ej. una animación puntual),
+  añade un punto de extensión en el `<head>` de `base.html.j2`: `{% block estilos_adicionales %}{%
+  endblock %}` — no reintroduzcas un bloque `<style>` global en `base.html.j2`.
+- El CDN de Tailwind requiere red disponible en el navegador cliente en cada carga de página (sin
+  fallback offline); si eso se vuelve un problema real, evaluar un build local (`@tailwindcss/cli`)
+  como decisión aparte, registrada en `.ai/DECISIONS_LOG.md`.
+
+**Fuentes de componentes para asistentes IA**
+- Al pedir a una IA que genere una macro nueva, dale como entrada un componente HTML ya
+  maquetado con clases Tailwind (p.ej. de Tailwind UI, Flowbite u otra librería de componentes
+  libres) y pide explícitamente su conversión a macro Jinja2 reutilizable con una clase
+  contenedora `.c-*` — no le pidas que lo diseñe desde cero sin referencia.
+- Escribir las clases directamente en el HTML de la plantilla/macro (en vez de en un `.css`
+  aparte) es lo que permite a la IA trabajar sin alternar entre ficheros de contexto distintos;
+  no rompas ese patrón introduciendo CSS externo.
+
 ---
 
 ## Calidad y pruebas
@@ -373,4 +447,4 @@ especializaciones afectadas (copilot-instructions.md y/o CLAUDE.md).
 
 ---
 
-*Actualizado: 2026-06-05*
+*Actualizado: 2026-08-30*

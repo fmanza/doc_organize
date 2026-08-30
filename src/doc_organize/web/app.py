@@ -126,7 +126,7 @@ def create_app(
             allowed_names = {allowed.lower() for allowed in role.project_names}
             projects = [project for project in projects if project.name.lower() in allowed_names]
 
-        return templates.TemplateResponse(request, "project_selector.html", {"projects": projects})
+        return templates.TemplateResponse(request, "project_selector.html.j2", {"projects": projects})
 
     @app.get("/projects/{name}", response_class=HTMLResponse, dependencies=[Depends(require_project_access)])
     async def dashboard(name: str, request: Request) -> HTMLResponse:
@@ -134,7 +134,7 @@ def create_app(
         # registrado arriba (_EXCEPTION_STATUS_CODES) la traduce a 404.
         async with get_project_registry(request) as registry:
             project = await registry.get_project(name, tenant_id=get_tenant_id(request))
-        return templates.TemplateResponse(request, "dashboard.html", {"project": project})
+        return templates.TemplateResponse(request, "dashboard.html.j2", {"project": project})
 
     return app
 

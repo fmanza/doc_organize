@@ -1,0 +1,14 @@
+{% extends "base.html.j2" %}
+{% block title %}doc_organize — {{ project.name }}{% endblock %}
+{% block content %}
+<p><a class="text-blue-600 underline" href="/">&larr; Proyectos</a></p>
+<h1 class="text-xl font-semibold mb-4">{{ project.name }}</h1>
+<table class="w-full border-collapse mt-4">
+    <tr><th class="text-left px-2.5 py-1.5 border-b border-gray-300">Carpeta raíz</th><td class="px-2.5 py-1.5 border-b border-gray-300">{{ project.root_path }}</td></tr>
+    <tr><th class="text-left px-2.5 py-1.5 border-b border-gray-300">Creado</th><td class="px-2.5 py-1.5 border-b border-gray-300">{{ project.created_at }}</td></tr>
+</table>
+<p class="mt-4"><a class="text-blue-600 underline" href="/projects/{{ project.name | urlencode }}/scan">Escanear carpetas &rarr;</a></p>
+<p class="mt-2"><a class="text-blue-600 underline" href="/projects/{{ project.name | urlencode }}/cache">Ver caché &rarr;</a></p>
+<p class="mt-2"><a class="text-blue-600 underline" href="/projects/{{ project.name | urlencode }}/duplicates">Resolver duplicados &rarr;</a></p>
+<p class="mt-2"><a class="text-blue-600 underline" href="/downloads/projects/{{ project.name | urlencode }}/export.zip">Descargar export (ZIP) &rarr;</a></p>
+{% endblock %}

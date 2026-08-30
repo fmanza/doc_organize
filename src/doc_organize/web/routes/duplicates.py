@@ -90,7 +90,7 @@ async def duplicates_resolver_page(name: str, request: Request) -> HTMLResponse:
         for group in groups
     ]
     return _templates.TemplateResponse(
-        request, "duplicates_resolver.html", {"project": project, "groups": groups_with_keys}
+        request, "duplicates_resolver.html.j2", {"project": project, "groups": groups_with_keys}
     )
 
 

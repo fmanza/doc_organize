@@ -196,3 +196,39 @@ versión, o esos roles no podrán iniciar ningún escaneo nuevo. `Role.allowed_s
 tabla nueva `role_scan_roots` (mismo patrón que `role_projects`, sin migración manual). Detalle
 completo, hallazgos y evidencia: `.ai/sessions/2026-08-29/TRACEABILITY.md`. Cierra v0.2.0
 (`CHANGELOG.md`, primera versión con changelog formal del proyecto).
+
+## Revisión 14 — Tailwind CSS (CDN) obligatorio para plantillas `web/`
+
+**Decisión**: Tailwind CSS vía `<script src="https://cdn.tailwindcss.com">` en `base.html` (play
+CDN, sin toolchain de build) como único mecanismo de estilo para las plantillas Jinja2 de `web/`;
+se retira el bloque `<style>` global de `base.html` y las 9 plantillas existentes se migran a
+clases utilitarias inline.
+**Alternativas descartadas**: mantener CSS propio en `<style>`/ficheros `.css` (obliga a alternar
+contexto `.css`/`.html.j2` al generar UI con asistentes IA, motivo explícito de esta decisión);
+Tailwind con build real (`@tailwindcss/cli`, PostCSS) — descartado por ahora al no existir pipeline
+de frontend en el proyecto (app interna, sin bundler).
+**Razón**: decisión explícita del usuario, no una elección técnica autónoma — se solicitó Tailwind
+como obligatorio tras evaluar la alternativa de dejarlo como opción a futuro.
+**Impacto actual**: toda plantilla nueva o modificada en `web/templates/` debe usar clases Tailwind
+en vez de CSS a medida; `.error`/`.missing` (clases CSS ad-hoc previas) desaparecen, sustituidas por
+utilidades equivalentes (`text-red-700`, etc.) directamente en cada plantilla. El CDN de Tailwind
+requiere red disponible en el navegador del cliente en cada carga de página (no hay fallback
+offline) — asumible para una interfaz de administración interna; revisar si se vuelve un problema
+real antes de invertir en un build local. Ver `.github/SHARED_INSTRUCTIONS.md` §"Plantillas Jinja2
+(módulo web/)".
+
+## Revisión 15 — Extensión `.html.j2` para las plantillas de `web/`
+
+**Decisión**: las 9 plantillas de `web/templates/` (incluida `base.html.j2`, referenciada como
+`base.html` en la revisión 14) pasan de `.html` a `.html.j2`; actualizadas todas las referencias
+`{% extends "..." %}` y los nombres pasados a `TemplateResponse(request, "...", ...)` en
+`web/app.py` y `web/routes/*.py`.
+**Alternativas descartadas**: mantener `.html` (la convención previa, elegida en su momento por ya
+estar establecida en el árbol y evitar renombrar sin necesidad funcional).
+**Razón**: decisión explícita del usuario — quiere que el editor distinga por extensión qué
+ficheros llevan sintaxis Jinja2 de cuáles son HTML estático, consistente con la recomendación
+original de `.github/SHARED_INSTRUCTIONS.md` §"Plantillas Jinja2 (módulo web/)".
+**Impacto actual**: `Jinja2Templates(directory=...)` sigue apuntando a `web/templates/` sin cambios
+(no depende de la extensión); toda plantilla nueva debe usar `.html.j2` desde el principio. Ningún
+cambio de comportamiento en tiempo de ejecución — verificado con la suite de tests de `web/`
+(85 tests) tras el renombrado.

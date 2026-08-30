@@ -20,7 +20,7 @@ router = APIRouter(tags=["auth"])
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_form(request: Request) -> HTMLResponse:
-    return _templates.TemplateResponse(request, "login.html", {"error": None})
+    return _templates.TemplateResponse(request, "login.html.j2", {"error": None})
 
 
 @router.post("/login", response_class=HTMLResponse)
@@ -45,7 +45,7 @@ async def login_submit(
     if limiter.is_locked(tenant_id, username):
         return _templates.TemplateResponse(
             request,
-            "login.html",
+            "login.html.j2",
             {"error": "Demasiados intentos fallidos. Inténtalo de nuevo en un minuto."},
             status_code=429,
         )
@@ -56,7 +56,7 @@ async def login_submit(
             limiter.record_failure(tenant_id, username)
             return _templates.TemplateResponse(
                 request,
-                "login.html",
+                "login.html.j2",
                 {"error": "Tenant, usuario o contraseña incorrectos."},
                 status_code=401,
             )

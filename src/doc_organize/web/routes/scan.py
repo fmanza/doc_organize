@@ -41,7 +41,7 @@ async def folder_selector(name: str, request: Request) -> HTMLResponse:
     # web/app.py (_EXCEPTION_STATUS_CODES) la traduce a 404.
     async with get_project_registry(request) as registry:
         project = await registry.get_project(name, tenant_id=get_tenant_id(request))
-    return _templates.TemplateResponse(request, "folder_selector.html", {"project": project})
+    return _templates.TemplateResponse(request, "folder_selector.html.j2", {"project": project})
 
 
 @router.post(

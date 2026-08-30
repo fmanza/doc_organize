@@ -59,7 +59,7 @@ async def _load_project_and_entries(request: Request, name: str) -> tuple[Projec
 @router.get("/projects/{name}/cache", response_class=HTMLResponse, dependencies=[Depends(require_project_access)])
 async def cache_viewer(name: str, request: Request) -> HTMLResponse:
     project, entries = await _load_project_and_entries(request, name)
-    return _templates.TemplateResponse(request, "cache_viewer.html", {"project": project, "entries": entries})
+    return _templates.TemplateResponse(request, "cache_viewer.html.j2", {"project": project, "entries": entries})
 
 
 @router.get("/api/projects/{name}/cache", response_model=CacheListResponse, dependencies=[Depends(require_project_access)])

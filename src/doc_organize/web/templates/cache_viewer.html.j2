@@ -1,0 +1,31 @@
+{% extends "base.html.j2" %}
+{% block title %}doc_organize — Caché: {{ project.name }}{% endblock %}
+{% block content %}
+<p><a class="text-blue-600 underline" href="/projects/{{ project.name | urlencode }}">&larr; {{ project.name }}</a></p>
+<h1 class="text-xl font-semibold mb-4">Caché: {{ project.name }}</h1>
+
+{% if entries %}
+<table class="w-full border-collapse mt-4">
+    <thead><tr>
+        <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Archivo</th>
+        <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Hash</th>
+        <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Estado</th>
+        <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Conversión</th>
+    </tr></thead>
+    <tbody>
+    {% for entry in entries %}
+        <tr>
+            <td class="px-2.5 py-1.5 border-b border-gray-300">{{ entry.file_path }}</td>
+            <td class="px-2.5 py-1.5 border-b border-gray-300">{{ entry.sha256_hash[:12] }}…</td>
+            <td class="px-2.5 py-1.5 border-b border-gray-300">{{ entry.status }}</td>
+            <td class="px-2.5 py-1.5 border-b border-gray-300">{{ entry.conversion_status or "—" }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+<p class="mt-4">{{ entries | length }} entradas.</p>
+{% else %}
+<p>No hay entradas en caché todavía — ejecuta un
+   <a class="text-blue-600 underline" href="/projects/{{ project.name | urlencode }}/scan">escaneo</a>.</p>
+{% endif %}
+{% endblock %}

@@ -22,7 +22,7 @@ router = APIRouter(tags=["auth"])
 
 @router.get("/change-password", response_class=HTMLResponse)
 async def change_password_form(request: Request) -> HTMLResponse:
-    return _templates.TemplateResponse(request, "change_password.html", {"error": None})
+    return _templates.TemplateResponse(request, "change_password.html.j2", {"error": None})
 
 
 @router.post("/change-password", response_class=HTMLResponse)
@@ -38,7 +38,7 @@ async def change_password_submit(
 
     if new_password != confirm_password:
         return _templates.TemplateResponse(
-            request, "change_password.html", {"error": "Las contraseñas nuevas no coinciden."}, status_code=422
+            request, "change_password.html.j2", {"error": "Las contraseñas nuevas no coinciden."}, status_code=422
         )
 
     async with get_auth_store(request) as store:
@@ -46,7 +46,7 @@ async def change_password_submit(
 
     if not success:
         return _templates.TemplateResponse(
-            request, "change_password.html", {"error": "La contraseña actual no es correcta."}, status_code=401
+            request, "change_password.html.j2", {"error": "La contraseña actual no es correcta."}, status_code=401
         )
 
     return RedirectResponse("/", status_code=303)

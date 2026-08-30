@@ -1,22 +1,23 @@
-{% extends "base.html" %}
+{% extends "base.html.j2" %}
 {% block title %}doc_organize — Escanear: {{ project.name }}{% endblock %}
 {% block content %}
-<p><a href="/projects/{{ project.name | urlencode }}">&larr; {{ project.name }}</a></p>
-<h1>Escanear: {{ project.name }}</h1>
+<p><a class="text-blue-600 underline" href="/projects/{{ project.name | urlencode }}">&larr; {{ project.name }}</a></p>
+<h1 class="text-xl font-semibold mb-4">Escanear: {{ project.name }}</h1>
 
-<form id="scan-form">
+<form id="scan-form" class="my-4">
     <label for="paths" class="sr-only">Carpetas a escanear (una por línea)</label>
-    <textarea id="paths" placeholder="Una carpeta por línea" rows="5" required style="width: 100%; padding: 0.4rem;"></textarea>
-    <p>
-        <label><input type="checkbox" id="deduplicate"> Deduplicar</label>
-        <label><input type="checkbox" id="use_ocr"> Usar OCR si hace falta</label>
-        <label><input type="checkbox" id="use_gpu"> OCR con GPU</label>
+    <textarea id="paths" placeholder="Una carpeta por línea" rows="5" required
+              class="w-full border border-gray-300 rounded px-2 py-1.5"></textarea>
+    <p class="my-2 flex gap-4 flex-wrap">
+        <label class="flex items-center gap-1"><input type="checkbox" id="deduplicate"> Deduplicar</label>
+        <label class="flex items-center gap-1"><input type="checkbox" id="use_ocr"> Usar OCR si hace falta</label>
+        <label class="flex items-center gap-1"><input type="checkbox" id="use_gpu"> OCR con GPU</label>
     </p>
-    <button type="submit">Escanear</button>
+    <button type="submit" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Escanear</button>
 </form>
-<p id="scan-error" class="error"></p>
+<p id="scan-error" class="text-red-700 my-2 min-h-[1.2em]"></p>
 
-<ul id="progress"></ul>
+<ul id="progress" class="mt-2 space-y-1"></ul>
 
 <script>
 const projectName = {{ project.name | tojson }};

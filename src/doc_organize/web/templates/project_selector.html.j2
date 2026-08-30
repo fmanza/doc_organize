@@ -1,0 +1,56 @@
+{% extends "base.html.j2" %}
+{% block title %}doc_organize — Proyectos{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-4">Proyectos</h1>
+
+<form id="create-form" class="my-4 flex gap-2 flex-wrap">
+    <label for="name" class="sr-only">Nombre del proyecto</label>
+    <input type="text" id="name" placeholder="Nombre del proyecto" required
+           class="border border-gray-300 rounded px-2 py-1.5 flex-1 min-w-[200px]">
+    <label for="location" class="sr-only">Ubicación (carpeta padre)</label>
+    <input type="text" id="location" placeholder="Ubicación (carpeta padre)" required
+           class="border border-gray-300 rounded px-2 py-1.5 flex-1 min-w-[200px]">
+    <button type="submit" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Crear proyecto</button>
+</form>
+<p id="create-error" class="text-red-700 my-2 min-h-[1.2em]"></p>
+
+{% if projects %}
+<table class="w-full border-collapse mt-4">
+    <thead><tr>
+        <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Nombre</th>
+        <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Ubicación</th>
+        <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Creado</th>
+    </tr></thead>
+    <tbody>
+    {% for project in projects %}
+        <tr>
+            <td class="px-2.5 py-1.5 border-b border-gray-300"><a class="text-blue-600 underline" href="/projects/{{ project.name | urlencode }}">{{ project.name }}</a></td>
+            <td class="px-2.5 py-1.5 border-b border-gray-300">{{ project.root_path }}</td>
+            <td class="px-2.5 py-1.5 border-b border-gray-300">{{ project.created_at }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No hay proyectos todavía.</p>
+{% endif %}
+
+<script>
+document.getElementById("create-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = document.getElementById("name").value;
+    const base_location = document.getElementById("location").value;
+    const response = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name, base_location: base_location }),
+    });
+    if (response.ok) {
+        window.location.reload();
+    } else {
+        const data = await response.json();
+        document.getElementById("create-error").textContent = data.detail || "Error al crear el proyecto.";
+    }
+});
+</script>
+{% endblock %}

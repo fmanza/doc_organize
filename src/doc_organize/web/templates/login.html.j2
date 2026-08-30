@@ -1,0 +1,22 @@
+{% extends "base.html.j2" %}
+{% block title %}doc_organize — Iniciar sesión{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-4">Iniciar sesión</h1>
+
+{% if error %}
+<p class="text-red-700 my-2 min-h-[1.2em]">{{ error }}</p>
+{% endif %}
+
+<form method="post" action="/login" class="my-4 flex gap-2 flex-wrap">
+    <label for="tenant_id" class="sr-only">Tenant</label>
+    <input type="text" id="tenant_id" name="tenant_id" placeholder="Tenant" required autofocus
+           class="border border-gray-300 rounded px-2 py-1.5 flex-1 min-w-[200px]">
+    <label for="username" class="sr-only">Usuario</label>
+    <input type="text" id="username" name="username" placeholder="Usuario" required
+           class="border border-gray-300 rounded px-2 py-1.5 flex-1 min-w-[200px]">
+    <label for="password" class="sr-only">Contraseña</label>
+    <input type="password" id="password" name="password" placeholder="Contraseña" required
+           class="border border-gray-300 rounded px-2 py-1.5 flex-1 min-w-[200px]">
+    <button type="submit" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Entrar</button>
+</form>
+{% endblock %}

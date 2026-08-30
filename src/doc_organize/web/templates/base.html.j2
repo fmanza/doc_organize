@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}doc_organize{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    {% block estilos_adicionales %}{% endblock %}
+</head>
+<body class="font-sans max-w-[720px] mx-auto px-4 py-8 text-gray-800">
+    {% if request.state.user_id is defined %}
+    <nav class="session-nav text-right text-sm mb-2">
+        {% if request.state.is_admin %}<a class="text-blue-600 underline" href="/admin/users">Gestión de usuarios</a> ·{% endif %}
+        <form method="post" action="/logout" class="inline"><button type="submit" class="bg-transparent border-0 p-0 cursor-pointer text-blue-600 underline">Cerrar sesión</button></form>
+    </nav>
+    {% endif %}
+    {% block content %}{% endblock %}
+</body>
+</html>

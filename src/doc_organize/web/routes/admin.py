@@ -99,7 +99,7 @@ async def admin_users_page(request: Request) -> HTMLResponse:
     roles_by_id = {role.id: role for role in roles}
     return _templates.TemplateResponse(
         request,
-        "admin_users.html",
+        "admin_users.html.j2",
         {"users": users, "roles": roles, "roles_by_id": roles_by_id, "projects": projects},
     )
 

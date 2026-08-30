@@ -1,26 +1,26 @@
-{% extends "base.html" %}
+{% extends "base.html.j2" %}
 {% block title %}doc_organize — Duplicados: {{ project.name }}{% endblock %}
 {% block content %}
-<p><a href="/projects/{{ project.name | urlencode }}">&larr; {{ project.name }}</a></p>
-<h1>Duplicados: {{ project.name }}</h1>
+<p><a class="text-blue-600 underline" href="/projects/{{ project.name | urlencode }}">&larr; {{ project.name }}</a></p>
+<h1 class="text-xl font-semibold mb-4">Duplicados: {{ project.name }}</h1>
 
 {% if groups %}
-<form id="resolve-form">
+<form id="resolve-form" class="my-4">
     {% for item in groups %}
-    <fieldset>
-        <legend>Grupo {{ loop.index }} ({{ item.group.reason.value }})</legend>
+    <fieldset class="border border-gray-300 rounded p-3 mb-3">
+        <legend class="px-1 font-medium">Grupo {{ loop.index }} ({{ item.group.reason.value }})</legend>
         {% for doc in item.members %}
-        <label>
+        <label class="block py-1">
             <input type="radio" name="group-{{ item.key }}" value="{{ doc.full_path }}"
                    {% if doc.full_path == item.group.canonical_doc.full_path %}checked{% endif %}>
             {{ doc.full_path }} ({{ doc.size_bytes }} bytes)
-        </label><br>
+        </label>
         {% endfor %}
     </fieldset>
     {% endfor %}
-    <button type="submit">Resolver duplicados</button>
+    <button type="submit" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Resolver duplicados</button>
 </form>
-<p id="resolve-result"></p>
+<p id="resolve-result" class="mt-2"></p>
 {% else %}
 <p>No se detectaron duplicados.</p>
 {% endif %}
