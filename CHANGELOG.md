@@ -18,6 +18,13 @@ releases publicados antes de esa versión).
   escaneo previo con "Deduplicar" activado ya movió automáticamente (lee
   `duplicados/DEDUP_REPORT.json`). Sin cambios en los modelos Pydantic ni en las
   rutas JSON existentes (`GET`/`POST /api/projects/{name}/duplicates...`).
+- `src/doc_organize/web/routes/cache.py` /
+  `src/doc_organize/web/templates/cache_viewer.html.j2`: misma mejora de
+  visualización aplicada a la página "Caché" — buscador de filtrado instantáneo
+  en cliente (por nombre de archivo o carpeta) y columnas Archivo/Carpeta
+  separadas en vez de la ruta completa en una sola celda; el contador de
+  entradas se actualiza a "X de Y entradas." mientras el filtro está activo. Sin
+  cambios en `CacheEntryResponse`/`CacheListResponse` ni en las rutas JSON.
 
 ### Fixed
 

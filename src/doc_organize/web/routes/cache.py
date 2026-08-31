@@ -17,6 +17,23 @@ from doc_organize.web.dependencies import get_project_registry, get_tenant_id, r
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 _templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
+
+def _dirname(full_path: str) -> str:
+    """Carpeta contenedora de `full_path`, para mostrarla separada del nombre de
+    archivo en la tabla del Cache Viewer (mismo criterio que en Duplicates Resolver)."""
+    return str(Path(full_path).parent)
+
+
+def _basename(full_path: str) -> str:
+    """Nombre de archivo de `full_path`, sin la carpeta contenedora. `CacheEntry` no
+    guarda un `display_name` separado (a diferencia de `DocumentMetadata`), así que
+    se deriva aquí para la columna "Archivo" del Cache Viewer."""
+    return Path(full_path).name
+
+
+_templates.env.filters["dirname"] = _dirname
+_templates.env.filters["basename"] = _basename
+
 router = APIRouter(tags=["cache"])
 
 

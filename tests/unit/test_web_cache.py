@@ -1,5 +1,9 @@
 """Tests del Cache Viewer (Fase D-2c, §2.7.4, sub-paso 1/3)."""
 
+import re
+
+from pathlib import Path
+
 import httpx
 import pytest
 
@@ -78,6 +82,61 @@ async def test_cache_api_404_for_missing_project(tmp_path) -> None:
     async with _client(app) as client:
         response = await client.get("/api/projects/No Existe/cache")
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_cache_viewer_page_shows_search_box_and_folder_column(tmp_path) -> None:
+    # Misma mejora de visualizacion aplicada antes a "Revisar Duplicados": la tabla
+    # separa carpeta y nombre de archivo, y ofrece un buscador cliente cuyo filtro
+    # se apoya en `data-search` por fila.
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    cache_db = tmp_path / "workspaces" / project.name / DEFAULT_CACHE_DB_NAME
+    file_path = str(tmp_path / "docs" / "report.pdf")
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
+        )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/cache")
+
+    assert response.status_code == 200
+    html = response.text
+    assert 'id="cache-search"' in html
+    assert 'id="cache-no-results"' in html
+    assert re.search(r">report\.pdf<", html)
+    # La carpeta debe aparecer como CONTENIDO de una celda de tabla (no solo dentro
+    # del atributo `data-search`, que trae la ruta completa en minusculas).
+    expected_dirname = str(Path(file_path).parent)
+    assert re.search(re.escape(expected_dirname).lower() + r"\s*</td>", html.lower())
+    # data-search debe traer la ruta completa en minusculas, para que el filtro
+    # tambien encuentre coincidencias por carpeta ademas de por nombre de archivo.
+    assert f'data-search="{file_path.lower()}"' in html
+    # El contador (actualizado por JS al filtrar) arranca con el total sin filtrar.
+    assert '<p class="mt-4" id="cache-count">1 entradas.</p>' in html
+
+
+@pytest.mark.asyncio
+async def test_cache_viewer_page_no_search_box_when_no_entries(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/cache")
+
+    assert response.status_code == 200
+    assert 'id="cache-search"' not in response.text
 
 
 @pytest.mark.asyncio

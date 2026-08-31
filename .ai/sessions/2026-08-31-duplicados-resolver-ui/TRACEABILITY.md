@@ -3,7 +3,8 @@
 ## Sesión
 - **Fecha**: 2026-08-31
 - **Tipo**: `hotfix` (mensaje engañoso en "Revisar Duplicados") seguido de `feature`
-  (PLAN → AUDIT_PLAN → IMPLEMENT → AUDIT_CODE → VERSION) sobre la misma página
+  (PLAN → AUDIT_PLAN → IMPLEMENT → AUDIT_CODE → VERSION) sobre esa página, extendida
+  después con el mismo ciclo completo sobre la página "Caché"
 - **Rama**: `develop`
 - **Estado**: ✅ COMPLETADA
 
@@ -13,7 +14,9 @@ duplicados" aunque sabía que había archivos duplicados. Tras diagnosticar la c
 se pidió además mejorar la visualización de esa página (ruta, listado completo, buscador),
 y finalmente — tras un segundo reporte de "no se muestran los duplicados" — se aclaró
 explícitamente el requisito real: los archivos duplicados deben verse en la página
-**independientemente de que el re-escaneo en vivo encuentre algo pendiente o no**.
+**independientemente de que el re-escaneo en vivo encuentre algo pendiente o no**. Una
+vez cerrada esa mejora, el usuario pidió aplicar la misma mejora de visualización
+(buscador + separación carpeta/archivo) a la página "Caché".
 
 ## Cambios Ejecutados
 
@@ -80,13 +83,43 @@ duplicados/". El buscador ahora filtra `document.querySelectorAll("fieldset[data
 manualmente sirviendo la página real con ambas secciones (pendientes + ya resueltos)
 presentes a la vez.
 
-### ✅ 6. VERSION
+### ✅ 6. VERSION (parcial, solo Duplicados)
 **Archivo(s)**: `CHANGELOG.md`, `pyproject.toml`, este fichero.
 **Descripción**: bump `MINOR` (0.2.0 → 0.3.0) — nueva capacidad observable para el
 usuario final (buscador, listado de ya-resueltos) aunque no cambia ninguna API pública
 de Python. Sin cambios en `docs/` (no se añadió ni movió ningún módulo/clase pública;
 `docs/functional/dedup.md` documenta `DeduplicationManager`, que no se tocó) — verificado
 con `mkdocs build --strict` limpio antes y después.
+**Status**: ✅.
+
+### ✅ 7. PLAN + AUDIT_PLAN + IMPLEMENT + AUDIT_CODE — misma mejora en "Caché"
+**Archivo(s)**: `src/doc_organize/web/routes/cache.py` (filtros Jinja `dirname`/
+`basename` nuevos — `CacheEntry` no tiene `display_name` como `DocumentMetadata`, así
+que `basename` se dedujo aparte), `src/doc_organize/web/templates/cache_viewer.html.j2`
+(columnas Archivo/Carpeta separadas, buscador `#cache-search`, contador dinámico
+"X de Y entradas."), `tests/unit/test_web_cache.py` (tests nuevos).
+**Descripción**: PLAN/AUDIT_PLAN sin ambigüedades nuevas que preguntar — todas las
+decisiones de UX ya estaban fijadas por precedente directo de la sesión de Duplicados
+(filtro 100% cliente, sin round-trip), y la tabla de Caché es más simple (sin grupos ni
+formulario/radios), lo que elimina la única fuente real de ambigüedad de la vez
+anterior: al filtrar se oculta la `<tr>` directamente, no hay que decidir "ocultar el
+grupo completo o atenuar filas sueltas". AUDIT_CODE encontró un `id="cache-count"`
+añadido sin conectar a nada (deuda técnica introducida en el propio IMPLEMENT, no
+heredada) — el usuario decidió conectarlo (mostrar "X de Y entradas." al filtrar) en vez
+de quitarlo; aplicado y verificado.
+**Status**: ✅ cubierto por tests nuevos y por **dos** verificaciones visuales en
+navegador real (Playwright headless): una del filtrado en sí (oculta `<tr>` sin romper
+la alineación de columnas de la tabla, a diferencia del `<fieldset>` de Duplicados) y
+una segunda, tras el fix del contador, confirmando los tres estados
+("2 entradas." / "1 de 2 entradas." / "0 de 2 entradas.").
+
+### ✅ 8. VERSION (Caché añadido al mismo 0.3.0 sin publicar)
+**Archivo(s)**: `CHANGELOG.md`, este fichero.
+**Descripción**: como 0.3.0 seguía sin commitear/publicar cuando se pidió esta
+extensión, se añadió como un bullet más bajo el `### Added` del mismo
+`## [0.3.0] - 2026-08-31` ya existente, en vez de abrir un `0.4.0` nuevo — una versión
+no debe consumirse dos veces para trabajo que todavía no se ha liberado. `pyproject.toml`
+se queda en `0.3.0` (sin cambios en este punto).
 **Status**: ✅.
 
 ---
@@ -96,36 +129,42 @@ con `mkdocs build --strict` limpio antes y después.
 ### Código
 - **Archivos modificados**: `src/doc_organize/web/routes/duplicates.py`,
   `src/doc_organize/web/templates/duplicates_resolver.html.j2`,
-  `tests/unit/test_web_duplicates.py`, `CHANGELOG.md`, `pyproject.toml`.
-- **Cambios funcionales**: sí, todos en la página web "Revisar Duplicados" — cero
-  cambios en modelos Pydantic, en `DeduplicationManager`/`ScanCommand`, o en los
-  contratos JSON de `GET`/`POST /api/projects/{name}/duplicates...`.
+  `tests/unit/test_web_duplicates.py`, `src/doc_organize/web/routes/cache.py`,
+  `src/doc_organize/web/templates/cache_viewer.html.j2`, `tests/unit/test_web_cache.py`,
+  `CHANGELOG.md`, `pyproject.toml`.
+- **Cambios funcionales**: sí, en las páginas web "Revisar Duplicados" y "Caché" — cero
+  cambios en modelos Pydantic, en `DeduplicationManager`/`ScanCommand`/`CacheManager`, o
+  en los contratos JSON de `GET`/`POST /api/projects/{name}/duplicates...` ni
+  `GET /api/projects/{name}/cache`.
 
 ### Compatibilidad
 - **BREAKING**: ninguno.
 - **NO BREAKING**: toda la API JSON y el CLI quedan intactos; el único fichero nuevo que
-  se **lee** (no se escribe) desde esta ruta es `duplicados/DEDUP_REPORT.json`, que ya
-  existía desde antes (lo escribe `DeduplicationManager.resolve_duplicates()`).
+  se **lee** (no se escribe) desde `duplicates.py` es `duplicados/DEDUP_REPORT.json`, que
+  ya existía desde antes (lo escribe `DeduplicationManager.resolve_duplicates()`).
 
 ---
 
 ## Verificación
 ```
-python -m ruff check src/doc_organize/web/routes/duplicates.py tests/unit/test_web_duplicates.py
+python -m ruff check src/doc_organize/web/routes/duplicates.py src/doc_organize/web/routes/cache.py tests/unit/test_web_duplicates.py tests/unit/test_web_cache.py
   → All checks passed!
-python -m mypy src/doc_organize/web/routes/duplicates.py
-  → Success: no issues found in 1 source file
-python -m pytest tests/unit/test_web_duplicates.py -q
-  → 13 passed, duplicates.py al 100% de cobertura
+python -m mypy src/doc_organize/web/routes/duplicates.py src/doc_organize/web/routes/cache.py
+  → Success: no issues found in 2 source files
+python -m pytest tests/unit/test_web_duplicates.py tests/unit/test_web_cache.py -q
+  → 20 passed (13 + 7), 100% cobertura en ambos módulos de ruta
 python -m pytest -q
-  → 275 passed, 96% cobertura total
+  → 277 passed, 96% cobertura total
 python -m mkdocs build --strict
   → Documentation built, sin warnings de links/anchors rotos
 ```
-Además: comprobación visual en navegador real (Playwright headless) del buscador
-filtrando en vivo, y smoke test manual sirviendo la app real con un proyecto que tenía
-simultáneamente grupos pendientes y un `DEDUP_REPORT.json` de un escaneo previo, para
-confirmar que ambas secciones conviven correctamente.
+Además: **tres** comprobaciones visuales en navegador real (Playwright headless) — el
+buscador de Duplicados filtrando en vivo; el de Caché ocultando `<tr>` sin romper la
+tabla; y una tercera tras el fix del contador de Caché confirmando sus tres estados
+("2 entradas." / "1 de 2 entradas." / "0 de 2 entradas."). También smoke test manual
+sirviendo la app real con un proyecto que tenía simultáneamente grupos de Duplicados
+pendientes y un `DEDUP_REPORT.json` de un escaneo previo, para confirmar que ambas
+secciones conviven correctamente.
 
 ---
 
@@ -133,7 +172,7 @@ confirmar que ambas secciones conviven correctamente.
 
 | Riesgo | Mitigación | Status |
 |--------|-----------|--------|
-| Autoescape de Jinja2 desactivado en **todas** las plantillas `.html.j2` del proyecto (`jinja2.select_autoescape()` decide por el sufijo literal del nombre de plantilla; `"algo.html.j2"` no termina en `.html` y por tanto no se escapa) — confirmado empíricamente. Riesgo de XSS almacenado vía nombre de archivo malicioso en Linux/macOS (Windows lo mitiga porque `< > "` son inválidos en nombres de archivo) | No corregido en esta sesión (afecta a todas las plantillas de `web/`, no solo a Duplicados — fuera de alcance de una feature sin refactor). Requiere un `/security-review` o `/hotfix` dedicado que fuerce `autoescape=True` explícito en cada `Jinja2Templates(...)` del proyecto, o renombrar las plantillas a `.html` puro | **Pendiente — recomendado como próxima sesión** |
+| Autoescape de Jinja2 desactivado en **todas** las plantillas `.html.j2` del proyecto (`jinja2.select_autoescape()` decide por el sufijo literal del nombre de plantilla; `"algo.html.j2"` no termina en `.html` y por tanto no se escapa) — confirmado empíricamente. Riesgo de XSS almacenado vía nombre de archivo malicioso en Linux/macOS (Windows lo mitiga porque `< > "` son inválidos en nombres de archivo). El cambio de Caché de esta sesión amplía la misma superficie ya conocida: `entry.file_path` ahora también se interpola en `data-search`/`title`, dos sitios nuevos que no existían en la versión anterior de esa página | No corregido en esta sesión (afecta a todas las plantillas de `web/`, no solo a Duplicados/Caché — fuera de alcance de una feature sin refactor). Requiere un `/security-review` o `/hotfix` dedicado que fuerce `autoescape=True` explícito en cada `Jinja2Templates(...)` del proyecto, o renombrar las plantillas a `.html` puro | **Pendiente — recomendado como próxima sesión** |
 | `DEDUP_REPORT.json` se escribe con `write_text` directo (sin patrón escribir-a-temporal-y-renombrar) | Mitigado en esta sesión solo del lado lectura (`_load_last_dedup_report` degrada a `None` si el JSON es inválido); la escritura sigue siendo no-atómica en `DeduplicationManager.resolve_duplicates()` | Mitigado parcialmente (lectura robusta; escritura sin cambios) |
 
 ---
@@ -142,11 +181,15 @@ confirmar que ambas secciones conviven correctamente.
 1. Abrir una sesión de `/security-review` o `/hotfix` dedicada al autoescape de Jinja2
    desactivado app-wide (ver Riesgos Residuales) — es el hallazgo más importante de esta
    sesión y no se corrigió por estar fuera del alcance de "nueva funcionalidad sin
-   refactor".
+   refactor". Cubre tanto Duplicados como Caché (y el resto de `web/`).
 2. Si se quiere robustecer más la escritura de `DEDUP_REPORT.json`, aplicar un patrón
    escribir-a-temporal-y-renombrar en `DeduplicationManager.resolve_duplicates()`
    (Level 2) — no se tocó en esta sesión por no ser el foco pedido.
-3. Confirmar con el usuario si procede el commit de esta sesión (mensaje sugerido más
+3. Si aparece una tercera página con la misma necesidad de "carpeta + nombre de archivo
+   separados", extraer `dirname`/`basename` a un módulo compartido (regla de tres) — hoy
+   están deliberadamente duplicados en `duplicates.py` y `cache.py`, consistente con que
+   cada ruta ya tiene su propia instancia `Jinja2Templates` autocontenida.
+4. Confirmar con el usuario si procede el commit de esta sesión (mensaje sugerido más
    abajo) — no se ejecutó `git commit` todavía.
 
 ---
@@ -189,6 +232,26 @@ confirmar que ambas secciones conviven correctamente.
   `DocumentMetadata` ni a `DuplicateGroup` (modelos Pydantic compartidos con la API
   JSON) — la presentación vive solo en la plantilla, para no acoplar el formato visual
   al contrato de datos.
+- **[Cada ruta web tiene su propia instancia `Jinja2Templates`, sin filtros
+  compartidos]**: `duplicates.py` y `cache.py` declaran cada uno su propio
+  `_templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))` apuntando al mismo
+  directorio físico, pero son objetos `Environment` distintos — un filtro registrado en
+  `duplicates.py` (`_templates.env.filters[...]`) **no** está disponible en las
+  plantillas renderizadas por `cache.py`, y viceversa. Por eso `cache.py` declara su
+  propio `_dirname` (y un `_basename` nuevo, porque `CacheEntry` no tiene
+  `display_name` como `DocumentMetadata`) en vez de importar el de `duplicates.py`. Es
+  el patrón ya existente en el proyecto, no una duplicación introducida por descuido.
+- **[El filtro de búsqueda de Caché oculta `<tr>` directamente, no un contenedor]**: a
+  diferencia de Duplicados (que oculta el `<fieldset>` de un grupo completo porque hay
+  un formulario con radios cuyo contexto no se puede romper), la tabla de Caché es
+  plana y de solo lectura — cada fila se oculta de forma independiente
+  (`row.hidden = true`), sin necesidad de preservar ningún grupo. Verificado que ocultar
+  `<tr>` no rompe la alineación de columnas de la tabla (el `<thead>` no se ve afectado).
+- **[El contador "X de Y entradas." de Caché es responsabilidad del propio JS del
+  filtro, no de la plantilla]**: `cache_viewer.html.j2` renderiza el texto inicial
+  ("N entradas.") en Jinja, pero es el listener de `#cache-search` el que lo reescribe
+  en cada tecla. Si se añade un filtro nuevo a esta página, hay que actualizar ese mismo
+  bloque de JS (`countEl.textContent = ...`), no solo el bucle de `hidden`.
 
 ---
 
@@ -200,18 +263,21 @@ confirmar que ambas secciones conviven correctamente.
 - ✅ Causa raíz del reporte original confirmada con el usuario antes de corregir, no
   asumida (dos veces: el hotfix inicial y la aclaración de alcance posterior)
 - ✅ PLAN/AUDIT_PLAN con ambigüedades resueltas explícitamente por el usuario antes de
-  escribir código
-- ✅ AUDIT_CODE encontró y corrigió dos problemas reales (crash por JSON corrupto,
-  aserciones de test débiles); el hallazgo de seguridad fuera de alcance quedó
-  documentado, no ignorado
-- ✅ `ruff`, `mypy`, `pytest` (275 passed), `mkdocs build --strict` — todos en verde
-- ✅ Verificación visual real (Playwright) además de tests automatizados
-- ✅ CHANGELOG.md y `pyproject.toml` sincronizados (0.3.0)
+  escribir código, en ambas páginas (Duplicados y Caché)
+- ✅ AUDIT_CODE encontró y corrigió problemas reales en ambas rondas: crash por JSON
+  corrupto y aserciones de test débiles (Duplicados); `id` sin conectar en el contador
+  (Caché, resuelto según preferencia explícita del usuario). El hallazgo de seguridad
+  fuera de alcance (autoescape) quedó documentado, no ignorado, en ambas páginas
+- ✅ `ruff`, `mypy`, `pytest` (277 passed), `mkdocs build --strict` — todos en verde
+- ✅ Verificación visual real (Playwright, 3 pasadas) además de tests automatizados
+- ✅ CHANGELOG.md sincronizado — ambas mejoras conviven en el mismo `## [0.3.0]` sin
+  publicar; `pyproject.toml` en `0.3.0`
 - ⬜ Commit: pendiente de confirmación explícita del usuario
 
 **Evidencia**:
 - Branch: `develop`
 - Commits: ninguno todavía (working tree con cambios sin confirmar)
-- Tests: 275 passed, 96% cobertura total, 100% en `web/routes/duplicates.py`
+- Tests: 277 passed, 96% cobertura total, 100% en `web/routes/duplicates.py` y
+  `web/routes/cache.py`
 
 **Sesión cerrada**: 2026-08-31

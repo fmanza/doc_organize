@@ -6,17 +6,28 @@
 <h1 class="text-xl font-semibold mb-4">Caché: {{ project.name }}</h1>
 
 {% if entries %}
+<div class="my-3">
+    <label for="cache-search" class="block text-sm font-medium mb-1">Buscar por nombre o carpeta</label>
+    <input type="text" id="cache-search" placeholder="Filtra por nombre de archivo o ruta de carpeta…"
+           class="border border-gray-300 rounded px-2 py-1.5 w-full max-w-md">
+</div>
+<p id="cache-no-results" class="text-gray-500 my-2" hidden>
+    Sin resultados para «<span id="cache-no-results-query"></span>».
+</p>
+
 <table class="w-full border-collapse mt-4">
     <thead><tr>
         <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Archivo</th>
+        <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Carpeta</th>
         <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Hash</th>
         <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Estado</th>
         <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Conversión</th>
     </tr></thead>
     <tbody>
     {% for entry in entries %}
-        <tr>
-            <td class="px-2.5 py-1.5 border-b border-gray-300">{{ entry.file_path }}</td>
+        <tr data-search="{{ entry.file_path | lower }}">
+            <td class="px-2.5 py-1.5 border-b border-gray-300 break-all">{{ entry.file_path | basename }}</td>
+            <td class="px-2.5 py-1.5 border-b border-gray-300 break-all text-gray-600 font-mono text-xs" title="{{ entry.file_path }}">{{ entry.file_path | dirname }}</td>
             <td class="px-2.5 py-1.5 border-b border-gray-300">{{ entry.sha256_hash[:12] }}…</td>
             <td class="px-2.5 py-1.5 border-b border-gray-300">{{ entry.status }}</td>
             <td class="px-2.5 py-1.5 border-b border-gray-300">{{ entry.conversion_status or "—" }}</td>
@@ -24,9 +35,40 @@
     {% endfor %}
     </tbody>
 </table>
-<p class="mt-4">{{ entries | length }} entradas.</p>
+<p class="mt-4" id="cache-count">{{ entries | length }} entradas.</p>
 {% else %}
 <p>No hay entradas en caché todavía — ejecuta un
    <a class="text-blue-600 underline" href="/projects/{{ project.name | urlencode }}/scan">escaneo</a>.</p>
 {% endif %}
+
+<script>
+const searchInput = document.getElementById("cache-search");
+if (searchInput) {
+    const rows = Array.from(document.querySelectorAll("tbody tr[data-search]"));
+    const noResults = document.getElementById("cache-no-results");
+    const noResultsQuery = document.getElementById("cache-no-results-query");
+    const countEl = document.getElementById("cache-count");
+    const totalCount = rows.length;
+
+    searchInput.addEventListener("input", () => {
+        const rawQuery = searchInput.value.trim();
+        const query = rawQuery.toLowerCase();
+        let visibleCount = 0;
+        for (const row of rows) {
+            const matches = query === "" || row.dataset.search.includes(query);
+            row.hidden = !matches;
+            if (matches) visibleCount += 1;
+        }
+        if (query !== "" && visibleCount === 0) {
+            noResultsQuery.textContent = rawQuery;
+            noResults.hidden = false;
+        } else {
+            noResults.hidden = true;
+        }
+        countEl.textContent = query === ""
+            ? totalCount + " entradas."
+            : visibleCount + " de " + totalCount + " entradas.";
+    });
+}
+</script>
 {% endblock %}
