@@ -191,7 +191,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
     def _origin_matches_request_host(request: Request, origin: str) -> bool:
         origin_netloc = urlparse(origin).netloc
         request_host = request.headers.get("host", "")
-        return origin_netloc == request_host
+        return bool(origin_netloc == request_host)
 
 
 __all__ = [

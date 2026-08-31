@@ -52,6 +52,10 @@ dev = [
     "mypy>=1.0",
     "types-aiofiles>=23.0",
     "black>=23.0",
+    # Web dependencies for type checking (have native type hints)
+    "fastapi>=0.100",
+    "uvicorn>=0.23",
+    "starlette>=0.35",
 ]
 docs = [
     "mkdocs>=1.4",
@@ -84,19 +88,21 @@ addopts = "-v --cov=src --cov-report=term-missing --cov-report=html"
 testpaths = ["tests"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 plugins = ["pydantic.mypy"]
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
 strict = false
+ignore_missing_imports = false
 
 # Docling arrastra dependencias (via scipy-stubs) que usan sintaxis de
 # Python 3.12+ en sus stubs; no seguimos sus imports para que no rompan el
-# type-check de nuestro propio codigo (que sigue siendo compatible con 3.10).
+# type-check de nuestro propio codigo (que sigue siendo compatible con 3.11+).
 [[tool.mypy.overrides]]
 module = ["docling.*"]
 follow_imports = "skip"
+ignore_errors = true
 
 [tool.ruff]
 line-length = 150
