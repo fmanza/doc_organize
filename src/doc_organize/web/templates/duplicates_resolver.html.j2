@@ -5,24 +5,116 @@
 {% block content %}
 <h1 class="text-xl font-semibold mb-4">Duplicados: {{ project.name }}</h1>
 
+{% if groups or resolved_groups %}
+<div class="my-3">
+    <label for="duplicates-search" class="block text-sm font-medium mb-1">Buscar por nombre o carpeta</label>
+    <input type="text" id="duplicates-search" placeholder="Filtra por nombre de archivo o ruta de carpeta…"
+           class="border border-gray-300 rounded px-2 py-1.5 w-full max-w-md">
+</div>
+<p id="duplicates-no-results" class="text-gray-500 my-2" hidden>
+    Sin resultados para «<span id="duplicates-no-results-query"></span>».
+</p>
+{% endif %}
+
 {% if groups %}
 <form id="resolve-form" class="my-4">
     {% for item in groups %}
-    <fieldset class="border border-gray-300 rounded p-3 mb-3">
+    <fieldset class="border border-gray-300 rounded p-3 mb-3"
+              data-search="{{ (item.members | map(attribute='full_path') | join(' ') | lower) }}">
         <legend class="px-1 font-medium">Grupo {{ loop.index }} ({{ item.group.reason.value }})</legend>
-        {% for doc in item.members %}
-        <label class="block py-1">
-            <input type="radio" name="group-{{ item.key }}" value="{{ doc.full_path }}"
-                   {% if doc.full_path == item.group.canonical_doc.full_path %}checked{% endif %}>
-            {{ doc.full_path }} ({{ doc.size_bytes }} bytes)
-        </label>
-        {% endfor %}
+        <table class="w-full text-sm border-collapse">
+            <thead>
+                <tr class="text-left text-gray-600">
+                    <th class="w-8 py-1"></th>
+                    <th class="py-1 pr-2">Archivo</th>
+                    <th class="py-1 pr-2">Carpeta</th>
+                    <th class="py-1 pr-2 text-right">Tamaño</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for doc in item.members %}
+                {% set is_default = doc.full_path == item.group.canonical_doc.full_path %}
+                <tr class="border-t border-gray-200">
+                    <td class="py-1 align-top">
+                        <input type="radio" name="group-{{ item.key }}" value="{{ doc.full_path }}" {% if is_default %}checked{% endif %}>
+                    </td>
+                    <td class="py-1 pr-2 align-top break-all">
+                        {{ doc.display_name }}
+                        {% if is_default %}<span class="text-xs text-green-700">(conservado por defecto)</span>{% endif %}
+                    </td>
+                    <td class="py-1 pr-2 align-top break-all text-gray-600 font-mono text-xs" title="{{ doc.full_path }}">
+                        {{ doc.full_path | dirname }}
+                    </td>
+                    <td class="py-1 pr-2 align-top text-right whitespace-nowrap" title="{{ doc.size_bytes }} bytes">
+                        {{ doc.size_bytes | file_size }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </fieldset>
     {% endfor %}
     <button type="submit" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Resolver duplicados</button>
 </form>
 <p id="resolve-result" class="mt-2"></p>
-{% else %}
+{% elif last_dedup_report %}
+<p class="my-2 text-gray-500">No hay duplicados pendientes de revisar en este momento.</p>
+{% endif %}
+
+{% if last_dedup_report %}
+<p class="my-2 px-3 py-2 rounded bg-blue-50 border border-blue-300 text-blue-900 text-sm">
+    El último escaneo con "Deduplicar" activado resolvió automáticamente
+    {{ last_dedup_report.total_exact_duplicates }} duplicado(s) exacto(s) y
+    {{ last_dedup_report.total_version_conflicts }} conflicto(s) de versión (conservando por
+    defecto el documento más antiguo de cada grupo) el {{ last_dedup_report.timestamp }}.
+    Los ficheros descartados se movieron a la carpeta <code>duplicados/</code> del proyecto.
+</p>
+
+{% if resolved_groups %}
+<div class="my-4">
+    <h2 class="text-lg font-medium mb-2">Duplicados ya resueltos</h2>
+    {% for item in resolved_groups %}
+    <fieldset class="border border-gray-200 rounded p-3 mb-3 bg-gray-50"
+              data-search="{{ (item.members | map(attribute='full_path') | join(' ') | lower) }}">
+        <legend class="px-1 font-medium text-gray-600">Grupo resuelto {{ loop.index }} ({{ item.group.reason.value }})</legend>
+        <table class="w-full text-sm border-collapse">
+            <thead>
+                <tr class="text-left text-gray-600">
+                    <th class="py-1 pr-2">Archivo</th>
+                    <th class="py-1 pr-2">Carpeta original</th>
+                    <th class="py-1 pr-2 text-right">Tamaño</th>
+                    <th class="py-1 pr-2">Estado</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for doc in item.members %}
+                {% set is_kept = doc.full_path == item.kept.full_path %}
+                <tr class="border-t border-gray-200">
+                    <td class="py-1 pr-2 align-top break-all">{{ doc.display_name }}</td>
+                    <td class="py-1 pr-2 align-top break-all text-gray-600 font-mono text-xs" title="{{ doc.full_path }}">
+                        {{ doc.full_path | dirname }}
+                    </td>
+                    <td class="py-1 pr-2 align-top text-right whitespace-nowrap" title="{{ doc.size_bytes }} bytes">
+                        {{ doc.size_bytes | file_size }}
+                    </td>
+                    <td class="py-1 pr-2 align-top whitespace-nowrap">
+                        {% if is_kept %}
+                        <span class="text-green-700">Conservado en su carpeta</span>
+                        {% else %}
+                        <span class="text-gray-500">Movido a duplicados/</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </fieldset>
+    {% endfor %}
+</div>
+{% endif %}
+{% endif %}
+
+{% if not groups and not last_dedup_report %}
 <p>No se detectaron duplicados.</p>
 {% endif %}
 
@@ -51,6 +143,35 @@ if (form) {
             resultEl.textContent = "Movidos: " + data.moved + " (grupos resueltos: " + data.groups_resolved + ")";
         } else {
             resultEl.textContent = data.detail || "Error al resolver duplicados.";
+        }
+    });
+}
+
+// --- Filtro de busqueda (solo visual: oculta <fieldset> con `hidden`, nunca
+// deshabilita sus radios, para que el submit siga incluyendo su seleccion aunque
+// el grupo este filtrado en el momento de enviar). Filtra TODOS los fieldset con
+// data-search de la pagina, tanto los pendientes (dentro de #resolve-form) como
+// los ya resueltos (fuera de cualquier form, de solo lectura). ---
+const searchInput = document.getElementById("duplicates-search");
+if (searchInput) {
+    const fieldsets = Array.from(document.querySelectorAll("fieldset[data-search]"));
+    const noResults = document.getElementById("duplicates-no-results");
+    const noResultsQuery = document.getElementById("duplicates-no-results-query");
+
+    searchInput.addEventListener("input", () => {
+        const rawQuery = searchInput.value.trim();
+        const query = rawQuery.toLowerCase();
+        let visibleCount = 0;
+        for (const fieldset of fieldsets) {
+            const matches = query === "" || fieldset.dataset.search.includes(query);
+            fieldset.hidden = !matches;
+            if (matches) visibleCount += 1;
+        }
+        if (query !== "" && visibleCount === 0) {
+            noResultsQuery.textContent = rawQuery;
+            noResults.hidden = false;
+        } else {
+            noResults.hidden = true;
         }
     });
 }

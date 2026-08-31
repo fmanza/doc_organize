@@ -10,9 +10,9 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
-from doc_organize.core.models import DuplicateGroup, Project
+from doc_organize.core.models import DeduplicationReport, DuplicateGroup, Project
 from doc_organize.dedup import DeduplicationManager
 from doc_organize.scanner import DocumentScanner
 from doc_organize.utils.logging import get_logger
@@ -22,6 +22,32 @@ logger = get_logger(__name__)
 
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 _templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+
+_SIZE_UNITS = ("B", "KB", "MB", "GB", "TB")
+
+
+def _format_file_size(size_bytes: int) -> str:
+    """Formatea bytes en una unidad legible (p.ej. "1.5 MB") solo para la plantilla
+    del Duplicates Resolver — no toca `DocumentMetadata.size_bytes`, que sigue
+    exponiendo el valor en bytes sin redondear en la API JSON."""
+    size = float(size_bytes)
+    unit_index = 0
+    while size >= 1024 and unit_index < len(_SIZE_UNITS) - 1:
+        size /= 1024
+        unit_index += 1
+    if unit_index == 0:
+        return f"{int(size)} {_SIZE_UNITS[unit_index]}"
+    return f"{size:.1f} {_SIZE_UNITS[unit_index]}"
+
+
+def _dirname(full_path: str) -> str:
+    """Carpeta contenedora de `full_path`, para mostrarla separada del nombre de
+    archivo en la tabla del Duplicates Resolver."""
+    return str(Path(full_path).parent)
+
+
+_templates.env.filters["file_size"] = _format_file_size
+_templates.env.filters["dirname"] = _dirname
 
 router = APIRouter(tags=["duplicates"])
 
@@ -81,16 +107,59 @@ async def _detect_duplicates(project: Project) -> list[DuplicateGroup]:
     return DeduplicationManager().find_duplicates(scan_result.documents)
 
 
+def _load_last_dedup_report(project: Project) -> DeduplicationReport | None:
+    """Lee `duplicados/DEDUP_REPORT.json` si el último escaneo se hizo con
+    "Deduplicar" activado: en ese caso `ScanCommand._deduplicate` ya movió los
+    duplicados fuera de las carpetas escaneadas *durante el propio escaneo*, así
+    que un re-escaneo en vivo (`_detect_duplicates`) no encuentra nada — no porque
+    no hubiera duplicados, sino porque ya se resolvieron automáticamente. Sin este
+    aviso, la página muestra "No se detectaron duplicados" de forma engañosa justo
+    después de que el escaneo informara de grupos detectados.
+    """
+    report_path = Path(project.root_path) / "duplicados" / "DEDUP_REPORT.json"
+    if not report_path.is_file():
+        return None
+    try:
+        return DeduplicationReport.model_validate_json(report_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, ValidationError):
+        # `resolve_duplicates()` escribe este fichero con un `write_text` directo
+        # (sin escribir-a-temporal-y-renombrar): un crash o disco lleno a mitad de
+        # escritura deja un JSON truncado/corrupto. Sin este fallback, cada visita
+        # posterior a esta página tumbaría con un 500 en vez de degradar al mismo
+        # "No se detectaron duplicados" que se mostraba antes de que este fichero
+        # existiera.
+        logger.warning(f"'{report_path}' existe pero no es un DEDUP_REPORT.json válido; se ignora.")
+        return None
+
+
 @router.get("/projects/{name}/duplicates", response_class=HTMLResponse, dependencies=[Depends(require_project_access)])
 async def duplicates_resolver_page(name: str, request: Request) -> HTMLResponse:
+    """Muestra tanto los duplicados pendientes de resolver (re-escaneo en vivo,
+    con formulario interactivo) como el detalle de los ya resueltos en el último
+    escaneo con "Deduplicar" activado (`DEDUP_REPORT.json`, de solo lectura) —
+    ambos bloques son independientes: los archivos duplicados deben verse en la
+    página tanto si el re-escaneo en vivo encuentra algo pendiente como si no.
+    """
     project = await _get_project(request, name)
     groups = await _detect_duplicates(project)
     groups_with_keys = [
         {"key": _group_key(group), "group": group, "members": [group.canonical_doc, *group.duplicates]}
         for group in groups
     ]
+    last_dedup_report = _load_last_dedup_report(project)
+    resolved_groups = [
+        {"group": group, "members": [group.canonical_doc, *group.duplicates], "kept": group.user_choice or group.canonical_doc}
+        for group in (last_dedup_report.groups if last_dedup_report else [])
+    ]
     return _templates.TemplateResponse(
-        request, "duplicates_resolver.html.j2", {"project": project, "groups": groups_with_keys}
+        request,
+        "duplicates_resolver.html.j2",
+        {
+            "project": project,
+            "groups": groups_with_keys,
+            "last_dedup_report": last_dedup_report,
+            "resolved_groups": resolved_groups,
+        },
     )
 
 

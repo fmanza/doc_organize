@@ -4,6 +4,34 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 Este proyecto sigue [SemVer](https://semver.org/lang/es/) desde v0.2.0 (sin
 releases publicados antes de esa versión).
 
+## [0.3.0] - 2026-08-31
+
+### Added
+
+- `src/doc_organize/web/routes/duplicates.py` /
+  `src/doc_organize/web/templates/duplicates_resolver.html.j2`: la página
+  "Revisar Duplicados" ahora incluye un buscador de filtrado instantáneo en
+  cliente (por nombre de archivo o carpeta, sin round-trip al servidor), muestra
+  la carpeta contenedora y el tamaño legible (`1.5 MB`) de cada documento en una
+  tabla en vez de una lista de radios en texto plano, y añade una sección de
+  solo lectura "Duplicados ya resueltos" con el detalle de los grupos que un
+  escaneo previo con "Deduplicar" activado ya movió automáticamente (lee
+  `duplicados/DEDUP_REPORT.json`). Sin cambios en los modelos Pydantic ni en las
+  rutas JSON existentes (`GET`/`POST /api/projects/{name}/duplicates...`).
+
+### Fixed
+
+- `src/doc_organize/web/routes/duplicates.py`: la página "Revisar Duplicados"
+  ya no muestra el mensaje ambiguo "No se detectaron duplicados" cuando un
+  escaneo previo con "Deduplicar" activado ya había resuelto y movido los
+  duplicados fuera de las carpetas escaneadas — un re-escaneo en vivo no podía
+  encontrarlos y el mensaje contradecía lo que el propio escaneo acababa de
+  informar. Ahora se explica el porqué y se lista su detalle (ver Added).
+- `src/doc_organize/web/routes/duplicates.py`: un `duplicados/DEDUP_REPORT.json`
+  truncado o corrupto (p. ej. por un proceso interrumpido a mitad de escritura)
+  ya no produce un error 500 permanente en la página — se ignora y se degrada
+  al mismo comportamiento que si el fichero no existiera.
+
 ## [0.2.0] - 2026-08-29
 
 ### Added
