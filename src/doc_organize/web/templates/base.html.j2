@@ -7,13 +7,62 @@
     <script src="https://cdn.tailwindcss.com"></script>
     {% block estilos_adicionales %}{% endblock %}
 </head>
-<body class="font-sans max-w-[720px] mx-auto px-4 py-8 text-gray-800">
-    {% if request.state.user_id is defined %}
-    <nav class="session-nav text-right text-sm mb-2">
-        {% if request.state.is_admin %}<a class="text-blue-600 underline" href="/admin/users">Gestión de usuarios</a> ·{% endif %}
-        <form method="post" action="/logout" class="inline"><button type="submit" class="bg-transparent border-0 p-0 cursor-pointer text-blue-600 underline">Cerrar sesión</button></form>
-    </nav>
-    {% endif %}
-    {% block content %}{% endblock %}
+<body class="font-sans text-gray-800">
+<div class="flex min-h-screen">
+    <aside id="sidebar" class="bg-gray-50 border-r border-gray-300 shrink-0 overflow-x-hidden overflow-y-auto transition-[width,border-width] duration-150"
+           style="width: 220px;">
+        <div class="p-4">
+            <a href="/" class="font-semibold whitespace-nowrap">doc_organize</a>
+        </div>
+        <nav class="px-2 space-y-1 whitespace-nowrap text-sm">
+            {% block sidebar_items %}{% endblock %}
+        </nav>
+        {% if request.state.user_id is defined %}
+        <div class="mt-4 px-4 pt-3 border-t border-gray-300 text-sm whitespace-nowrap space-y-1">
+            {% if request.state.is_admin %}<a class="block text-blue-600 underline" href="/admin/users">Gestión de usuarios</a>{% endif %}
+            <form method="post" action="/logout"><button type="submit" class="bg-transparent border-0 p-0 cursor-pointer text-blue-600 underline">Cerrar sesión</button></form>
+        </div>
+        {% endif %}
+    </aside>
+    <div class="flex-1 min-w-0">
+        <button id="sidebar-toggle" type="button"
+                class="m-2 px-2 py-1 border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 cursor-pointer text-sm"
+                aria-controls="sidebar" aria-expanded="true">&#9776; Menú</button>
+        <main class="max-w-[720px] mx-auto px-4 py-4">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+</div>
+<script>
+(function () {
+    const STORAGE_KEY = "doc_organize_sidebar_collapsed";
+    const sidebar = document.getElementById("sidebar");
+    const toggle = document.getElementById("sidebar-toggle");
+
+    function applyState(collapsed) {
+        sidebar.style.width = collapsed ? "0px" : "220px";
+        sidebar.style.borderRightWidth = collapsed ? "0px" : "1px";
+        toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    }
+
+    let collapsed = false;
+    try {
+        collapsed = window.localStorage.getItem(STORAGE_KEY) === "1";
+    } catch (e) {
+        // localStorage no disponible (navegación privada, etc.): se ignora, el sidebar arranca visible.
+    }
+    applyState(collapsed);
+
+    toggle.addEventListener("click", () => {
+        collapsed = !collapsed;
+        applyState(collapsed);
+        try {
+            window.localStorage.setItem(STORAGE_KEY, collapsed ? "1" : "0");
+        } catch (e) {
+            // idem: sin persistencia, el toggle sigue funcionando solo para esta carga de página.
+        }
+    });
+})();
+</script>
 </body>
 </html>

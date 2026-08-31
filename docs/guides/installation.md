@@ -36,6 +36,27 @@ GPU (EasyOCR) en vez del motor por defecto en CPU (RapidOCR). Es una optimizaci�
 opcional: el OCR funciona igual de correcto sin GPU, solo más lento en documentos
 grandes.
 
+⚠️ **Este comando por sí solo instala el build de `torch` CPU-only.** El extra
+`ocr-gpu` de `pyproject.toml` no fija una versión CUDA de `torch` a propósito
+(para no atar el paquete a una versión de CUDA concreta) — `pip install torch`
+sin más resuelve siempre contra PyPI, que solo publica el wheel CPU. Para el
+build con CUDA hace falta el índice propio de PyTorch, indicando la etiqueta
+`cuXXX` que corresponda a tus drivers NVIDIA (comprueba la versión de CUDA
+soportada con `nvidia-smi`, y la etiqueta exacta en
+[pytorch.org/get-started](https://pytorch.org/get-started/locally/)):
+
+```bash
+pip install --force-reinstall torch --index-url https://download.pytorch.org/whl/cuXXX
+```
+
+Ejecuta esto **dentro del mismo entorno virtual que arranca el servidor web**
+(`python -m doc_organize web`) — si lo instalaste en otro Python del sistema,
+`torch.cuda.is_available()` seguirá devolviendo `False` en el proceso real del
+servidor aunque en ese otro entorno funcione. La página de Escaneo detecta y
+muestra este estado automáticamente (ver
+[Resolución de problemas](troubleshooting.md#el-menu-escaneo-dice-gpu-no-activa-aunque-ya-la-instale-y-funciona)
+si el mensaje no coincide con lo que esperas).
+
 ## Entorno de desarrollo
 
 ```bash

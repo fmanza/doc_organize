@@ -372,6 +372,40 @@ class SecurityConfig(BaseModel):
     require_auth_if_not_loopback: bool = Field(default=True, description="Exigir autenticación si no es loopback")
 
 
+class ScannedFolder(BaseModel):
+    """Una carpeta guardada en la lista persistente de escaneo de un proyecto (menú Escaneo).
+
+    `used=True` es permanente una vez marcado: registra que la carpeta se usó
+    alguna vez en un escaneo real, tanto para informar a qué carpetas se ha
+    escaneado como para impedir su eliminación accidental de la lista.
+    """
+
+    path: str = Field(..., description="Ruta absoluta de la carpeta")
+    added_at: str = Field(..., description="Timestamp ISO 8601 de cuándo se añadió a la lista")
+    used: bool = Field(default=False, description="Si esta carpeta ya se ha usado en algún escaneo")
+
+
+class GpuStatus(BaseModel):
+    """Estado de soporte de GPU del entorno donde corre el servidor web (menú Escaneo).
+
+    Detección de entorno software, no de permisos por usuario/rol: el mismo
+    resultado aplica a cualquier sesión, porque depende únicamente de qué hay
+    instalado/disponible en el proceso servidor, no de quién pregunta.
+    """
+
+    gpu_support_installed: bool = Field(..., description="Si `torch` (extra `ocr-gpu`) está instalado en este entorno")
+    gpu_active: bool = Field(..., description="Si hay una GPU CUDA disponible y utilizable ahora mismo")
+    instructions: str | None = Field(None, description="Instrucciones para activar la GPU, si `gpu_active` es `False`")
+
+
+class DirectoryListing(BaseModel):
+    """Resultado de listar el contenido de una carpeta del servidor (explorador de carpetas de escaneo)."""
+
+    current_path: str = Field(..., description="Ruta absoluta listada")
+    parent_path: str | None = Field(None, description="Ruta absoluta de la carpeta padre, o `None` si no hay/no es accesible")
+    entries: list[str] = Field(default_factory=list, description="Nombres de las subcarpetas inmediatas, ordenados alfabéticamente")
+
+
 __all__ = [
     "CacheConfig",
     "CacheEntry",
@@ -379,6 +413,7 @@ __all__ = [
     "ConversionResult",
     "ConversionStatus",
     "DeduplicationReport",
+    "DirectoryListing",
     "DirectoryTree",
     "DirectoryTreeNode",
     "DoclingConfig",
@@ -386,6 +421,7 @@ __all__ = [
     "DocumentStatus",
     "DuplicateGroup",
     "DuplicateReason",
+    "GpuStatus",
     "OcrMode",
     "Project",
     "ProjectNameValidation",
@@ -393,6 +429,7 @@ __all__ = [
     "ScanEvent",
     "ScanEventType",
     "ScanResult",
+    "ScannedFolder",
     "SecurityConfig",
     "Session",
     "Tenant",

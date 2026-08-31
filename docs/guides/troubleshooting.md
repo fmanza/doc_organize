@@ -17,6 +17,44 @@ El motor por defecto (RapidOCR) corre en CPU. Si tienes GPU disponible, instala
 el extra `ocr-gpu` y añade `--use-gpu` (junto con `--use-ocr`) para usar EasyOCR
 acelerado por CUDA.
 
+## El menú Escaneo dice "GPU no activa" aunque ya la instalé y funciona
+
+Primero, comprueba el estado real desde el mismo entorno donde corre el
+servidor (no desde otra terminal/Python que tengas a mano):
+
+```bash
+# reemplaza .venv por el entorno virtual real de tu instalación
+.venv\Scripts\python -c "from doc_organize.utils.gpu_detector import detect_gpu_status; print(detect_gpu_status())"
+```
+
+**Causa más común: `torch` CPU-only en el entorno del servidor.**
+`pip install doc_organize[web,ocr-gpu]` (o `pip install torch` a secas) instala
+por defecto el build **CPU-only** de PyTorch — PyPI no publica los builds con
+CUDA bajo el nombre normal del paquete. Es fácil comprobarlo y confundirse
+porque `import torch` funciona igual de bien con o sin CUDA: solo
+`torch.cuda.is_available()` delata la diferencia.
+
+```bash
+.venv\Scripts\python -c "import torch; print(torch.__version__, torch.version.cuda)"
+```
+
+Si `torch.version.cuda` sale `None` (o la versión no lleva sufijo `+cuXXX`),
+reinstala `torch` en **ese mismo entorno** apuntando al índice de PyTorch (ver
+[Instalación → Aceleración GPU](installation.md#aceleracion-gpu-para-ocr-opcional)
+para el comando exacto con la etiqueta CUDA correcta). Es habitual tener, sin
+darse cuenta, `torch` con CUDA instalado en *otro* Python del sistema (uno
+distinto al que arranca `doc_organize web`) — comprobar `torch.cuda.is_available()`
+ahí no dice nada sobre el entorno real del servidor.
+
+**Causa secundaria: caché por proceso.** `detect_gpu_status()`
+(`utils/gpu_detector.py`) cachea su resultado una vez por proceso servidor
+(`functools.lru_cache`), para no reimportar `torch` ni reinicializar CUDA en
+cada carga de página. Si acabas de arreglar el build de `torch` (o instalar
+drivers) con el servidor ya arrancado, reinicia el proceso
+(`python -m doc_organize web`) — el nuevo proceso vuelve a detectar el entorno
+desde cero. Un reinicio **no** soluciona la causa más común de arriba, solo
+esta.
+
 ## Rutas de salida muy largas o error de ruta en Windows
 
 `DocumentConverter` replica la ruta **absoluta completa** del documento de origen

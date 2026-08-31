@@ -48,6 +48,112 @@ async def test_folder_selector_page_404_for_missing_project(tmp_path) -> None:
     assert response.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_folder_selector_page_shows_gpu_status(tmp_path) -> None:
+    """Sin torch instalado en el entorno de test, la página debe mostrar
+    las instrucciones de instalación en vez de reventar (menú Escaneo, GPU)."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/scan")
+
+    assert response.status_code == 200
+    assert "GPU" in response.text
+
+
+# ===== API /api/projects/{name}/folders/library (lista persistente de carpetas) =====
+
+
+@pytest.mark.asyncio
+async def test_folder_library_starts_empty(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.get(f"/api/projects/{project.name}/folders/library")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+@pytest.mark.asyncio
+async def test_add_folder_to_library(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    folder = tmp_path / "datos"
+    folder.mkdir()
+
+    async with _client(app) as client:
+        response = await client.post(f"/api/projects/{project.name}/folders/library", json={"path": str(folder)})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["path"] == str(folder.resolve())
+    assert payload["used"] is False
+
+
+@pytest.mark.asyncio
+async def test_add_folder_to_library_rejects_nonexistent_path(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.post(f"/api/projects/{project.name}/folders/library", json={"path": str(tmp_path / "no-existe")})
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_remove_unused_folder_from_library(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    folder = tmp_path / "datos"
+    folder.mkdir()
+
+    async with _client(app) as client:
+        await client.post(f"/api/projects/{project.name}/folders/library", json={"path": str(folder)})
+        response = await client.request("DELETE", f"/api/projects/{project.name}/folders/library", json={"path": str(folder)})
+        listing = await client.get(f"/api/projects/{project.name}/folders/library")
+
+    assert response.status_code == 204
+    assert listing.json() == []
+
+
+@pytest.mark.asyncio
+async def test_remove_used_folder_from_library_is_rejected(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    empty_input = tmp_path / "empty-input"
+    empty_input.mkdir()
+
+    client = TestClient(app)
+    add_response = client.post(f"/api/projects/{project.name}/folders/library", json={"path": str(empty_input)})
+    assert add_response.status_code == 200
+
+    with client.websocket_connect(f"/api/projects/{project.name}/scan") as websocket:
+        websocket.send_json({"paths": [str(empty_input)], "deduplicate": False, "use_ocr": False, "use_gpu": False})
+        while True:
+            message = websocket.receive_json()
+            if message["event"] == "completed":
+                break
+
+    remove_response = client.request("DELETE", f"/api/projects/{project.name}/folders/library", json={"path": str(empty_input)})
+    assert remove_response.status_code == 409
+
+    listing = client.get(f"/api/projects/{project.name}/folders/library")
+    assert listing.json()[0]["used"] is True
+
+
 # ===== POST /api/projects/{name}/folders/validate =====
 
 
@@ -189,9 +295,7 @@ async def test_scan_websocket_non_admin_role_rejects_path_outside_allowed_roots(
         tenant = await store.create_tenant("Acme Corp")
         allowed_root = tmp_path / "allowed-root"
         allowed_root.mkdir()
-        role = await store.create_role(
-            tenant.id, "Lector", project_names=["Proyecto Scan"], allowed_scan_roots=[str(allowed_root)]
-        )
+        role = await store.create_role(tenant.id, "Lector", project_names=["Proyecto Scan"], allowed_scan_roots=[str(allowed_root)])
         alice = await store.create_user(tenant.id, "alice", "s3cr3t-password", role_id=role.id)
         session = await store.create_session(alice)
 
@@ -217,9 +321,7 @@ async def test_scan_websocket_non_admin_role_allows_path_inside_allowed_roots(tm
         tenant = await store.create_tenant("Acme Corp")
         allowed_root = tmp_path / "allowed-root"
         allowed_root.mkdir()
-        role = await store.create_role(
-            tenant.id, "Lector", project_names=["Proyecto Scan"], allowed_scan_roots=[str(allowed_root)]
-        )
+        role = await store.create_role(tenant.id, "Lector", project_names=["Proyecto Scan"], allowed_scan_roots=[str(allowed_root)])
         alice = await store.create_user(tenant.id, "alice", "s3cr3t-password", role_id=role.id)
         session = await store.create_session(alice)
 

@@ -6,7 +6,7 @@ from fastapi import HTTPException, Request
 from starlette.requests import HTTPConnection
 
 from doc_organize.auth import AuthStore
-from doc_organize.projects import ProjectRegistry
+from doc_organize.projects import ProjectRegistry, ScannedFoldersStore
 
 # `HTTPConnection` (no `Request`): base compartida de `Request` y `WebSocket` en
 # Starlette. Estas funciones solo tocan `.app.state`/`.state`, presentes en ambas —
@@ -36,6 +36,13 @@ def get_auth_store(conn: HTTPConnection) -> AuthStore:
     return AuthStore(auth_db_path) if auth_db_path else AuthStore()
 
 
+def get_scanned_folders_store() -> ScannedFoldersStore:
+    """Devuelve un `ScannedFoldersStore` (sin parámetros: a diferencia de `ProjectRegistry`/`AuthStore`,
+    no tiene una ruta de fichero única inyectable — cada método recibe el `Project` sobre el que opera).
+    """
+    return ScannedFoldersStore()
+
+
 def get_tenant_id(conn: HTTPConnection) -> str:
     """Resuelve el tenant de esta conexión (revisión 8, §2.7.2).
 
@@ -63,6 +70,31 @@ def require_admin(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Esta operación requiere un rol admin.")
 
 
+async def get_allowed_scan_roots(request: Request) -> list[str] | None:
+    """Resuelve las raíces de escaneo permitidas para la sesión de `request`, o `None` si no hay restricción.
+
+    Equivalente HTTP de la comprobación que `scan.py::_authorize_scan_websocket`
+    hace a mano para el WebSocket (`BaseHTTPMiddleware` no cubre WebSocket, así
+    que ese handler no puede depender de `AuthMiddleware`/`request.state`). Usado
+    por los endpoints REST del explorador de carpetas y de la lista persistente
+    de carpetas (`web/routes/filesystem.py`, `web/routes/scan.py`), que sí pasan
+    por `AuthMiddleware` y ya tienen `request.state.is_admin`/`role_id` resueltos.
+
+    `None` (sin restricción) para: sesión no resuelta (loopback/sin auth, mismo
+    criterio que `get_tenant_id`) o rol `is_admin`. Una lista (posiblemente
+    vacía) para un rol restringido, tomada de `Role.allowed_scan_roots`.
+    """
+    is_admin = getattr(request.state, "is_admin", None)
+    if is_admin is None or is_admin:
+        return None
+
+    role_id = request.state.role_id
+    tenant_id = get_tenant_id(request)
+    async with get_auth_store(request) as store:
+        role = await store.get_role(tenant_id, role_id)
+    return role.allowed_scan_roots
+
+
 async def require_project_access(name: str, request: Request) -> None:
     """Bloquea el acceso a un proyecto si el rol de la sesión no lo permite (revisión 9).
 
@@ -87,4 +119,11 @@ async def require_project_access(name: str, request: Request) -> None:
         raise HTTPException(status_code=404, detail=f"No existe ningún proyecto llamado '{name}'.")
 
 
-__all__ = ["get_auth_store", "get_project_registry", "get_tenant_id", "require_admin", "require_project_access"]
+__all__ = [
+    "get_allowed_scan_roots",
+    "get_auth_store",
+    "get_project_registry",
+    "get_tenant_id",
+    "require_admin",
+    "require_project_access",
+]

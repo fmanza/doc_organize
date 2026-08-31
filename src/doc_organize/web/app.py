@@ -11,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 
 from doc_organize.core.exceptions import (
     AuthError,
+    InvalidPathError,
     ProjectAlreadyExistsError,
     ProjectError,
     ProjectNameError,
@@ -18,6 +19,8 @@ from doc_organize.core.exceptions import (
     RoleAlreadyExistsError,
     RoleInUseError,
     RoleNotFoundError,
+    ScannedFolderInUseError,
+    ScannedFolderNotFoundError,
     UserAlreadyExistsError,
     UserNotFoundError,
 )
@@ -30,6 +33,7 @@ from doc_organize.web.routes.cache import router as cache_router
 from doc_organize.web.routes.change_password import router as change_password_router
 from doc_organize.web.routes.downloads import router as downloads_router
 from doc_organize.web.routes.duplicates import router as duplicates_router
+from doc_organize.web.routes.filesystem import router as filesystem_router
 from doc_organize.web.routes.projects import router as projects_router
 from doc_organize.web.routes.scan import router as scan_router
 
@@ -59,6 +63,9 @@ _EXCEPTION_STATUS_CODES: dict[type[Exception], int] = {
     UserNotFoundError: 404,
     UserAlreadyExistsError: 409,
     AuthError: 422,
+    InvalidPathError: 422,
+    ScannedFolderNotFoundError: 404,
+    ScannedFolderInUseError: 409,
 }
 
 
@@ -109,6 +116,7 @@ def create_app(
     app.include_router(admin_router)
     app.include_router(projects_router)
     app.include_router(scan_router)
+    app.include_router(filesystem_router)
     app.include_router(cache_router)
     app.include_router(downloads_router)
     app.include_router(duplicates_router)

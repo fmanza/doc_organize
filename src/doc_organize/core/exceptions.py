@@ -43,6 +43,18 @@ class ProjectNotFoundError(ProjectError):
     """No hay ningun proyecto registrado con ese nombre."""
 
 
+class ScannedFolderError(DocOrganizeError):
+    """Error base de la lista persistente de carpetas de escaneo de un proyecto."""
+
+
+class ScannedFolderNotFoundError(ScannedFolderError):
+    """La carpeta indicada no esta en la lista persistente del proyecto."""
+
+
+class ScannedFolderInUseError(ScannedFolderError):
+    """La carpeta ya se ha usado en un escaneo; no se puede eliminar de la lista."""
+
+
 class AuthError(DocOrganizeError):
     """Error base para autenticacion multi-usuario/multi-tenant (revision 8, §2.7.2)."""
 
@@ -89,6 +101,9 @@ __all__ = [
     "RoleAlreadyExistsError",
     "RoleInUseError",
     "RoleNotFoundError",
+    "ScannedFolderError",
+    "ScannedFolderInUseError",
+    "ScannedFolderNotFoundError",
     "TenantAlreadyExistsError",
     "TenantNotFoundError",
     "UserAlreadyExistsError",

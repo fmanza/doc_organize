@@ -2,20 +2,31 @@
 Folder Selector + escaneo/conversión vía web con progreso WebSocket (Fase D-2b, §2.7.3).
 """
 
+import asyncio
+
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from doc_organize.core.exceptions import ProjectNotFoundError
+from doc_organize.core.models import ScanEventType, ScannedFolder
 from doc_organize.scan import ScanCommand
+from doc_organize.utils.gpu_detector import detect_gpu_status
 from doc_organize.utils.logging import get_logger
-from doc_organize.utils.path_utils import is_subpath
+from doc_organize.utils.path_utils import paths_within_roots
 from doc_organize.validators import FolderValidator
 from doc_organize.web.auth import authenticate_session, requires_auth
-from doc_organize.web.dependencies import get_auth_store, get_project_registry, get_tenant_id, require_project_access
+from doc_organize.web.dependencies import (
+    get_allowed_scan_roots,
+    get_auth_store,
+    get_project_registry,
+    get_scanned_folders_store,
+    get_tenant_id,
+    require_project_access,
+)
 
 logger = get_logger(__name__)
 
@@ -35,13 +46,72 @@ class ValidateFoldersResponse(BaseModel):
     clean_paths: list[str]
 
 
+class AddFolderRequest(BaseModel):
+    path: str
+
+
 @router.get("/projects/{name}/scan", response_class=HTMLResponse, dependencies=[Depends(require_project_access)])
 async def folder_selector(name: str, request: Request) -> HTMLResponse:
     # ProjectNotFoundError se propaga sin capturar: el handler global de
     # web/app.py (_EXCEPTION_STATUS_CODES) la traduce a 404.
     async with get_project_registry(request) as registry:
         project = await registry.get_project(name, tenant_id=get_tenant_id(request))
-    return _templates.TemplateResponse(request, "folder_selector.html.j2", {"project": project})
+    folders = await get_scanned_folders_store().list_folders(project)
+    # asyncio.to_thread: importar torch (si está instalado) e inicializar CUDA
+    # tiene coste no trivial — no debe bloquear el event loop (AUDIT_PLAN GPU).
+    gpu_status = await asyncio.to_thread(detect_gpu_status)
+    return _templates.TemplateResponse(request, "folder_selector.html.j2", {"project": project, "folders": folders, "gpu_status": gpu_status})
+
+
+@router.get(
+    "/api/projects/{name}/folders/library",
+    response_model=list[ScannedFolder],
+    dependencies=[Depends(require_project_access)],
+)
+async def list_folder_library(name: str, request: Request) -> list[ScannedFolder]:
+    """Lista la carpeta persistente de carpetas guardadas de `name` (menú Escaneo)."""
+    async with get_project_registry(request) as registry:
+        project = await registry.get_project(name, tenant_id=get_tenant_id(request))
+    return await get_scanned_folders_store().list_folders(project)
+
+
+@router.post(
+    "/api/projects/{name}/folders/library",
+    response_model=ScannedFolder,
+    dependencies=[Depends(require_project_access)],
+)
+async def add_folder_to_library(name: str, payload: AddFolderRequest, request: Request) -> ScannedFolder:
+    """Añade una carpeta a la lista persistente de `name` (botón "Buscar…" del menú Escaneo).
+
+    Sujeto a la misma restricción `allowed_scan_roots` que el escaneo en sí — un
+    rol restringido no puede guardar en su lista una carpeta que de todos modos
+    no podría escanear.
+    """
+    async with get_project_registry(request) as registry:
+        project = await registry.get_project(name, tenant_id=get_tenant_id(request))
+
+    allowed_roots = await get_allowed_scan_roots(request)
+    if not paths_within_roots([payload.path], allowed_roots):
+        raise HTTPException(status_code=403, detail="No tienes acceso a esa carpeta.")
+
+    return await get_scanned_folders_store().add_folder(project, payload.path)
+
+
+@router.delete(
+    "/api/projects/{name}/folders/library",
+    status_code=204,
+    dependencies=[Depends(require_project_access)],
+)
+async def remove_folder_from_library(name: str, payload: AddFolderRequest, request: Request) -> None:
+    """Elimina una carpeta no usada de la lista persistente de `name`.
+
+    Raises:
+        HTTPException: 404 si la carpeta no está en la lista; 409 si ya se usó
+            en un escaneo (`ScannedFolderInUseError`, mapeada en `web/app.py`).
+    """
+    async with get_project_registry(request) as registry:
+        project = await registry.get_project(name, tenant_id=get_tenant_id(request))
+    await get_scanned_folders_store().remove_folder(project, payload.path)
 
 
 @router.post(
@@ -60,22 +130,6 @@ async def validate_folders(name: str, payload: ValidateFoldersRequest, request: 
 
     result = FolderValidator().validate_folder_set(payload.paths)
     return ValidateFoldersResponse(valid=result.is_valid, warnings=result.warnings, clean_paths=result.clean_paths)
-
-
-def _paths_within_roots(paths: list[str], allowed_roots: list[str]) -> bool:
-    """`True` si cada ruta de `paths` es (o está dentro de) alguna de `allowed_roots`.
-
-    Sin `allowed_roots` configuradas, un rol restringido no puede escanear ninguna
-    ruta externa: antes de esta comprobación, cualquier rol con acceso a un
-    proyecto podía indicar cualquier ruta legible por el proceso servidor,
-    evadiendo por completo la restricción de `project_names` (revisión de
-    seguridad, revisión 9 roles y gestión de usuarios).
-    """
-    if not paths:
-        return True
-    if not allowed_roots:
-        return False
-    return all(any(is_subpath(path, root) for root in allowed_roots) for path in paths)
 
 
 async def _authorize_scan_websocket(websocket: WebSocket, project_name: str) -> tuple[str, list[str] | None] | None:
@@ -139,7 +193,7 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
         return
 
     paths = [str(p) for p in request_payload.get("paths", [])]
-    if allowed_scan_roots is not None and not _paths_within_roots(paths, allowed_scan_roots):
+    if not paths_within_roots(paths, allowed_scan_roots):
         await websocket.close(code=1008, reason="Forbidden path")
         return
 
@@ -159,6 +213,13 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
             use_ocr=use_ocr,
             use_gpu=use_gpu,
         ):
+            if event.event == ScanEventType.COMPLETED:
+                # Se marca ANTES de retransmitir el evento "completed" al cliente
+                # (menú Escaneo, lista persistente de carpetas): el cliente cierra
+                # el WebSocket en cuanto recibe "completed" (ver
+                # folder_selector.html.j2), así que si `mark_used` fuera después
+                # de `send_json` competiría con esa desconexión.
+                await get_scanned_folders_store().mark_used(project, paths)
             await websocket.send_json(event.model_dump(mode="json"))
     except WebSocketDisconnect:
         logger.info(f"Cliente desconectado durante el escaneo de '{name}' (tenant '{tenant_id}')")

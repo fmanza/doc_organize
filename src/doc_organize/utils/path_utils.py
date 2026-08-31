@@ -58,4 +58,24 @@ def is_subpath(child: str | Path, parent: str | Path) -> bool:
     return child_resolved == parent_resolved or parent_resolved in child_resolved.parents
 
 
-__all__ = ["is_subpath", "safe_path_join"]
+def paths_within_roots(paths: list[str], allowed_roots: list[str] | None) -> bool:
+    """`True` si cada ruta de `paths` es (o está dentro de) alguna de `allowed_roots`.
+
+    `allowed_roots=None` significa "sin restricción" (rol admin, o servidor sin
+    autenticación) y siempre devuelve `True`. Con una lista (posiblemente vacía),
+    un rol restringido sin `allowed_roots` configuradas no puede indicar ninguna
+    ruta externa — evita que eluda su `project_names` apuntando el escaneo (o el
+    explorador de carpetas) a una ruta arbitraria del servidor. Compartida por
+    `web/routes/scan.py` (WebSocket de escaneo) y `web/routes/filesystem.py`
+    (explorador de carpetas), que aplican la misma restricción por rol.
+    """
+    if allowed_roots is None:
+        return True
+    if not paths:
+        return True
+    if not allowed_roots:
+        return False
+    return all(any(is_subpath(path, root) for root in allowed_roots) for path in paths)
+
+
+__all__ = ["is_subpath", "paths_within_roots", "safe_path_join"]

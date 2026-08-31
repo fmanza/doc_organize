@@ -1,7 +1,8 @@
 {% extends "base.html.j2" %}
+{% from "_nav_macros.html.j2" import project_nav %}
 {% block title %}doc_organize — Duplicados: {{ project.name }}{% endblock %}
+{% block sidebar_items %}{{ project_nav(project, "duplicates") }}{% endblock %}
 {% block content %}
-<p><a class="text-blue-600 underline" href="/projects/{{ project.name | urlencode }}">&larr; {{ project.name }}</a></p>
 <h1 class="text-xl font-semibold mb-4">Duplicados: {{ project.name }}</h1>
 
 {% if groups %}

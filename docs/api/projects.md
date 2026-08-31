@@ -183,3 +183,31 @@ class Project:
 ## Ejemplos Relacionados
 
 - [Crear y listar proyectos](../examples/projects-registry.md)
+
+## ScannedFoldersStore
+
+```python
+class ScannedFoldersStore:
+    async def list_folders(self, project: Project) -> list[ScannedFolder]
+    async def add_folder(self, project: Project, path: str) -> ScannedFolder
+    async def remove_folder(self, project: Project, path: str) -> None
+    async def mark_used(self, project: Project, paths: list[str]) -> None
+```
+
+Lista persistente por proyecto (`<project.root_path>/scanned_folders.json`) de
+las carpetas guardadas desde el menú Escaneo de la web. Mismo patrón de
+concurrencia que `ProjectRegistry` (lock en proceso + escritura atómica).
+
+| Método | Descripción | Excepciones |
+|---|---|---|
+| `add_folder` | Añade `path` (o devuelve la entrada existente si ya estaba) | `InvalidPathError` si no existe o no es carpeta |
+| `remove_folder` | Elimina `path` de la lista | `ScannedFolderNotFoundError`, `ScannedFolderInUseError` si `used=True` |
+| `mark_used` | Marca `paths` como usadas (crea la entrada si no existía); llamado por `scan_websocket` tras un escaneo correcto | — |
+
+```python
+@dataclass
+class ScannedFolder:
+    path: str
+    added_at: str  # ISO 8601
+    used: bool  # permanente una vez True
+```
