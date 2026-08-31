@@ -47,7 +47,8 @@ sin perder la estructura de carpetas original ni duplicar trabajo entre ejecucio
 
 ### CLI (`python -m doc_organize ...`, no `doclink`)
 - `project create` / `project list`
-- `scan --paths ... [--project ...] [--deduplicate] [--use-ocr] [--use-gpu]`
+- `scan --paths ... [--project ...] [--use-ocr] [--use-gpu]` (ya no deduplica — ver `deduplicate`)
+- `deduplicate --paths ... [--project ...] [--duplicates-dir ...]` (acción aparte, a petición del usuario)
 - `web [--host ...] [--port ...]`
 - `tenant create` / `user create` (contraseña vía `getpass`, nunca como argumento)
 

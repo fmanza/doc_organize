@@ -45,7 +45,8 @@ mkdocs build --strict                # sitio estático en ./site — comando de 
 ```bash
 python -m doc_organize project create "Mi Proyecto" --location /ruta/a/workspaces
 python -m doc_organize project list
-python -m doc_organize scan --project "Mi Proyecto" --paths /ruta/a/documentos [--deduplicate] [--use-ocr] [--use-gpu]
+python -m doc_organize scan --project "Mi Proyecto" --paths /ruta/a/documentos [--use-ocr] [--use-gpu]  # ya no deduplica
+python -m doc_organize deduplicate --project "Mi Proyecto" --paths /ruta/a/documentos  # accion aparte, a peticion del usuario
 python -m doc_organize web [--host 0.0.0.0] [--port 8000]
 python -m doc_organize tenant create "Mi Organización"
 python -m doc_organize user create alice --tenant mi-organizacion   # contraseña vía prompt interactivo

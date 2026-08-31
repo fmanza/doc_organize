@@ -66,7 +66,8 @@ class DeduplicationManager:
     async def resolve_duplicates(self, groups: list[DuplicateGroup], duplicates_dir: Path) -> DeduplicationReport:
         """Mueve los documentos descartados de cada grupo a `duplicates_dir`,
         preservando su estructura de directorios original, y escribe
-        `DEDUP_REPORT.json` con la auditoria de la operacion."""
+        `DEDUP_REPORT.json` (solo el último run) y añade una línea a
+        `DEDUP_HISTORY.jsonl` (histórico acumulado de todas las ejecuciones)."""
         duplicates_dir = Path(duplicates_dir)
         await asyncio.to_thread(duplicates_dir.mkdir, parents=True, exist_ok=True)
 
@@ -93,8 +94,25 @@ class DeduplicationManager:
             groups=groups,
         )
         await asyncio.to_thread(audit_path.write_text, report.model_dump_json(indent=2), encoding="utf-8")
+        await self._append_to_history(duplicates_dir, report)
         self.logger.info(f"Deduplicación resuelta: {exact_moved} duplicados exactos, {version_resolved} conflictos de versión")
         return report
+
+    @staticmethod
+    async def _append_to_history(duplicates_dir: Path, report: DeduplicationReport) -> None:
+        """Añade `report` como una línea a `DEDUP_HISTORY.jsonl` (append, nunca
+        sobrescribe): a diferencia de `DEDUP_REPORT.json` (solo el último run),
+        este fichero acumula todas las ejecuciones para poder consultarlas —
+        tanto las lanzadas desde "Buscar duplicados" como las del formulario
+        interactivo de resolución manual, ambas pasan por aquí."""
+        history_path = duplicates_dir / "DEDUP_HISTORY.jsonl"
+        line = report.model_dump_json() + "\n"
+
+        def _append() -> None:
+            with history_path.open("a", encoding="utf-8") as handle:
+                handle.write(line)
+
+        await asyncio.to_thread(_append)
 
     @staticmethod
     def _extract_base_name(display_name: str) -> str:

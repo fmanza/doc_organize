@@ -90,6 +90,52 @@ async def test_resolve_duplicates_moves_files_and_writes_report(tmp_path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_resolve_duplicates_appends_to_history_across_runs(tmp_path) -> None:
+    # "los duplicados generan una lista incremental que permita su consulta":
+    # DEDUP_REPORT.json solo guarda el ultimo run, pero DEDUP_HISTORY.jsonl debe
+    # acumular todas las ejecuciones -- una linea por resolve_duplicates(), sin
+    # sobrescribir las anteriores.
+    source_dir = tmp_path / "docs"
+    source_dir.mkdir()
+    duplicates_dir = tmp_path / "duplicados"
+    manager = DeduplicationManager()
+
+    first_older = source_dir / "first_original.pdf"
+    first_newer = source_dir / "first_copy.pdf"
+    first_older.write_bytes(b"first-content")
+    first_newer.write_bytes(b"first-content")
+    first_groups = manager.find_duplicates(
+        [
+            _doc(str(first_newer), "first-hash", modified_time=2.0),
+            _doc(str(first_older), "first-hash", modified_time=1.0),
+        ]
+    )
+    await manager.resolve_duplicates(first_groups, duplicates_dir)
+
+    second_older = source_dir / "second_original.pdf"
+    second_newer = source_dir / "second_copy.pdf"
+    second_older.write_bytes(b"second-content")
+    second_newer.write_bytes(b"second-content")
+    second_groups = manager.find_duplicates(
+        [
+            _doc(str(second_newer), "second-hash", modified_time=2.0),
+            _doc(str(second_older), "second-hash", modified_time=1.0),
+        ]
+    )
+    await manager.resolve_duplicates(second_groups, duplicates_dir)
+
+    history_path = duplicates_dir / "DEDUP_HISTORY.jsonl"
+    lines = [line for line in history_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(lines) == 2
+    reports = [json.loads(line) for line in lines]
+    assert [report["total_exact_duplicates"] for report in reports] == [1, 1]
+    # DEDUP_REPORT.json (solo lectura del ultimo run) no se ve afectado por el
+    # historico: sigue reflejando unicamente la segunda ejecucion.
+    last_report = json.loads((duplicates_dir / "DEDUP_REPORT.json").read_text(encoding="utf-8"))
+    assert last_report["total_exact_duplicates"] == 1
+
+
+@pytest.mark.asyncio
 async def test_resolve_duplicates_avoids_overwrite_on_name_collision(tmp_path) -> None:
     source_dir = tmp_path / "a"
     source_dir.mkdir()

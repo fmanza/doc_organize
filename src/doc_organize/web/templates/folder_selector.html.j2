@@ -20,13 +20,11 @@
 {% endif %}
 
 <h2 class="text-lg font-medium mt-4 mb-2">Carpetas guardadas</h2>
+<p class="text-sm text-gray-600 mb-2">Tanto "Buscar duplicados" como "Escanear" procesan siempre todas las carpetas de esta lista.</p>
 <ul id="folder-list" class="border border-gray-300 rounded divide-y divide-gray-200">
     {% for folder in folders %}
     <li class="flex items-center gap-2 px-2.5 py-1.5" data-path="{{ folder.path }}">
-        <label class="flex items-center gap-2 flex-1 min-w-0">
-            <input type="checkbox" class="folder-select" value="{{ folder.path }}">
-            <span class="truncate">{{ folder.path }}</span>
-        </label>
+        <span class="truncate flex-1 min-w-0">{{ folder.path }}</span>
         {% if folder.used %}
         <span class="text-xs text-gray-500 shrink-0">usada</span>
         {% else %}
@@ -57,15 +55,21 @@
     <p id="browse-error" class="text-red-700 my-1 min-h-[1.2em] text-sm"></p>
 </div>
 
+<h2 class="text-lg font-medium mt-4 mb-2">Paso 1: Buscar duplicados</h2>
+<p class="text-sm text-gray-600 mb-2">Busca y mueve duplicados en todas las carpetas guardadas. Hay que ejecutar este paso, en esta misma visita, antes de poder escanear.</p>
+<button type="button" id="deduplicate-btn" {% if not folders %}disabled{% endif %} class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50">Buscar duplicados</button>
+<p id="deduplicate-error" class="text-red-700 my-2 min-h-[1.2em]"></p>
+
+<h2 class="text-lg font-medium mt-4 mb-2">Paso 2: Escanear</h2>
 <form id="scan-form" class="my-4">
     <p class="my-2 flex gap-4 flex-wrap">
-        <label class="flex items-center gap-1"><input type="checkbox" id="deduplicate"> Deduplicar</label>
         <label class="flex items-center gap-1"><input type="checkbox" id="use_ocr"> Usar OCR si hace falta</label>
         <label class="flex items-center gap-1" title="{{ '' if gpu_status.gpu_active else (gpu_status.instructions or '') }}">
             <input type="checkbox" id="use_gpu" {% if not gpu_status.gpu_active %}disabled{% endif %}> OCR con GPU
         </label>
     </p>
-    <button type="submit" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Escanear carpetas seleccionadas</button>
+    <button type="submit" id="scan-submit-btn" disabled class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50">Escanear todas las carpetas guardadas</button>
+    <p class="text-xs text-gray-500 mt-1">Deshabilitado hasta ejecutar "Buscar duplicados" en esta visita.</p>
 </form>
 <p id="scan-error" class="text-red-700 my-2 min-h-[1.2em]"></p>
 
@@ -192,7 +196,35 @@ document.getElementById("browse-use").addEventListener("click", async () => {
     }
 });
 
-// --- Escaneo ---
+// --- Buscar duplicados (paso 1, obligatorio antes de poder escanear) ---
+
+const deduplicateBtn = document.getElementById("deduplicate-btn");
+const deduplicateErrorEl = document.getElementById("deduplicate-error");
+const scanSubmitBtn = document.getElementById("scan-submit-btn");
+
+deduplicateBtn.addEventListener("click", async () => {
+    deduplicateErrorEl.textContent = "";
+    deduplicateBtn.disabled = true;
+    try {
+        const response = await fetch(
+            "/api/projects/" + encodeURIComponent(projectName) + "/scan/deduplicate",
+            { method: "POST" }
+        );
+        const data = await response.json();
+        if (!response.ok) {
+            deduplicateErrorEl.textContent = apiError(data, "No se pudieron buscar duplicados.");
+            return;
+        }
+        appendProgress({ event: "deduplicated", data: data });
+        // Gate solo de cliente: habilita "Escanear" para esta visita. Se resetea
+        // al recargar la página — hay que volver a pulsar este botón cada vez.
+        scanSubmitBtn.disabled = false;
+    } finally {
+        deduplicateBtn.disabled = false;
+    }
+});
+
+// --- Escaneo (paso 2, bloqueado hasta completar el paso 1) ---
 
 const form = document.getElementById("scan-form");
 const progressBox = document.getElementById("progress");
@@ -208,28 +240,8 @@ form.addEventListener("submit", async (submitEvent) => {
     errorEl.textContent = "";
     progressBox.value = "";
 
-    const paths = Array.from(document.querySelectorAll(".folder-select:checked")).map((el) => el.value);
-    if (paths.length === 0) {
-        errorEl.textContent = "Selecciona al menos una carpeta guardada.";
-        return;
-    }
-    const deduplicate = document.getElementById("deduplicate").checked;
     const use_ocr = document.getElementById("use_ocr").checked;
     const use_gpu = document.getElementById("use_gpu").checked;
-
-    const validateResponse = await fetch(
-        "/api/projects/" + encodeURIComponent(projectName) + "/folders/validate",
-        {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ paths: paths }),
-        }
-    );
-    const validation = await validateResponse.json();
-    if (!validateResponse.ok || !validation.valid) {
-        errorEl.textContent = (validation.warnings || []).join("; ") || "Rutas inválidas.";
-        return;
-    }
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(
@@ -237,7 +249,7 @@ form.addEventListener("submit", async (submitEvent) => {
     );
 
     ws.onopen = () => {
-        ws.send(JSON.stringify({ paths: validation.clean_paths, deduplicate: deduplicate, use_ocr: use_ocr, use_gpu: use_gpu }));
+        ws.send(JSON.stringify({ use_ocr: use_ocr, use_gpu: use_gpu }));
     };
     ws.onmessage = (message) => {
         const scanEvent = JSON.parse(message.data);

@@ -29,7 +29,8 @@ sequenceDiagram
     
     Usuario->>DeduplicationManager: resolve_duplicates(groups, duplicates_dir)
     DeduplicationManager->>Sistema: Mover archivos descartados<br/>a duplicates_dir
-    DeduplicationManager->>Sistema: Escribir DEDUP_REPORT.json
+    DeduplicationManager->>Sistema: Escribir DEDUP_REPORT.json<br/>(solo el ultimo run)
+    DeduplicationManager->>Sistema: Anadir linea a DEDUP_HISTORY.jsonl<br/>(historico acumulado, nunca se sobrescribe)
     DeduplicationManager->>Usuario: return DeduplicationReport
 ```
 
@@ -38,8 +39,18 @@ sequenceDiagram
 1. **Análisis**: Agrupa documentos por hash exacto y por nombre base
 2. **Selección**: Elige documento canónico (más antiguo) de cada grupo
 3. **Resolución**: Mueve no-canónicos a `duplicates_dir`, preservando estructura original
-4. **Auditoría**: Escribe reporte JSON con conteos y decisiones
+4. **Auditoría**: Escribe `DEDUP_REPORT.json` (solo el último run) y añade una
+   línea a `DEDUP_HISTORY.jsonl` (histórico acumulado, consultable desde la
+   página "Duplicados" de la interfaz web)
 5. **Retorno**: Reporte con resumen ejecutivo
+
+`resolve_duplicates()` tiene tres llamadores: el botón "Buscar duplicados" de
+la página Escanear y el subcomando `deduplicate` (CLI), ambos vía
+`ScanCommand.deduplicate()`; y el formulario interactivo de resolución manual
+de la página Duplicados, que llama a `DeduplicationManager` directamente. Los
+tres alimentan el mismo `DEDUP_HISTORY.jsonl`. Buscar duplicados es una acción
+independiente del escaneo, a petición explícita del usuario, no un paso
+automático dentro de él.
 
 ## Reglas de Negocio
 

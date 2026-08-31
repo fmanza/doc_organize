@@ -37,6 +37,11 @@ VERSION_SUFFIX_PATTERN = re.compile(
 #: Nombre por defecto de la base de datos de cache (REQ-006).
 DEFAULT_CACHE_DB_NAME = "cache.db"
 
+#: Nombre del fichero que registra la última tanda de rutas escaneadas/deduplicadas
+#: por proyecto (escrito por `ScanCommand._resolve_scan_paths`, releído por
+#: `web/routes/duplicates.py` para re-escanear sin pedir las carpetas de nuevo).
+SCAN_FOLDERS_JSON_NAME = "folders.json"
+
 #: Longitud maxima de un nombre de proyecto (REQ-008), tras strip().
 PROJECT_NAME_MAX_LENGTH = 100
 
@@ -121,6 +126,7 @@ __all__ = [
     "PROJECT_NAME_RESERVED_PATTERN",
     "ROLE_NAME_MAX_LENGTH",
     "ROLE_NAME_PATTERN",
+    "SCAN_FOLDERS_JSON_NAME",
     "SCRYPT_DKLEN",
     "SCRYPT_MAXMEM",
     "SCRYPT_N",

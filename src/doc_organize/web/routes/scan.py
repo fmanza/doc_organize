@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
+from doc_organize.core.constants import SCAN_FOLDERS_JSON_NAME
 from doc_organize.core.exceptions import ProjectNotFoundError
 from doc_organize.core.models import ScanEventType, ScannedFolder
 from doc_organize.scan import ScanCommand
@@ -48,6 +49,12 @@ class ValidateFoldersResponse(BaseModel):
 
 class AddFolderRequest(BaseModel):
     path: str
+
+
+class DeduplicateFoldersResponse(BaseModel):
+    groups_found: int
+    moved: int
+    warnings: list[str]
 
 
 @router.get("/projects/{name}/scan", response_class=HTMLResponse, dependencies=[Depends(require_project_access)])
@@ -132,6 +139,42 @@ async def validate_folders(name: str, payload: ValidateFoldersRequest, request: 
     return ValidateFoldersResponse(valid=result.is_valid, warnings=result.warnings, clean_paths=result.clean_paths)
 
 
+@router.post(
+    "/api/projects/{name}/scan/deduplicate",
+    response_model=DeduplicateFoldersResponse,
+    dependencies=[Depends(require_project_access)],
+)
+async def deduplicate_folders(name: str, request: Request) -> DeduplicateFoldersResponse:
+    """Busca y mueve duplicados sobre TODAS las carpetas guardadas del proyecto,
+    a petición del usuario (botón "Buscar duplicados" del menú Escaneo).
+
+    Paso previo obligatorio antes de poder escanear: `folder_selector.html.j2`
+    mantiene "Escanear" deshabilitado hasta que este endpoint responda con
+    éxito en la misma visita a la página — un gate solo de cliente (sin
+    persistencia entre visitas, se resetea al recargar), no una barrera de
+    seguridad: saltárselo llamando directamente al WebSocket de escaneo no
+    expone nada que no fuera ya posible antes de que existiera este endpoint.
+    """
+    async with get_project_registry(request) as registry:
+        project = await registry.get_project(name, tenant_id=get_tenant_id(request))
+
+    allowed_roots = await get_allowed_scan_roots(request)
+    folders = await get_scanned_folders_store().list_folders(project)
+    saved_paths = [folder.path for folder in folders]
+    if not saved_paths:
+        raise HTTPException(status_code=409, detail="No hay carpetas guardadas para este proyecto.")
+    if not paths_within_roots(saved_paths, allowed_roots):
+        raise HTTPException(status_code=403, detail="No tienes acceso a alguna de las carpetas guardadas.")
+
+    root = Path(project.root_path)
+    summary = await ScanCommand().deduplicate(
+        paths=saved_paths,
+        duplicates_dir=root / "duplicados",
+        folders_json=root / SCAN_FOLDERS_JSON_NAME,
+    )
+    return DeduplicateFoldersResponse(groups_found=summary.groups_found, moved=summary.moved, warnings=summary.warnings)
+
+
 async def _authorize_scan_websocket(websocket: WebSocket, project_name: str) -> tuple[str, list[str] | None] | None:
     """Autentica (si aplica) y resuelve `tenant_id` + `allowed_scan_roots` para la conexión.
 
@@ -192,12 +235,28 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         return
 
-    paths = [str(p) for p in request_payload.get("paths", [])]
-    if not paths_within_roots(paths, allowed_scan_roots):
+    # Ya no se acepta `paths` del cliente (antes, selección manual por checkbox):
+    # se escanean siempre TODAS las carpetas guardadas del proyecto — el cliente ya
+    # no elige un subconjunto. `paths_within_roots` se mantiene como defensa en
+    # profundidad por si el rol perdió acceso a alguna carpeta ya guardada después
+    # de guardarla.
+    folders = await get_scanned_folders_store().list_folders(project)
+    saved_paths = [folder.path for folder in folders]
+    if not saved_paths:
+        await websocket.close(code=1008, reason="No hay carpetas guardadas para este proyecto")
+        return
+    if not paths_within_roots(saved_paths, allowed_scan_roots):
         await websocket.close(code=1008, reason="Forbidden path")
         return
 
-    deduplicate = bool(request_payload.get("deduplicate", False))
+    # Antes, el cliente llamaba a `/folders/validate` y enviaba `clean_paths` en el
+    # payload; `mark_used` marcaba exactamente esas rutas ya validadas. Ahora que
+    # las rutas vienen del store sin ese preflight, se valida aquí para no marcar
+    # como `used` (permanente, ver `ScannedFoldersStore.remove_folder`) una carpeta
+    # guardada que `FolderValidator`/`ScanCommand._resolve_scan_paths` descarta por
+    # no existir ya en disco.
+    paths = FolderValidator().validate_folder_set(saved_paths).clean_paths
+
     use_ocr = bool(request_payload.get("use_ocr", False))
     use_gpu = bool(request_payload.get("use_gpu", False))
 
@@ -207,9 +266,7 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
             paths=paths,
             output_dir=root / "Conversión",
             cache_db=root / "cache.db",
-            duplicates_dir=root / "duplicados",
-            folders_json=root / "folders.json",
-            deduplicate=deduplicate,
+            folders_json=root / SCAN_FOLDERS_JSON_NAME,
             use_ocr=use_ocr,
             use_gpu=use_gpu,
         ):

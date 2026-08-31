@@ -10,15 +10,15 @@ import sys
 from pathlib import Path
 
 from doc_organize.auth import AuthStore
-from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME
+from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME, SCAN_FOLDERS_JSON_NAME
 from doc_organize.core.exceptions import DocOrganizeError
 from doc_organize.projects import ProjectRegistry
-from doc_organize.scan import ScanCommand, ScanSummary
+from doc_organize.scan import DeduplicationSummary, ScanCommand, ScanSummary
 from doc_organize.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-__all__ = ["ScanCommand", "ScanSummary", "build_parser", "main"]
+__all__ = ["DeduplicationSummary", "ScanCommand", "ScanSummary", "build_parser", "main"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -41,15 +41,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     project_subparsers.add_parser("list", help="Listar proyectos existentes", parents=[registry_flag])
 
-    scan_parser = subparsers.add_parser("scan", help="Escanear, cachear, deduplicar y convertir documentos", parents=[registry_flag])
+    scan_parser = subparsers.add_parser("scan", help="Escanear, cachear y convertir documentos", parents=[registry_flag])
     scan_parser.add_argument("--paths", nargs="+", required=True, help="Carpetas de entrada a escanear")
     scan_parser.add_argument("--project", help="Nombre de un proyecto existente (REQ-008)")
     scan_parser.add_argument("--output-dir", help="Carpeta de salida de conversión (uso avanzado sin proyecto)")
     scan_parser.add_argument("--cache-file", help="Ruta a cache.db (uso avanzado sin proyecto)")
-    scan_parser.add_argument("--duplicates-dir", help="Carpeta de duplicados (uso avanzado sin proyecto)")
-    scan_parser.add_argument("--deduplicate", action="store_true", help="Detectar y mover duplicados")
     scan_parser.add_argument("--use-ocr", action="store_true", help="Reprocesar con OCR los documentos que lo necesiten")
     scan_parser.add_argument("--use-gpu", action="store_true", help="Usar motor OCR acelerado por GPU (EasyOCR) si --use-ocr")
+
+    dedup_parser = subparsers.add_parser(
+        "deduplicate", help="Buscar y mover duplicados, a petición del usuario (REQ-005)", parents=[registry_flag]
+    )
+    dedup_parser.add_argument("--paths", nargs="+", required=True, help="Carpetas de entrada a deduplicar")
+    dedup_parser.add_argument("--project", help="Nombre de un proyecto existente (REQ-008)")
+    dedup_parser.add_argument("--duplicates-dir", help="Carpeta de duplicados (uso avanzado sin proyecto)")
 
     auth_db_flag = argparse.ArgumentParser(add_help=False)
     auth_db_flag.add_argument(
@@ -85,14 +90,16 @@ def _auth_store(args: argparse.Namespace) -> AuthStore:
     return AuthStore(auth_db_path) if auth_db_path else AuthStore()
 
 
-async def _resolve_scan_paths(args: argparse.Namespace) -> tuple[Path, Path, Path, Path]:
-    """Resuelve (output_dir, cache_db, duplicates_dir, folders_json) para `scan`.
+async def _resolve_scan_paths(args: argparse.Namespace) -> tuple[Path, Path, Path]:
+    """Resuelve (output_dir, cache_db, folders_json) para `scan`.
 
     Si se indica --project, las rutas se derivan de su carpeta raíz. Los flags
-    explícitos (--output-dir, --cache-file, --duplicates-dir) tienen prioridad si
-    se combinan con --project (con warning), tal como especifica REQ-008.
+    explícitos (--output-dir, --cache-file) tienen prioridad si se combinan con
+    --project (con warning), tal como especifica REQ-008. `scan` ya no
+    deduplica (ver `deduplicate`, acción separada) así que no resuelve
+    `duplicates_dir` — solo lo necesita `_resolve_dedup_paths`.
     """
-    explicit_any = bool(args.output_dir or args.cache_file or args.duplicates_dir)
+    explicit_any = bool(args.output_dir or args.cache_file)
 
     if args.project:
         async with _registry(args) as registry:
@@ -102,15 +109,33 @@ async def _resolve_scan_paths(args: argparse.Namespace) -> tuple[Path, Path, Pat
             logger.warning("Se combinó --project con flags explícitos; los flags explícitos tienen prioridad sobre las rutas derivadas del proyecto.")
         output_dir = Path(args.output_dir) if args.output_dir else root / "Conversión"
         cache_db = Path(args.cache_file) if args.cache_file else root / DEFAULT_CACHE_DB_NAME
-        duplicates_dir = Path(args.duplicates_dir) if args.duplicates_dir else root / "duplicados"
-        return output_dir, cache_db, duplicates_dir, root / "folders.json"
+        return output_dir, cache_db, root / SCAN_FOLDERS_JSON_NAME
 
     if not args.output_dir or not args.cache_file:
         raise DocOrganizeError("Sin --project, hay que indicar --output-dir y --cache-file explícitamente.")
     output_dir = Path(args.output_dir)
     cache_db = Path(args.cache_file)
-    duplicates_dir = Path(args.duplicates_dir) if args.duplicates_dir else output_dir.parent / "duplicados"
-    return output_dir, cache_db, duplicates_dir, output_dir.parent / "folders.json"
+    return output_dir, cache_db, output_dir.parent / SCAN_FOLDERS_JSON_NAME
+
+
+async def _resolve_dedup_paths(args: argparse.Namespace) -> tuple[Path, Path]:
+    """Resuelve (duplicates_dir, folders_json) para `deduplicate`.
+
+    A diferencia de `_resolve_scan_paths`, esta acción no convierte ni cachea
+    nada, así que no exige --output-dir/--cache-file cuando no hay --project:
+    solo necesita saber dónde mover los duplicados.
+    """
+    if args.project:
+        async with _registry(args) as registry:
+            project = await registry.get_project(args.project)
+        root = Path(project.root_path)
+        duplicates_dir = Path(args.duplicates_dir) if args.duplicates_dir else root / "duplicados"
+        return duplicates_dir, root / SCAN_FOLDERS_JSON_NAME
+
+    if not args.duplicates_dir:
+        raise DocOrganizeError("Sin --project, hay que indicar --duplicates-dir explícitamente.")
+    duplicates_dir = Path(args.duplicates_dir)
+    return duplicates_dir, duplicates_dir.parent / SCAN_FOLDERS_JSON_NAME
 
 
 async def _run_project_create(args: argparse.Namespace) -> int:
@@ -157,17 +182,22 @@ async def _run_project_list(args: argparse.Namespace) -> int:
 
 
 async def _run_scan(args: argparse.Namespace) -> int:
-    output_dir, cache_db, duplicates_dir, folders_json = await _resolve_scan_paths(args)
+    output_dir, cache_db, folders_json = await _resolve_scan_paths(args)
     summary = await ScanCommand().run(
         paths=args.paths,
         output_dir=output_dir,
         cache_db=cache_db,
-        duplicates_dir=duplicates_dir,
         folders_json=folders_json,
-        deduplicate=args.deduplicate,
         use_ocr=args.use_ocr,
         use_gpu=args.use_gpu,
     )
+    print(summary.render())
+    return 0
+
+
+async def _run_deduplicate(args: argparse.Namespace) -> int:
+    duplicates_dir, folders_json = await _resolve_dedup_paths(args)
+    summary = await ScanCommand().deduplicate(paths=args.paths, duplicates_dir=duplicates_dir, folders_json=folders_json)
     print(summary.render())
     return 0
 
@@ -213,6 +243,8 @@ def main(argv: list[str] | None = None) -> int:
             return asyncio.run(_run_project_list(args))
         if args.command == "scan":
             return asyncio.run(_run_scan(args))
+        if args.command == "deduplicate":
+            return asyncio.run(_run_deduplicate(args))
         if args.command == "web":
             return _run_web(args)
         if args.command == "tenant" and args.tenant_command == "create":

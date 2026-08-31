@@ -7,7 +7,7 @@ import pytest
 
 from doc_organize.core.exceptions import DocOrganizeError
 from doc_organize.core.models import ConversionStatus, ScanEventType
-from doc_organize.main import ScanCommand, _resolve_scan_paths, build_parser, main
+from doc_organize.main import ScanCommand, _resolve_dedup_paths, _resolve_scan_paths, build_parser, main
 from doc_organize.projects import ProjectRegistry
 
 _SAMPLE_TEXT = "Informe de prueba doc_organize.\nDocumento de fixture para tests del CLI."
@@ -54,12 +54,11 @@ async def test_resolve_scan_paths_from_project(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("doc_organize.main.ProjectRegistry", lambda: _FakeRegistry(tmp_path / "proj"))
     args = _Args(project="Mi Proyecto")
 
-    output_dir, cache_db, duplicates_dir, folders_json = await _resolve_scan_paths(args)
+    output_dir, cache_db, folders_json = await _resolve_scan_paths(args)
 
     root = tmp_path / "proj"
     assert output_dir == root / "Conversión"
     assert cache_db == root / "cache.db"
-    assert duplicates_dir == root / "duplicados"
     assert folders_json == root / "folders.json"
 
 
@@ -67,11 +66,10 @@ async def test_resolve_scan_paths_from_project(tmp_path, monkeypatch) -> None:
 async def test_resolve_scan_paths_explicit_flags_without_project() -> None:
     args = _Args(output_dir="/tmp/out", cache_file="/tmp/cache.db")
 
-    output_dir, cache_db, duplicates_dir, _folders_json = await _resolve_scan_paths(args)
+    output_dir, cache_db, _folders_json = await _resolve_scan_paths(args)
 
     assert output_dir == Path("/tmp/out")
     assert cache_db == Path("/tmp/cache.db")
-    assert duplicates_dir == Path("/tmp/duplicados")
 
 
 @pytest.mark.asyncio
@@ -86,11 +84,43 @@ async def test_resolve_scan_paths_explicit_overrides_project(tmp_path, monkeypat
     monkeypatch.setattr("doc_organize.main.ProjectRegistry", lambda: _FakeRegistry(tmp_path / "proj"))
     args = _Args(project="Mi Proyecto", cache_file=str(tmp_path / "custom_cache.db"))
 
-    output_dir, cache_db, _duplicates_dir, _folders_json = await _resolve_scan_paths(args)
+    output_dir, cache_db, _folders_json = await _resolve_scan_paths(args)
 
     root = tmp_path / "proj"
     assert cache_db == tmp_path / "custom_cache.db"  # el flag explicito gana
     assert output_dir == root / "Conversión"  # el resto sigue derivado del proyecto
+
+
+# ===== _resolve_dedup_paths =====
+
+
+@pytest.mark.asyncio
+async def test_resolve_dedup_paths_from_project(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("doc_organize.main.ProjectRegistry", lambda: _FakeRegistry(tmp_path / "proj"))
+    args = _Args(project="Mi Proyecto")
+
+    duplicates_dir, folders_json = await _resolve_dedup_paths(args)
+
+    root = tmp_path / "proj"
+    assert duplicates_dir == root / "duplicados"
+    assert folders_json == root / "folders.json"
+
+
+@pytest.mark.asyncio
+async def test_resolve_dedup_paths_explicit_without_project() -> None:
+    args = _Args(duplicates_dir="/tmp/duplicados")
+
+    duplicates_dir, folders_json = await _resolve_dedup_paths(args)
+
+    assert duplicates_dir == Path("/tmp/duplicados")
+    assert folders_json == Path("/tmp/folders.json")
+
+
+@pytest.mark.asyncio
+async def test_resolve_dedup_paths_requires_project_or_explicit_flag() -> None:
+    args = _Args()
+    with pytest.raises(DocOrganizeError):
+        await _resolve_dedup_paths(args)
 
 
 class _FakeProject:
@@ -123,12 +153,25 @@ def test_build_parser_scan_requires_paths() -> None:
 
 def test_build_parser_scan_parses_flags() -> None:
     parser = build_parser()
-    args = parser.parse_args(["scan", "--paths", "/a", "/b", "--project", "Foo", "--deduplicate", "--use-ocr"])
+    args = parser.parse_args(["scan", "--paths", "/a", "/b", "--project", "Foo", "--use-ocr"])
     assert args.paths == ["/a", "/b"]
     assert args.project == "Foo"
-    assert args.deduplicate is True
     assert args.use_ocr is True
     assert args.use_gpu is False
+
+
+def test_build_parser_deduplicate_requires_paths() -> None:
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["deduplicate"])
+
+
+def test_build_parser_deduplicate_parses_flags() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["deduplicate", "--paths", "/a", "/b", "--project", "Foo"])
+    assert args.paths == ["/a", "/b"]
+    assert args.project == "Foo"
+    assert args.duplicates_dir is None
 
 
 def test_build_parser_project_create() -> None:
@@ -160,9 +203,7 @@ async def test_scan_command_converts_new_documents(tmp_path) -> None:
         paths=[str(input_dir)],
         output_dir=root / "Conversión",
         cache_db=root / "cache.db",
-        duplicates_dir=root / "duplicados",
         folders_json=root / "folders.json",
-        deduplicate=False,
         use_ocr=False,
         use_gpu=False,
     )
@@ -201,9 +242,7 @@ async def test_scan_command_run_streaming_emits_expected_event_sequence(tmp_path
             paths=[str(input_dir)],
             output_dir=root / "Conversión",
             cache_db=root / "cache.db",
-            duplicates_dir=root / "duplicados",
             folders_json=root / "folders.json",
-            deduplicate=False,
             use_ocr=False,
             use_gpu=False,
         )
@@ -240,9 +279,7 @@ async def test_scan_command_second_run_skips_unchanged(tmp_path) -> None:
         "paths": [str(input_dir)],
         "output_dir": root / "Conversión",
         "cache_db": root / "cache.db",
-        "duplicates_dir": root / "duplicados",
         "folders_json": root / "folders.json",
-        "deduplicate": False,
         "use_ocr": False,
         "use_gpu": False,
     }
@@ -273,9 +310,7 @@ async def test_scan_command_ocr_pending_then_processed_on_next_run(tmp_path) -> 
         "paths": [str(input_dir)],
         "output_dir": root / "Conversión",
         "cache_db": root / "cache.db",
-        "duplicates_dir": root / "duplicados",
         "folders_json": root / "folders.json",
-        "deduplicate": False,
         "use_gpu": False,
     }
 
@@ -318,56 +353,57 @@ async def test_scan_command_deduplicate_moves_exact_duplicate(tmp_path) -> None:
     # Copia exacta (mismo contenido) con otro nombre -> duplicado exacto.
     (input_dir / "copia.pdf").write_bytes((input_dir / "original.pdf").read_bytes())
 
-    summary = await ScanCommand().run(
+    summary = await ScanCommand().deduplicate(
+        paths=[str(input_dir)],
+        duplicates_dir=root / "duplicados",
+        folders_json=root / "folders.json",
+    )
+
+    assert summary.groups_found == 1
+    assert summary.moved == 1
+    assert (root / "duplicados" / "DEDUP_REPORT.json").exists()
+    assert (root / "folders.json").exists()  # para que web/routes/duplicates.py funcione sin haber escaneado
+
+    # `run()` ya no deduplica: la copia se movió por `deduplicate()`, así que
+    # el escaneo posterior ya solo encuentra el canónico.
+    scan_summary = await ScanCommand().run(
         paths=[str(input_dir)],
         output_dir=root / "Conversión",
         cache_db=root / "cache.db",
-        duplicates_dir=root / "duplicados",
         folders_json=root / "folders.json",
-        deduplicate=True,
         use_ocr=False,
         use_gpu=False,
     )
-
-    assert summary.duplicate_groups == 1
-    assert summary.converted == 1  # solo el canonico se convierte
-    assert (root / "duplicados" / "DEDUP_REPORT.json").exists()
+    assert scan_summary.scanned == 1
+    assert scan_summary.converted == 1
 
 
-@pytest.mark.slow
 @pytest.mark.asyncio
-async def test_scan_command_run_streaming_emits_deduplicated_event(tmp_path) -> None:
+async def test_scan_command_deduplicate_no_duplicates_returns_zero(tmp_path) -> None:
     base = tmp_path / "workspaces"
     base.mkdir()
     async with ProjectRegistry(tmp_path / "projects.json") as registry:
-        project = await registry.create_project("Proyecto Dedup Streaming", base)
+        project = await registry.create_project("Proyecto Sin Dedup", base)
     root = Path(project.root_path)
 
     input_dir = tmp_path / "input"
     input_dir.mkdir()
-    _make_native_pdf(input_dir / "original.pdf")
-    (input_dir / "copia.pdf").write_bytes((input_dir / "original.pdf").read_bytes())
+    (input_dir / "unico.pdf").write_bytes(b"contenido-unico")
 
-    events = [
-        event
-        async for event in ScanCommand().run_streaming(
-            paths=[str(input_dir)],
-            output_dir=root / "Conversión",
-            cache_db=root / "cache.db",
-            duplicates_dir=root / "duplicados",
-            folders_json=root / "folders.json",
-            deduplicate=True,
-            use_ocr=False,
-            use_gpu=False,
-        )
-    ]
+    summary = await ScanCommand().deduplicate(
+        paths=[str(input_dir)],
+        duplicates_dir=root / "duplicados",
+        folders_json=root / "folders.json",
+    )
 
-    event_types = [event.event for event in events]
-    assert ScanEventType.DEDUPLICATED in event_types
-    dedup_event = next(event for event in events if event.event is ScanEventType.DEDUPLICATED)
-    assert dedup_event.data["duplicate_groups"] == 1
-    # DEDUPLICATED llega antes que el/los FILE_CONVERTED, no despues.
-    assert event_types.index(ScanEventType.DEDUPLICATED) < event_types.index(ScanEventType.FILE_CONVERTED)
+    assert summary.groups_found == 0
+    assert summary.moved == 0
+    assert summary.warnings == []
+    # Se registra igual en el historico (histórico completo de cada ejecución de
+    # "Buscar duplicados", no solo de las que movieron algo).
+    assert (root / "duplicados" / "DEDUP_REPORT.json").exists()
+    history_lines = (root / "duplicados" / "DEDUP_HISTORY.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(history_lines) == 1
 
 
 # ===== main() end-to-end (usa --registry-path para no tocar ~/.doc_organize/) =====
@@ -434,6 +470,40 @@ def test_main_scan_end_to_end(tmp_path, capsys) -> None:
     assert "Documentos escaneados: 1" in output
     assert "Convertidos: 1" in output
     assert list((base / "Proyecto CLI" / "Conversión").rglob("native.md"))
+
+
+def test_main_deduplicate_end_to_end(tmp_path, capsys) -> None:
+    """El CLI también puede deduplicar (independiente de `scan`, ver PLAN de la
+    sesión que separó ambas acciones)."""
+    registry_path = str(tmp_path / "projects.json")
+    base = tmp_path / "workspaces"
+    base.mkdir()
+    main(["project", "create", "Proyecto CLI Dedup", "--location", str(base), "--registry-path", registry_path])
+    capsys.readouterr()
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    original = input_dir / "original.pdf"
+    original.write_bytes(b"contenido-duplicado")
+    (input_dir / "copia.pdf").write_bytes(original.read_bytes())
+
+    exit_code = main(
+        [
+            "deduplicate",
+            "--paths",
+            str(input_dir),
+            "--project",
+            "Proyecto CLI Dedup",
+            "--registry-path",
+            registry_path,
+        ]
+    )
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Grupos de duplicados detectados: 1" in output
+    assert "Archivos movidos a duplicados/: 1" in output
+    assert (base / "Proyecto CLI Dedup" / "duplicados" / "DEDUP_REPORT.json").exists()
 
 
 # ===== `web` subcommand =====

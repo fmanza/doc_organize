@@ -27,7 +27,9 @@
 - **DuplicateGroup**: grupo de documentos duplicados (exactos o conflicto de versión), con un
   documento canónico y una elección opcional del usuario (`user_choice`).
 - **ScanEvent**: evento de progreso emitido por `ScanCommand.run_streaming()`
-  (`started`/`scanned`/`deduplicated`/`file_converted`/`ocr_processed`/`completed`).
+  (`started`/`scanned`/`file_converted`/`ocr_processed`/`completed`). La deduplicación
+  (`ScanCommand.deduplicate()`) es una acción aparte, a petición del usuario, y no
+  emite `ScanEvent` — devuelve un `DeduplicationSummary` de una sola vez.
 
 ## Conceptos técnicos
 

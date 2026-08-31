@@ -2,6 +2,7 @@
 Duplicates Resolver: detección y resolución interactiva de duplicados (Fase D-2c, §2.7.4).
 """
 
+import asyncio
 import hashlib
 import json
 
@@ -12,6 +13,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ValidationError
 
+from doc_organize.core.constants import SCAN_FOLDERS_JSON_NAME
 from doc_organize.core.models import DeduplicationReport, DuplicateGroup, Project
 from doc_organize.dedup import DeduplicationManager
 from doc_organize.scanner import DocumentScanner
@@ -91,15 +93,21 @@ async def _detect_duplicates(project: Project) -> list[DuplicateGroup]:
     `DeduplicationManager.find_duplicates()`.
     """
     root = Path(project.root_path)
-    folders_json = root / "folders.json"
-    if not folders_json.is_file():
+    folders_json = root / SCAN_FOLDERS_JSON_NAME
+
+    def _read_scanned_paths() -> list[str] | None:
+        if not folders_json.is_file():
+            return None
+        payload = json.loads(folders_json.read_text(encoding="utf-8"))
+        paths: list[str] = payload.get("paths", [])
+        return paths
+
+    paths = await asyncio.to_thread(_read_scanned_paths)
+    if paths is None:
         raise HTTPException(
             status_code=409,
-            detail="Este proyecto todavía no se ha escaneado nunca (no existe folders.json).",
+            detail=f"Este proyecto todavía no se ha escaneado ni deduplicado nunca (no existe {SCAN_FOLDERS_JSON_NAME}).",
         )
-
-    payload = json.loads(folders_json.read_text(encoding="utf-8"))
-    paths = payload.get("paths", [])
 
     async with DocumentScanner() as scanner:
         scan_result = await scanner.scan_folders(paths)
@@ -107,38 +115,48 @@ async def _detect_duplicates(project: Project) -> list[DuplicateGroup]:
     return DeduplicationManager().find_duplicates(scan_result.documents)
 
 
-def _load_last_dedup_report(project: Project) -> DeduplicationReport | None:
-    """Lee `duplicados/DEDUP_REPORT.json` si el último escaneo se hizo con
-    "Deduplicar" activado: en ese caso `ScanCommand._deduplicate` ya movió los
-    duplicados fuera de las carpetas escaneadas *durante el propio escaneo*, así
-    que un re-escaneo en vivo (`_detect_duplicates`) no encuentra nada — no porque
-    no hubiera duplicados, sino porque ya se resolvieron automáticamente. Sin este
-    aviso, la página muestra "No se detectaron duplicados" de forma engañosa justo
-    después de que el escaneo informara de grupos detectados.
+def _load_dedup_history(project: Project) -> list[DeduplicationReport]:
+    """Lee `duplicados/DEDUP_HISTORY.jsonl` — una línea por cada ejecución de
+    `DeduplicationManager.resolve_duplicates()` (tanto desde "Buscar
+    duplicados" como desde el formulario interactivo de esta página) — y
+    devuelve las ejecuciones más recientes primero.
+
+    Única fuente para "cuál fue la última deduplicación" (ver
+    `duplicates_resolver_page`, que deriva `last_dedup_report` de
+    `history[0]` en vez de leer `DEDUP_REPORT.json` aparte): `resolve_duplicates()`
+    escribe ambos ficheros en dos pasos no atómicos, así que leerlos por separado
+    podía mostrar un "último report" que no coincidía con el histórico si un
+    crash caía justo entre ambas escrituras. `DEDUP_REPORT.json` se sigue
+    escribiendo en disco (contrato externo, `DeduplicationReport.audit_json_path`
+    apunta ahí), pero esta página ya no lo lee.
     """
-    report_path = Path(project.root_path) / "duplicados" / "DEDUP_REPORT.json"
-    if not report_path.is_file():
-        return None
-    try:
-        return DeduplicationReport.model_validate_json(report_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, ValidationError):
-        # `resolve_duplicates()` escribe este fichero con un `write_text` directo
-        # (sin escribir-a-temporal-y-renombrar): un crash o disco lleno a mitad de
-        # escritura deja un JSON truncado/corrupto. Sin este fallback, cada visita
-        # posterior a esta página tumbaría con un 500 en vez de degradar al mismo
-        # "No se detectaron duplicados" que se mostraba antes de que este fichero
-        # existiera.
-        logger.warning(f"'{report_path}' existe pero no es un DEDUP_REPORT.json válido; se ignora.")
-        return None
+    history_path = Path(project.root_path) / "duplicados" / "DEDUP_HISTORY.jsonl"
+    if not history_path.is_file():
+        return []
+    reports: list[DeduplicationReport] = []
+    for raw_line in history_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            reports.append(DeduplicationReport.model_validate_json(line))
+        except (json.JSONDecodeError, ValidationError):
+            # Igual que `_load_last_dedup_report`: una línea corrupta o truncada
+            # (p.ej. un crash a mitad de un `write`) se ignora en vez de tumbar
+            # la página con un 500 — el resto del histórico sigue siendo válido.
+            logger.warning(f"Línea inválida en '{history_path}'; se ignora.")
+    reports.reverse()
+    return reports
 
 
 @router.get("/projects/{name}/duplicates", response_class=HTMLResponse, dependencies=[Depends(require_project_access)])
 async def duplicates_resolver_page(name: str, request: Request) -> HTMLResponse:
-    """Muestra tanto los duplicados pendientes de resolver (re-escaneo en vivo,
-    con formulario interactivo) como el detalle de los ya resueltos en el último
-    escaneo con "Deduplicar" activado (`DEDUP_REPORT.json`, de solo lectura) —
-    ambos bloques son independientes: los archivos duplicados deben verse en la
-    página tanto si el re-escaneo en vivo encuentra algo pendiente como si no.
+    """Muestra los duplicados pendientes de resolver (re-escaneo en vivo, con
+    formulario interactivo) y el histórico completo de deduplicaciones — cada
+    ejecución con su propio detalle de archivos (conservado/movido), no solo
+    la última. Los bloques son independientes: los archivos duplicados deben
+    verse en la página tanto si el re-escaneo en vivo encuentra algo
+    pendiente como si no.
     """
     project = await _get_project(request, name)
     groups = await _detect_duplicates(project)
@@ -146,11 +164,23 @@ async def duplicates_resolver_page(name: str, request: Request) -> HTMLResponse:
         {"key": _group_key(group), "group": group, "members": [group.canonical_doc, *group.duplicates]}
         for group in groups
     ]
-    last_dedup_report = _load_last_dedup_report(project)
-    resolved_groups = [
-        {"group": group, "members": [group.canonical_doc, *group.duplicates], "kept": group.user_choice or group.canonical_doc}
-        for group in (last_dedup_report.groups if last_dedup_report else [])
+    history = await asyncio.to_thread(_load_dedup_history, project)
+    last_dedup_report = history[0] if history else None
+    history_entries = [
+        {
+            "report": report,
+            "resolved_groups": [
+                {
+                    "group": group,
+                    "members": [group.canonical_doc, *group.duplicates],
+                    "kept": group.user_choice or group.canonical_doc,
+                }
+                for group in report.groups
+            ],
+        }
+        for report in history
     ]
+    total_resolved_groups = sum(len(report.groups) for report in history)
     return _templates.TemplateResponse(
         request,
         "duplicates_resolver.html.j2",
@@ -158,7 +188,8 @@ async def duplicates_resolver_page(name: str, request: Request) -> HTMLResponse:
             "project": project,
             "groups": groups_with_keys,
             "last_dedup_report": last_dedup_report,
-            "resolved_groups": resolved_groups,
+            "history_entries": history_entries,
+            "total_resolved_groups": total_resolved_groups,
         },
     )
 

@@ -76,12 +76,19 @@ Logout selectivo: cerrar una sesión no afecta a las demás del mismo usuario.
 
 ### `scan/`
 
-`ScanCommand`: orquesta escaneo + diff de caché + deduplicación opcional +
-conversión + OCR opcional como un único pipeline, usando los servicios de Nivel 2
-sin cambiar ninguno de sus contratos. Usada tanto por el CLI (`main.py`) como por
-la interfaz web (`web/routes/scan.py`) — no pertenece a ninguno de los dos.
-`run()` devuelve solo el resumen final (uso del CLI); `run_streaming()` emite
-progreso incremental por evento (usado por el WebSocket de la web).
+`ScanCommand`: orquesta dos acciones independientes usando los servicios de
+Nivel 2, sin cambiar ninguno de sus contratos. Usada tanto por el CLI
+(`main.py`) como por la interfaz web (`web/routes/scan.py`) — no pertenece a
+ninguno de los dos.
+
+- `run()`/`run_streaming()`: escaneo + diff de caché + conversión + OCR
+  opcional. `run()` devuelve solo el resumen final (uso del CLI);
+  `run_streaming()` emite progreso incremental por evento (usado por el
+  WebSocket de la web). Ya no deduplica.
+- `deduplicate()`: busca y mueve duplicados, a petición explícita del usuario
+  (botón "Buscar duplicados" en la web, subcomando `deduplicate` en el CLI).
+  En la interfaz web, `run_streaming()` queda bloqueado hasta que esta acción
+  se haya ejecutado con éxito en la misma visita a la página.
 
 ### `web/` (extra `[web]`)
 

@@ -73,8 +73,12 @@ distinto del registro central `projects.json` de arriba.
 
 - **Añadir**: desde la UI, escribiendo la ruta o con el botón "Buscar…" (explorador
   de carpetas del propio servidor, vía `GET /api/fs/browse`).
-- **Usar**: cada carpeta guardada aparece como checkbox seleccionable al lanzar
-  un escaneo; el escaneo solo recorre las carpetas marcadas.
+- **Usar**: tanto "Buscar duplicados" como "Escanear" procesan siempre **todas**
+  las carpetas guardadas de la lista — no hay selección manual por checkbox; una
+  carpeta añadida después de una ejecución previa se incluye automáticamente en
+  la siguiente sin ninguna acción extra. "Escanear" queda deshabilitado hasta
+  ejecutar "Buscar duplicados" con éxito en esa misma visita a la página (gate
+  solo de cliente, se resetea al recargar — no una barrera de seguridad).
 - **Eliminar**: solo las carpetas que **nunca** se han usado en un escaneo real
   pueden eliminarse de la lista — una vez usada, queda marcada `used=True` de
   forma permanente, como historial de qué se ha escaneado.

@@ -1,18 +1,24 @@
 """
-Orquestación de escaneo + caché + deduplicación + conversión.
+Orquestación de escaneo + caché + conversión, y deduplicación bajo demanda.
 
 Extraído de `main.py` en Fase D-2b (§2.7.3): `ScanCommand` es un módulo de
 orquestación Level 3 (`architecture.instructions.md`) usado por dos entry points
 distintos — el CLI (`main.py`, Fase D-1) y la interfaz web (`web/routes/scan.py`,
 Fase D-2b) — así que no debe pertenecer a ninguno de los dos; vive en su propio
 módulo para que ninguno dependa del otro.
+
+`run`/`run_streaming` (escanear+cachear+convertir) y `deduplicate` (buscar y
+mover duplicados) son dos acciones independientes, no un único pipeline: la
+deduplicación es una acción explícita a petición del usuario, no un paso
+automático del escaneo — ambos entry points la ofrecen como una operación
+separada que el usuario ejecuta antes de escanear.
 """
 
 import asyncio
 import json
 
 from collections.abc import AsyncIterator
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from doc_organize.cache import CacheManager
@@ -44,22 +50,41 @@ class ScanSummary:
     conversion_errors: int = 0
     ocr_required: int = 0
     ocr_processed: int = 0
-    duplicate_groups: int = 0
+
+    def render(self) -> str:
+        return "\n".join(
+            [
+                f"Documentos escaneados: {self.scanned}",
+                f"  nuevos: {self.new} | modificados: {self.modified} | sin cambios: {self.unchanged}",
+                f"Convertidos: {self.converted} (errores: {self.conversion_errors})",
+                f"Requieren OCR: {self.ocr_required} (procesados con OCR: {self.ocr_processed})",
+            ]
+        )
+
+
+@dataclass
+class DeduplicationSummary:
+    """Resumen imprimible del resultado de `ScanCommand.deduplicate()` (uso interno,
+    no un modelo de dominio — el contrato JSON de la web usa su propio Pydantic
+    response model, ver `web/routes/scan.py`)."""
+
+    groups_found: int = 0
+    moved: int = 0
+    warnings: list[str] = field(default_factory=list)
 
     def render(self) -> str:
         lines = [
-            f"Documentos escaneados: {self.scanned}",
-            f"  nuevos: {self.new} | modificados: {self.modified} | sin cambios: {self.unchanged}",
-            f"Convertidos: {self.converted} (errores: {self.conversion_errors})",
-            f"Requieren OCR: {self.ocr_required} (procesados con OCR: {self.ocr_processed})",
+            f"Grupos de duplicados detectados: {self.groups_found}",
+            f"Archivos movidos a duplicados/: {self.moved}",
         ]
-        if self.duplicate_groups:
-            lines.append(f"Grupos de duplicados resueltos: {self.duplicate_groups}")
+        if self.warnings:
+            lines.append(f"Avisos ({len(self.warnings)}):")
+            lines.extend(f"  - {warning}" for warning in self.warnings)
         return "\n".join(lines)
 
 
 class ScanCommand:
-    """Orquesta escaneo + caché + deduplicación + conversión (Fase D-1, Fase D-2b).
+    """Orquesta escaneo + caché + conversión, y deduplicación bajo demanda (Fase D-1, Fase D-2b).
 
     No es un módulo de dominio nuevo (`workflow/` sigue fuera de alcance, v0.2.0):
     es una capa de pegamento — Level 3 según `architecture.instructions.md` — que
@@ -79,9 +104,7 @@ class ScanCommand:
         paths: list[str],
         output_dir: Path,
         cache_db: Path,
-        duplicates_dir: Path,
         folders_json: Path,
-        deduplicate: bool,
         use_ocr: bool,
         use_gpu: bool,
     ) -> ScanSummary:
@@ -90,9 +113,7 @@ class ScanCommand:
         ver `§2.7.3` (Fase D-2b): la orquestación real vive ahora ahí.
         """
         summary = ScanSummary()
-        async for event in self.run_streaming(
-            paths, output_dir, cache_db, duplicates_dir, folders_json, deduplicate, use_ocr, use_gpu
-        ):
+        async for event in self.run_streaming(paths, output_dir, cache_db, folders_json, use_ocr, use_gpu):
             if event.event is ScanEventType.COMPLETED:
                 summary = ScanSummary(**event.data)
         return summary
@@ -102,24 +123,30 @@ class ScanCommand:
         paths: list[str],
         output_dir: Path,
         cache_db: Path,
-        duplicates_dir: Path,
         folders_json: Path,
-        deduplicate: bool,
         use_ocr: bool,
         use_gpu: bool,
     ) -> AsyncIterator[ScanEvent]:
-        """Orquesta escaneo + caché + deduplicación + conversión, emitiendo progreso.
+        """Orquesta escaneo + caché + conversión, emitiendo progreso.
 
         Fase D-2b (`§2.7.3`): misma orquestación que antes vivía solo en `run()`,
         ahora factorizada aquí para que `web/routes/scan.py` pueda retransmitir cada
         evento por WebSocket sin duplicar la lógica del pipeline. Cada fase delega en
         un método privado (reduce la complejidad ciclomática de este método a la de
         "qué fases hay y en qué orden", no al detalle de cada una).
+
+        La deduplicación NO forma parte de este pipeline: es una acción separada y
+        explícita a petición del usuario (`deduplicate()`, más abajo) — la página
+        "Escanear" bloquea este paso hasta que esa otra se haya ejecutado en la
+        misma visita. Antes de esta sesión, `run_streaming()` deduplicaba
+        internamente (opcional primero, incondicional después); se separó porque
+        un pipeline combinado no permite exigir "deduplicar antes de escanear"
+        como dos pasos distintos que el usuario controla.
         """
         summary = ScanSummary()
         yield ScanEvent(event=ScanEventType.STARTED, data={})
 
-        clean_paths = await self._resolve_scan_paths(paths, folders_json)
+        clean_paths, path_warnings = await self._resolve_scan_paths(paths, folders_json)
 
         async with DocumentScanner() as scanner:
             scan_result = await scanner.scan_folders(clean_paths)
@@ -139,14 +166,21 @@ class ScanCommand:
             docs_to_process = [docs_by_path[path] for path in to_process_paths if path in docs_by_path]
             yield ScanEvent(
                 event=ScanEventType.SCANNED,
-                data={"scanned": summary.scanned, "new": summary.new, "modified": summary.modified, "unchanged": summary.unchanged},
+                data={
+                    "scanned": summary.scanned,
+                    "new": summary.new,
+                    "modified": summary.modified,
+                    "unchanged": summary.unchanged,
+                    # Antes (checkboxes + preflight `/folders/validate`) el cliente
+                    # ya llegaba aquí con rutas limpias y el usuario veía cualquier
+                    # aviso antes de escanear. Ahora las rutas vienen siempre de
+                    # `ScannedFoldersStore` sin ese preflight, así que una carpeta
+                    # guardada que ya no exista en disco se descarta en silencio si
+                    # no se retransmite aquí — el cliente ya muestra cada evento tal
+                    # cual en el cuadro de progreso.
+                    "warnings": path_warnings,
+                },
             )
-
-            if deduplicate:
-                docs_to_process, summary.duplicate_groups = await self._deduplicate(
-                    scan_result.documents, docs_to_process, duplicates_dir
-                )
-                yield ScanEvent(event=ScanEventType.DEDUPLICATED, data={"duplicate_groups": summary.duplicate_groups})
 
             entries: list[CacheEntry] = []
             ocr_candidates: list[DocumentMetadata] = []
@@ -163,8 +197,9 @@ class ScanCommand:
 
         yield ScanEvent(event=ScanEventType.COMPLETED, data=asdict(summary))
 
-    async def _resolve_scan_paths(self, paths: list[str], folders_json: Path) -> list[str]:
-        """Valida `paths`, persiste el resultado en `folders_json`, devuelve las rutas limpias.
+    async def _resolve_scan_paths(self, paths: list[str], folders_json: Path) -> tuple[list[str], list[str]]:
+        """Valida `paths`, persiste el resultado en `folders_json`, devuelve
+        `(rutas limpias, avisos de validación)`.
 
         `folders_json` es releído más tarde por `web/routes/duplicates.py` (Fase D-2c,
         `§2.7.4`) para re-escanear el proyecto sin que el usuario tenga que volver a
@@ -179,20 +214,34 @@ class ScanCommand:
             json.dumps({"paths": validation.clean_paths}, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
-        return validation.clean_paths
+        return validation.clean_paths, validation.warnings
 
-    @staticmethod
-    async def _deduplicate(
-        documents: list[DocumentMetadata], docs_to_process: list[DocumentMetadata], duplicates_dir: Path
-    ) -> tuple[list[DocumentMetadata], int]:
-        """Detecta y resuelve duplicados; devuelve `(docs_to_process filtrados, nº de grupos)`."""
+    async def deduplicate(self, paths: list[str], duplicates_dir: Path, folders_json: Path) -> DeduplicationSummary:
+        """Busca y mueve duplicados en `paths`, a petición explícita del usuario.
+
+        Acción independiente del pipeline de `run`/`run_streaming` (ver su
+        docstring): no convierte ni cachea nada, solo escanea para poder
+        calcular hashes, detecta duplicados y los mueve. Reutiliza
+        `_resolve_scan_paths()` para que `folders_json` quede escrito igual que
+        tras un escaneo — así `web/routes/duplicates.py` funciona aunque el
+        usuario solo haya deduplicado y no haya llegado a escanear todavía.
+
+        Llama a `resolve_duplicates()` siempre, incluso sin grupos (`groups`
+        vacío): así cada ejecución de "Buscar duplicados" queda registrada en
+        `DEDUP_HISTORY.jsonl` (histórico completo de cada vez que se pulsó el
+        botón, no solo de las veces que se movió algo).
+        """
+        clean_paths, warnings = await self._resolve_scan_paths(paths, folders_json)
+
+        async with DocumentScanner() as scanner:
+            scan_result = await scanner.scan_folders(clean_paths)
+
         dedup_manager = DeduplicationManager()
-        groups = dedup_manager.find_duplicates(documents)
-        if groups:
-            await dedup_manager.resolve_duplicates(groups, duplicates_dir)
-            discarded_paths = {doc.full_path for group in groups for doc in group.duplicates}
-            docs_to_process = [doc for doc in docs_to_process if doc.full_path not in discarded_paths]
-        return docs_to_process, len(groups)
+        groups = dedup_manager.find_duplicates(scan_result.documents)
+        report = await dedup_manager.resolve_duplicates(groups, duplicates_dir)
+        moved = report.total_exact_duplicates + report.total_version_conflicts
+
+        return DeduplicationSummary(groups_found=len(groups), moved=moved, warnings=warnings)
 
     async def _convert_documents(
         self,
@@ -291,4 +340,4 @@ class ScanCommand:
         )
 
 
-__all__ = ["ScanCommand", "ScanSummary"]
+__all__ = ["DeduplicationSummary", "ScanCommand", "ScanSummary"]

@@ -16,21 +16,29 @@ Crea `/ruta/a/workspaces/Mi Proyecto/` y lo registra en
 python -m doc_organize project list
 ```
 
-## 2. Escanea y convierte
+## 2. Busca duplicados y escanea
+
+`deduplicate` y `scan` son dos acciones independientes, en ese orden:
 
 ```bash
+python -m doc_organize deduplicate --project "Mi Proyecto" --paths /ruta/a/documentos
 python -m doc_organize scan --project "Mi Proyecto" --paths /ruta/a/documentos
 ```
 
-Escanea `/ruta/a/documentos` recursivamente, calcula el hash SHA-256 de cada
-documento soportado, convierte los nuevos/modificados a Markdown + JSON dentro de
-`Mi Proyecto/Conversión/` (replicando su estructura de origen) y actualiza el
-caché. Una segunda ejecución sobre la misma carpeta solo procesa lo que cambió.
+`deduplicate` busca duplicados exactos y conflictos de versión (por hash SHA-256)
+y los mueve a `duplicados/`. Cada ejecución queda registrada, sin sobrescribir las
+anteriores, en `duplicados/DEDUP_HISTORY.jsonl` (consultable desde la página
+"Duplicados" de la interfaz web).
 
-Flags útiles:
+`scan` escanea `/ruta/a/documentos` recursivamente, convierte los
+nuevos/modificados a Markdown + JSON dentro de `Mi Proyecto/Conversión/`
+(replicando su estructura de origen) y actualiza el caché. Una segunda
+ejecución sobre la misma carpeta solo procesa lo que cambió. Ya no deduplica
+por sí solo — para eso está `deduplicate`.
+
+Flags útiles de `scan`:
 
 ```bash
---deduplicate    # detecta duplicados exactos/conflictos de version y los mueve a duplicados/
 --use-ocr        # reprocesa con OCR los documentos sin capa de texto nativa
 --use-gpu        # OCR acelerado por GPU (requiere el extra ocr-gpu), solo con --use-ocr
 ```
@@ -43,8 +51,10 @@ python -m doc_organize web
 ```
 
 Arranca en `http://127.0.0.1:8000` — en loopback, sin autenticación. Desde el
-Project Selector puedes crear/abrir proyectos, escanear con progreso en vivo,
-ver el caché, resolver duplicados y descargar un export ZIP.
+Project Selector puedes crear/abrir proyectos; en la página Escanear, buscar
+duplicados y escanear con progreso en vivo (el escaneo queda deshabilitado
+hasta ejecutar "Buscar duplicados" en esa misma visita); además, ver el caché,
+consultar/resolver duplicados y descargar un export ZIP.
 
 ### Exponer la web fuera de tu máquina
 
@@ -66,11 +76,16 @@ por sí mismo.
 
 ## 4. Uso avanzado sin proyecto
 
-`scan` también funciona sin `--project`, indicando las rutas explícitamente:
+`scan` y `deduplicate` también funcionan sin `--project`, indicando las rutas
+explícitamente:
 
 ```bash
 python -m doc_organize scan \
   --paths /ruta/a/documentos \
   --output-dir ./Conversión \
   --cache-file ./cache.db
+
+python -m doc_organize deduplicate \
+  --paths /ruta/a/documentos \
+  --duplicates-dir ./duplicados
 ```

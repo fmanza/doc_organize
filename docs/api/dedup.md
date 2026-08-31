@@ -88,8 +88,9 @@ Mueve documentos descartados a carpeta de duplicados.
 **Proceso**:
 1. Para cada grupo, determina canónico (o usa `user_choice` si proporciona)
 2. Mueve documentos no-canónicos a `duplicates_dir`, preservando estructura original
-3. Escribe `DEDUP_REPORT.json` con auditoría completa
-4. Retorna `DeduplicationReport` con resumen
+3. Escribe `DEDUP_REPORT.json` con auditoría completa (solo la última ejecución)
+4. Añade una línea a `DEDUP_HISTORY.jsonl` (histórico acumulado, nunca se sobrescribe)
+5. Retorna `DeduplicationReport` con resumen
 
 **Excepciones**:
 - `ProjectError` — Errores críticos durante movimiento
@@ -142,6 +143,9 @@ class DeduplicationReport:
 - **Movimiento seguro**: `safe_path_join()` previene path traversal
 - **Colisiones**: Si destino existe, añade sufijo con hash de 8 caracteres
 - **Auditoría completa**: `DEDUP_REPORT.json` incluye lista de todas las decisiones
+- **Histórico incremental**: `DEDUP_HISTORY.jsonl` (una línea JSON por ejecución de
+  `resolve_duplicates()`, formato JSON Lines) acumula todas las ejecuciones, a
+  diferencia de `DEDUP_REPORT.json` (que solo refleja la última)
 
 ## Ejemplos Relacionados
 
