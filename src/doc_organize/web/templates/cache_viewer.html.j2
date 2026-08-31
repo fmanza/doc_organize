@@ -6,10 +6,13 @@
 <h1 class="text-xl font-semibold mb-4">Caché: {{ project.name }}</h1>
 
 {% if entries %}
-<div class="my-3">
-    <label for="cache-search" class="block text-sm font-medium mb-1">Buscar por nombre o carpeta</label>
-    <input type="text" id="cache-search" placeholder="Filtra por nombre de archivo o ruta de carpeta…"
-           class="border border-gray-300 rounded px-2 py-1.5 w-full max-w-md">
+<div class="my-3 flex flex-wrap items-center gap-3">
+    <div>
+        <label for="cache-search" class="block text-sm font-medium mb-1">Buscar por nombre o carpeta</label>
+        <input type="text" id="cache-search" placeholder="Filtra por nombre de archivo o ruta de carpeta…"
+               class="border border-gray-300 rounded px-2 py-1.5 w-full max-w-md">
+    </div>
+    <p class="text-gray-500 text-sm" id="cache-count">{{ entries | length }} entradas.</p>
 </div>
 <p id="cache-no-results" class="text-gray-500 my-2" hidden>
     Sin resultados para «<span id="cache-no-results-query"></span>».
@@ -35,7 +38,6 @@
     {% endfor %}
     </tbody>
 </table>
-<p class="mt-4" id="cache-count">{{ entries | length }} entradas.</p>
 {% else %}
 <p>No hay entradas en caché todavía — ejecuta un
    <a class="text-blue-600 underline" href="/projects/{{ project.name | urlencode }}/scan">escaneo</a>.</p>

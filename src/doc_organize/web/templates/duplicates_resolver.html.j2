@@ -6,10 +6,13 @@
 <h1 class="text-xl font-semibold mb-4">Duplicados: {{ project.name }}</h1>
 
 {% if groups or resolved_groups %}
-<div class="my-3">
-    <label for="duplicates-search" class="block text-sm font-medium mb-1">Buscar por nombre o carpeta</label>
-    <input type="text" id="duplicates-search" placeholder="Filtra por nombre de archivo o ruta de carpeta…"
-           class="border border-gray-300 rounded px-2 py-1.5 w-full max-w-md">
+<div class="my-3 flex flex-wrap items-center gap-3">
+    <div>
+        <label for="duplicates-search" class="block text-sm font-medium mb-1">Buscar por nombre o carpeta</label>
+        <input type="text" id="duplicates-search" placeholder="Filtra por nombre de archivo o ruta de carpeta…"
+               class="border border-gray-300 rounded px-2 py-1.5 w-full max-w-md">
+    </div>
+    <p class="text-gray-500 text-sm" id="duplicates-count">{{ (groups | length) + (resolved_groups | length) }} grupo(s).</p>
 </div>
 <p id="duplicates-no-results" class="text-gray-500 my-2" hidden>
     Sin resultados para «<span id="duplicates-no-results-query"></span>».
@@ -157,6 +160,8 @@ if (searchInput) {
     const fieldsets = Array.from(document.querySelectorAll("fieldset[data-search]"));
     const noResults = document.getElementById("duplicates-no-results");
     const noResultsQuery = document.getElementById("duplicates-no-results-query");
+    const countEl = document.getElementById("duplicates-count");
+    const totalCount = fieldsets.length;
 
     searchInput.addEventListener("input", () => {
         const rawQuery = searchInput.value.trim();
@@ -173,6 +178,9 @@ if (searchInput) {
         } else {
             noResults.hidden = true;
         }
+        countEl.textContent = query === ""
+            ? totalCount + " grupo(s)."
+            : visibleCount + " de " + totalCount + " grupo(s).";
     });
 }
 </script>

@@ -226,6 +226,9 @@ async def test_duplicates_resolver_page_shows_search_box_folder_and_size(tmp_pat
     # El filtro solo oculta con `hidden`/CSS via JS -- en el HTML servido ningun
     # radio debe llevar `disabled`, o el submit perderia esa seleccion al filtrar.
     assert "disabled" not in html
+    # Contador (actualizado por JS al filtrar) arranca con el total sin filtrar,
+    # igual que el de Caché.
+    assert '<p class="text-gray-500 text-sm" id="duplicates-count">1 grupo(s).</p>' in html
 
 
 @pytest.mark.asyncio
@@ -410,6 +413,9 @@ async def test_duplicates_page_shows_resolved_groups_detail_from_last_scan_dedup
     assert "Conservado en su carpeta" in html
     assert "Movido a duplicados/" in html
     assert 'id="duplicates-search"' in html
+    # El contador suma pendientes (0 aqui) + ya resueltos (1), igual que la busqueda
+    # cubre ambas secciones.
+    assert '<p class="text-gray-500 text-sm" id="duplicates-count">1 grupo(s).</p>' in html
     # Solo-lectura: no debe haber ningun radio para estos grupos ya resueltos.
     assert "<input" not in html.split("Duplicados ya resueltos")[1]
 

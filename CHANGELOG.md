@@ -13,11 +13,13 @@ releases publicados antes de esa versión).
   "Revisar Duplicados" ahora incluye un buscador de filtrado instantáneo en
   cliente (por nombre de archivo o carpeta, sin round-trip al servidor), muestra
   la carpeta contenedora y el tamaño legible (`1.5 MB`) de cada documento en una
-  tabla en vez de una lista de radios en texto plano, y añade una sección de
+  tabla en vez de una lista de radios en texto plano, añade una sección de
   solo lectura "Duplicados ya resueltos" con el detalle de los grupos que un
   escaneo previo con "Deduplicar" activado ya movió automáticamente (lee
-  `duplicados/DEDUP_REPORT.json`). Sin cambios en los modelos Pydantic ni en las
-  rutas JSON existentes (`GET`/`POST /api/projects/{name}/duplicates...`).
+  `duplicados/DEDUP_REPORT.json`), y un contador que se actualiza a
+  "X de Y grupo(s)." mientras el filtro está activo (suma pendientes + ya
+  resueltos). Sin cambios en los modelos Pydantic ni en las rutas JSON
+  existentes (`GET`/`POST /api/projects/{name}/duplicates...`).
 - `src/doc_organize/web/routes/cache.py` /
   `src/doc_organize/web/templates/cache_viewer.html.j2`: misma mejora de
   visualización aplicada a la página "Caché" — buscador de filtrado instantáneo

@@ -122,6 +122,39 @@ no debe consumirse dos veces para trabajo que todavía no se ha liberado. `pypro
 se queda en `0.3.0` (sin cambios en este punto).
 **Status**: ✅.
 
+### ✅ 9. IMPLEMENT (paridad) — mismo contador dinámico en "Revisar Duplicados"
+**Archivo(s)**: `src/doc_organize/web/templates/duplicates_resolver.html.j2`,
+`tests/unit/test_web_duplicates.py`.
+**Descripción**: el usuario pidió llevar a Duplicados el mismo fix de contador que se
+acababa de aplicar en Caché (punto 7) — a diferencia de Caché, Duplicados no tenía
+ningún contador previo, así que se añadió `#duplicates-count` desde cero (no existía
+como `id` sin conectar). Cuenta la suma de grupos pendientes (`groups`) + ya resueltos
+(`resolved_groups`), coherente con que el buscador ya filtra ambas secciones a la vez;
+se actualiza a "X de Y grupo(s)." mientras el filtro está activo, igual que en Caché.
+**Status**: ✅ cubierto por tests nuevos (conteo inicial en el caso con 1 grupo pendiente
+y en el caso con 0 pendientes + 1 ya resuelto) y por una verificación visual en
+navegador real (Playwright headless) confirmando los 4 estados sobre una página con 3
+grupos totales (2 pendientes + 1 resuelto): "3 grupo(s)." → "1 de 3 grupo(s)." (filtrado
+por "sub") → "3 grupo(s)." (limpiado) → "0 de 3 grupo(s)." (sin coincidencias).
+
+### ✅ 10. IMPLEMENT (ajuste visual) — contador junto al buscador, no debajo
+**Archivo(s)**: `src/doc_organize/web/templates/duplicates_resolver.html.j2`,
+`src/doc_organize/web/templates/cache_viewer.html.j2`, `tests/unit/test_web_duplicates.py`,
+`tests/unit/test_web_cache.py`.
+**Descripción**: el usuario pidió que el contador apareciera al lado del buscador en
+ambas páginas, no en su propia línea debajo (Duplicados) ni al pie de la tabla
+(Caché, su ubicación original desde antes de esta sesión). Se envolvió el `<label>`+
+`<input>` de búsqueda en un `<div>` propio dentro de un contenedor
+`flex flex-wrap items-center gap-3`, con el `<p id="...-count">` como segundo hijo de
+ese mismo flex — misma solución en ambas plantillas. Los tests que comprobaban la
+cadena HTML exacta del contador (`class="mt-4"` en Caché, `class="text-gray-500 my-1"`
+en Duplicados) se actualizaron a la clase nueva (`class="text-gray-500 text-sm"`, igual
+en ambas páginas).
+**Status**: ✅ tests actualizados (20 passed en ambos módulos), suite completa 277
+passed, y verificación visual en navegador real confirmando que el buscador y el
+contador quedan en la misma fila en ambas páginas sin solapamientos ni overflow a
+~1280px de ancho.
+
 ---
 
 ## Impacto

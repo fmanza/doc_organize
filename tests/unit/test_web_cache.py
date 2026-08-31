@@ -123,7 +123,7 @@ async def test_cache_viewer_page_shows_search_box_and_folder_column(tmp_path) ->
     # tambien encuentre coincidencias por carpeta ademas de por nombre de archivo.
     assert f'data-search="{file_path.lower()}"' in html
     # El contador (actualizado por JS al filtrar) arranca con el total sin filtrar.
-    assert '<p class="mt-4" id="cache-count">1 entradas.</p>' in html
+    assert '<p class="text-gray-500 text-sm" id="cache-count">1 entradas.</p>' in html
 
 
 @pytest.mark.asyncio
