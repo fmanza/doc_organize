@@ -48,6 +48,9 @@ def build_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--cache-file", help="Ruta a cache.db (uso avanzado sin proyecto)")
     scan_parser.add_argument("--use-ocr", action="store_true", help="Reprocesar con OCR los documentos que lo necesiten")
     scan_parser.add_argument("--use-gpu", action="store_true", help="Usar motor OCR acelerado por GPU (EasyOCR) si --use-ocr")
+    scan_parser.add_argument(
+        "--force", action="store_true", help="Forzar rescan completo: vacía la caché y reconvierte todos los documentos"
+    )
 
     dedup_parser = subparsers.add_parser(
         "deduplicate", help="Buscar y mover duplicados, a petición del usuario (REQ-005)", parents=[registry_flag]
@@ -190,6 +193,7 @@ async def _run_scan(args: argparse.Namespace) -> int:
         folders_json=folders_json,
         use_ocr=args.use_ocr,
         use_gpu=args.use_gpu,
+        force=args.force,
     )
     print(summary.render())
     return 0

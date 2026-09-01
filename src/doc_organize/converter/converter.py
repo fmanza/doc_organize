@@ -143,6 +143,21 @@ class DocumentConverter:
             duration_seconds=duration,
         )
 
+    @staticmethod
+    def resolve_output_paths(full_path: str, output_dir: Path) -> tuple[Path, Path]:
+        """Deriva `(markdown_path, json_path)` para el fichero fuente `full_path` bajo `output_dir`.
+
+        Determinista y basado solo en la ruta del fichero fuente (nunca en su
+        hash): replica la jerarquia de carpetas original bajo `output_dir` y usa
+        el stem del fichero como nombre. Extraido de `_write_outputs` para que
+        el llamante (p.ej. `ScanCommand`, al forzar un rescan) pueda localizar
+        la salida de un documento sin tener que reconvertirlo.
+        """
+        relative_parts = Path(full_path).resolve().parts[1:]
+        stem = Path(relative_parts[-1]).stem if relative_parts else Path(full_path).stem
+        target_dir = output_dir.joinpath(*relative_parts[:-1]) if len(relative_parts) > 1 else output_dir
+        return target_dir / f"{stem}.md", target_dir / f"{stem}.json"
+
     async def _write_outputs(
         self,
         source_doc: DocumentMetadata,
@@ -152,17 +167,12 @@ class DocumentConverter:
     ) -> tuple[Path, Path]:
         markdown_text = docling_result.document.export_to_markdown()
 
-        relative_parts = Path(source_doc.full_path).resolve().parts[1:]
-        stem = Path(relative_parts[-1]).stem if relative_parts else Path(source_doc.full_path).stem
-        target_dir = output_dir.joinpath(*relative_parts[:-1]) if len(relative_parts) > 1 else output_dir
-        await asyncio.to_thread(target_dir.mkdir, parents=True, exist_ok=True)
-
-        markdown_path = target_dir / f"{stem}.md"
-        json_path = target_dir / f"{stem}.json"
+        markdown_path, json_path = self.resolve_output_paths(source_doc.full_path, output_dir)
+        await asyncio.to_thread(markdown_path.parent.mkdir, parents=True, exist_ok=True)
 
         document_json = {
             "source_path": source_doc.full_path,
-            "title": stem,
+            "title": markdown_path.stem,
             "size_bytes": source_doc.size_bytes,
             "sha256_hash": source_doc.sha256_hash,
             "modified_time": source_doc.modified_time,

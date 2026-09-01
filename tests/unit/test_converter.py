@@ -9,6 +9,8 @@ suite (carga de modelos de Docling), de ahi el marcador `slow`.
 import asyncio
 import json
 
+from pathlib import Path
+
 import pytest
 
 from doc_organize.converter import DocumentConverter
@@ -100,6 +102,23 @@ async def test_convert_document_reports_error_without_raising(tmp_path) -> None:
     assert result.error is not None
     assert result.markdown_path is None
     assert result.json_path is None
+
+
+def test_resolve_output_paths_mirrors_source_tree_and_is_deterministic(tmp_path) -> None:
+    output_dir = tmp_path / "Conversión"
+    source = tmp_path / "input" / "sub" / "informe.pdf"
+
+    markdown_path, json_path = DocumentConverter.resolve_output_paths(str(source), output_dir)
+    again_markdown, again_json = DocumentConverter.resolve_output_paths(str(source), output_dir)
+
+    assert markdown_path == again_markdown
+    assert json_path == again_json
+    assert markdown_path.name == "informe.md"
+    assert json_path.name == "informe.json"
+    # Replica la jerarquia "input/sub" del fuente bajo output_dir (no depende del hash);
+    # se compara solo el sufijo porque el resto del path mide desde la raiz del filesystem.
+    assert str(markdown_path).endswith(str(Path("input") / "sub" / "informe.md"))
+    assert markdown_path.is_relative_to(output_dir)
 
 
 @pytest.mark.asyncio

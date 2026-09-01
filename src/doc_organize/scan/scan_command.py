@@ -107,13 +107,14 @@ class ScanCommand:
         folders_json: Path,
         use_ocr: bool,
         use_gpu: bool,
+        force: bool = False,
     ) -> ScanSummary:
         """Ejecuta el pipeline y devuelve solo el resumen final (contrato sin cambios,
         Fase D-1). Consume `run_streaming()` y se queda con su evento `completed` —
         ver `§2.7.3` (Fase D-2b): la orquestación real vive ahora ahí.
         """
         summary = ScanSummary()
-        async for event in self.run_streaming(paths, output_dir, cache_db, folders_json, use_ocr, use_gpu):
+        async for event in self.run_streaming(paths, output_dir, cache_db, folders_json, use_ocr, use_gpu, force):
             if event.event is ScanEventType.COMPLETED:
                 summary = ScanSummary(**event.data)
         return summary
@@ -126,6 +127,7 @@ class ScanCommand:
         folders_json: Path,
         use_ocr: bool,
         use_gpu: bool,
+        force: bool = False,
     ) -> AsyncIterator[ScanEvent]:
         """Orquesta escaneo + caché + conversión, emitiendo progreso.
 
@@ -142,6 +144,16 @@ class ScanCommand:
         internamente (opcional primero, incondicional después); se separó porque
         un pipeline combinado no permite exigir "deduplicar antes de escanear"
         como dos pasos distintos que el usuario controla.
+
+        Args:
+            force: Si `True`, ignora la caché existente (se vacía antes de
+                comparar, así que `get_changes()` trata todos los documentos
+                como nuevos) y borra los `.md`/`.json` ya generados de
+                ficheros que estaban en la caché anterior pero ya no aparecen
+                en este escaneo (renombrados, movidos o eliminados desde la
+                última pasada). Los ficheros que sí siguen presentes no se
+                borran de antemano: `DocumentConverter` ya sobrescribe su
+                salida al reconvertirlos, en el mismo path derivado de su ruta.
         """
         summary = ScanSummary()
         yield ScanEvent(event=ScanEventType.STARTED, data={})
@@ -154,6 +166,12 @@ class ScanCommand:
 
         async with CacheManager(cache_db) as cache:
             cached_entries = await cache.load_cache()
+            if force:
+                current_paths = {doc.full_path for doc in scan_result.documents}
+                orphaned_paths = set(cached_entries) - current_paths
+                await self._delete_orphaned_outputs(orphaned_paths, output_dir)
+                await cache.clear()
+                cached_entries = {}
             new_files, modified_files, unchanged_files = cache.get_changes(cached_entries, scan_result.documents)
             summary.new, summary.modified, summary.unchanged = (
                 len(new_files),
@@ -215,6 +233,21 @@ class ScanCommand:
             encoding="utf-8",
         )
         return validation.clean_paths, validation.warnings
+
+    @staticmethod
+    async def _delete_orphaned_outputs(orphaned_paths: set[str], output_dir: Path) -> None:
+        """Borra los `.md`/`.json` de `orphaned_paths` bajo `output_dir`, si existen.
+
+        Usado por "forzar rescan" (`force=True`): `orphaned_paths` son rutas que
+        estaban en la caché anterior pero no en el escaneo actual (fichero
+        renombrado, movido o eliminado desde la última pasada) — su salida
+        antigua, calculada con el mismo algoritmo que `DocumentConverter` usa al
+        generarla, quedaría huérfana si no se borra aquí.
+        """
+        for path in orphaned_paths:
+            for artifact in DocumentConverter.resolve_output_paths(path, output_dir):
+                if await asyncio.to_thread(artifact.exists):
+                    await asyncio.to_thread(artifact.unlink)
 
     async def deduplicate(self, paths: list[str], duplicates_dir: Path, folders_json: Path) -> DeduplicationSummary:
         """Busca y mueve duplicados en `paths`, a petición explícita del usuario.

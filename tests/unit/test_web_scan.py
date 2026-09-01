@@ -675,6 +675,36 @@ async def test_scan_websocket_loopback_converts_real_document(tmp_path, native_p
     assert events[-1]["data"]["converted"] == 1
 
 
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_scan_websocket_force_reconverts_unchanged_document(tmp_path, native_pdf) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    client = TestClient(app)
+    add_response = client.post(f"/api/projects/{project.name}/folders/library", json={"path": str(native_pdf.parent)})
+    assert add_response.status_code == 200
+
+    def _scan(payload: dict) -> list[dict]:
+        with client.websocket_connect(f"/api/projects/{project.name}/scan") as websocket:
+            websocket.send_json(payload)
+            events = []
+            while True:
+                message = websocket.receive_json()
+                events.append(message)
+                if message["event"] == "completed":
+                    break
+            return events
+
+    _scan({"use_ocr": False, "use_gpu": False})
+    unchanged_events = _scan({"use_ocr": False, "use_gpu": False})
+    assert unchanged_events[-1]["data"]["converted"] == 0  # sin force, no se reconvierte
+
+    forced_events = _scan({"use_ocr": False, "use_gpu": False, "force": True})
+    assert forced_events[-1]["data"]["converted"] == 1  # con force, se reconvierte igual
+
+
 @pytest.mark.asyncio
 async def test_scan_websocket_rejects_missing_project(tmp_path) -> None:
     app = create_app(registry_path=tmp_path / "projects.json")

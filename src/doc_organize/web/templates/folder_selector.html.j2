@@ -35,6 +35,9 @@
         <label class="flex items-center gap-1" title="{{ '' if gpu_status.gpu_active else (gpu_status.instructions or '') }}">
             <input type="checkbox" id="use_gpu" {% if not gpu_status.gpu_active %}disabled{% endif %}> OCR con GPU
         </label>
+        <label class="flex items-center gap-1" title="Vacía la caché y reconvierte todos los documentos desde cero, aunque no hayan cambiado.">
+            <input type="checkbox" id="force"> Forzar rescan completo
+        </label>
     </p>
     <button type="submit" id="scan-submit-btn" {% if not folders %}disabled{% endif %} class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50">Escanear todas las carpetas guardadas</button>
     {% if not folders %}
@@ -175,10 +178,16 @@ function appendProgress(event) {
 form.addEventListener("submit", async (submitEvent) => {
     submitEvent.preventDefault();
     errorEl.textContent = "";
-    progressBox.value = "";
 
     const use_ocr = document.getElementById("use_ocr").checked;
     const use_gpu = document.getElementById("use_gpu").checked;
+    const force = document.getElementById("force").checked;
+
+    if (force && !window.confirm("Esto vaciará la caché y reconvertirá TODOS los documentos, aunque no hayan cambiado. ¿Continuar?")) {
+        return;
+    }
+
+    progressBox.value = "";
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(
@@ -186,7 +195,7 @@ form.addEventListener("submit", async (submitEvent) => {
     );
 
     ws.onopen = () => {
-        ws.send(JSON.stringify({ use_ocr: use_ocr, use_gpu: use_gpu }));
+        ws.send(JSON.stringify({ use_ocr: use_ocr, use_gpu: use_gpu, force: force }));
     };
     ws.onmessage = (message) => {
         const scanEvent = JSON.parse(message.data);

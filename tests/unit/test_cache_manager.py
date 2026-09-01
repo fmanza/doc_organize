@@ -90,6 +90,27 @@ async def test_compute_hash_matches_hash_utils(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_clear_removes_all_entries(tmp_path) -> None:
+    db_path = tmp_path / "cache.db"
+    async with CacheManager(db_path) as cache:
+        await cache.save_entries([_entry("/repo/a.pdf", "hash-a"), _entry("/repo/b.pdf", "hash-b")])
+        await cache.clear()
+        loaded = await cache.load_cache()
+
+    assert loaded == {}
+
+
+@pytest.mark.asyncio
+async def test_clear_on_empty_cache_is_a_no_op(tmp_path) -> None:
+    db_path = tmp_path / "cache.db"
+    async with CacheManager(db_path) as cache:
+        await cache.clear()
+        loaded = await cache.load_cache()
+
+    assert loaded == {}
+
+
+@pytest.mark.asyncio
 async def test_using_outside_context_manager_raises() -> None:
     cache = CacheManager("unused.db")
     with pytest.raises(CacheError):

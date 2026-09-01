@@ -326,6 +326,7 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
 
     use_ocr = bool(request_payload.get("use_ocr", False))
     use_gpu = bool(request_payload.get("use_gpu", False))
+    force = bool(request_payload.get("force", False))
 
     root = Path(project.root_path)
     try:
@@ -336,6 +337,7 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
             folders_json=root / SCAN_FOLDERS_JSON_NAME,
             use_ocr=use_ocr,
             use_gpu=use_gpu,
+            force=force,
         ):
             if event.event == ScanEventType.COMPLETED:
                 # Se marca ANTES de retransmitir el evento "completed" al cliente

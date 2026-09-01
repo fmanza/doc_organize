@@ -200,6 +200,17 @@ class CacheManager:
         self.logger.info(f"Cambios detectados: {len(new_files)} nuevos, {len(modified_files)} modificados, {len(unchanged_files)} sin cambios")
         return new_files, modified_files, unchanged_files
 
+    async def clear(self) -> None:
+        """Vacia `cache_entries` por completo — usado por "forzar rescan".
+
+        A diferencia de `save_entries()`, no es un upsert: borra toda fila
+        existente para que la proxima comparacion (`get_changes()`) trate
+        todos los documentos como nuevos, sin depender de ningun hash previo.
+        """
+        await self._connection.execute("DELETE FROM cache_entries")
+        await self._connection.commit()
+        self.logger.info("Cache vaciada (forzar rescan)")
+
     async def save_entries(self, entries: list[CacheEntry]) -> None:
         """Upsert transaccional de `entries` en `cache.db`."""
         if not entries:

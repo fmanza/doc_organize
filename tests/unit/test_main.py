@@ -5,6 +5,7 @@ from typing import Self
 
 import pytest
 
+from doc_organize.converter import DocumentConverter
 from doc_organize.core.exceptions import DocOrganizeError
 from doc_organize.core.models import ConversionStatus, ScanEventType
 from doc_organize.main import ScanCommand, _resolve_dedup_paths, _resolve_scan_paths, build_parser, main
@@ -158,6 +159,13 @@ def test_build_parser_scan_parses_flags() -> None:
     assert args.project == "Foo"
     assert args.use_ocr is True
     assert args.use_gpu is False
+    assert args.force is False
+
+
+def test_build_parser_scan_parses_force_flag() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["scan", "--paths", "/a", "--force"])
+    assert args.force is True
 
 
 def test_build_parser_deduplicate_requires_paths() -> None:
@@ -291,6 +299,104 @@ async def test_scan_command_second_run_skips_unchanged(tmp_path) -> None:
     assert second.new == 0
     assert second.unchanged == 1
     assert second.converted == 0  # no se reconvierte lo que no cambio
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_scan_command_force_reconverts_unchanged(tmp_path) -> None:
+    """`force=True` vacía la caché antes de comparar: un documento sin cambios
+    (que normalmente se saltaría, ver test anterior) se reconvierte igualmente."""
+    base = tmp_path / "workspaces"
+    base.mkdir()
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        project = await registry.create_project("Proyecto Force", base)
+    root = Path(project.root_path)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    _make_native_pdf(input_dir / "native.pdf")
+
+    run_kwargs = {
+        "paths": [str(input_dir)],
+        "output_dir": root / "Conversión",
+        "cache_db": root / "cache.db",
+        "folders_json": root / "folders.json",
+        "use_ocr": False,
+        "use_gpu": False,
+    }
+
+    first = await ScanCommand().run(**run_kwargs)
+    second = await ScanCommand().run(**run_kwargs)
+    third = await ScanCommand().run(force=True, **run_kwargs)
+
+    assert first.new == 1
+    assert second.converted == 0
+    assert third.new == 1  # cache vaciada: el documento vuelve a contar como nuevo
+    assert third.converted == 1  # y se reconvierte de verdad, no solo se recuenta
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_scan_command_force_removes_output_of_removed_file(tmp_path) -> None:
+    """Un fichero presente en la cache anterior pero eliminado antes del rescan
+    forzado deja de generar output huerfano en `output_dir` (REQ nuevo: reset completo)."""
+    base = tmp_path / "workspaces"
+    base.mkdir()
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        project = await registry.create_project("Proyecto Force Orphan", base)
+    root = Path(project.root_path)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    stale_path = input_dir / "stale.pdf"
+    _make_native_pdf(stale_path)
+
+    run_kwargs = {
+        "paths": [str(input_dir)],
+        "output_dir": root / "Conversión",
+        "cache_db": root / "cache.db",
+        "folders_json": root / "folders.json",
+        "use_ocr": False,
+        "use_gpu": False,
+    }
+    await ScanCommand().run(**run_kwargs)
+
+    generated = list((root / "Conversión").rglob("stale.md"))
+    assert len(generated) == 1
+
+    stale_path.unlink()  # el fichero fuente desaparece antes del rescan forzado
+
+    summary = await ScanCommand().run(force=True, **run_kwargs)
+
+    assert summary.scanned == 0
+    assert not generated[0].exists()  # el output huerfano se borro
+
+
+@pytest.mark.asyncio
+async def test_delete_orphaned_outputs_removes_stale_artifacts_and_ignores_missing(tmp_path) -> None:
+    """Cubre `ScanCommand._delete_orphaned_outputs` sin pasar por Docling: los
+    artefactos se crean a mano en la ubicacion que `resolve_output_paths` calcularia."""
+    output_dir = tmp_path / "Conversión"
+    orphaned_path = str(tmp_path / "input" / "old.pdf")
+    kept_path = str(tmp_path / "input" / "kept.pdf")
+    never_existed_path = str(tmp_path / "input" / "never-existed.pdf")
+
+    orphaned_md, orphaned_json = DocumentConverter.resolve_output_paths(orphaned_path, output_dir)
+    orphaned_md.parent.mkdir(parents=True, exist_ok=True)
+    orphaned_md.write_text("stale markdown", encoding="utf-8")
+    orphaned_json.write_text("{}", encoding="utf-8")
+
+    kept_md, kept_json = DocumentConverter.resolve_output_paths(kept_path, output_dir)
+    kept_md.parent.mkdir(parents=True, exist_ok=True)
+    kept_md.write_text("kept markdown", encoding="utf-8")
+    kept_json.write_text("{}", encoding="utf-8")
+
+    await ScanCommand._delete_orphaned_outputs({orphaned_path, never_existed_path}, output_dir)
+
+    assert not orphaned_md.exists()
+    assert not orphaned_json.exists()
+    assert kept_md.exists()
+    assert kept_json.exists()
 
 
 @pytest.mark.slow
@@ -470,6 +576,32 @@ def test_main_scan_end_to_end(tmp_path, capsys) -> None:
     assert "Documentos escaneados: 1" in output
     assert "Convertidos: 1" in output
     assert list((base / "Proyecto CLI" / "Conversión").rglob("native.md"))
+
+
+@pytest.mark.slow
+def test_main_scan_force_end_to_end(tmp_path, capsys) -> None:
+    registry_path = str(tmp_path / "projects.json")
+    base = tmp_path / "workspaces"
+    base.mkdir()
+    main(["project", "create", "Proyecto CLI Force", "--location", str(base), "--registry-path", registry_path])
+    capsys.readouterr()
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    _make_native_pdf(input_dir / "native.pdf")
+
+    scan_args = ["scan", "--paths", str(input_dir), "--project", "Proyecto CLI Force", "--registry-path", registry_path]
+    main(scan_args)
+    capsys.readouterr()
+
+    main(scan_args)  # sin --force: documento sin cambios, no se reconvierte
+    assert "Convertidos: 0" in capsys.readouterr().out
+
+    exit_code = main([*scan_args, "--force"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Convertidos: 1" in output
 
 
 def test_main_deduplicate_end_to_end(tmp_path, capsys) -> None:
