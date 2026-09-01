@@ -8,11 +8,13 @@ import math
 import time
 
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Self, cast
 
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import EasyOcrOptions, PdfPipelineOptions
 from docling.document_converter import DocumentConverter as DoclingConverter, PdfFormatOption
+from docling_core.transforms.chunker.doc_chunk import DocChunk
+from docling_core.transforms.chunker.hierarchical_chunker import HierarchicalChunker
 
 from doc_organize.core.exceptions import ConversionError
 from doc_organize.core.models import ConversionResult, DocumentMetadata
@@ -23,16 +25,17 @@ class DocumentConverter:
     """Convierte documentos a Markdown + JSON usando Docling (REQ-003).
 
     Guarda salida dual (`<nombre>.md` + `<nombre>.json`) manteniendo la
-    estructura de directorios original bajo `output_dir`. El `.json` es el
-    export nativo de Docling (`DoclingDocument.export_to_dict()`: texto
-    estructurado, tablas, layout y proveniencia por pagina) con la metadata
-    propia de doc_organize (hash, tamano, fecha, ocr_required) anidada bajo
-    la clave `doc_organize_metadata` para no colisionar con el schema de
-    Docling. La pipeline usa `generate_picture_images=False` (default de
-    `PdfPipelineOptions`, sin tocar), asi que no se embeben imagenes en el
-    JSON. Los errores de conversion se capturan y se devuelven en
-    `ConversionResult.error`, sin interrumpir el resto de un batch
-    (responsabilidad del llamante).
+    estructura de directorios original bajo `output_dir`. El `.json` esta
+    pensado para consumo por IA (RAG/embeddings), no como export de layout:
+    en vez del arbol completo de Docling (con bounding boxes, coordenadas y
+    referencias internas — ruido de formato irrelevante para un LLM), usa
+    `HierarchicalChunker` (sin dependencias de tokenizer/descarga de modelo)
+    para trocear el documento en chunks por seccion, cada uno con su texto,
+    la ruta de encabezados (`headings`) y las paginas de origen. La metadata
+    propia de doc_organize (hash, tamano, fecha, ocr_required) va en el nivel
+    raiz del mismo fichero, junto a la lista `chunks`. Los errores de
+    conversion se capturan y se devuelven en `ConversionResult.error`, sin
+    interrumpir el resto de un batch (responsabilidad del llamante).
 
     La deteccion de `ocr_required` (REQ-004) se basa en
     `result.confidence.parse_score` siendo `NaN` — señal confirmada
@@ -55,13 +58,16 @@ class DocumentConverter:
     def __init__(self) -> None:
         self.logger = get_logger(__name__)
         self._docling_by_mode: dict[tuple[bool, bool], DoclingConverter] | None = None
+        self._chunker: HierarchicalChunker | None = None
 
     async def __aenter__(self) -> Self:
         self._docling_by_mode = {}
+        self._chunker = HierarchicalChunker()
         return self
 
     async def __aexit__(self, *exc_info: object) -> None:
         self._docling_by_mode = None
+        self._chunker = None
 
     def _get_docling(self, use_ocr: bool, use_gpu: bool = False) -> DoclingConverter:
         if self._docling_by_mode is None:
@@ -154,14 +160,14 @@ class DocumentConverter:
         markdown_path = target_dir / f"{stem}.md"
         json_path = target_dir / f"{stem}.json"
 
-        document_json = docling_result.document.export_to_dict()
-        document_json["doc_organize_metadata"] = {
+        document_json = {
             "source_path": source_doc.full_path,
             "title": stem,
             "size_bytes": source_doc.size_bytes,
             "sha256_hash": source_doc.sha256_hash,
             "modified_time": source_doc.modified_time,
             "ocr_required": ocr_required,
+            "chunks": await asyncio.to_thread(self._build_chunks, docling_result.document),
         }
 
         await asyncio.to_thread(markdown_path.write_text, markdown_text, encoding="utf-8")
@@ -169,6 +175,33 @@ class DocumentConverter:
             json_path.write_text, json.dumps(document_json, indent=2, ensure_ascii=False), encoding="utf-8"
         )
         return markdown_path, json_path
+
+    def _build_chunks(self, document: Any) -> list[dict[str, Any]]:
+        """Trocea `document` en chunks por seccion, sin geometria (REQ-003).
+
+        Usa `HierarchicalChunker` en vez de `HybridChunker`: no necesita un
+        tokenizer (ni su descarga inicial de HuggingFace), suficiente para
+        chunks alineados con la estructura del documento sin acotar por
+        limite de tokens (ver AUDIT_PLAN, sesion JSON-para-IA).
+        """
+        if self._chunker is None:
+            raise ConversionError("DocumentConverter debe usarse como context manager async ('async with').")
+
+        chunks = []
+        for base_chunk in self._chunker.chunk(document):
+            # HierarchicalChunker siempre produce DocChunk (meta: DocMeta); el tipo
+            # declarado del iterador es la base generica BaseChunk (meta: BaseMeta).
+            chunk = cast(DocChunk, base_chunk)
+            page_numbers = sorted({prov.page_no for item in chunk.meta.doc_items for prov in item.prov})
+            entry: dict[str, Any] = {
+                "text": chunk.text,
+                "headings": chunk.meta.headings or [],
+                "page_numbers": page_numbers,
+            }
+            if chunk.meta.captions:
+                entry["captions"] = chunk.meta.captions
+            chunks.append(entry)
+        return chunks
 
     @staticmethod
     def _needs_ocr(docling_result: Any) -> bool:

@@ -49,10 +49,9 @@ async def test_convert_native_pdf_extracts_text_without_ocr(native_pdf, tmp_path
     assert "Informe de prueba" in markdown_text
 
     document_json = json.loads(await asyncio.to_thread(_read_text, result.json_path))
-    metadata = document_json["doc_organize_metadata"]
-    assert metadata["sha256_hash"] == doc.sha256_hash
-    assert metadata["ocr_required"] is False
-    assert "texts" in document_json
+    assert document_json["sha256_hash"] == doc.sha256_hash
+    assert document_json["ocr_required"] is False
+    assert any("Informe de prueba" in chunk["text"] for chunk in document_json["chunks"])
 
 
 @pytest.mark.slow
