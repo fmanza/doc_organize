@@ -4,11 +4,19 @@ import httpx
 import pytest
 
 from doc_organize.core.models import SecurityConfig
+from doc_organize.projects import ProjectRegistry
 from doc_organize.web import create_app
 
 
 def _client(app, base_url: str = "http://testserver") -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=base_url)
+
+
+async def _create_project(tmp_path, registry_path, name: str, tenant_id: str = "default"):
+    base = tmp_path / "workspaces"
+    base.mkdir(exist_ok=True)
+    async with ProjectRegistry(registry_path) as registry:
+        return await registry.create_project(name, base, tenant_id=tenant_id)
 
 
 # ===== Loopback (por defecto): sin autenticacion =====
@@ -21,6 +29,105 @@ async def test_project_selector_page_loads(tmp_path) -> None:
         response = await client.get("/")
     assert response.status_code == 200
     assert "Proyectos" in response.text
+
+
+# ===== Buscador y paginación de "Proyectos" (misma funcionalidad que la pestaña Caché) =====
+
+
+@pytest.mark.asyncio
+async def test_project_selector_page_no_search_box_when_no_projects(tmp_path) -> None:
+    app = create_app(registry_path=tmp_path / "projects.json")
+    async with _client(app) as client:
+        response = await client.get("/")
+    assert response.status_code == 200
+    assert 'id="project-search"' not in response.text
+
+
+@pytest.mark.asyncio
+async def test_project_selector_page_shows_search_box_and_count(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    await _create_project(tmp_path, registry_path, "Informe Anual")
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.get("/")
+
+    assert response.status_code == 200
+    html = response.text
+    assert 'id="project-search"' in html
+    assert 'name="q"' in html
+    assert "Mostrando 1–1 de 1 entradas." in html
+
+
+@pytest.mark.asyncio
+async def test_project_selector_page_search_filters_by_name(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    await _create_project(tmp_path, registry_path, "Informe Anual")
+    await _create_project(tmp_path, registry_path, "Facturas 2026")
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.get("/", params={"q": "informe"})
+
+    assert response.status_code == 200
+    html = response.text
+    # El nombre coincidente se resalta con <mark>, partiendo la cadena literal.
+    assert "<mark>Informe</mark> Anual" in html
+    assert "Facturas 2026" not in html
+    assert "Mostrando 1–1 de 1 entradas." in html
+
+
+@pytest.mark.asyncio
+async def test_project_selector_page_search_filters_by_location(tmp_path) -> None:
+    # "misma funcionalidad que la pestaña Caché": el buscador cubre nombre Y
+    # ubicación, igual que Caché cubre nombre de archivo Y carpeta.
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path, "Proyecto Uno")
+    await _create_project(tmp_path, registry_path, "Proyecto Dos")
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.get("/", params={"q": project.root_path})
+
+    assert response.status_code == 200
+    html = response.text
+    assert "Proyecto Uno" in html
+    assert "Proyecto Dos" not in html
+
+
+@pytest.mark.asyncio
+async def test_project_selector_page_paginates_and_navigates_pages(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    for i in range(30):
+        await _create_project(tmp_path, registry_path, f"Proyecto {i:03d}")
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        page1 = await client.get("/", params={"page_size": 25})
+        page2 = await client.get("/", params={"page": 2, "page_size": 25})
+
+    assert page1.status_code == 200
+    assert page2.status_code == 200
+    assert "Página 1 de 2" in page1.text
+    assert "Página 2 de 2" in page2.text
+    assert "Proyecto 000" in page1.text
+    assert "Proyecto 024" in page1.text
+    assert "Proyecto 025" not in page1.text
+    assert "Proyecto 029" in page2.text
+    assert "Proyecto 000" not in page2.text
+
+
+@pytest.mark.asyncio
+async def test_project_selector_page_clamps_out_of_range_page(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    await _create_project(tmp_path, registry_path, "Único Proyecto")
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.get("/", params={"page": 999})
+
+    assert response.status_code == 200
+    assert "Único Proyecto" in response.text
 
 
 @pytest.mark.asyncio
@@ -79,6 +186,29 @@ async def test_dashboard_page_for_existing_project(tmp_path) -> None:
 
     assert response.status_code == 200
     assert "Mi Proyecto" in response.text
+
+
+@pytest.mark.asyncio
+async def test_dashboard_page_shows_saved_folders_section(tmp_path) -> None:
+    """ "Carpetas guardadas" se trasladó de la página Escanear al Dashboard
+    (reestructuración de navegación)."""
+    base = tmp_path / "workspaces"
+    base.mkdir()
+    app = create_app(registry_path=tmp_path / "projects.json")
+
+    folder = tmp_path / "datos"
+    folder.mkdir()
+
+    async with _client(app) as client:
+        await client.post("/api/projects", json={"name": "Mi Proyecto", "base_location": str(base)})
+        await client.post("/api/projects/Mi Proyecto/folders/library", json={"path": str(folder)})
+        response = await client.get("/projects/Mi Proyecto")
+
+    assert response.status_code == 200
+    html = response.text
+    assert "Carpetas guardadas" in html
+    assert str(folder.resolve()) in html
+    assert 'id="add-folder-btn"' in html
 
 
 @pytest.mark.asyncio

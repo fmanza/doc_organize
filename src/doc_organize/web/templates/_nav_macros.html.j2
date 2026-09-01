@@ -1,12 +1,10 @@
 {% macro project_nav(project, active) %}
 <a class="block px-2 py-1.5 rounded {{ 'bg-gray-200 font-medium' if active == 'dashboard' else 'hover:bg-gray-100' }}"
    href="/projects/{{ project.name | urlencode }}">{{ project.name }}</a>
-<a class="block px-2 py-1.5 rounded {{ 'bg-gray-200 font-medium' if active == 'scan' else 'hover:bg-gray-100' }}"
-   href="/projects/{{ project.name | urlencode }}/scan">Escanear</a>
-<a class="block px-2 py-1.5 rounded {{ 'bg-gray-200 font-medium' if active == 'cache' else 'hover:bg-gray-100' }}"
-   href="/projects/{{ project.name | urlencode }}/cache">Caché</a>
 <a class="block px-2 py-1.5 rounded {{ 'bg-gray-200 font-medium' if active == 'duplicates' else 'hover:bg-gray-100' }}"
    href="/projects/{{ project.name | urlencode }}/duplicates">Duplicados</a>
+<a class="block px-2 py-1.5 rounded {{ 'bg-gray-200 font-medium' if active == 'scan' else 'hover:bg-gray-100' }}"
+   href="/projects/{{ project.name | urlencode }}/scan">Escanear</a>
 <a class="block px-2 py-1.5 rounded hover:bg-gray-100" href="/downloads/projects/{{ project.name | urlencode }}/export.zip">Descargar export</a>
 <a class="block px-2 py-1.5 rounded hover:bg-gray-100 mt-2 border-t border-gray-300 pt-2" href="/">&larr; Todos los proyectos</a>
 {% endmacro %}

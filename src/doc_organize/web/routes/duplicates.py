@@ -17,7 +17,7 @@ from doc_organize.core.models import DeduplicationReport, DuplicateGroup, Projec
 from doc_organize.dedup import DeduplicationManager
 from doc_organize.scanner import DocumentScanner
 from doc_organize.utils.logging import get_logger
-from doc_organize.web.dependencies import get_project_registry, get_tenant_id, require_project_access
+from doc_organize.web.dependencies import get_project_registry, get_scanned_folders_store, get_tenant_id, require_project_access
 from doc_organize.web.templating import create_templates
 
 logger = get_logger(__name__)
@@ -150,20 +150,21 @@ def _load_dedup_history(project: Project) -> list[DeduplicationReport]:
 
 
 @router.get("/projects/{name}/duplicates", response_class=HTMLResponse, dependencies=[Depends(require_project_access)])
-async def duplicates_resolver_page(name: str, request: Request) -> HTMLResponse:
+async def duplicates_resolver_page(name: str, request: Request, tab: str = "resolve") -> HTMLResponse:
     """Muestra los duplicados pendientes de resolver (re-escaneo en vivo, con
     formulario interactivo) y el histórico completo de deduplicaciones — cada
     ejecución con su propio detalle de archivos (conservado/movido), no solo
     la última. Los bloques son independientes: los archivos duplicados deben
     verse en la página tanto si el re-escaneo en vivo encuentra algo
     pendiente como si no.
+
+    Incluye también la acción masiva "Buscar duplicados" (antes en la página
+    Escanear, ahora en la pestaña "Buscar duplicados" de esta página, tras la
+    reestructuración de navegación).
     """
     project = await _get_project(request, name)
     groups = await _detect_duplicates(project)
-    groups_with_keys = [
-        {"key": _group_key(group), "group": group, "members": [group.canonical_doc, *group.duplicates]}
-        for group in groups
-    ]
+    groups_with_keys = [{"key": _group_key(group), "group": group, "members": [group.canonical_doc, *group.duplicates]} for group in groups]
     history = await asyncio.to_thread(_load_dedup_history, project)
     last_dedup_report = history[0] if history else None
     history_entries = [
@@ -181,6 +182,7 @@ async def duplicates_resolver_page(name: str, request: Request) -> HTMLResponse:
         for report in history
     ]
     total_resolved_groups = sum(len(report.groups) for report in history)
+    saved_folders = await get_scanned_folders_store().list_folders(project)
     return _templates.TemplateResponse(
         request,
         "duplicates_resolver.html.j2",
@@ -190,6 +192,8 @@ async def duplicates_resolver_page(name: str, request: Request) -> HTMLResponse:
             "last_dedup_report": last_dedup_report,
             "history_entries": history_entries,
             "total_resolved_groups": total_resolved_groups,
+            "has_saved_folders": bool(saved_folders),
+            "active_tab": "history" if tab == "history" else "resolve",
         },
     )
 

@@ -51,10 +51,12 @@ python -m doc_organize web
 ```
 
 Arranca en `http://127.0.0.1:8000` — en loopback, sin autenticación. Desde el
-Project Selector puedes crear/abrir proyectos; en la página Escanear, buscar
-duplicados y escanear con progreso en vivo (el escaneo queda deshabilitado
-hasta ejecutar "Buscar duplicados" en esa misma visita); además, ver el caché,
-consultar/resolver duplicados y descargar un export ZIP.
+Project Selector puedes crear/abrir proyectos; en la página del proyecto
+(Dashboard) gestionas las carpetas guardadas; en Escanear, escanear con
+progreso en vivo y consultar el caché (dos pestañas: Escanear / Caché); en
+Duplicados, buscar/resolver duplicados y consultar el histórico de
+deduplicaciones (dos pestañas: Buscar duplicados / Histórico de
+deduplicaciones); y descargar un export ZIP.
 
 ### Exponer la web fuera de tu máquina
 

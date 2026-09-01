@@ -5,6 +5,15 @@
 {% block content %}
 <h1 class="text-xl font-semibold mb-4">Escanear: {{ project.name }}</h1>
 
+<div role="tablist" class="flex gap-1 border-b border-gray-300 mb-4">
+    <button type="button" id="tab-btn-scan" role="tab" aria-selected="{{ 'true' if active_tab != 'cache' else 'false' }}" aria-controls="tab-panel-scan"
+            class="page-tab-btn px-3 py-1.5 border border-b-0 rounded-t cursor-pointer {{ 'bg-white border-gray-300 font-medium' if active_tab != 'cache' else 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100' }}">Escanear</button>
+    <button type="button" id="tab-btn-cache" role="tab" aria-selected="{{ 'true' if active_tab == 'cache' else 'false' }}" aria-controls="tab-panel-cache"
+            class="page-tab-btn px-3 py-1.5 border border-b-0 rounded-t cursor-pointer {{ 'bg-white border-gray-300 font-medium' if active_tab == 'cache' else 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100' }}">Caché</button>
+</div>
+
+<div id="tab-panel-scan" role="tabpanel" aria-labelledby="tab-btn-scan" {% if active_tab == 'cache' %}hidden{% endif %}>
+
 {% if gpu_status.gpu_active %}
 <p class="my-2 px-3 py-2 rounded bg-green-50 border border-green-300 text-green-800 text-sm">
     GPU disponible y activa: el OCR acelerado por GPU se puede usar en este escaneo.
@@ -19,48 +28,7 @@
 </p>
 {% endif %}
 
-<h2 class="text-lg font-medium mt-4 mb-2">Carpetas guardadas</h2>
-<p class="text-sm text-gray-600 mb-2">Tanto "Buscar duplicados" como "Escanear" procesan siempre todas las carpetas de esta lista.</p>
-<ul id="folder-list" class="border border-gray-300 rounded divide-y divide-gray-200">
-    {% for folder in folders %}
-    <li class="flex items-center gap-2 px-2.5 py-1.5" data-path="{{ folder.path }}">
-        <span class="truncate flex-1 min-w-0">{{ folder.path }}</span>
-        {% if folder.used %}
-        <span class="text-xs text-gray-500 shrink-0">usada</span>
-        {% else %}
-        <button type="button" class="folder-remove shrink-0 text-red-700 underline cursor-pointer text-sm" data-path="{{ folder.path }}">Eliminar</button>
-        {% endif %}
-    </li>
-    {% else %}
-    <li class="px-2.5 py-1.5 text-gray-500">Todavía no hay carpetas guardadas para este proyecto.</li>
-    {% endfor %}
-</ul>
-<p id="folder-list-error" class="text-red-700 my-2 min-h-[1.2em]"></p>
-
-<div class="my-3 flex gap-2 flex-wrap items-start">
-    <label for="new-folder-path" class="sr-only">Ruta de la nueva carpeta</label>
-    <input type="text" id="new-folder-path" placeholder="Ruta de la carpeta" class="border border-gray-300 rounded px-2 py-1.5 flex-1 min-w-[240px]">
-    <button type="button" id="add-folder-btn" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Guardar carpeta</button>
-    <button type="button" id="browse-btn" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Buscar…</button>
-</div>
-
-<div id="browse-panel" hidden class="my-2 border border-gray-300 rounded p-3">
-    <p id="browse-current" class="font-mono text-xs mb-2 break-all"></p>
-    <div class="flex gap-2 mb-2 flex-wrap">
-        <button type="button" id="browse-up" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 text-sm">&uarr; Subir</button>
-        <button type="button" id="browse-use" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-blue-100 hover:bg-blue-200 text-sm">Usar esta carpeta</button>
-        <button type="button" id="browse-close" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 text-sm">Cerrar</button>
-    </div>
-    <ul id="browse-entries" class="border border-gray-200 rounded divide-y divide-gray-100 max-h-64 overflow-y-auto"></ul>
-    <p id="browse-error" class="text-red-700 my-1 min-h-[1.2em] text-sm"></p>
-</div>
-
-<h2 class="text-lg font-medium mt-4 mb-2">Paso 1: Buscar duplicados</h2>
-<p class="text-sm text-gray-600 mb-2">Busca y mueve duplicados en todas las carpetas guardadas. Hay que ejecutar este paso, en esta misma visita, antes de poder escanear.</p>
-<button type="button" id="deduplicate-btn" {% if not folders %}disabled{% endif %} class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50">Buscar duplicados</button>
-<p id="deduplicate-error" class="text-red-700 my-2 min-h-[1.2em]"></p>
-
-<h2 class="text-lg font-medium mt-4 mb-2">Paso 2: Escanear</h2>
+<h2 class="text-lg font-medium mt-4 mb-2">Escanear</h2>
 <form id="scan-form" class="my-4">
     <p class="my-2 flex gap-4 flex-wrap">
         <label class="flex items-center gap-1"><input type="checkbox" id="use_ocr"> Usar OCR si hace falta</label>
@@ -68,8 +36,10 @@
             <input type="checkbox" id="use_gpu" {% if not gpu_status.gpu_active %}disabled{% endif %}> OCR con GPU
         </label>
     </p>
-    <button type="submit" id="scan-submit-btn" disabled class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50">Escanear todas las carpetas guardadas</button>
-    <p class="text-xs text-gray-500 mt-1">Deshabilitado hasta ejecutar "Buscar duplicados" en esta visita.</p>
+    <button type="submit" id="scan-submit-btn" {% if not folders %}disabled{% endif %} class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50">Escanear todas las carpetas guardadas</button>
+    {% if not folders %}
+    <p class="text-xs text-gray-500 mt-1">Deshabilitado hasta guardar al menos una carpeta (menú {{ project.name }}, Carpetas guardadas).</p>
+    {% endif %}
 </form>
 <p id="scan-error" class="text-red-700 my-2 min-h-[1.2em]"></p>
 
@@ -77,154 +47,121 @@
 <label for="progress" class="sr-only">Resultado del escaneo</label>
 <textarea id="progress" readonly rows="12" class="w-full border border-gray-300 rounded px-2 py-1.5 font-mono text-xs bg-gray-50"></textarea>
 
+</div>
+
+<div id="tab-panel-cache" role="tabpanel" aria-labelledby="tab-btn-cache" {% if active_tab != 'cache' %}hidden{% endif %}>
+
+<p class="mb-3">
+    <a class="text-blue-600 underline text-sm" href="/downloads/projects/{{ project.name | urlencode }}/cache-export.xlsx">
+        ⬇ Exportar a Excel
+    </a>
+</p>
+
+{% if cache_total > 0 or cache_q %}
+<form method="get" id="cache-filter-form" class="my-3 flex flex-wrap items-end gap-3">
+    <input type="hidden" name="tab" value="cache">
+    <div>
+        <label for="cache-search" class="block text-sm font-medium mb-1">Buscar por nombre o carpeta</label>
+        <input type="text" id="cache-search" name="q" value="{{ cache_q or '' }}"
+               placeholder="Filtra por nombre de archivo o ruta de carpeta…"
+               class="border border-gray-300 rounded px-2 py-1.5 w-full max-w-md">
+    </div>
+    <div>
+        <label for="cache-page-size" class="block text-sm font-medium mb-1">Filas por página</label>
+        <select id="cache-page-size" name="page_size" onchange="this.form.requestSubmit()"
+                class="border border-gray-300 rounded px-2 py-1.5">
+        {% for option in cache_page_size_options %}
+            <option value="{{ option }}" {% if option == cache_page_size %}selected{% endif %}>{{ option }}</option>
+        {% endfor %}
+        </select>
+    </div>
+    <input type="hidden" name="page" id="cache-page-input" value="1">
+    <p class="text-gray-500 text-sm" id="cache-count">
+    {% if cache_total == 0 %}
+        Sin resultados{% if cache_q %} para «{{ cache_q }}»{% endif %}.
+    {% else %}
+        Mostrando {{ cache_range_start }}–{{ cache_range_end }} de {{ cache_total }} entradas.
+    {% endif %}
+    </p>
+</form>
+
+{% if cache_entries %}
+<div class="overflow-x-auto">
+<table class="w-full border-collapse mt-4">
+    <thead>
+        <tr>
+        <th class="sticky top-0 z-10 text-left px-2.5 py-1.5 border-b border-gray-300 bg-white">Archivo</th>
+        <th class="sticky top-0 z-10 text-left px-2.5 py-1.5 border-b border-gray-300 bg-white">Carpeta</th>
+        <th class="sticky top-0 z-10 text-left px-2.5 py-1.5 border-b border-gray-300 bg-white whitespace-nowrap w-32">Hash</th>
+        <th class="sticky top-0 z-10 text-left px-2.5 py-1.5 border-b border-gray-300 bg-white whitespace-nowrap w-24">Estado</th>
+        <th class="sticky top-0 z-10 text-left px-2.5 py-1.5 border-b border-gray-300 bg-white whitespace-nowrap w-28">Conversión</th>
+    </tr></thead>
+    <tbody>
+    {% for entry in cache_entries %}
+        <tr class="even:bg-gray-50 hover:bg-blue-50">
+            <td class="px-2.5 py-1.5 border-b border-gray-300 break-all">{{ entry.file_path | basename | highlight(cache_q) }}</td>
+            <td class="px-2.5 py-1.5 border-b border-gray-300 break-all text-gray-600 font-mono text-xs" title="{{ entry.file_path }}">{{ entry.file_path | dirname | highlight(cache_q) }}</td>
+            <td class="px-2.5 py-1.5 border-b border-gray-300 whitespace-nowrap">{{ entry.sha256_hash[:12] }}…</td>
+            <td class="px-2.5 py-1.5 border-b border-gray-300 whitespace-nowrap">{{ entry.status }}</td>
+            <td class="px-2.5 py-1.5 border-b border-gray-300 whitespace-nowrap">{{ entry.conversion_status or "—" }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+
+{% if cache_total_pages > 1 %}
+<nav aria-label="Paginación" class="flex items-center justify-between mt-3 text-sm">
+    {% set base_qs = "tab=cache&q=" + (cache_q or "") | urlencode + "&page_size=" + cache_page_size | string %}
+    {% if cache_page > 1 %}
+    <a class="text-blue-600 underline" href="?{{ base_qs }}&page={{ cache_page - 1 }}">« Anterior</a>
+    {% else %}
+    <span class="text-gray-400">« Anterior</span>
+    {% endif %}
+    <span class="text-gray-600">Página {{ cache_page }} de {{ cache_total_pages }}</span>
+    {% if cache_page < cache_total_pages %}
+    <a class="text-blue-600 underline" href="?{{ base_qs }}&page={{ cache_page + 1 }}">Siguiente »</a>
+    {% else %}
+    <span class="text-gray-400">Siguiente »</span>
+    {% endif %}
+</nav>
+{% endif %}
+
+<p class="mt-3"><a href="#cache-search" class="text-blue-600 underline text-sm">↑ Volver arriba</a></p>
+{% endif %}
+{% else %}
+<p>No hay entradas en caché todavía — ejecuta un escaneo en la pestaña "Escanear".</p>
+{% endif %}
+
+</div>
+
 <script>
 const projectName = {{ project.name | tojson }};
 const libraryBaseUrl = "/api/projects/" + encodeURIComponent(projectName) + "/folders/library";
 
-function apiError(data, fallback) {
-    return (data && data.detail) || fallback;
-}
+// --- Pestañas (Escanear / Caché) ---
 
-// --- Lista persistente de carpetas ---
+const tabButtons = { scan: document.getElementById("tab-btn-scan"), cache: document.getElementById("tab-btn-cache") };
+const tabPanels = { scan: document.getElementById("tab-panel-scan"), cache: document.getElementById("tab-panel-cache") };
 
-async function reloadFolderList() {
-    window.location.reload();
-}
-
-document.getElementById("add-folder-btn").addEventListener("click", async () => {
-    const errorEl = document.getElementById("folder-list-error");
-    errorEl.textContent = "";
-    const path = document.getElementById("new-folder-path").value.trim();
-    if (!path) {
-        errorEl.textContent = "Indica una ruta de carpeta.";
-        return;
-    }
-    const response = await fetch(libraryBaseUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: path }),
-    });
-    if (response.ok) {
-        await reloadFolderList();
-    } else {
-        const data = await response.json();
-        errorEl.textContent = apiError(data, "No se pudo guardar la carpeta.");
-    }
-});
-
-document.getElementById("folder-list").addEventListener("click", async (event) => {
-    const button = event.target.closest(".folder-remove");
-    if (!button) return;
-    const errorEl = document.getElementById("folder-list-error");
-    errorEl.textContent = "";
-    const response = await fetch(libraryBaseUrl, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: button.dataset.path }),
-    });
-    if (response.ok) {
-        await reloadFolderList();
-    } else {
-        const data = await response.json();
-        errorEl.textContent = apiError(data, "No se pudo eliminar la carpeta.");
-    }
-});
-
-// --- Explorador de carpetas del servidor ("Buscar…") ---
-
-const browsePanel = document.getElementById("browse-panel");
-const browseCurrent = document.getElementById("browse-current");
-const browseEntries = document.getElementById("browse-entries");
-const browseError = document.getElementById("browse-error");
-let browseState = { current_path: "", parent_path: null };
-
-async function browseTo(path) {
-    browseError.textContent = "";
-    const url = path ? "/api/fs/browse?path=" + encodeURIComponent(path) : "/api/fs/browse";
-    const response = await fetch(url);
-    const data = await response.json();
-    if (!response.ok) {
-        browseError.textContent = apiError(data, "No se pudo explorar esa carpeta.");
-        return;
-    }
-    browseState = data;
-    browseCurrent.textContent = data.current_path;
-    browseEntries.innerHTML = "";
-    if (data.entries.length === 0) {
-        const li = document.createElement("li");
-        li.className = "px-2 py-1 text-gray-500 text-sm";
-        li.textContent = "(sin subcarpetas)";
-        browseEntries.appendChild(li);
-    }
-    for (const entryName of data.entries) {
-        const li = document.createElement("li");
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "w-full text-left px-2 py-1 cursor-pointer hover:bg-gray-100 text-sm";
-        btn.textContent = entryName;
-        btn.addEventListener("click", () => {
-            const separator = data.current_path.endsWith("/") || data.current_path.endsWith("\\") ? "" : "/";
-            browseTo(data.current_path + separator + entryName);
-        });
-        li.appendChild(btn);
-        browseEntries.appendChild(li);
+function activateTab(tabName) {
+    for (const name of Object.keys(tabButtons)) {
+        const isActive = name === tabName;
+        tabPanels[name].hidden = !isActive;
+        tabButtons[name].setAttribute("aria-selected", isActive ? "true" : "false");
+        tabButtons[name].classList.toggle("bg-white", isActive);
+        tabButtons[name].classList.toggle("border-gray-300", isActive);
+        tabButtons[name].classList.toggle("font-medium", isActive);
+        tabButtons[name].classList.toggle("bg-gray-50", !isActive);
+        tabButtons[name].classList.toggle("border-transparent", !isActive);
+        tabButtons[name].classList.toggle("text-gray-600", !isActive);
     }
 }
 
-document.getElementById("browse-btn").addEventListener("click", () => {
-    browsePanel.hidden = false;
-    browseTo(null);
-});
-document.getElementById("browse-close").addEventListener("click", () => {
-    browsePanel.hidden = true;
-});
-document.getElementById("browse-up").addEventListener("click", () => {
-    if (browseState.parent_path) browseTo(browseState.parent_path);
-});
-document.getElementById("browse-use").addEventListener("click", async () => {
-    browseError.textContent = "";
-    const response = await fetch(libraryBaseUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: browseState.current_path }),
-    });
-    if (response.ok) {
-        await reloadFolderList();
-    } else {
-        const data = await response.json();
-        browseError.textContent = apiError(data, "No se pudo guardar la carpeta.");
-    }
-});
+tabButtons.scan.addEventListener("click", () => activateTab("scan"));
+tabButtons.cache.addEventListener("click", () => activateTab("cache"));
 
-// --- Buscar duplicados (paso 1, obligatorio antes de poder escanear) ---
-
-const deduplicateBtn = document.getElementById("deduplicate-btn");
-const deduplicateErrorEl = document.getElementById("deduplicate-error");
-const scanSubmitBtn = document.getElementById("scan-submit-btn");
-
-deduplicateBtn.addEventListener("click", async () => {
-    deduplicateErrorEl.textContent = "";
-    deduplicateBtn.disabled = true;
-    try {
-        const response = await fetch(
-            "/api/projects/" + encodeURIComponent(projectName) + "/scan/deduplicate",
-            { method: "POST" }
-        );
-        const data = await response.json();
-        if (!response.ok) {
-            deduplicateErrorEl.textContent = apiError(data, "No se pudieron buscar duplicados.");
-            return;
-        }
-        appendProgress({ event: "deduplicated", data: data });
-        // Gate solo de cliente: habilita "Escanear" para esta visita. Se resetea
-        // al recargar la página — hay que volver a pulsar este botón cada vez.
-        scanSubmitBtn.disabled = false;
-    } finally {
-        deduplicateBtn.disabled = false;
-    }
-});
-
-// --- Escaneo (paso 2, bloqueado hasta completar el paso 1) ---
+// --- Escaneo ---
 
 const form = document.getElementById("scan-form");
 const progressBox = document.getElementById("progress");
@@ -262,5 +199,28 @@ form.addEventListener("submit", async (submitEvent) => {
         errorEl.textContent = "Error de conexión durante el escaneo.";
     };
 });
+
+// --- Búsqueda en Caché (auto-submit con debounce) ---
+
+(function () {
+    const searchInput = document.getElementById("cache-search");
+    if (!searchInput) return;
+
+    const cacheForm = document.getElementById("cache-filter-form");
+    const pageInput = document.getElementById("cache-page-input");
+    let debounceTimer = null;
+
+    searchInput.addEventListener("input", () => {
+        pageInput.value = "1";
+        if (debounceTimer) window.clearTimeout(debounceTimer);
+        debounceTimer = window.setTimeout(() => cacheForm.requestSubmit(), 400);
+    });
+
+    if (searchInput.value) {
+        searchInput.focus();
+        const end = searchInput.value.length;
+        searchInput.setSelectionRange(end, end);
+    }
+})();
 </script>
 {% endblock %}

@@ -112,7 +112,7 @@ generada desde los docstrings).
 | REQ-004 | Detección y reprocesado OCR | ✅ Implementado |
 | REQ-005 | Deduplicación | ✅ Implementado (auto vía CLI/scan; interactivo vía web) |
 | REQ-006 | Caché incremental | ✅ Implementado |
-| REQ-007 | Interfaz web | ✅ Implementado (Project Selector, Dashboard, Folder Selector+WS, Cache Viewer, Duplicates Resolver, Export ZIP) |
+| REQ-007 | Interfaz web | ✅ Implementado (Project Selector con buscador+paginación, Dashboard con Carpetas guardadas, Escanear+WS con pestañas Escanear/Caché, Duplicados con pestañas Buscar duplicados/Histórico, Export ZIP) |
 | REQ-008 | Gestión de proyectos | ✅ Implementado (multi-tenant) |
 
 Fuente de verdad detallada (incluye historial de revisiones y AUDIT_PLAN de cada pieza):

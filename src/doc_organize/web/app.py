@@ -25,7 +25,14 @@ from doc_organize.core.exceptions import (
 )
 from doc_organize.core.models import SecurityConfig
 from doc_organize.web.auth import AuthMiddleware, LoginRateLimiter
-from doc_organize.web.dependencies import get_auth_store, get_project_registry, get_tenant_id, require_project_access
+from doc_organize.web.dependencies import (
+    get_auth_store,
+    get_project_registry,
+    get_scanned_folders_store,
+    get_tenant_id,
+    require_project_access,
+)
+from doc_organize.web.pagination import DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, paginate
 from doc_organize.web.routes.admin import router as admin_router
 from doc_organize.web.routes.auth import router as auth_router
 from doc_organize.web.routes.cache import router as cache_router
@@ -124,7 +131,12 @@ def create_app(
     templates = create_templates(_TEMPLATES_DIR)
 
     @app.get("/", response_class=HTMLResponse)
-    async def project_selector(request: Request) -> HTMLResponse:
+    async def project_selector(
+        request: Request,
+        q: str | None = None,
+        page: int = 1,
+        page_size: int = DEFAULT_PAGE_SIZE,
+    ) -> HTMLResponse:
         async with get_project_registry(request) as registry:
             projects = await registry.list_projects(tenant_id=get_tenant_id(request))
 
@@ -134,7 +146,33 @@ def create_app(
             allowed_names = {allowed.lower() for allowed in role.project_names}
             projects = [project for project in projects if project.name.lower() in allowed_names]
 
-        return templates.TemplateResponse(request, "project_selector.html.j2", {"projects": projects})
+        # Misma funcionalidad que la pestaña Caché de Escanear: buscador server-side
+        # (por nombre o ubicación) + paginación, en vez de listar siempre todos los
+        # proyectos del tenant/rol de una sola vez.
+        q_normalized = (q.strip() or None) if q else None
+        if q_normalized:
+            needle = q_normalized.lower()
+            projects = [project for project in projects if needle in project.name.lower() or needle in project.root_path.lower()]
+
+        resolved_page = paginate(len(projects), page, page_size)
+        offset = (resolved_page.number - 1) * resolved_page.size
+        page_projects = projects[offset : offset + resolved_page.size]
+
+        return templates.TemplateResponse(
+            request,
+            "project_selector.html.j2",
+            {
+                "projects": page_projects,
+                "q": q_normalized,
+                "page": resolved_page.number,
+                "page_size": resolved_page.size,
+                "page_size_options": PAGE_SIZE_OPTIONS,
+                "total": resolved_page.total,
+                "total_pages": resolved_page.total_pages,
+                "range_start": resolved_page.range_start,
+                "range_end": resolved_page.range_end,
+            },
+        )
 
     @app.get("/projects/{name}", response_class=HTMLResponse, dependencies=[Depends(require_project_access)])
     async def dashboard(name: str, request: Request) -> HTMLResponse:
@@ -142,7 +180,8 @@ def create_app(
         # registrado arriba (_EXCEPTION_STATUS_CODES) la traduce a 404.
         async with get_project_registry(request) as registry:
             project = await registry.get_project(name, tenant_id=get_tenant_id(request))
-        return templates.TemplateResponse(request, "dashboard.html.j2", {"project": project})
+        folders = await get_scanned_folders_store().list_folders(project)
+        return templates.TemplateResponse(request, "dashboard.html.j2", {"project": project, "folders": folders})
 
     return app
 

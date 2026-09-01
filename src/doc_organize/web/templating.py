@@ -10,15 +10,38 @@ carpeta, etc.) se renderiza sin escapar y abre la puerta a XSS. Cada módulo de 
 creaba su propia instancia de `Jinja2Templates` y tenía que acordarse de este override
 por separado; `create_templates()` centraliza el fix para que una ruta nueva no pueda
 repetir el olvido.
+
+También registra aquí el filtro `highlight`, común a todas las páginas con
+buscador server-side (pestaña Caché de Escanear, Proyectos): antes cada módulo
+de rutas que lo necesitaba lo redefinía por su cuenta.
 """
 
 from pathlib import Path
 
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup, escape
+
+
+def _highlight(text: str, query: str | None) -> Markup:
+    """Envuelve en `<mark>` la subcadena de `text` que coincide (insensible a
+    mayúsculas) con `query`. `text` viene de un dato controlado por quien busca
+    (nombre de archivo, ruta de carpeta, nombre de proyecto...) — cada fragmento
+    se escapa individualmente con `markupsafe.escape()` antes de recomponer el
+    HTML, para no reabrir un XSS vía un valor malicioso."""
+    if not query:
+        return escape(text)
+    lowered_text = text.lower()
+    lowered_query = query.lower()
+    start = lowered_text.find(lowered_query)
+    if start == -1:
+        return escape(text)
+    end = start + len(query)
+    return Markup("{}<mark>{}</mark>{}").format(text[:start], text[start:end], text[end:])
 
 
 def create_templates(directory: str | Path) -> Jinja2Templates:
-    """Crea un `Jinja2Templates` con el autoescape forzado a `True`.
+    """Crea un `Jinja2Templates` con el autoescape forzado a `True` y el filtro
+    `highlight` disponible.
 
     Args:
         directory (str | Path): Carpeta de plantillas (típicamente `web/templates/`).
@@ -34,6 +57,7 @@ def create_templates(directory: str | Path) -> Jinja2Templates:
     """
     templates = Jinja2Templates(directory=str(directory))
     templates.env.autoescape = True
+    templates.env.filters["highlight"] = _highlight
     return templates
 
 

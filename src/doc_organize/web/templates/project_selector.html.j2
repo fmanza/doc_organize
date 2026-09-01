@@ -14,6 +14,33 @@
 </form>
 <p id="create-error" class="text-red-700 my-2 min-h-[1.2em]"></p>
 
+{% if total > 0 or q %}
+<form method="get" id="project-filter-form" class="my-3 flex flex-wrap items-end gap-3">
+    <div>
+        <label for="project-search" class="block text-sm font-medium mb-1">Buscar por nombre o ubicación</label>
+        <input type="text" id="project-search" name="q" value="{{ q or '' }}"
+               placeholder="Filtra por nombre de proyecto o ruta…"
+               class="border border-gray-300 rounded px-2 py-1.5 w-full max-w-md">
+    </div>
+    <div>
+        <label for="project-page-size" class="block text-sm font-medium mb-1">Filas por página</label>
+        <select id="project-page-size" name="page_size" onchange="this.form.requestSubmit()"
+                class="border border-gray-300 rounded px-2 py-1.5">
+        {% for option in page_size_options %}
+            <option value="{{ option }}" {% if option == page_size %}selected{% endif %}>{{ option }}</option>
+        {% endfor %}
+        </select>
+    </div>
+    <input type="hidden" name="page" id="project-page-input" value="1">
+    <p class="text-gray-500 text-sm" id="project-count">
+    {% if total == 0 %}
+        Sin resultados{% if q %} para «{{ q }}»{% endif %}.
+    {% else %}
+        Mostrando {{ range_start }}–{{ range_end }} de {{ total }} entradas.
+    {% endif %}
+    </p>
+</form>
+
 {% if projects %}
 <table class="w-full border-collapse mt-4">
     <thead><tr>
@@ -24,13 +51,31 @@
     <tbody>
     {% for project in projects %}
         <tr>
-            <td class="px-2.5 py-1.5 border-b border-gray-300"><a class="text-blue-600 underline" href="/projects/{{ project.name | urlencode }}">{{ project.name }}</a></td>
-            <td class="px-2.5 py-1.5 border-b border-gray-300">{{ project.root_path }}</td>
+            <td class="px-2.5 py-1.5 border-b border-gray-300"><a class="text-blue-600 underline" href="/projects/{{ project.name | urlencode }}">{{ project.name | highlight(q) }}</a></td>
+            <td class="px-2.5 py-1.5 border-b border-gray-300 text-gray-600 font-mono text-xs">{{ project.root_path | highlight(q) }}</td>
             <td class="px-2.5 py-1.5 border-b border-gray-300">{{ project.created_at }}</td>
         </tr>
     {% endfor %}
     </tbody>
 </table>
+
+{% if total_pages > 1 %}
+<nav aria-label="Paginación" class="flex items-center justify-between mt-3 text-sm">
+    {% set base_qs = "q=" + (q or "") | urlencode + "&page_size=" + page_size | string %}
+    {% if page > 1 %}
+    <a class="text-blue-600 underline" href="?{{ base_qs }}&page={{ page - 1 }}">« Anterior</a>
+    {% else %}
+    <span class="text-gray-400">« Anterior</span>
+    {% endif %}
+    <span class="text-gray-600">Página {{ page }} de {{ total_pages }}</span>
+    {% if page < total_pages %}
+    <a class="text-blue-600 underline" href="?{{ base_qs }}&page={{ page + 1 }}">Siguiente »</a>
+    {% else %}
+    <span class="text-gray-400">Siguiente »</span>
+    {% endif %}
+</nav>
+{% endif %}
+{% endif %}
 {% else %}
 <p>No hay proyectos todavía.</p>
 {% endif %}
@@ -52,5 +97,28 @@ document.getElementById("create-form").addEventListener("submit", async (event) 
         document.getElementById("create-error").textContent = data.detail || "Error al crear el proyecto.";
     }
 });
+
+// --- Búsqueda de proyectos (auto-submit con debounce, igual que la pestaña Caché) ---
+
+(function () {
+    const searchInput = document.getElementById("project-search");
+    if (!searchInput) return;
+
+    const projectForm = document.getElementById("project-filter-form");
+    const pageInput = document.getElementById("project-page-input");
+    let debounceTimer = null;
+
+    searchInput.addEventListener("input", () => {
+        pageInput.value = "1";
+        if (debounceTimer) window.clearTimeout(debounceTimer);
+        debounceTimer = window.setTimeout(() => projectForm.requestSubmit(), 400);
+    });
+
+    if (searchInput.value) {
+        searchInput.focus();
+        const end = searchInput.value.length;
+        searchInput.setSelectionRange(end, end);
+    }
+})();
 </script>
 {% endblock %}

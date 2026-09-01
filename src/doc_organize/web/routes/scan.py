@@ -1,5 +1,8 @@
 """
 Folder Selector + escaneo/conversión vía web con progreso WebSocket (Fase D-2b, §2.7.3).
+
+Incluye también la pestaña "Caché" de la página Escanear (antigua página Caché
+independiente, Fase D-2c §2.7.4, fusionada aquí en la reestructuración de navegación).
 """
 
 import asyncio
@@ -10,9 +13,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSo
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from doc_organize.core.constants import SCAN_FOLDERS_JSON_NAME
+from doc_organize.cache import CacheManager
+from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME, SCAN_FOLDERS_JSON_NAME
 from doc_organize.core.exceptions import ProjectNotFoundError
-from doc_organize.core.models import ScanEventType, ScannedFolder
+from doc_organize.core.models import Project, ScanEventType, ScannedFolder
 from doc_organize.scan import ScanCommand
 from doc_organize.utils.gpu_detector import detect_gpu_status
 from doc_organize.utils.logging import get_logger
@@ -27,6 +31,8 @@ from doc_organize.web.dependencies import (
     get_tenant_id,
     require_project_access,
 )
+from doc_organize.web.pagination import DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, Page, paginate
+from doc_organize.web.routes.cache import CacheEntryResponse, cache_entry_to_response
 from doc_organize.web.templating import create_templates
 
 logger = get_logger(__name__)
@@ -34,7 +40,36 @@ logger = get_logger(__name__)
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 _templates = create_templates(_TEMPLATES_DIR)
 
+
+def _dirname(full_path: str) -> str:
+    """Carpeta contenedora de `full_path`, para la pestaña Caché de Escanear (mismo
+    criterio que en Duplicates Resolver)."""
+    return str(Path(full_path).parent)
+
+
+def _basename(full_path: str) -> str:
+    """Nombre de archivo de `full_path`, sin la carpeta contenedora, para la columna
+    "Archivo" de la pestaña Caché."""
+    return Path(full_path).name
+
+
+_templates.env.filters["dirname"] = _dirname
+_templates.env.filters["basename"] = _basename
+
 router = APIRouter(tags=["scan"])
+
+
+async def _load_cache_page(project: Project, *, q: str | None, page: int, page_size: int) -> tuple[list[CacheEntryResponse], Page]:
+    """Carga una página de `cache_entries` para la pestaña Caché de Escanear."""
+    cache_db = Path(project.root_path) / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        total = await cache.count_entries(q)
+        resolved_page = paginate(total, page, page_size)
+        offset = (resolved_page.number - 1) * resolved_page.size
+        page_entries = await cache.load_cache_page(resolved_page.size, offset, q)
+
+    entries = [cache_entry_to_response(entry) for entry in page_entries]
+    return entries, resolved_page
 
 
 class ValidateFoldersRequest(BaseModel):
@@ -58,7 +93,14 @@ class DeduplicateFoldersResponse(BaseModel):
 
 
 @router.get("/projects/{name}/scan", response_class=HTMLResponse, dependencies=[Depends(require_project_access)])
-async def folder_selector(name: str, request: Request) -> HTMLResponse:
+async def folder_selector(
+    name: str,
+    request: Request,
+    tab: str = "scan",
+    q: str | None = None,
+    page: int = 1,
+    page_size: int = DEFAULT_PAGE_SIZE,
+) -> HTMLResponse:
     # ProjectNotFoundError se propaga sin capturar: el handler global de
     # web/app.py (_EXCEPTION_STATUS_CODES) la traduce a 404.
     async with get_project_registry(request) as registry:
@@ -67,7 +109,32 @@ async def folder_selector(name: str, request: Request) -> HTMLResponse:
     # asyncio.to_thread: importar torch (si está instalado) e inicializar CUDA
     # tiene coste no trivial — no debe bloquear el event loop (AUDIT_PLAN GPU).
     gpu_status = await asyncio.to_thread(detect_gpu_status)
-    return _templates.TemplateResponse(request, "folder_selector.html.j2", {"project": project, "folders": folders, "gpu_status": gpu_status})
+
+    # La pestaña Caché se renderiza siempre en la misma respuesta (igual que el
+    # resto de la app: todo server-rendered, sin fragmentos cargados por AJAX) para
+    # que el cambio de pestaña sea instantáneo sin recargar la página.
+    cache_q = (q.strip() or None) if q else None
+    cache_entries, cache_page = await _load_cache_page(project, q=cache_q, page=page, page_size=page_size)
+
+    return _templates.TemplateResponse(
+        request,
+        "folder_selector.html.j2",
+        {
+            "project": project,
+            "folders": folders,
+            "gpu_status": gpu_status,
+            "active_tab": "cache" if tab == "cache" else "scan",
+            "cache_entries": cache_entries,
+            "cache_q": cache_q,
+            "cache_page": cache_page.number,
+            "cache_page_size": cache_page.size,
+            "cache_total": cache_page.total,
+            "cache_total_pages": cache_page.total_pages,
+            "cache_page_size_options": PAGE_SIZE_OPTIONS,
+            "cache_range_start": cache_page.range_start,
+            "cache_range_end": cache_page.range_end,
+        },
+    )
 
 
 @router.get(

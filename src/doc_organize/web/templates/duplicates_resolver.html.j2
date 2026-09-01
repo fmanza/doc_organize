@@ -5,25 +5,28 @@
 {% block content %}
 <h1 class="text-xl font-semibold mb-4">Duplicados: {{ project.name }}</h1>
 
-{% if groups or total_resolved_groups %}
-<div class="my-3 flex flex-wrap items-center gap-3">
-    <div>
-        <label for="duplicates-search" class="block text-sm font-medium mb-1">Buscar por nombre o carpeta</label>
-        <input type="text" id="duplicates-search" placeholder="Filtra por nombre de archivo o ruta de carpeta…"
-               class="border border-gray-300 rounded px-2 py-1.5 w-full max-w-md">
-    </div>
-    <p class="text-gray-500 text-sm" id="duplicates-count">{{ (groups | length) + total_resolved_groups }} grupo(s).</p>
+<div role="tablist" class="flex gap-1 border-b border-gray-300 mb-4">
+    <button type="button" id="tab-btn-resolve" role="tab" aria-selected="{{ 'true' if active_tab != 'history' else 'false' }}" aria-controls="tab-panel-resolve"
+            class="page-tab-btn px-3 py-1.5 border border-b-0 rounded-t cursor-pointer {{ 'bg-white border-gray-300 font-medium' if active_tab != 'history' else 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100' }}">Buscar duplicados</button>
+    <button type="button" id="tab-btn-history" role="tab" aria-selected="{{ 'true' if active_tab == 'history' else 'false' }}" aria-controls="tab-panel-history"
+            class="page-tab-btn px-3 py-1.5 border border-b-0 rounded-t cursor-pointer {{ 'bg-white border-gray-300 font-medium' if active_tab == 'history' else 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100' }}">Histórico de deduplicaciones</button>
 </div>
-<p id="duplicates-no-results" class="text-gray-500 my-2" hidden>
-    Sin resultados para «<span id="duplicates-no-results-query"></span>».
-</p>
-{% endif %}
 
+<div id="tab-panel-resolve" role="tabpanel" aria-labelledby="tab-btn-resolve" {% if active_tab == 'history' %}hidden{% endif %}>
+
+<h2 class="text-lg font-medium mt-2 mb-2">Buscar duplicados</h2>
+<p class="text-sm text-gray-600 mb-2">Busca y mueve duplicados en todas las carpetas guardadas del proyecto, aplicando las reglas de negocio actuales (se conserva por defecto el documento más antiguo de cada grupo).</p>
+<button type="button" id="deduplicate-btn" {% if not has_saved_folders %}disabled{% endif %} class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50">Buscar duplicados</button>
+{% if not has_saved_folders %}
+<p class="text-xs text-gray-500 mt-1">Deshabilitado hasta guardar al menos una carpeta (menú {{ project.name }}, Carpetas guardadas).</p>
+{% endif %}
+<p id="deduplicate-error" class="text-red-700 my-2 min-h-[1.2em]"></p>
+
+<h2 class="text-lg font-medium mt-4 mb-2">Resultado de los duplicados</h2>
 {% if groups %}
 <form id="resolve-form" class="my-4">
     {% for item in groups %}
-    <fieldset class="border border-gray-300 rounded p-3 mb-3"
-              data-search="{{ (item.members | map(attribute='full_path') | join(' ') | lower) }}">
+    <fieldset class="border border-gray-300 rounded p-3 mb-3">
         <legend class="px-1 font-medium">Grupo {{ loop.index }} ({{ item.group.reason.value }})</legend>
         <table class="w-full text-sm border-collapse">
             <thead>
@@ -72,73 +75,142 @@
     defecto el documento más antiguo de cada grupo) el {{ last_dedup_report.timestamp }}.
     Los ficheros descartados se movieron a la carpeta <code>duplicados/</code> del proyecto.
 </p>
-
-{% if history_entries %}
-<div class="my-4">
-    <h2 class="text-lg font-medium mb-2">Histórico de deduplicaciones</h2>
-    <p class="text-sm text-gray-600 mb-2">Cada ejecución de "Buscar duplicados" (menú Escaneo) o de "Resolver duplicados" (arriba) queda registrada aquí, con su propio detalle de archivos, más reciente primero.</p>
-    {% for entry in history_entries %}
-    <details class="border border-gray-200 rounded p-3 mb-3 bg-gray-50">
-        <summary class="cursor-pointer select-none font-medium text-gray-700">
-            {{ entry.report.timestamp }} —
-            {{ entry.report.total_exact_duplicates }} duplicado(s) exacto(s),
-            {{ entry.report.total_version_conflicts }} conflicto(s) de versión
-        </summary>
-        <div class="mt-2">
-            {% if entry.resolved_groups %}
-            {% for item in entry.resolved_groups %}
-            <fieldset class="border border-gray-200 rounded p-3 mb-3 bg-white"
-                      data-search="{{ (item.members | map(attribute='full_path') | join(' ') | lower) }}">
-                <legend class="px-1 font-medium text-gray-600">Grupo {{ loop.index }} ({{ item.group.reason.value }})</legend>
-                <table class="w-full text-sm border-collapse">
-                    <thead>
-                        <tr class="text-left text-gray-600">
-                            <th class="py-1 pr-2">Archivo</th>
-                            <th class="py-1 pr-2">Carpeta original</th>
-                            <th class="py-1 pr-2 text-right">Tamaño</th>
-                            <th class="py-1 pr-2">Estado</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for doc in item.members %}
-                        {% set is_kept = doc.full_path == item.kept.full_path %}
-                        <tr class="border-t border-gray-200">
-                            <td class="py-1 pr-2 align-top break-all">{{ doc.display_name }}</td>
-                            <td class="py-1 pr-2 align-top break-all text-gray-600 font-mono text-xs" title="{{ doc.full_path }}">
-                                {{ doc.full_path | dirname }}
-                            </td>
-                            <td class="py-1 pr-2 align-top text-right whitespace-nowrap" title="{{ doc.size_bytes }} bytes">
-                                {{ doc.size_bytes | file_size }}
-                            </td>
-                            <td class="py-1 pr-2 align-top whitespace-nowrap">
-                                {% if is_kept %}
-                                <span class="text-green-700">Conservado en su carpeta</span>
-                                {% else %}
-                                <span class="text-gray-500">Movido a duplicados/</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </fieldset>
-            {% endfor %}
-            {% else %}
-            <p class="text-sm text-gray-500">Sin duplicados encontrados en esta ejecución.</p>
-            {% endif %}
-        </div>
-    </details>
-    {% endfor %}
-</div>
-{% endif %}
 {% endif %}
 
 {% if not groups and not last_dedup_report %}
 <p>No se detectaron duplicados.</p>
 {% endif %}
 
+</div>
+
+<div id="tab-panel-history" role="tabpanel" aria-labelledby="tab-btn-history" {% if active_tab != 'history' %}hidden{% endif %}>
+
+{% if history_entries %}
+<div class="my-3 flex flex-wrap items-center gap-3">
+    <div>
+        <label for="duplicates-search" class="block text-sm font-medium mb-1">Buscar por nombre o carpeta</label>
+        <input type="text" id="duplicates-search" placeholder="Filtra por nombre de archivo o ruta de carpeta…"
+               class="border border-gray-300 rounded px-2 py-1.5 w-full max-w-md">
+    </div>
+    <p class="text-gray-500 text-sm" id="duplicates-count">{{ total_resolved_groups }} grupo(s).</p>
+</div>
+<p id="duplicates-no-results" class="text-gray-500 my-2" hidden>
+    Sin resultados para «<span id="duplicates-no-results-query"></span>».
+</p>
+{% for entry in history_entries %}
+<details class="border border-gray-200 rounded p-3 mb-3 bg-gray-50">
+    <summary class="cursor-pointer select-none font-medium text-gray-700">
+        {{ entry.report.timestamp }} —
+        {{ entry.report.total_exact_duplicates }} duplicado(s) exacto(s),
+        {{ entry.report.total_version_conflicts }} conflicto(s) de versión
+    </summary>
+    <div class="mt-2">
+        {% if entry.resolved_groups %}
+        {% for item in entry.resolved_groups %}
+        <fieldset class="border border-gray-200 rounded p-3 mb-3 bg-white"
+                  data-search="{{ (item.members | map(attribute='full_path') | join(' ') | lower) }}">
+            <legend class="px-1 font-medium text-gray-600">Grupo {{ loop.index }} ({{ item.group.reason.value }})</legend>
+            <table class="w-full text-sm border-collapse">
+                <thead>
+                    <tr class="text-left text-gray-600">
+                        <th class="py-1 pr-2">Archivo</th>
+                        <th class="py-1 pr-2">Carpeta original</th>
+                        <th class="py-1 pr-2 text-right">Tamaño</th>
+                        <th class="py-1 pr-2">Estado</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for doc in item.members %}
+                    {% set is_kept = doc.full_path == item.kept.full_path %}
+                    <tr class="border-t border-gray-200">
+                        <td class="py-1 pr-2 align-top break-all">{{ doc.display_name }}</td>
+                        <td class="py-1 pr-2 align-top break-all text-gray-600 font-mono text-xs" title="{{ doc.full_path }}">
+                            {{ doc.full_path | dirname }}
+                        </td>
+                        <td class="py-1 pr-2 align-top text-right whitespace-nowrap" title="{{ doc.size_bytes }} bytes">
+                            {{ doc.size_bytes | file_size }}
+                        </td>
+                        <td class="py-1 pr-2 align-top whitespace-nowrap">
+                            {% if is_kept %}
+                            <span class="text-green-700">Conservado en su carpeta</span>
+                            {% else %}
+                            <span class="text-gray-500">Movido a duplicados/</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </fieldset>
+        {% endfor %}
+        {% else %}
+        <p class="text-sm text-gray-500">Sin duplicados encontrados en esta ejecución.</p>
+        {% endif %}
+    </div>
+</details>
+{% endfor %}
+{% else %}
+<p class="my-2 text-gray-500">Todavía no hay ninguna deduplicación registrada.</p>
+{% endif %}
+
+</div>
+
 <script>
 const projectName = {{ project.name | tojson }};
+
+// --- Pestañas (Buscar duplicados / Histórico de deduplicaciones) ---
+
+const tabButtons = { resolve: document.getElementById("tab-btn-resolve"), history: document.getElementById("tab-btn-history") };
+const tabPanels = { resolve: document.getElementById("tab-panel-resolve"), history: document.getElementById("tab-panel-history") };
+
+function activateTab(tabName) {
+    for (const name of Object.keys(tabButtons)) {
+        const isActive = name === tabName;
+        tabPanels[name].hidden = !isActive;
+        tabButtons[name].setAttribute("aria-selected", isActive ? "true" : "false");
+        tabButtons[name].classList.toggle("bg-white", isActive);
+        tabButtons[name].classList.toggle("border-gray-300", isActive);
+        tabButtons[name].classList.toggle("font-medium", isActive);
+        tabButtons[name].classList.toggle("bg-gray-50", !isActive);
+        tabButtons[name].classList.toggle("border-transparent", !isActive);
+        tabButtons[name].classList.toggle("text-gray-600", !isActive);
+    }
+}
+
+tabButtons.resolve.addEventListener("click", () => activateTab("resolve"));
+tabButtons.history.addEventListener("click", () => activateTab("history"));
+
+// --- Buscar duplicados (accion masiva, aplica las reglas de negocio por defecto) ---
+
+const deduplicateBtn = document.getElementById("deduplicate-btn");
+if (deduplicateBtn) {
+    const deduplicateErrorEl = document.getElementById("deduplicate-error");
+    deduplicateBtn.addEventListener("click", async () => {
+        deduplicateErrorEl.textContent = "";
+        deduplicateBtn.disabled = true;
+        try {
+            const response = await fetch(
+                "/api/projects/" + encodeURIComponent(projectName) + "/scan/deduplicate",
+                { method: "POST" }
+            );
+            const data = await response.json();
+            if (!response.ok) {
+                deduplicateErrorEl.textContent = (data && data.detail) || "No se pudieron buscar duplicados.";
+                deduplicateBtn.disabled = false;
+                return;
+            }
+            // Refresca la ventana: los grupos resueltos por esta ejecucion deben
+            // desaparecer de "pendientes" y pasar a verse en el historico.
+            window.location.reload();
+        } catch (error) {
+            deduplicateErrorEl.textContent = "No se pudieron buscar duplicados.";
+            deduplicateBtn.disabled = false;
+        }
+    });
+}
+
+// --- Resolver duplicados (formulario de seleccion por grupo) ---
+
 const form = document.getElementById("resolve-form");
 if (form) {
     form.addEventListener("submit", async (submitEvent) => {
@@ -167,14 +239,13 @@ if (form) {
     });
 }
 
-// --- Filtro de busqueda (solo visual: oculta <fieldset> con `hidden`, nunca
-// deshabilita sus radios, para que el submit siga incluyendo su seleccion aunque
-// el grupo este filtrado en el momento de enviar). Filtra TODOS los fieldset con
-// data-search de la pagina: los pendientes (dentro de #resolve-form) y los de
-// cada ejecucion del historico (fuera de cualquier form, de solo lectura). ---
+// --- Filtro de busqueda del histórico (solo visual: oculta <fieldset> con
+// `hidden`). Vive dentro de la pestaña "Histórico de deduplicaciones" y solo
+// filtra los fieldset de cada ejecucion del historico -- los grupos pendientes
+// de "Buscar duplicados" no tienen buscador propio. ---
 const searchInput = document.getElementById("duplicates-search");
 if (searchInput) {
-    const fieldsets = Array.from(document.querySelectorAll("fieldset[data-search]"));
+    const fieldsets = Array.from(document.querySelectorAll("#tab-panel-history fieldset[data-search]"));
     const noResults = document.getElementById("duplicates-no-results");
     const noResultsQuery = document.getElementById("duplicates-no-results-query");
     const countEl = document.getElementById("duplicates-count");
@@ -189,10 +260,10 @@ if (searchInput) {
             fieldset.hidden = !matches;
             if (matches) {
                 visibleCount += 1;
-                // Una coincidencia dentro de una ejecución colapsada (<details>
-                // del histórico) no se ve aunque el <fieldset> ya no esté
-                // `hidden` -- se expande el acordeón que la contiene. No se
-                // vuelve a colapsar al borrar la búsqueda.
+                // Una coincidencia dentro de una ejecución colapsada (<details>)
+                // no se ve aunque el <fieldset> ya no esté `hidden` -- se expande
+                // el acordeón que la contiene. No se vuelve a colapsar al borrar
+                // la búsqueda.
                 if (query !== "") {
                     const detailsAncestor = fieldset.closest("details");
                     if (detailsAncestor) detailsAncestor.open = true;

@@ -1,6 +1,12 @@
-"""Tests del Folder Selector y escaneo vía web (Fase D-2b, §2.7.3)."""
+"""Tests del Folder Selector y escaneo vía web (Fase D-2b, §2.7.3).
+
+Incluye también los tests de la pestaña Caché de esta misma página (antigua
+página Caché independiente, fusionada aquí en la reestructuración de
+navegación, Fase D-2c §2.7.4).
+"""
 
 import json
+import re
 
 from pathlib import Path
 
@@ -11,7 +17,9 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from doc_organize.auth import AuthStore
-from doc_organize.core.models import SecurityConfig
+from doc_organize.cache import CacheManager
+from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME
+from doc_organize.core.models import CacheEntry, ConversionStatus, DocumentStatus, SecurityConfig
 from doc_organize.projects import ProjectRegistry, ScannedFoldersStore
 from doc_organize.web import create_app
 from doc_organize.web.auth import SESSION_COOKIE_NAME
@@ -65,6 +73,237 @@ async def test_folder_selector_page_shows_gpu_status(tmp_path) -> None:
 
     assert response.status_code == 200
     assert "GPU" in response.text
+
+
+@pytest.mark.asyncio
+async def test_folder_selector_page_no_longer_shows_saved_folders_section(tmp_path) -> None:
+    """ "Carpetas guardadas" se trasladó al Dashboard (reestructuración de
+    navegación, tabs Escanear/Caché + Duplicados) -- ya no debe aparecer en la
+    página Escanear."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/scan")
+
+    assert response.status_code == 200
+    html = response.text
+    assert 'id="folder-list"' not in html
+    assert 'id="add-folder-btn"' not in html
+
+
+@pytest.mark.asyncio
+async def test_folder_selector_page_no_longer_shows_deduplicate_step(tmp_path) -> None:
+    """ "Paso 1: Buscar duplicados" se trasladó a la pestaña "Buscar duplicados"
+    de la página Duplicados -- ya no debe aparecer en Escanear."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/scan")
+
+    assert response.status_code == 200
+    assert 'id="deduplicate-btn"' not in response.text
+
+
+@pytest.mark.asyncio
+async def test_folder_selector_scan_button_disabled_without_saved_folders(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/scan")
+
+    assert response.status_code == 200
+    assert 'id="scan-submit-btn" disabled' in response.text
+
+
+@pytest.mark.asyncio
+async def test_folder_selector_scan_button_enabled_with_saved_folders(tmp_path) -> None:
+    """El gate "hay que deduplicar en esta misma visita antes de escanear" se
+    elimina (reestructuración de navegación: "Buscar duplicados" pasa a vivir en
+    otra página, Duplicados): con al menos una carpeta guardada, "Escanear" ya
+    no depende de haber ejecutado antes "Buscar duplicados"."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    folder = tmp_path / "datos"
+    folder.mkdir()
+
+    async with _client(app) as client:
+        await client.post(f"/api/projects/{project.name}/folders/library", json={"path": str(folder)})
+        response = await client.get(f"/projects/{project.name}/scan")
+
+    assert response.status_code == 200
+    assert 'id="scan-submit-btn" disabled' not in response.text
+
+
+# ===== Pestaña Caché de la página Escanear (antigua página Caché, GET /projects/{name}/cache) =====
+
+
+@pytest.mark.asyncio
+async def test_scan_page_cache_tab_loads_when_never_scanned(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/scan", params={"tab": "cache"})
+
+    assert response.status_code == 200
+    assert "No hay entradas en caché" in response.text
+
+
+@pytest.mark.asyncio
+async def test_scan_page_cache_tab_shows_search_box_and_folder_column(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    cache_db = tmp_path / "workspaces" / project.name / DEFAULT_CACHE_DB_NAME
+    file_path = str(tmp_path / "docs" / "report.pdf")
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
+        )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/scan", params={"tab": "cache"})
+
+    assert response.status_code == 200
+    html = response.text
+    assert 'id="cache-search"' in html
+    assert 'name="q"' in html
+    assert re.search(r">report\.pdf<", html)
+    expected_dirname = str(Path(file_path).parent)
+    assert re.search(re.escape(expected_dirname).lower() + r"\s*</td>", html.lower())
+    assert "Mostrando 1–1 de 1 entradas." in html
+
+
+@pytest.mark.asyncio
+async def test_scan_page_cache_tab_paginates_and_navigates_pages(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    cache_db = tmp_path / "workspaces" / project.name / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [
+                CacheEntry(
+                    file_path=f"/repo/doc-{i:03d}.pdf",
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=None,
+                )
+                for i in range(30)
+            ]
+        )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        page1 = await client.get(f"/projects/{project.name}/scan", params={"tab": "cache", "page_size": 25})
+        page2 = await client.get(f"/projects/{project.name}/scan", params={"tab": "cache", "page": 2, "page_size": 25})
+
+    assert page1.status_code == 200
+    assert page2.status_code == 200
+    assert "Página 1 de 2" in page1.text
+    assert "Página 2 de 2" in page2.text
+    assert "doc-000.pdf" in page1.text
+    assert "doc-024.pdf" in page1.text
+    assert "doc-025.pdf" not in page1.text
+    assert "doc-029.pdf" in page2.text
+    assert "doc-000.pdf" not in page2.text
+
+
+@pytest.mark.asyncio
+async def test_scan_page_cache_tab_search_filters_server_side(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    cache_db = tmp_path / "workspaces" / project.name / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [
+                CacheEntry(
+                    file_path="/repo/informe.pdf",
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=None,
+                ),
+                CacheEntry(
+                    file_path="/repo/factura.pdf",
+                    sha256_hash="b" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=None,
+                ),
+            ]
+        )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/scan", params={"tab": "cache", "q": "informe"})
+
+    assert response.status_code == 200
+    html = response.text
+    assert "informe.pdf" in html
+    assert "factura.pdf" not in html
+    assert "Mostrando 1–1 de 1 entradas." in html
+    assert "<mark>informe</mark>" in html
+
+
+@pytest.mark.asyncio
+async def test_scan_page_cache_tab_escapes_malicious_file_path(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    cache_db = tmp_path / "workspaces" / project.name / DEFAULT_CACHE_DB_NAME
+    malicious_name = "<script>alert(1)</script>.pdf"
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [
+                CacheEntry(
+                    file_path=f"/repo/{malicious_name}",
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=None,
+                )
+            ]
+        )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/scan", params={"tab": "cache"})
+
+    assert response.status_code == 200
+    assert "<script>alert(1)</script>" not in response.text
+    assert "&lt;" in response.text
+    assert "&gt;" in response.text
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;.pdf" in response.text
+
+
+@pytest.mark.asyncio
+async def test_scan_page_cache_tab_no_search_box_when_no_entries(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/scan", params={"tab": "cache"})
+
+    assert response.status_code == 200
+    assert 'id="cache-search"' not in response.text
 
 
 # ===== API /api/projects/{name}/folders/library (lista persistente de carpetas) =====

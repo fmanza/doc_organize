@@ -8,7 +8,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from doc_organize.projects import ProjectRegistry
+from doc_organize.projects import ProjectRegistry, ScannedFoldersStore
 from doc_organize.web import create_app
 
 
@@ -205,10 +205,12 @@ async def test_duplicates_resolver_page_loads_with_detected_groups(tmp_path) -> 
 
 
 @pytest.mark.asyncio
-async def test_duplicates_resolver_page_shows_search_box_folder_and_size(tmp_path) -> None:
-    # La tabla de cada grupo debe mostrar la carpeta (separada del nombre de
-    # archivo), el tamaño legible, marcar el conservado por defecto, y ofrecer un
-    # buscador cliente cuyo filtro se apoya en `data-search` por fieldset.
+async def test_duplicates_resolver_page_shows_folder_and_size(tmp_path) -> None:
+    # La tabla de cada grupo pendiente debe mostrar la carpeta (separada del
+    # nombre de archivo), el tamaño legible y marcar el conservado por defecto.
+    # El buscador vive en la pestaña "Histórico de deduplicaciones" (ver
+    # test_duplicates_history_tab_shows_search_box_folder_and_size), no aquí:
+    # este escenario no tiene ningún historial.
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
     project_root = tmp_path / "workspaces" / project.name
@@ -226,19 +228,88 @@ async def test_duplicates_resolver_page_shows_search_box_folder_and_size(tmp_pat
     assert response.status_code == 200
     html = response.text
 
-    assert 'id="duplicates-search"' in html
-    assert 'id="duplicates-no-results"' in html
-    # La carpeta debe aparecer como CONTENIDO de una celda de tabla (no solo dentro
-    # del atributo `data-search`, que también la incluye pero en minúsculas).
+    # La carpeta debe aparecer como CONTENIDO de una celda de tabla.
     assert re.search(re.escape(str(input_dir).lower()) + r"\s*</td>", html.lower())
     assert "2.0 KB" in html
     assert "conservado por defecto" in html
     # El filtro solo oculta con `hidden`/CSS via JS -- en el HTML servido ningun
     # radio debe llevar `disabled`, o el submit perderia esa seleccion al filtrar.
-    assert "disabled" not in html
-    # Contador (actualizado por JS al filtrar) arranca con el total sin filtrar,
-    # igual que el de Caché.
-    assert '<p class="text-gray-500 text-sm" id="duplicates-count">1 grupo(s).</p>' in html
+    # Se acota a #resolve-form: el botón "Buscar duplicados" (fuera del form)
+    # lleva clases Tailwind `disabled:...` en su `class` pase lo que pase, que no
+    # son el atributo HTML `disabled`.
+    resolve_form_html = html.split('<form id="resolve-form"')[1].split("</form>")[0]
+    assert "disabled" not in resolve_form_html
+    # Sin ningún historial en este escenario: no hay buscador que mostrar.
+    assert 'id="duplicates-search"' not in html
+
+
+@pytest.mark.asyncio
+async def test_duplicates_history_tab_shows_search_box_folder_and_size(tmp_path) -> None:
+    # El buscador ("Buscar por nombre o carpeta") vive dentro de la pestaña
+    # "Histórico de deduplicaciones" y su contador solo cuenta grupos del
+    # histórico (no los pendientes de "Buscar duplicados").
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "unico.pdf").write_bytes(b"sin duplicados pendientes")
+    _write_folders_json(project_root, [str(input_dir)])
+
+    duplicados_dir = project_root / "duplicados"
+    kept_path = str(input_dir / "informe.pdf")
+    moved_path = str(input_dir / "informe_copia.pdf")
+    _write_dedup_history(
+        duplicados_dir,
+        {
+            "timestamp": "2026-08-31T10:00:00+00:00",
+            "total_exact_duplicates": 1,
+            "total_version_conflicts": 0,
+            "duplicates_folder_path": str(duplicados_dir),
+            "audit_json_path": str(duplicados_dir / "DEDUP_REPORT.json"),
+            "groups": [
+                {
+                    "group_id": "11111111-1111-1111-1111-111111111111",
+                    "canonical_doc": {
+                        "full_path": kept_path,
+                        "display_name": "informe.pdf",
+                        "extension": "pdf",
+                        "size_bytes": 2048,
+                        "modified_time": 1000.0,
+                        "sha256_hash": "abc123",
+                    },
+                    "duplicates": [
+                        {
+                            "full_path": moved_path,
+                            "display_name": "informe_copia.pdf",
+                            "extension": "pdf",
+                            "size_bytes": 2048,
+                            "modified_time": 1001.0,
+                            "sha256_hash": "abc123",
+                        }
+                    ],
+                    "reason": "exact_duplicate",
+                    "user_choice": None,
+                }
+            ],
+        },
+    )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/duplicates")
+
+    assert response.status_code == 200
+    html = response.text
+
+    history_tab_html = html.split('id="tab-panel-history"')[1]
+    assert 'id="duplicates-search"' in history_tab_html
+    assert 'id="duplicates-no-results"' in history_tab_html
+    assert "2.0 KB" in history_tab_html
+    # El contador (actualizado por JS al filtrar) arranca con el total del
+    # histórico sin filtrar -- no incluye grupos pendientes (aquí, 0).
+    assert '<p class="text-gray-500 text-sm" id="duplicates-count">1 grupo(s).</p>' in history_tab_html
 
 
 @pytest.mark.asyncio
@@ -416,11 +487,13 @@ async def test_duplicates_page_shows_resolved_groups_detail_from_last_scan_dedup
     assert "Conservado en su carpeta" in html
     assert "Movido a duplicados/" in html
     assert 'id="duplicates-search"' in html
-    # El contador suma pendientes (0 aqui) + resueltos en el historico (1), igual
-    # que la busqueda cubre ambas fuentes.
+    # El contador cuenta los grupos resueltos en el historico (1) -- el buscador
+    # vive dentro de la pestaña "Histórico de deduplicaciones" y no cubre los
+    # grupos pendientes (0 aqui).
     assert '<p class="text-gray-500 text-sm" id="duplicates-count">1 grupo(s).</p>' in html
-    # Solo-lectura: no debe haber ningun radio en el bloque de historico.
-    assert "<input" not in html.split("Histórico de deduplicaciones")[1]
+    # Solo-lectura: no debe haber ningun radio en el bloque de historico (el
+    # <input type="text"> del buscador no cuenta, solo el atributo de tipo).
+    assert 'type="radio"' not in html.split("Histórico de deduplicaciones")[1]
 
 
 @pytest.mark.asyncio
@@ -527,9 +600,7 @@ async def test_duplicates_page_history_skips_corrupt_lines(tmp_path) -> None:
         "audit_json_path": str(duplicados_dir / "DEDUP_REPORT.json"),
         "groups": [],
     }
-    (duplicados_dir / "DEDUP_HISTORY.jsonl").write_text(
-        '{"timestamp": "corrupta-truncada\n' + json.dumps(valid_report) + "\n", encoding="utf-8"
-    )
+    (duplicados_dir / "DEDUP_HISTORY.jsonl").write_text('{"timestamp": "corrupta-truncada\n' + json.dumps(valid_report) + "\n", encoding="utf-8")
 
     app = create_app(registry_path=registry_path)
     async with _client(app) as client:
@@ -541,7 +612,11 @@ async def test_duplicates_page_history_skips_corrupt_lines(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_duplicates_page_no_history_section_when_no_history_file(tmp_path) -> None:
+async def test_duplicates_page_no_history_entries_when_no_history_file(tmp_path) -> None:
+    # "Histórico de deduplicaciones" es ahora el rótulo fijo de la segunda pestaña
+    # (reestructuración de navegación) y aparece siempre; lo que debe faltar sin
+    # fichero de histórico es el detalle de ejecuciones -- se muestra el mensaje
+    # de estado vacío en su lugar.
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
     project_root = tmp_path / "workspaces" / project.name
@@ -556,7 +631,89 @@ async def test_duplicates_page_no_history_section_when_no_history_file(tmp_path)
         response = await client.get(f"/projects/{project.name}/duplicates")
 
     assert response.status_code == 200
-    assert "Histórico de deduplicaciones" not in response.text
+    assert "Todavía no hay ninguna deduplicación registrada." in response.text
+
+
+# ===== Reestructuración de navegación: pestañas y "Buscar duplicados" movido desde Escanear =====
+
+
+@pytest.mark.asyncio
+async def test_duplicates_page_has_two_tabs(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    _write_folders_json(project_root, [])
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/duplicates")
+
+    assert response.status_code == 200
+    html = response.text
+    assert 'id="tab-btn-resolve"' in html
+    assert 'id="tab-btn-history"' in html
+    assert "Buscar duplicados" in html
+    assert "Histórico de deduplicaciones" in html
+
+
+@pytest.mark.asyncio
+async def test_duplicates_page_shows_deduplicate_button_moved_from_scan(tmp_path) -> None:
+    """El "Paso 1: Buscar duplicados" de la antigua página Escanear vive ahora en
+    la pestaña "Buscar duplicados" de esta página, llamando al mismo endpoint
+    POST /api/projects/{name}/scan/deduplicate."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    _write_folders_json(project_root, [str(input_dir)])
+    await ScannedFoldersStore().add_folder(project, str(input_dir))
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/duplicates")
+
+    assert response.status_code == 200
+    html = response.text
+    assert 'id="deduplicate-btn"' in html
+    # No exacto "disabled": el botón siempre lleva clases Tailwind `disabled:...`
+    # en su `class`, presentes tanto habilitado como deshabilitado.
+    assert 'id="deduplicate-btn" disabled' not in html
+
+
+@pytest.mark.asyncio
+async def test_duplicates_page_deduplicate_button_disabled_without_saved_folders(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    _write_folders_json(project_root, [])
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/duplicates")
+
+    assert response.status_code == 200
+    assert 'id="deduplicate-btn" disabled' in response.text
+
+
+@pytest.mark.asyncio
+async def test_duplicates_page_history_tab_active_via_query_param(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    _write_folders_json(project_root, [])
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/duplicates", params={"tab": "history"})
+
+    assert response.status_code == 200
+    html = response.text
+    resolve_tag = html.split('id="tab-panel-resolve"')[1].split(">")[0]
+    history_tag = html.split('id="tab-panel-history"')[1].split(">")[0]
+    assert "hidden" in resolve_tag
+    assert "hidden" not in history_tag
 
 
 @pytest.mark.asyncio
