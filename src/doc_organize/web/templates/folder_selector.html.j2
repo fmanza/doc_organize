@@ -9,7 +9,7 @@
     <button type="button" id="tab-btn-scan" role="tab" aria-selected="{{ 'true' if active_tab != 'cache' else 'false' }}" aria-controls="tab-panel-scan"
             class="page-tab-btn px-3 py-1.5 border border-b-0 rounded-t cursor-pointer {{ 'bg-white border-gray-300 font-medium' if active_tab != 'cache' else 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100' }}">Escanear</button>
     <button type="button" id="tab-btn-cache" role="tab" aria-selected="{{ 'true' if active_tab == 'cache' else 'false' }}" aria-controls="tab-panel-cache"
-            class="page-tab-btn px-3 py-1.5 border border-b-0 rounded-t cursor-pointer {{ 'bg-white border-gray-300 font-medium' if active_tab == 'cache' else 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100' }}">Caché</button>
+            class="page-tab-btn px-3 py-1.5 border border-b-0 rounded-t cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 {{ 'bg-white border-gray-300 font-medium' if active_tab == 'cache' else 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100' }}">Caché</button>
 </div>
 
 <div id="tab-panel-scan" role="tabpanel" aria-labelledby="tab-btn-scan" {% if active_tab == 'cache' %}hidden{% endif %}>
@@ -178,11 +178,45 @@ function activateTab(tabName) {
 }
 
 tabButtons.scan.addEventListener("click", () => activateTab("scan"));
-tabButtons.cache.addEventListener("click", () => activateTab("cache"));
+
+// La pestaña Caché y el botón de envío se bloquean mientras corre un escaneo: la
+// caché quedaría obsoleta en cuanto termine, y un segundo envío abriría un WebSocket
+// de escaneo concurrente sobre las mismas carpetas. Al desbloquear tras el escaneo,
+// se marca "cacheStale" (solo si de verdad llegó a arrancar, ver "scanStarted") para
+// forzar una recarga con datos frescos la próxima vez que se pulse la pestaña Caché,
+// en vez de solo alternar visibilidad como hace activateTab().
+let cacheStale = false;
+let scanStarted = false;
+
+function lockCacheTab() {
+    scanStarted = true;
+    tabButtons.cache.disabled = true;
+    tabButtons.cache.title = "Disponible cuando termine el escaneo en curso";
+    submitBtn.disabled = true;
+}
+
+function unlockCacheTab() {
+    tabButtons.cache.disabled = false;
+    tabButtons.cache.removeAttribute("title");
+    submitBtn.disabled = false;
+    if (scanStarted) {
+        cacheStale = true;
+        scanStarted = false;
+    }
+}
+
+tabButtons.cache.addEventListener("click", () => {
+    if (cacheStale) {
+        window.location.href = window.location.pathname + "?tab=cache";
+        return;
+    }
+    activateTab("cache");
+});
 
 // --- Escaneo ---
 
 const form = document.getElementById("scan-form");
+const submitBtn = document.getElementById("scan-submit-btn");
 const progressBox = document.getElementById("progress");
 const errorEl = document.getElementById("scan-error");
 
@@ -254,6 +288,7 @@ function appendProgress(event) {
 
 form.addEventListener("submit", async (submitEvent) => {
     submitEvent.preventDefault();
+    if (submitBtn.disabled) return;
     errorEl.textContent = "";
 
     const use_ocr = document.getElementById("use_ocr").checked;
@@ -264,6 +299,11 @@ form.addEventListener("submit", async (submitEvent) => {
         return;
     }
 
+    // Bloqueo síncrono, ANTES de abrir el WebSocket: lockCacheTab() (llamada en
+    // ws.onopen) llega demasiado tarde para evitar un doble clic, porque onopen es
+    // asíncrono (espera el handshake) — en ese hueco un segundo submit todavía
+    // encontraría el botón habilitado.
+    submitBtn.disabled = true;
     progressBox.value = "";
     resetSemaforo();
 
@@ -275,6 +315,7 @@ form.addEventListener("submit", async (submitEvent) => {
 
     ws.onopen = () => {
         setSemaforo(SCAN_PHASE.STARTED);
+        lockCacheTab();
         ws.send(JSON.stringify({ use_ocr: use_ocr, use_gpu: use_gpu, force: force }));
     };
     ws.onmessage = (message) => {
@@ -283,6 +324,7 @@ form.addEventListener("submit", async (submitEvent) => {
         if (scanEvent.event === "completed") {
             scanFinished = true;
             setSemaforo(SCAN_PHASE.COMPLETED);
+            unlockCacheTab();
             ws.close();
         } else if (RUNNING_EVENTS.has(scanEvent.event)) {
             setSemaforo(SCAN_PHASE.RUNNING);
@@ -291,10 +333,12 @@ form.addEventListener("submit", async (submitEvent) => {
     ws.onerror = () => {
         errorEl.textContent = "Error de conexión durante el escaneo.";
         setSemaforo(SCAN_PHASE.ERROR);
+        unlockCacheTab();
     };
     ws.onclose = () => {
         if (!scanFinished) {
             setSemaforo(SCAN_PHASE.ERROR);
+            unlockCacheTab();
         }
     };
 });
