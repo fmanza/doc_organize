@@ -10,12 +10,12 @@ from pathlib import Path
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from fastapi.templating import Jinja2Templates
 
 from doc_organize.web.dependencies import get_auth_store
+from doc_organize.web.templating import create_templates
 
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
-_templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+_templates = create_templates(_TEMPLATES_DIR)
 
 router = APIRouter(tags=["auth"])
 

@@ -10,6 +10,8 @@ classDiagram
         -logger: Logger
         -db_path: Path
         +load_cache() dict[str, CacheEntry]
+        +count_entries(search: str) int
+        +load_cache_page(limit: int, offset: int, search: str) list[CacheEntry]
         +get_changes(cache: dict, current_docs: list) tuple
         +save_entries(entries: list[CacheEntry]) void
     }
@@ -36,6 +38,15 @@ class CacheManager:
     
     async def load_cache(self) -> dict[str, CacheEntry]
     
+    async def count_entries(self, search: str | None = None) -> int
+    
+    async def load_cache_page(
+        self,
+        limit: int,
+        offset: int,
+        search: str | None = None
+    ) -> list[CacheEntry]
+    
     def get_changes(
         self,
         cache: dict[str, CacheEntry],
@@ -61,6 +72,45 @@ Carga todas las entradas del caché en memoria.
 **Operación**:
 - Lee tabla `cache_entries` desde SQLite
 - Retorna diccionario para búsqueda O(1)
+
+---
+
+#### count_entries (Async)
+
+Cuenta entradas de `cache_entries`, opcionalmente filtradas por `search`.
+
+| Parámetro | Tipo | Descripción |
+|---|---|---|
+| `search` | `str \| None` | Subcadena a buscar en `file_path` (nombre o carpeta). `None` cuenta todas |
+
+| Retorno | Tipo | Descripción |
+|---|---|---|
+| | `int` | Número de entradas que coinciden |
+
+**Operación**:
+- `SELECT COUNT(*)` sobre `cache_entries`, con `WHERE file_path LIKE ?` si `search`
+- Comparación insensible a mayúsculas/tildes (función SQL `py_lower` registrada por conexión)
+- Usado por el Cache Viewer web para calcular el número de páginas
+
+---
+
+#### load_cache_page (Async)
+
+Lee una página de `cache_entries`, ordenada por `file_path` para paginación estable.
+
+| Parámetro | Tipo | Descripción |
+|---|---|---|
+| `limit` | `int` | Número máximo de entradas a devolver |
+| `offset` | `int` | Entradas a saltar desde el principio del orden |
+| `search` | `str \| None` | Subcadena a buscar en `file_path`. `None` no filtra |
+
+| Retorno | Tipo | Descripción |
+|---|---|---|
+| | `list[CacheEntry]` | Entradas de la página solicitada |
+
+**Operación**:
+- `SELECT ... ORDER BY file_path LIMIT ? OFFSET ?`, con el mismo filtro `search` que `count_entries`
+- No sustituye a `load_cache()`: sigue siendo la fuente completa que usan `get_changes()` y la exportación ZIP; `load_cache_page()` es solo para listas largas en la vista web
 
 ---
 
@@ -156,6 +206,19 @@ CREATE TABLE cache_entries (
 - **Clasificación local**: `get_changes()` es operación en memoria (CPU, no disco)
 - **Limpieza manual**: Entradas obsoletas persisten hasta limpieza manual
 - **Escala**: Soporta ~100k-1M entradas sin problemas de rendimiento
+
+## Exportación (Web)
+
+`GET /downloads/projects/{name}/cache-export.xlsx` (`web/routes/downloads.py`) descarga
+un Excel con **todas** las entradas de `cache.db` (ignora cualquier filtro `?q=` activo
+en el Cache Viewer), ordenadas por `file_path`. Columnas: Archivo, Carpeta, Ruta
+completa, Hash SHA-256 (completo, sin truncar), Estado, Conversión, Última
+actualización (UTC). Usa `pandas`/`openpyxl` (ya declaradas como dependencias: `pandas`
+en `dependencies`, `openpyxl` en el extra `web`) — mismo patrón que
+`export.zip` (fichero temporal generado vía `asyncio.to_thread`, servido con
+`FileResponse` y borrado después con `BackgroundTask`). Los valores derivados de
+nombres de fichero se neutralizan si empiezan por un carácter disparador de fórmula
+(`=`, `+`, `-`, `@`) para evitar inyección de fórmulas al abrir el fichero en Excel/LibreOffice.
 
 ## Ejemplos Relacionados
 

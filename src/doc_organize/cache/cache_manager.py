@@ -33,6 +33,17 @@ ON CONFLICT(file_path) DO UPDATE SET
 """
 
 
+def _py_lower(value: str | None) -> str | None:
+    """Funcion SQL `py_lower`: plegado a minusculas Unicode-aware (registrada por conexion)."""
+    return value.lower() if value is not None else None
+
+
+def _like_pattern(search: str) -> str:
+    """Envuelve `search` en comodines `%...%` escapando `\\`, `%` y `_` (literales de LIKE)."""
+    escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
 class CacheManager:
     """Gestiona el cache transaccional de hashes en `cache.db` (SQLite, WAL).
 
@@ -62,6 +73,9 @@ class CacheManager:
         await self._conn.execute("PRAGMA journal_mode=WAL")
         await self._conn.execute(_SCHEMA)
         await self._conn.commit()
+        # SQLite LIKE/LOWER() solo pliegan mayusculas para ASCII: sin esto, buscar
+        # "cafe" no encontraria "CAFE" en nombres de archivo en espanol con tildes.
+        await self._conn.create_function("py_lower", 1, _py_lower, deterministic=True)
         return self
 
     async def __aexit__(self, *exc_info: object) -> None:
@@ -88,6 +102,69 @@ class CacheManager:
                     conversion_status=ConversionStatus(conversion_status) if conversion_status else None,
                 )
         return cache
+
+    async def count_entries(self, search: str | None = None) -> int:
+        """Cuenta entradas de `cache_entries`, opcionalmente filtradas por `search`.
+
+        Args:
+            search (str | None): Subcadena a buscar en `file_path` (nombre o carpeta),
+                insensible a mayusculas/tildes. `None` o cadena vacia cuenta todas.
+
+        Returns:
+            int: Numero de entradas que coinciden.
+
+        Example:
+            >>> total = await cache.count_entries("informe")
+        """
+        query = "SELECT COUNT(*) FROM cache_entries"
+        params: tuple[str, ...] = ()
+        if search:
+            query += " WHERE py_lower(file_path) LIKE py_lower(?) ESCAPE '\\'"
+            params = (_like_pattern(search),)
+        async with self._connection.execute(query, params) as cursor:
+            row = await cursor.fetchone()
+            return int(row[0]) if row else 0
+
+    async def load_cache_page(self, limit: int, offset: int, search: str | None = None) -> list[CacheEntry]:
+        """Lee una pagina de `cache_entries`, ordenada por `file_path` para paginacion estable.
+
+        Pensado para la vista web del Cache Viewer (listas largas); no sustituye a
+        `load_cache()`, que sigue siendo la fuente completa para `get_changes()` y
+        la exportacion ZIP.
+
+        Args:
+            limit (int): Numero maximo de entradas a devolver.
+            offset (int): Entradas a saltar desde el principio del orden.
+            search (str | None): Subcadena a buscar en `file_path`, insensible a
+                mayusculas/tildes. `None` o cadena vacia no filtra.
+
+        Returns:
+            list[CacheEntry]: Entradas de la pagina solicitada, ordenadas por `file_path`.
+
+        Example:
+            >>> page = await cache.load_cache_page(limit=50, offset=0)
+        """
+        query = "SELECT file_path, sha256_hash, timestamp, status, conversion_status FROM cache_entries"
+        params: list[object] = []
+        if search:
+            query += " WHERE py_lower(file_path) LIKE py_lower(?) ESCAPE '\\'"
+            params.append(_like_pattern(search))
+        query += " ORDER BY file_path LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+        entries: list[CacheEntry] = []
+        async with self._connection.execute(query, params) as cursor:
+            async for file_path, sha256_hash, timestamp, status, conversion_status in cursor:
+                entries.append(
+                    CacheEntry(
+                        file_path=file_path,
+                        sha256_hash=sha256_hash,
+                        timestamp=timestamp,
+                        status=DocumentStatus(status),
+                        conversion_status=ConversionStatus(conversion_status) if conversion_status else None,
+                    )
+                )
+        return entries
 
     async def compute_hash(self, file_path: str) -> str:
         """Delega en `utils.hash_utils.hash_file()` — no reimplementa el hashing."""

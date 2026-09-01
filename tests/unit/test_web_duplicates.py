@@ -560,6 +560,58 @@ async def test_duplicates_page_no_history_section_when_no_history_file(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_duplicates_page_escapes_malicious_display_name_in_history(tmp_path) -> None:
+    # Revision de seguridad: `doc.display_name`/`doc.full_path` (renderizados sin
+    # filtro en duplicates_resolver.html.j2) vienen de nombres de fichero reales, sin
+    # restriccion de caracteres -- a diferencia de `project.name`/`username`, que si
+    # se validan. En Windows no se puede CREAR un fichero llamado literalmente
+    # "<script>...", asi que este test inyecta el nombre malicioso directamente en
+    # DEDUP_HISTORY.jsonl (que solo contiene JSON validado por Pydantic, sin pasar
+    # por el sistema de ficheros) para ejercitar la misma ruta de renderizado que
+    # explotaria un fichero real con ese nombre en un filesystem que si lo permita
+    # (Linux/macOS, o un recurso de red no NTFS).
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    _write_folders_json(project_root, [])
+    duplicados_dir = project_root / "duplicados"
+
+    malicious_name = "<script>alert(1)</script>.pdf"
+    report = {
+        "timestamp": "2026-08-30T09:00:00+00:00",
+        "total_exact_duplicates": 1,
+        "total_version_conflicts": 0,
+        "duplicates_folder_path": str(duplicados_dir),
+        "audit_json_path": str(duplicados_dir / "DEDUP_REPORT.json"),
+        "groups": [
+            {
+                "group_id": "11111111-1111-1111-1111-111111111111",
+                "canonical_doc": {
+                    "full_path": f"/repo/{malicious_name}",
+                    "display_name": malicious_name,
+                    "extension": "pdf",
+                    "size_bytes": 1024,
+                    "modified_time": 1000.0,
+                    "sha256_hash": "abc123",
+                },
+                "duplicates": [],
+                "reason": "exact_duplicate",
+                "user_choice": None,
+            }
+        ],
+    }
+    _write_dedup_history(duplicados_dir, report)
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/duplicates")
+
+    assert response.status_code == 200
+    assert "<script>alert(1)</script>" not in response.text
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;.pdf" in response.text
+
+
+@pytest.mark.asyncio
 async def test_duplicates_api_tenant_isolation(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path, tenant_id="acme-corp")

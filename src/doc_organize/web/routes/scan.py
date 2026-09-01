@@ -8,7 +8,6 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from doc_organize.core.constants import SCAN_FOLDERS_JSON_NAME
@@ -28,11 +27,12 @@ from doc_organize.web.dependencies import (
     get_tenant_id,
     require_project_access,
 )
+from doc_organize.web.templating import create_templates
 
 logger = get_logger(__name__)
 
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
-_templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+_templates = create_templates(_TEMPLATES_DIR)
 
 router = APIRouter(tags=["scan"])
 

@@ -94,3 +94,65 @@ async def test_using_outside_context_manager_raises() -> None:
     cache = CacheManager("unused.db")
     with pytest.raises(CacheError):
         await cache.load_cache()
+
+
+@pytest.mark.asyncio
+async def test_load_cache_page_orders_by_file_path_and_respects_limit_offset(tmp_path) -> None:
+    db_path = tmp_path / "cache.db"
+    async with CacheManager(db_path) as cache:
+        await cache.save_entries(
+            [
+                _entry("/repo/c.pdf", "hash-c"),
+                _entry("/repo/a.pdf", "hash-a"),
+                _entry("/repo/b.pdf", "hash-b"),
+            ]
+        )
+        first_page = await cache.load_cache_page(limit=2, offset=0)
+        second_page = await cache.load_cache_page(limit=2, offset=2)
+
+    assert [entry.file_path for entry in first_page] == ["/repo/a.pdf", "/repo/b.pdf"]
+    assert [entry.file_path for entry in second_page] == ["/repo/c.pdf"]
+
+
+@pytest.mark.asyncio
+async def test_count_entries_without_search_counts_all(tmp_path) -> None:
+    db_path = tmp_path / "cache.db"
+    async with CacheManager(db_path) as cache:
+        await cache.save_entries([_entry("/repo/a.pdf", "hash-a"), _entry("/repo/b.pdf", "hash-b")])
+        total = await cache.count_entries()
+
+    assert total == 2
+
+
+@pytest.mark.asyncio
+async def test_search_filters_by_file_path_case_and_accent_insensitive(tmp_path) -> None:
+    db_path = tmp_path / "cache.db"
+    async with CacheManager(db_path) as cache:
+        await cache.save_entries(
+            [
+                _entry("/repo/Café.pdf", "hash-cafe"),
+                _entry("/repo/other.pdf", "hash-other"),
+            ]
+        )
+        total = await cache.count_entries("CAFÉ")
+        page = await cache.load_cache_page(limit=10, offset=0, search="CAFÉ")
+
+    assert total == 1
+    assert [entry.file_path for entry in page] == ["/repo/Café.pdf"]
+
+
+@pytest.mark.asyncio
+async def test_search_with_like_special_characters_is_treated_literally(tmp_path) -> None:
+    db_path = tmp_path / "cache.db"
+    async with CacheManager(db_path) as cache:
+        await cache.save_entries(
+            [
+                _entry("/repo/100%_done.pdf", "hash-percent"),
+                _entry("/repo/100Xdone.pdf", "hash-x"),
+            ]
+        )
+        total = await cache.count_entries("100%_done")
+
+    # "%" y "_" deben tratarse como literales (escapados), no como comodines de LIKE:
+    # de lo contrario "100%_done" tambien encontraria "100Xdone".
+    assert total == 1

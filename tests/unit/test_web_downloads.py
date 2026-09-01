@@ -1,10 +1,14 @@
-"""Tests del Export ZIP (Fase D-2c, §2.7.4, sub-paso 2/3)."""
+"""Tests del Export ZIP (Fase D-2c, §2.7.4, sub-paso 2/3) y del Export Excel de caché."""
 
 import io
 import json
 import zipfile
 
+from datetime import datetime, timezone
+from pathlib import Path
+
 import httpx
+import openpyxl
 import pytest
 
 from doc_organize.cache import CacheManager
@@ -130,5 +134,149 @@ async def test_export_zip_requires_session_when_non_loopback(tmp_path) -> None:
 
     async with _client(app) as client:
         response = await client.get(f"/downloads/projects/{project.name}/export.zip")
+
+    assert response.status_code == 401
+
+
+def _read_xlsx_rows(content: bytes) -> list[tuple]:
+    workbook = openpyxl.load_workbook(io.BytesIO(content))
+    sheet = workbook["Cache"]
+    return list(sheet.iter_rows(values_only=True))
+
+
+@pytest.mark.asyncio
+async def test_export_cache_xlsx_404_for_missing_project(tmp_path) -> None:
+    app = create_app(registry_path=tmp_path / "projects.json")
+    async with _client(app) as client:
+        response = await client.get("/downloads/projects/No Existe/cache-export.xlsx")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_export_cache_xlsx_works_when_never_scanned(tmp_path) -> None:
+    # Sin cache.db previo: se genera igualmente un .xlsx valido, solo con cabeceras.
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/downloads/projects/{project.name}/cache-export.xlsx")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    rows = _read_xlsx_rows(response.content)
+    assert rows == [
+        ("Archivo", "Carpeta", "Ruta completa", "Hash SHA-256", "Estado", "Conversión", "Última actualización (UTC)")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_export_cache_xlsx_contains_full_hash_and_all_entries(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    cache_db = tmp_path / "workspaces" / project.name / DEFAULT_CACHE_DB_NAME
+    full_hash = "b" * 64
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [
+                CacheEntry(
+                    file_path="/repo/docs/report.pdf",
+                    sha256_hash=full_hash,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                ),
+                CacheEntry(
+                    file_path="/repo/docs/other.pdf",
+                    sha256_hash="c" * 64,
+                    timestamp=1_700_000_100.0,
+                    status=DocumentStatus.UNCHANGED,
+                    conversion_status=None,
+                ),
+            ]
+        )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/downloads/projects/{project.name}/cache-export.xlsx")
+
+    assert response.status_code == 200
+    rows = _read_xlsx_rows(response.content)
+    assert len(rows) == 3  # cabecera + 2 entradas
+    # Orden estable por file_path: other.pdf antes que report.pdf.
+    header, first, second = rows
+    assert first[0] == "other.pdf"
+    # `Path("/repo/docs/other.pdf").parent` normaliza a separadores nativos (p. ej.
+    # backslash en Windows) -- se compara contra Path en vez de una cadena literal.
+    assert first[1] == str(Path("/repo/docs"))
+    assert first[2] == "/repo/docs/other.pdf"
+    assert first[3] == "c" * 64
+    assert first[4] == "unchanged"
+    assert first[5] is None  # celda vacia: openpyxl la lee como None, no como ""
+    assert second[0] == "report.pdf"
+    assert second[3] == full_hash  # hash completo, no truncado a 12 caracteres
+    assert second[4] == "new"
+    assert second[5] == "success"
+    assert second[6] == datetime.fromtimestamp(1_700_000_000.0, tz=timezone.utc).isoformat()
+
+
+@pytest.mark.asyncio
+async def test_export_cache_xlsx_neutralizes_formula_injection_in_file_name(tmp_path) -> None:
+    # Revision de seguridad: un fichero con un nombre que empieza por "=" se
+    # interpretaria como formula al abrir el .xlsx en Excel/LibreOffice si se
+    # escribe tal cual -- debe anteponerse un "'" (mitigacion OWASP CSV/Excel
+    # Formula Injection). Sin "/" ni "\" en el nombre: Windows los trataria como
+    # separador de ruta y `Path(...).name` se quedaria solo con lo que va detras.
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    cache_db = tmp_path / "workspaces" / project.name / DEFAULT_CACHE_DB_NAME
+    malicious_name = "=cmd|'calc'!A1.pdf"
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [
+                CacheEntry(
+                    file_path=f"/repo/{malicious_name}",
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=None,
+                )
+            ]
+        )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/downloads/projects/{project.name}/cache-export.xlsx")
+
+    rows = _read_xlsx_rows(response.content)
+    _, data_row = rows
+    # "Archivo" (solo el nombre) empieza por "=" -> se neutraliza con un "'" inicial.
+    assert data_row[0] == f"'{malicious_name}"
+    # "Ruta completa" empieza por "/repo/..." (no por un caracter disparador de
+    # formula) -> no hace falta neutralizarla, se conserva tal cual.
+    assert data_row[2] == f"/repo/{malicious_name}"
+
+
+@pytest.mark.asyncio
+async def test_export_cache_xlsx_tenant_isolation(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path, tenant_id="acme-corp")
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/downloads/projects/{project.name}/cache-export.xlsx")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_export_cache_xlsx_requires_session_when_non_loopback(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    security = SecurityConfig(bind_host="0.0.0.0")
+    app = create_app(security=security, registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
+
+    async with _client(app) as client:
+        response = await client.get(f"/downloads/projects/{project.name}/cache-export.xlsx")
 
     assert response.status_code == 401
