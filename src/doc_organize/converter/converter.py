@@ -23,9 +23,16 @@ class DocumentConverter:
     """Convierte documentos a Markdown + JSON usando Docling (REQ-003).
 
     Guarda salida dual (`<nombre>.md` + `<nombre>.json`) manteniendo la
-    estructura de directorios original bajo `output_dir`. Los errores de
-    conversion se capturan y se devuelven en `ConversionResult.error`, sin
-    interrumpir el resto de un batch (responsabilidad del llamante).
+    estructura de directorios original bajo `output_dir`. El `.json` es el
+    export nativo de Docling (`DoclingDocument.export_to_dict()`: texto
+    estructurado, tablas, layout y proveniencia por pagina) con la metadata
+    propia de doc_organize (hash, tamano, fecha, ocr_required) anidada bajo
+    la clave `doc_organize_metadata` para no colisionar con el schema de
+    Docling. La pipeline usa `generate_picture_images=False` (default de
+    `PdfPipelineOptions`, sin tocar), asi que no se embeben imagenes en el
+    JSON. Los errores de conversion se capturan y se devuelven en
+    `ConversionResult.error`, sin interrumpir el resto de un batch
+    (responsabilidad del llamante).
 
     La deteccion de `ocr_required` (REQ-004) se basa en
     `result.confidence.parse_score` siendo `NaN` — señal confirmada
@@ -147,7 +154,8 @@ class DocumentConverter:
         markdown_path = target_dir / f"{stem}.md"
         json_path = target_dir / f"{stem}.json"
 
-        metadata = {
+        document_json = docling_result.document.export_to_dict()
+        document_json["doc_organize_metadata"] = {
             "source_path": source_doc.full_path,
             "title": stem,
             "size_bytes": source_doc.size_bytes,
@@ -157,7 +165,9 @@ class DocumentConverter:
         }
 
         await asyncio.to_thread(markdown_path.write_text, markdown_text, encoding="utf-8")
-        await asyncio.to_thread(json_path.write_text, json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+        await asyncio.to_thread(
+            json_path.write_text, json.dumps(document_json, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
         return markdown_path, json_path
 
     @staticmethod
