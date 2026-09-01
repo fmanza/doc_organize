@@ -41,6 +41,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -74,8 +75,10 @@ def _version() -> str:
         with PYPROJECT.open("rb") as fh:
             data = tomllib.load(fh)
         version = data.get("project", {}).get("version")
+        if not isinstance(version, str):
+            raise TypeError(f"Expected str version, got {type(version).__name__}")
         if not version:
-            raise KeyError("Missing 'project.version' in pyproject.toml")
+            raise ValueError("Empty version string in pyproject.toml")
         return version
     except FileNotFoundError:
         print(
@@ -173,8 +176,8 @@ def _zip(output_dir: Path, version: str) -> Path:
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Sanitize version for safe filename (remove spaces, slashes, etc.)
-    safe_version = version.replace(" ", "_").replace("/", "-").replace("\\", "-")
+    # Sanitize version for safe filename (whitelist alphanumeric + valid chars)
+    safe_version = re.sub(r"[^a-zA-Z0-9._\-+]", "_", version)
 
     # Warn if overwriting
     zip_stem = output_dir / f"{ZIP_PREFIX}-{safe_version}"
@@ -238,11 +241,15 @@ def _create_checksum_files(archive: Path) -> str:
 
     # Create .sha256 file (single checksum for verification)
     sha256_file = archive.with_suffix(".zip.sha256")
+    sha256_file.unlink(missing_ok=True)  # Clean up old checksum file
     try:
         with open(sha256_file, "w", encoding="utf-8") as f:
             f.write(f"{sha256_hash}  {archive.name}\n")
         # Make readable by GitHub Actions and other processes
-        os.chmod(sha256_file, 0o644)
+        try:
+            os.chmod(sha256_file, 0o644)
+        except OSError:
+            pass  # chmod may not be supported on all platforms (e.g., Windows)
     except Exception as e:
         print(
             f"[build_docs_zip] ERROR: Cannot write {sha256_file}: {e}",
@@ -256,7 +263,10 @@ def _create_checksum_files(archive: Path) -> str:
     try:
         with open(checksums_file, "a", encoding="utf-8") as f:
             f.write(f"{sha256_hash}  {archive.name}  ({timestamp})\n")
-        os.chmod(checksums_file, 0o644)
+        try:
+            os.chmod(checksums_file, 0o644)
+        except OSError:
+            pass  # chmod may not be supported on all platforms (e.g., Windows)
     except Exception as e:
         print(
             f"[build_docs_zip] ERROR: Cannot write {checksums_file}: {e}",
