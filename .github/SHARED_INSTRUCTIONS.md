@@ -208,6 +208,25 @@ revisión), renderizadas vía `fastapi.templating.Jinja2Templates`.
   fallback offline); si eso se vuelve un problema real, evaluar un build local (`@tailwindcss/cli`)
   como decisión aparte, registrada en `.ai/DECISIONS_LOG.md`.
 
+**JavaScript inline (`<script>` en plantillas)**
+- Todo el JS del módulo `web/` vive inline en `<script>` dentro de la plantilla que lo usa — no hay
+  toolchain de build ni bundler (mismo motivo que Tailwind se carga vía CDN, ver "CSS y
+  componentes" arriba). No introduzcas ficheros `.js` externos ni un sistema de módulos
+  (`import`/`export`) sin decidirlo aparte.
+- Si un mismo valor (estado, fase, nombre de evento) se repite 3 o más veces dentro de un bloque
+  `<script>`, extráelo a un objeto de constantes al principio del bloque (p.ej.
+  `const SCAN_PHASE = { IDLE: "idle", STARTED: "started", ... }`) en vez de repetir strings
+  sueltos — mismo umbral que ya aplica a macros Jinja2 repetidas (ver "Lógica y buenas prácticas"
+  arriba). Con 1-2 usos, un literal inline sigue siendo preferible a una abstracción prematura.
+  Ejemplo real: `SCAN_PHASE` en `folder_selector.html.j2` (semáforo de estado del escaneo).
+- El proyecto no tiene infraestructura de test para JS (no hay Jest/Vitest/Playwright instalado ni
+  decidido — cualquier propuesta de añadirla es una decisión de producto, regístrala en
+  `.ai/DECISIONS_LOG.md` antes de introducirla). Esto es una decisión implícita aceptada, no un
+  olvido: mantén el JS inline simple (funciones puras y cortas, sin lógica de negocio) para que
+  sea auditable a simple vista. Si un bloque de JS crece lo suficiente como para necesitar tests
+  reales, es señal de que esa lógica debería salir de la plantilla hacia un endpoint/backend
+  testeable en Python, no de que haga falta montar un framework de test JS.
+
 **Fuentes de componentes para asistentes IA**
 - Al pedir a una IA que genere una macro nueva, dale como entrada un componente HTML ya
   maquetado con clases Tailwind (p.ej. de Tailwind UI, Flowbite u otra librería de componentes
@@ -241,6 +260,9 @@ mkdocs build --strict                       # build con validación de links
 - Fixtures en `tests/conftest.py`: documentos mock (PDF vacío, DOCX simple, etc.)
 - Tests de integración opcionales en `tests/integration/` marcados con `pytest.mark.integration`
 - Cobertura target: ≥80% de líneas ejecutables en módulos core
+- Módulo `web/`: rutas, WebSockets y lógica Python cubiertos con pytest
+  (`tests/unit/test_web_*.py`). El JS inline de las plantillas (`web/templates/*.html.j2`) no
+  tiene test dedicado — ver política en "Plantillas Jinja2 → JavaScript inline" arriba.
 
 ### Documentación obligatoria
 

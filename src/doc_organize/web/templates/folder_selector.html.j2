@@ -201,7 +201,9 @@ const LIGHT_ON_AMBER = "bg-amber-400 border-amber-500";
 const LIGHT_ON_GREEN = "bg-green-500 border-green-600";
 const LIGHT_ON_RED = "bg-red-500 border-red-600";
 
-let semaforoPhase = "idle"; // último estado real alcanzado (no "error"): idle|started|running|completed
+const SCAN_PHASE = { IDLE: "idle", STARTED: "started", RUNNING: "running", COMPLETED: "completed", ERROR: "error" };
+
+let semaforoPhase = SCAN_PHASE.IDLE; // último estado real alcanzado (no ERROR): IDLE|STARTED|RUNNING|COMPLETED
 
 function paintLight(el, colorClass, pulse) {
     el.className = "inline-block w-3.5 h-3.5 rounded-full border " + colorClass + (pulse ? " animate-pulse" : "");
@@ -213,33 +215,35 @@ function resetSemaforo() {
     paintLight(semaforoLights.completed, LIGHT_OFF);
     semaforoText.textContent = "Sin iniciar";
     semaforoText.className = "text-sm font-medium text-gray-600 ml-2";
-    semaforoPhase = "idle";
+    semaforoPhase = SCAN_PHASE.IDLE;
 }
 
 function setSemaforo(phase) {
-    if (phase === "error") {
-        const failedLight = semaforoPhase === "running" ? semaforoLights.running : semaforoLights.started;
+    if (phase === SCAN_PHASE.ERROR) {
+        const failedLight = semaforoPhase === SCAN_PHASE.RUNNING ? semaforoLights.running : semaforoLights.started;
         paintLight(failedLight, LIGHT_ON_RED);
         semaforoText.textContent = "Error: el escaneo se ha interrumpido";
         semaforoText.className = "text-sm font-medium text-red-700 ml-2";
         return;
     }
     semaforoPhase = phase;
-    if (phase === "started") {
+    if (phase === SCAN_PHASE.STARTED) {
         paintLight(semaforoLights.started, LIGHT_ON_AMBER);
         semaforoText.textContent = "Iniciando escaneo…";
         semaforoText.className = "text-sm font-medium text-amber-700 ml-2";
-    } else if (phase === "running") {
+    } else if (phase === SCAN_PHASE.RUNNING) {
         paintLight(semaforoLights.started, LIGHT_ON_AMBER);
         paintLight(semaforoLights.running, LIGHT_ON_AMBER, true);
         semaforoText.textContent = "Escaneo en ejecución…";
         semaforoText.className = "text-sm font-medium text-amber-700 ml-2";
-    } else if (phase === "completed") {
+    } else if (phase === SCAN_PHASE.COMPLETED) {
         paintLight(semaforoLights.started, LIGHT_ON_AMBER);
         paintLight(semaforoLights.running, LIGHT_ON_AMBER);
         paintLight(semaforoLights.completed, LIGHT_ON_GREEN);
         semaforoText.textContent = "Escaneo finalizado";
         semaforoText.className = "text-sm font-medium text-green-700 ml-2";
+    } else {
+        console.error("setSemaforo: fase desconocida", phase);
     }
 }
 
@@ -270,7 +274,7 @@ form.addEventListener("submit", async (submitEvent) => {
     let scanFinished = false;
 
     ws.onopen = () => {
-        setSemaforo("started");
+        setSemaforo(SCAN_PHASE.STARTED);
         ws.send(JSON.stringify({ use_ocr: use_ocr, use_gpu: use_gpu, force: force }));
     };
     ws.onmessage = (message) => {
@@ -278,19 +282,19 @@ form.addEventListener("submit", async (submitEvent) => {
         appendProgress(scanEvent);
         if (scanEvent.event === "completed") {
             scanFinished = true;
-            setSemaforo("completed");
+            setSemaforo(SCAN_PHASE.COMPLETED);
             ws.close();
         } else if (RUNNING_EVENTS.has(scanEvent.event)) {
-            setSemaforo("running");
+            setSemaforo(SCAN_PHASE.RUNNING);
         }
     };
     ws.onerror = () => {
         errorEl.textContent = "Error de conexión durante el escaneo.";
-        setSemaforo("error");
+        setSemaforo(SCAN_PHASE.ERROR);
     };
     ws.onclose = () => {
         if (!scanFinished) {
-            setSemaforo("error");
+            setSemaforo(SCAN_PHASE.ERROR);
         }
     };
 });
