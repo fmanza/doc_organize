@@ -4,6 +4,41 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 Este proyecto sigue [SemVer](https://semver.org/lang/es/) desde v0.2.0 (sin
 releases publicados antes de esa versión).
 
+## [Unreleased]
+
+### Added
+
+- `scripts/build_docs_zip.py`: nuevo script para empaquetar la documentación compilada como ZIP
+  con checksums SHA256 para distribución offline. Genera:
+  - `dist/doc_organize-docs-{version}.zip` (sitio MkDocs completo comprimido)
+  - `dist/doc_organize-docs-{version}.zip.sha256` (checksum individual)
+  - `dist/CHECKSUMS.txt` (histórico de todas las builds)
+- `.github/workflows/docs-zip-release.yml`: nueva automatización que en cada push a `main`/`develop`
+  que afecte `docs/`, `mkdocs.yml` o `pyproject.toml`:
+  1. Construye documentación con `mkdocs build --strict`
+  2. Genera ZIP con `scripts/build_docs_zip.py`
+  3. Crea GitHub Release con tag `docs-v{version}` y adjunta ZIP + checksums
+  4. Publica en [Releases](https://github.com/fmanza/doc_organize/releases)
+
+**Features:**
+- ✅ Descarga offline de documentación completa con búsqueda
+- ✅ Verificación de integridad por SHA256 (portable, compatible con `sha256sum -c`)
+- ✅ Histórico de builds en `CHECKSUMS.txt` para auditoría
+- ✅ GitHub Artifacts (retención 30 días) para CI/CD
+- ✅ Error handling + validaciones (cross-platform, Python 3.11+)
+
+**Uso:**
+```bash
+# Manual (local)
+python scripts/build_docs_zip.py
+python scripts/build_docs_zip.py --no-build  # rezip site/ existente
+
+# Automático (CI/CD)
+# En cada push que toque docs/ → GitHub Release automático
+```
+
+---
+
 ## [0.4.0] - 2026-08-31
 
 ⚠️ **Rompe contratos públicos** (ver "Removed"/"Changed"): firma de `ScanCommand`, flags del CLI

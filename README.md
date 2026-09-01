@@ -78,6 +78,28 @@ mkdocs serve    # documentación local (http://127.0.0.1:8000)
 mkdocs build    # sitio estático en ./site
 ```
 
+### Descarga Offline
+
+La documentación completa se empaqueta automáticamente en ZIP con checksums para distribución offline:
+
+```bash
+# Generar ZIP manualmente
+python scripts/build_docs_zip.py
+
+# Resultado:
+# - dist/doc_organize-docs-{version}.zip
+# - dist/doc_organize-docs-{version}.zip.sha256
+# - dist/CHECKSUMS.txt (histórico de builds)
+```
+
+**Descarga en Releases:** https://github.com/fmanza/doc_organize/releases (busca tags `docs-v*`)
+
+**Verificación de integridad:**
+```bash
+sha256sum -c doc_organize-docs-*.zip.sha256
+# Output: doc_organize-docs-0.3.0.zip: OK
+```
+
 ## Estructura del proyecto
 
 ```
