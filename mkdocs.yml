@@ -17,6 +17,7 @@ nav:
       - Instalación: guides/installation.md
       - Inicio rápido: guides/quick_start.md
       - Resolución de problemas: guides/troubleshooting.md
+      - Descarga Offline: guides/downloads.md
   - Funcionalidad:
       - Descripción general: functional/index.md
       - Validadores: functional/validators.md
