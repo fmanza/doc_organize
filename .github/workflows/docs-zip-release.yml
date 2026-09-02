@@ -56,7 +56,7 @@ jobs:
           echo "🔒 SHA256 file:"
           cat dist/*.sha256 || echo "No sha256 file yet"
 
-      - name: '📤 Upload ZIP as artifact (retention: 30 days)'
+      - name: Upload ZIP as artifact
         uses: actions/upload-artifact@v4
         with:
           name: docs-zip-build
@@ -78,8 +78,8 @@ jobs:
       - name: '🏷️ Create or update GitHub Release'
         uses: ncipollo/release-action@v1
         with:
-          tag: "docs-v${{ steps.release_info.outputs.version }}"
-          name: "📚 Documentation Offline v${{ steps.release_info.outputs.version }}"
+          tag: docs-v${{ steps.release_info.outputs.version }}
+          name: 📚 Documentation Offline v${{ steps.release_info.outputs.version }}
           body: |
             ## 📚 Documentation Offline Package
 
