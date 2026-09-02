@@ -716,6 +716,78 @@ async def test_duplicates_page_history_tab_active_via_query_param(tmp_path) -> N
     assert "hidden" not in history_tag
 
 
+# ===== Semáforo de estado + bloqueo cruzado (paridad visual con Escanear) =====
+
+
+@pytest.mark.asyncio
+async def test_duplicates_page_shows_semaforo_markup(tmp_path) -> None:
+    """El semáforo de estado (Inicio/Ejecución/Finalización/Error) para "Buscar
+    duplicados" replica el patrón visual usado en Escanear (ver
+    folder_selector.html.j2 / #scan-semaforo)."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    _write_folders_json(project_root, [])
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/duplicates")
+
+    assert response.status_code == 200
+    html = response.text
+    assert 'id="dedup-semaforo"' in html
+    assert 'id="dedup-light-started"' in html
+    assert 'id="dedup-light-running"' in html
+    assert 'id="dedup-light-completed"' in html
+    assert 'id="dedup-semaforo-status-text"' in html
+
+
+@pytest.mark.asyncio
+async def test_duplicates_page_history_tab_has_disabled_styling_wired(tmp_path) -> None:
+    """La pestaña "Histórico de deduplicaciones" lleva las mismas clases Tailwind
+    `disabled:*` que "Caché" en Escanear, para que el bloqueo JS durante una
+    operación en curso (lockDedupControls) tenga efecto visual."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    _write_folders_json(project_root, [])
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/duplicates")
+
+    assert response.status_code == 200
+    tab_btn_history_tag = response.text.split('id="tab-btn-history"')[1].split(">")[0]
+    assert "disabled:cursor-not-allowed" in tab_btn_history_tag
+    assert "disabled:opacity-50" in tab_btn_history_tag
+
+
+@pytest.mark.asyncio
+async def test_duplicates_page_resolve_results_container_wraps_dynamic_content(tmp_path) -> None:
+    """El JS reemplaza "#resolve-results-container" tras cada operación (en vez de
+    recargar la página) para no perder el estado visual del semáforo -- este test
+    fija que el contenedor exista y envuelva el resultado de los duplicados."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "a.pdf").write_bytes(b"contenido identico")
+    (input_dir / "b.pdf").write_bytes(b"contenido identico")
+    _write_folders_json(project_root, [str(input_dir)])
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/duplicates")
+
+    assert response.status_code == 200
+    html = response.text
+    assert 'id="resolve-results-container"' in html
+    container_html = html.split('id="resolve-results-container"')[1].split('<div id="tab-panel-history"')[0]
+    assert "Grupo 1" in container_html
+
+
 @pytest.mark.asyncio
 async def test_duplicates_page_escapes_malicious_display_name_in_history(tmp_path) -> None:
     # Revision de seguridad: `doc.display_name`/`doc.full_path` (renderizados sin

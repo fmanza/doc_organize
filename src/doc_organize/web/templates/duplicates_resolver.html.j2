@@ -9,7 +9,7 @@
     <button type="button" id="tab-btn-resolve" role="tab" aria-selected="{{ 'true' if active_tab != 'history' else 'false' }}" aria-controls="tab-panel-resolve"
             class="page-tab-btn px-3 py-1.5 border border-b-0 rounded-t cursor-pointer {{ 'bg-white border-gray-300 font-medium' if active_tab != 'history' else 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100' }}">Buscar duplicados</button>
     <button type="button" id="tab-btn-history" role="tab" aria-selected="{{ 'true' if active_tab == 'history' else 'false' }}" aria-controls="tab-panel-history"
-            class="page-tab-btn px-3 py-1.5 border border-b-0 rounded-t cursor-pointer {{ 'bg-white border-gray-300 font-medium' if active_tab == 'history' else 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100' }}">Histórico de deduplicaciones</button>
+            class="page-tab-btn px-3 py-1.5 border border-b-0 rounded-t cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 {{ 'bg-white border-gray-300 font-medium' if active_tab == 'history' else 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100' }}">Histórico de deduplicaciones</button>
 </div>
 
 <div id="tab-panel-resolve" role="tabpanel" aria-labelledby="tab-btn-resolve" {% if active_tab == 'history' %}hidden{% endif %}>
@@ -22,6 +22,23 @@
 {% endif %}
 <p id="deduplicate-error" class="text-red-700 my-2 min-h-[1.2em]"></p>
 
+<div id="dedup-semaforo" role="status" aria-live="polite" class="flex flex-wrap items-center gap-4 my-3 px-3 py-2 rounded border border-gray-200 bg-gray-50 w-fit">
+    <span class="flex items-center gap-1.5">
+        <span id="dedup-light-started" class="inline-block w-3.5 h-3.5 rounded-full border bg-gray-300 border-gray-400"></span>
+        <span class="text-xs text-gray-600">Inicio</span>
+    </span>
+    <span class="flex items-center gap-1.5">
+        <span id="dedup-light-running" class="inline-block w-3.5 h-3.5 rounded-full border bg-gray-300 border-gray-400"></span>
+        <span class="text-xs text-gray-600">Ejecución</span>
+    </span>
+    <span class="flex items-center gap-1.5">
+        <span id="dedup-light-completed" class="inline-block w-3.5 h-3.5 rounded-full border bg-gray-300 border-gray-400"></span>
+        <span class="text-xs text-gray-600">Finalización</span>
+    </span>
+    <span id="dedup-semaforo-status-text" class="text-sm font-medium text-gray-600 ml-2">Sin iniciar</span>
+</div>
+
+<div id="resolve-results-container">
 <h2 class="text-lg font-medium mt-4 mb-2">Resultado de los duplicados</h2>
 {% if groups %}
 <form id="resolve-form" class="my-4">
@@ -80,6 +97,8 @@
 {% if not groups and not last_dedup_report %}
 <p>No se detectaron duplicados.</p>
 {% endif %}
+
+</div>
 
 </div>
 
@@ -183,68 +202,204 @@ tabButtons.history.addEventListener("click", () => activateTab("history"));
 // --- Buscar duplicados (accion masiva, aplica las reglas de negocio por defecto) ---
 
 const deduplicateBtn = document.getElementById("deduplicate-btn");
+const deduplicateErrorEl = document.getElementById("deduplicate-error");
+let form = document.getElementById("resolve-form");
+
+// --- Bloqueo cruzado: "Buscar duplicados" (accion masiva), el formulario de
+// resolucion individual (resolve-form) y la pestaña Histórico se bloquean
+// entre si mientras cualquiera de las dos operaciones esta en curso, para
+// evitar que ambas muevan ficheros del mismo grupo a la vez. El histórico
+// tambien se bloquea porque quedaría obsoleto en cuanto termine la operación
+// (mismo motivo que "Caché" en Escanear, ver folder_selector.html.j2). ---
+let dedupOperationInProgress = false;
+
+function lockDedupControls() {
+    dedupOperationInProgress = true;
+    tabButtons.history.disabled = true;
+    tabButtons.history.title = "Disponible cuando termine la operación en curso";
+    deduplicateBtn.disabled = true;
+    const resolveSubmitBtn = form ? form.querySelector('button[type="submit"]') : null;
+    if (resolveSubmitBtn) resolveSubmitBtn.disabled = true;
+}
+
+function unlockDedupControls() {
+    dedupOperationInProgress = false;
+    tabButtons.history.disabled = false;
+    tabButtons.history.removeAttribute("title");
+    deduplicateBtn.disabled = false;
+    const resolveSubmitBtn = form ? form.querySelector('button[type="submit"]') : null;
+    if (resolveSubmitBtn) resolveSubmitBtn.disabled = false;
+}
+
+// --- Semáforo de estado (Inicio / Ejecución / Finalización / Error) ---
+
+const dedupSemaforoLights = {
+    started: document.getElementById("dedup-light-started"),
+    running: document.getElementById("dedup-light-running"),
+    completed: document.getElementById("dedup-light-completed"),
+};
+const dedupSemaforoText = document.getElementById("dedup-semaforo-status-text");
+const LIGHT_OFF = "bg-gray-300 border-gray-400";
+const LIGHT_ON_AMBER = "bg-amber-400 border-amber-500";
+const LIGHT_ON_GREEN = "bg-green-500 border-green-600";
+const LIGHT_ON_RED = "bg-red-500 border-red-600";
+
+const DEDUP_PHASE = { IDLE: "idle", STARTED: "started", RUNNING: "running", COMPLETED: "completed", ERROR: "error" };
+
+let dedupSemaforoPhase = DEDUP_PHASE.IDLE; // último estado real alcanzado (no ERROR): IDLE|STARTED|RUNNING|COMPLETED
+
+function paintLight(el, colorClass, pulse) {
+    el.className = "inline-block w-3.5 h-3.5 rounded-full border " + colorClass + (pulse ? " animate-pulse" : "");
+}
+
+function resetDedupSemaforo() {
+    paintLight(dedupSemaforoLights.started, LIGHT_OFF);
+    paintLight(dedupSemaforoLights.running, LIGHT_OFF);
+    paintLight(dedupSemaforoLights.completed, LIGHT_OFF);
+    dedupSemaforoText.textContent = "Sin iniciar";
+    dedupSemaforoText.className = "text-sm font-medium text-gray-600 ml-2";
+    dedupSemaforoPhase = DEDUP_PHASE.IDLE;
+}
+
+function setDedupSemaforo(phase) {
+    if (phase === DEDUP_PHASE.ERROR) {
+        const failedLight = dedupSemaforoPhase === DEDUP_PHASE.RUNNING ? dedupSemaforoLights.running : dedupSemaforoLights.started;
+        paintLight(failedLight, LIGHT_ON_RED);
+        dedupSemaforoText.textContent = "Error: la búsqueda de duplicados se ha interrumpido";
+        dedupSemaforoText.className = "text-sm font-medium text-red-700 ml-2";
+        return;
+    }
+    dedupSemaforoPhase = phase;
+    if (phase === DEDUP_PHASE.STARTED) {
+        paintLight(dedupSemaforoLights.started, LIGHT_ON_AMBER);
+        dedupSemaforoText.textContent = "Iniciando búsqueda de duplicados…";
+        dedupSemaforoText.className = "text-sm font-medium text-amber-700 ml-2";
+    } else if (phase === DEDUP_PHASE.RUNNING) {
+        paintLight(dedupSemaforoLights.started, LIGHT_ON_AMBER);
+        paintLight(dedupSemaforoLights.running, LIGHT_ON_AMBER, true);
+        dedupSemaforoText.textContent = "Búsqueda de duplicados en ejecución…";
+        dedupSemaforoText.className = "text-sm font-medium text-amber-700 ml-2";
+    } else if (phase === DEDUP_PHASE.COMPLETED) {
+        paintLight(dedupSemaforoLights.started, LIGHT_ON_AMBER);
+        paintLight(dedupSemaforoLights.running, LIGHT_ON_AMBER);
+        paintLight(dedupSemaforoLights.completed, LIGHT_ON_GREEN);
+        dedupSemaforoText.textContent = "Búsqueda de duplicados finalizada";
+        dedupSemaforoText.className = "text-sm font-medium text-green-700 ml-2";
+    } else {
+        console.error("setDedupSemaforo: fase desconocida", phase);
+    }
+}
+
+// --- Refresco parcial tras completar una operación: sustituye solo el
+// contenido de "Resultado de los duplicados" y del histórico (no toda la
+// pagina via window.location.reload()), para que el semáforo en verde
+// ("Finalización") siga visible en vez de perderse en una navegación. ---
+
+function extractElementHtml(htmlText, elementId) {
+    const parsed = new DOMParser().parseFromString(htmlText, "text/html");
+    const el = parsed.getElementById(elementId);
+    return el ? el.innerHTML : null;
+}
+
+async function refreshDynamicPanels() {
+    const response = await fetch(window.location.pathname);
+    const html = await response.text();
+    const resolveHtml = extractElementHtml(html, "resolve-results-container");
+    const historyHtml = extractElementHtml(html, "tab-panel-history");
+    if (resolveHtml !== null) {
+        document.getElementById("resolve-results-container").innerHTML = resolveHtml;
+    }
+    if (historyHtml !== null) {
+        document.getElementById("tab-panel-history").innerHTML = historyHtml;
+    }
+    // Los paneles reemplazados traen sus propios <form>/<input> nuevos -- hay
+    // que volver a enlazar sus listeners, los del DOM original ya no aplican.
+    setupResolveForm();
+    setupHistorySearch();
+}
+
 if (deduplicateBtn) {
-    const deduplicateErrorEl = document.getElementById("deduplicate-error");
     deduplicateBtn.addEventListener("click", async () => {
+        if (dedupOperationInProgress) return;
         deduplicateErrorEl.textContent = "";
-        deduplicateBtn.disabled = true;
+        resetDedupSemaforo();
+        setDedupSemaforo(DEDUP_PHASE.STARTED);
+        lockDedupControls();
         try {
-            const response = await fetch(
+            const fetchPromise = fetch(
                 "/api/projects/" + encodeURIComponent(projectName) + "/scan/deduplicate",
                 { method: "POST" }
             );
+            setDedupSemaforo(DEDUP_PHASE.RUNNING);
+            const response = await fetchPromise;
             const data = await response.json();
             if (!response.ok) {
                 deduplicateErrorEl.textContent = (data && data.detail) || "No se pudieron buscar duplicados.";
-                deduplicateBtn.disabled = false;
+                setDedupSemaforo(DEDUP_PHASE.ERROR);
+                unlockDedupControls();
                 return;
             }
-            // Refresca la ventana: los grupos resueltos por esta ejecucion deben
-            // desaparecer de "pendientes" y pasar a verse en el historico.
-            window.location.reload();
+            setDedupSemaforo(DEDUP_PHASE.COMPLETED);
+            unlockDedupControls();
+            // Los grupos resueltos por esta ejecucion deben desaparecer de
+            // "pendientes" y pasar a verse en el historico.
+            await refreshDynamicPanels();
         } catch (error) {
             deduplicateErrorEl.textContent = "No se pudieron buscar duplicados.";
-            deduplicateBtn.disabled = false;
+            setDedupSemaforo(DEDUP_PHASE.ERROR);
+            unlockDedupControls();
         }
     });
 }
 
 // --- Resolver duplicados (formulario de seleccion por grupo) ---
 
-const form = document.getElementById("resolve-form");
-if (form) {
+function setupResolveForm() {
+    form = document.getElementById("resolve-form");
+    if (!form) return;
     form.addEventListener("submit", async (submitEvent) => {
         submitEvent.preventDefault();
+        if (dedupOperationInProgress) return;
+        lockDedupControls();
         const resolutions = {};
         const formData = new FormData(form);
         for (const [fieldName, value] of formData.entries()) {
             resolutions[fieldName.replace("group-", "")] = value;
         }
-        const response = await fetch(
-            "/api/projects/" + encodeURIComponent(projectName) + "/duplicates/resolve",
-            {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ resolutions: resolutions }),
+        try {
+            const response = await fetch(
+                "/api/projects/" + encodeURIComponent(projectName) + "/duplicates/resolve",
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ resolutions: resolutions }),
+                }
+            );
+            if (response.ok) {
+                unlockDedupControls();
+                // El grupo resuelto debe desaparecer de "pendientes" y pasar
+                // a verse en el histórico.
+                await refreshDynamicPanels();
+                return;
             }
-        );
-        if (response.ok) {
-            // Refresca la ventana: el grupo resuelto debe desaparecer de
-            // "pendientes" y pasar a verse en el histórico.
-            window.location.reload();
-            return;
+            const data = await response.json();
+            document.getElementById("resolve-result").textContent = data.detail || "Error al resolver duplicados.";
+            unlockDedupControls();
+        } catch (error) {
+            document.getElementById("resolve-result").textContent = "Error al resolver duplicados.";
+            unlockDedupControls();
         }
-        const data = await response.json();
-        document.getElementById("resolve-result").textContent = data.detail || "Error al resolver duplicados.";
     });
 }
+setupResolveForm();
 
 // --- Filtro de busqueda del histórico (solo visual: oculta <fieldset> con
 // `hidden`). Vive dentro de la pestaña "Histórico de deduplicaciones" y solo
 // filtra los fieldset de cada ejecucion del historico -- los grupos pendientes
 // de "Buscar duplicados" no tienen buscador propio. ---
-const searchInput = document.getElementById("duplicates-search");
-if (searchInput) {
+function setupHistorySearch() {
+    const searchInput = document.getElementById("duplicates-search");
+    if (!searchInput) return;
     const fieldsets = Array.from(document.querySelectorAll("#tab-panel-history fieldset[data-search]"));
     const noResults = document.getElementById("duplicates-no-results");
     const noResultsQuery = document.getElementById("duplicates-no-results-query");
@@ -281,5 +436,6 @@ if (searchInput) {
             : visibleCount + " de " + totalCount + " grupo(s).";
     });
 }
+setupHistorySearch();
 </script>
 {% endblock %}
