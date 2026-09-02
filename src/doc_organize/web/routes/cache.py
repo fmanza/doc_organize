@@ -26,6 +26,7 @@ class CacheEntryResponse(BaseModel):
     timestamp: float
     status: str
     conversion_status: str | None
+    error_message: str | None
 
 
 class CacheListResponse(BaseModel):
@@ -54,6 +55,7 @@ def cache_entry_to_response(entry: CacheEntry) -> CacheEntryResponse:
         timestamp=entry.timestamp,
         status=entry.status.value,
         conversion_status=entry.conversion_status.value if entry.conversion_status else None,
+        error_message=entry.error_message,
     )
 
 

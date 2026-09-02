@@ -705,6 +705,62 @@ async def test_scan_websocket_force_reconverts_unchanged_document(tmp_path, nati
     assert forced_events[-1]["data"]["converted"] == 1  # con force, se reconvierte igual
 
 
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_scan_websocket_retries_error_entries_without_force(tmp_path, native_pdf) -> None:
+    """Un fichero sin cambios cuya conversión anterior quedó en ERROR debe
+    reintentarse en un escaneo normal — antes quedaba excluido para siempre
+    (`get_changes()` lo clasifica como `unchanged` por hash, y solo
+    `force=True`, que reprocesa todo el proyecto, volvía a intentarlo)."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    client = TestClient(app)
+    add_response = client.post(f"/api/projects/{project.name}/folders/library", json={"path": str(native_pdf.parent)})
+    assert add_response.status_code == 200
+
+    def _scan(payload: dict) -> list[dict]:
+        with client.websocket_connect(f"/api/projects/{project.name}/scan") as websocket:
+            websocket.send_json(payload)
+            events = []
+            while True:
+                message = websocket.receive_json()
+                events.append(message)
+                if message["event"] == "completed":
+                    break
+            return events
+
+    first_events = _scan({"use_ocr": False, "use_gpu": False})
+    assert first_events[-1]["data"]["converted"] == 1
+
+    cache_db = tmp_path / "workspaces" / project.name / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        cached = await cache.load_cache()
+        ((file_path, entry),) = cached.items()
+        await cache.save_entries(
+            [
+                CacheEntry(
+                    file_path=entry.file_path,
+                    sha256_hash=entry.sha256_hash,
+                    timestamp=entry.timestamp,
+                    status=DocumentStatus.UNCHANGED,
+                    conversion_status=ConversionStatus.ERROR,
+                    error_message="fallo simulado en un escaneo anterior",
+                )
+            ]
+        )
+
+    retry_events = _scan({"use_ocr": False, "use_gpu": False})
+    assert retry_events[-1]["data"]["unchanged"] == 1  # el hash no cambió
+    assert retry_events[-1]["data"]["converted"] == 1  # pero se reintentó por estar en ERROR
+
+    async with CacheManager(cache_db) as cache:
+        reloaded = await cache.load_cache()
+    assert reloaded[file_path].conversion_status == ConversionStatus.SUCCESS
+    assert reloaded[file_path].error_message is None
+
+
 @pytest.mark.asyncio
 async def test_scan_websocket_rejects_missing_project(tmp_path) -> None:
     app = create_app(registry_path=tmp_path / "projects.json")

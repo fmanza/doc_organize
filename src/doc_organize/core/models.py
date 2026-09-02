@@ -175,6 +175,7 @@ class CacheEntry(BaseModel):
     timestamp: float = Field(..., description="Timestamp Unix de la última actualización de la entrada")
     status: DocumentStatus = Field(..., description="Estado del documento (new/unchanged/modified/deleted)")
     conversion_status: ConversionStatus | None = Field(None, description="Estado de progreso de la conversión")
+    error_message: str | None = Field(None, description="Mensaje de error de la última conversión fallida")
 
 
 class CacheExportSnapshot(BaseModel):

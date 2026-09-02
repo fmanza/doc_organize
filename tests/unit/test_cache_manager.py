@@ -7,13 +7,14 @@ from doc_organize.core.exceptions import CacheError
 from doc_organize.core.models import CacheEntry, DocumentMetadata, DocumentStatus
 
 
-def _entry(file_path: str, sha256_hash: str, timestamp: float = 1.0) -> CacheEntry:
+def _entry(file_path: str, sha256_hash: str, timestamp: float = 1.0, error_message: str | None = None) -> CacheEntry:
     return CacheEntry(
         file_path=file_path,
         sha256_hash=sha256_hash,
         timestamp=timestamp,
         status=DocumentStatus.NEW,
         conversion_status=None,
+        error_message=error_message,
     )
 
 
@@ -32,11 +33,12 @@ def _doc(file_path: str, sha256_hash: str) -> DocumentMetadata:
 async def test_save_and_load_roundtrip(tmp_path) -> None:
     db_path = tmp_path / "cache.db"
     async with CacheManager(db_path) as cache:
-        await cache.save_entries([_entry("/repo/a.pdf", "hash-a")])
+        await cache.save_entries([_entry("/repo/a.pdf", "hash-a", error_message="Documento cifrado")])
         loaded = await cache.load_cache()
 
     assert "/repo/a.pdf" in loaded
     assert loaded["/repo/a.pdf"].sha256_hash == "hash-a"
+    assert loaded["/repo/a.pdf"].error_message == "Documento cifrado"
 
 
 @pytest.mark.asyncio
@@ -108,6 +110,36 @@ async def test_clear_on_empty_cache_is_a_no_op(tmp_path) -> None:
         loaded = await cache.load_cache()
 
     assert loaded == {}
+
+
+@pytest.mark.asyncio
+async def test_migrate_adds_error_message_column_to_legacy_db(tmp_path) -> None:
+    db_path = tmp_path / "cache.db"
+
+    import aiosqlite
+
+    async with aiosqlite.connect(db_path) as legacy_conn:
+        await legacy_conn.execute(
+            """
+            CREATE TABLE cache_entries (
+                file_path TEXT PRIMARY KEY,
+                sha256_hash TEXT NOT NULL,
+                timestamp REAL NOT NULL,
+                status TEXT NOT NULL,
+                conversion_status TEXT
+            )
+            """
+        )
+        await legacy_conn.execute(
+            "INSERT INTO cache_entries VALUES (?, ?, ?, ?, ?)",
+            ("/repo/legacy.pdf", "hash-legacy", 1.0, "new", "error"),
+        )
+        await legacy_conn.commit()
+
+    async with CacheManager(db_path) as cache:
+        loaded = await cache.load_cache()
+
+    assert loaded["/repo/legacy.pdf"].error_message is None
 
 
 @pytest.mark.asyncio

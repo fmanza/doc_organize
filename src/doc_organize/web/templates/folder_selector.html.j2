@@ -122,7 +122,7 @@
             <td class="px-2.5 py-1.5 border-b border-gray-300 break-all text-gray-600 font-mono text-xs" title="{{ entry.file_path }}">{{ entry.file_path | dirname | highlight(cache_q) }}</td>
             <td class="px-2.5 py-1.5 border-b border-gray-300 whitespace-nowrap">{{ entry.sha256_hash[:12] }}…</td>
             <td class="px-2.5 py-1.5 border-b border-gray-300 whitespace-nowrap">{{ entry.status }}</td>
-            <td class="px-2.5 py-1.5 border-b border-gray-300 whitespace-nowrap">{{ entry.conversion_status or "—" }}</td>
+            <td class="px-2.5 py-1.5 border-b border-gray-300 whitespace-nowrap"{% if entry.conversion_status == "error" and entry.error_message %} title="{{ entry.error_message }}"{% endif %}>{{ entry.conversion_status or "—" }}</td>
         </tr>
     {% endfor %}
     </tbody>

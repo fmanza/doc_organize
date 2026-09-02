@@ -179,9 +179,12 @@ class ScanCommand:
                 len(unchanged_files),
             )
             new_set = set(new_files)
-            to_process_paths = new_set | set(modified_files)
+            modified_set = set(modified_files)
+            to_process_paths = new_set | modified_set
             docs_by_path = {doc.full_path: doc for doc in scan_result.documents}
-            docs_to_process = [docs_by_path[path] for path in to_process_paths if path in docs_by_path]
+            error_retry_paths = self._collect_stale_error_paths(cached_entries, docs_by_path, to_process_paths)
+            already_converting = to_process_paths | error_retry_paths
+            docs_to_process = [docs_by_path[path] for path in already_converting if path in docs_by_path]
             yield ScanEvent(
                 event=ScanEventType.SCANNED,
                 data={
@@ -203,11 +206,11 @@ class ScanCommand:
             entries: list[CacheEntry] = []
             ocr_candidates: list[DocumentMetadata] = []
 
-            async for event in self._convert_documents(docs_to_process, output_dir, new_set, summary, entries, ocr_candidates):
+            async for event in self._convert_documents(docs_to_process, output_dir, new_set, modified_set, summary, entries, ocr_candidates):
                 yield event
 
             if use_ocr:
-                self._collect_stale_ocr_candidates(cached_entries, docs_by_path, to_process_paths, ocr_candidates)
+                self._collect_stale_ocr_candidates(cached_entries, docs_by_path, already_converting, ocr_candidates)
                 async for event in self._process_ocr(ocr_candidates, output_dir, use_gpu, entries, summary):
                     yield event
 
@@ -281,11 +284,17 @@ class ScanCommand:
         docs_to_process: list[DocumentMetadata],
         output_dir: Path,
         new_set: set[str],
+        modified_set: set[str],
         summary: ScanSummary,
         entries: list[CacheEntry],
         ocr_candidates: list[DocumentMetadata],
     ) -> AsyncIterator[ScanEvent]:
         """Convierte cada documento, yieldeando un `FILE_CONVERTED` por unidad.
+
+        `docs_to_process` incluye tanto ficheros nuevos/modificados (`new_set`/
+        `modified_set`) como reintentos de ficheros sin cambios cuya conversión
+        anterior quedó en `ERROR` (`_collect_stale_error_paths`) — estos últimos
+        conservan `status=UNCHANGED`, ya que su hash no varió.
 
         Muta `summary`/`entries`/`ocr_candidates` in-place (son del llamador) en vez
         de devolverlos: es la forma más simple de combinar "acumula resultados" con
@@ -295,7 +304,12 @@ class ScanCommand:
         async with DocumentConverter() as converter:
             for doc in docs_to_process:
                 result = await converter.convert_document(doc, output_dir, use_ocr=False)
-                status = DocumentStatus.NEW if doc.full_path in new_set else DocumentStatus.MODIFIED
+                if doc.full_path in new_set:
+                    status = DocumentStatus.NEW
+                elif doc.full_path in modified_set:
+                    status = DocumentStatus.MODIFIED
+                else:
+                    status = DocumentStatus.UNCHANGED
                 if result.success:
                     summary.converted += 1
                 else:
@@ -308,6 +322,26 @@ class ScanCommand:
                     event=ScanEventType.FILE_CONVERTED,
                     data={"path": doc.full_path, "success": result.success, "ocr_required": result.ocr_required},
                 )
+
+    @staticmethod
+    def _collect_stale_error_paths(
+        cached_entries: dict[str, CacheEntry],
+        docs_by_path: dict[str, DocumentMetadata],
+        to_process_paths: set[str],
+    ) -> set[str]:
+        """Devuelve las rutas de documentos sin cambios cuya conversión anterior
+        quedó en `ERROR`, para reintentarlas en el siguiente escaneo normal.
+
+        Sin esto, `get_changes()` clasifica estos ficheros como `unchanged` (su
+        hash no varió) y quedarían excluidos de `docs_to_process` para siempre,
+        obligando a "forzar rescan completo" (que reprocesa todo el proyecto)
+        para poder reintentar un único fichero fallido.
+        """
+        return {
+            entry.file_path
+            for entry in cached_entries.values()
+            if entry.conversion_status == ConversionStatus.ERROR and entry.file_path not in to_process_paths and entry.file_path in docs_by_path
+        }
 
     @staticmethod
     def _collect_stale_ocr_candidates(
@@ -370,6 +404,7 @@ class ScanCommand:
             timestamp=doc.modified_time,
             status=status,
             conversion_status=conversion_status,
+            error_message=result.error,
         )
 
 
