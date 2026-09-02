@@ -138,8 +138,14 @@ async def test_migrate_adds_error_message_column_to_legacy_db(tmp_path) -> None:
 
     async with CacheManager(db_path) as cache:
         loaded = await cache.load_cache()
+        assert loaded["/repo/legacy.pdf"].error_message is None
 
-    assert loaded["/repo/legacy.pdf"].error_message is None
+        # Round-trip completo tras la migracion: la columna anadida por ALTER
+        # TABLE debe aceptar escrituras normales, no solo lecturas.
+        await cache.save_entries([_entry("/repo/legacy.pdf", "hash-legacy", error_message="fallo tras migrar")])
+        reloaded = await cache.load_cache()
+
+    assert reloaded["/repo/legacy.pdf"].error_message == "fallo tras migrar"
 
 
 @pytest.mark.asyncio

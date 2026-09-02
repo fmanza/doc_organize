@@ -55,6 +55,36 @@ async def test_cache_api_returns_saved_entries(tmp_path) -> None:
     assert payload["entries"][0]["file_path"] == "/repo/docs/report.pdf"
     assert payload["entries"][0]["status"] == "new"
     assert payload["entries"][0]["conversion_status"] == "success"
+    assert payload["entries"][0]["error_message"] is None
+
+
+@pytest.mark.asyncio
+async def test_cache_api_returns_error_message_for_failed_conversion(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    cache_db = tmp_path / "workspaces" / project.name / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [
+                CacheEntry(
+                    file_path="/repo/docs/roto.pdf",
+                    sha256_hash="b" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.UNCHANGED,
+                    conversion_status=ConversionStatus.ERROR,
+                    error_message="Documento cifrado, no se pudo abrir",
+                )
+            ]
+        )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/api/projects/{project.name}/cache")
+
+    assert response.status_code == 200
+    entry = response.json()["entries"][0]
+    assert entry["conversion_status"] == "error"
+    assert entry["error_message"] == "Documento cifrado, no se pudo abrir"
 
 
 @pytest.mark.asyncio

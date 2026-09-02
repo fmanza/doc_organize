@@ -192,6 +192,49 @@ async def test_scan_page_cache_tab_shows_search_box_and_folder_column(tmp_path) 
 
 
 @pytest.mark.asyncio
+async def test_scan_page_cache_tab_shows_error_message_as_tooltip(tmp_path) -> None:
+    """La celda "Conversión" de una entrada en ERROR lleva el mensaje de error
+    como `title` (tooltip) — ver `folder_selector.html.j2`. Las entradas sin
+    error (o no fallidas) no deben llevar ese atributo."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    cache_db = tmp_path / "workspaces" / project.name / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [
+                CacheEntry(
+                    file_path=str(tmp_path / "docs" / "roto.pdf"),
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.UNCHANGED,
+                    conversion_status=ConversionStatus.ERROR,
+                    error_message="Documento cifrado, no se pudo abrir",
+                ),
+                CacheEntry(
+                    file_path=str(tmp_path / "docs" / "ok.pdf"),
+                    sha256_hash="b" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                ),
+            ]
+        )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/scan", params={"tab": "cache"})
+
+    assert response.status_code == 200
+    html = response.text
+    # Celda "Conversión" de la fila en error: lleva el mensaje como title.
+    assert 'whitespace-nowrap" title="Documento cifrado, no se pudo abrir">error</td>' in html
+    # Celda "Conversión" de la fila sin error: sin atributo title (el `title` de
+    # la celda "Carpeta", ver folder_selector.html.j2:122, es un tooltip distinto
+    # que sí aparece siempre y no debe confundirse con este).
+    assert 'whitespace-nowrap">success</td>' in html
+
+
+@pytest.mark.asyncio
 async def test_scan_page_cache_tab_paginates_and_navigates_pages(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
