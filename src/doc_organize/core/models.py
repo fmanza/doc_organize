@@ -176,6 +176,7 @@ class CacheEntry(BaseModel):
     status: DocumentStatus = Field(..., description="Estado del documento (new/unchanged/modified/deleted)")
     conversion_status: ConversionStatus | None = Field(None, description="Estado de progreso de la conversión")
     error_message: str | None = Field(None, description="Mensaje de error de la última conversión fallida")
+    error_retry_count: int = Field(0, description="Fallos consecutivos sin cambios en el fichero (0 si el último intento tuvo éxito)")
 
 
 class CacheExportSnapshot(BaseModel):

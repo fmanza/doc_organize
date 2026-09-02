@@ -7,7 +7,13 @@ from doc_organize.core.exceptions import CacheError
 from doc_organize.core.models import CacheEntry, DocumentMetadata, DocumentStatus
 
 
-def _entry(file_path: str, sha256_hash: str, timestamp: float = 1.0, error_message: str | None = None) -> CacheEntry:
+def _entry(
+    file_path: str,
+    sha256_hash: str,
+    timestamp: float = 1.0,
+    error_message: str | None = None,
+    error_retry_count: int = 0,
+) -> CacheEntry:
     return CacheEntry(
         file_path=file_path,
         sha256_hash=sha256_hash,
@@ -15,6 +21,7 @@ def _entry(file_path: str, sha256_hash: str, timestamp: float = 1.0, error_messa
         status=DocumentStatus.NEW,
         conversion_status=None,
         error_message=error_message,
+        error_retry_count=error_retry_count,
     )
 
 
@@ -33,12 +40,13 @@ def _doc(file_path: str, sha256_hash: str) -> DocumentMetadata:
 async def test_save_and_load_roundtrip(tmp_path) -> None:
     db_path = tmp_path / "cache.db"
     async with CacheManager(db_path) as cache:
-        await cache.save_entries([_entry("/repo/a.pdf", "hash-a", error_message="Documento cifrado")])
+        await cache.save_entries([_entry("/repo/a.pdf", "hash-a", error_message="Documento cifrado", error_retry_count=2)])
         loaded = await cache.load_cache()
 
     assert "/repo/a.pdf" in loaded
     assert loaded["/repo/a.pdf"].sha256_hash == "hash-a"
     assert loaded["/repo/a.pdf"].error_message == "Documento cifrado"
+    assert loaded["/repo/a.pdf"].error_retry_count == 2
 
 
 @pytest.mark.asyncio
@@ -139,13 +147,50 @@ async def test_migrate_adds_error_message_column_to_legacy_db(tmp_path) -> None:
     async with CacheManager(db_path) as cache:
         loaded = await cache.load_cache()
         assert loaded["/repo/legacy.pdf"].error_message is None
+        assert loaded["/repo/legacy.pdf"].error_retry_count == 0
 
-        # Round-trip completo tras la migracion: la columna anadida por ALTER
-        # TABLE debe aceptar escrituras normales, no solo lecturas.
-        await cache.save_entries([_entry("/repo/legacy.pdf", "hash-legacy", error_message="fallo tras migrar")])
+        # Round-trip completo tras la migracion: las columnas anadidas por ALTER
+        # TABLE deben aceptar escrituras normales, no solo lecturas.
+        await cache.save_entries([_entry("/repo/legacy.pdf", "hash-legacy", error_message="fallo tras migrar", error_retry_count=1)])
         reloaded = await cache.load_cache()
 
     assert reloaded["/repo/legacy.pdf"].error_message == "fallo tras migrar"
+    assert reloaded["/repo/legacy.pdf"].error_retry_count == 1
+
+
+@pytest.mark.asyncio
+async def test_migrate_adds_only_missing_column_when_partially_migrated(tmp_path) -> None:
+    """DB de una revision intermedia: `error_message` ya existe (migracion previa)
+    pero `error_retry_count` no. La migracion debe anadir solo la que falta, sin
+    fallar con "duplicate column" al comprobar `error_message`."""
+    db_path = tmp_path / "cache.db"
+
+    import aiosqlite
+
+    async with aiosqlite.connect(db_path) as legacy_conn:
+        await legacy_conn.execute(
+            """
+            CREATE TABLE cache_entries (
+                file_path TEXT PRIMARY KEY,
+                sha256_hash TEXT NOT NULL,
+                timestamp REAL NOT NULL,
+                status TEXT NOT NULL,
+                conversion_status TEXT,
+                error_message TEXT
+            )
+            """
+        )
+        await legacy_conn.execute(
+            "INSERT INTO cache_entries VALUES (?, ?, ?, ?, ?, ?)",
+            ("/repo/parcial.pdf", "hash-parcial", 1.0, "new", "error", "fallo previo"),
+        )
+        await legacy_conn.commit()
+
+    async with CacheManager(db_path) as cache:
+        loaded = await cache.load_cache()
+
+    assert loaded["/repo/parcial.pdf"].error_message == "fallo previo"
+    assert loaded["/repo/parcial.pdf"].error_retry_count == 0
 
 
 @pytest.mark.asyncio

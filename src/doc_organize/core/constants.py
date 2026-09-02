@@ -37,6 +37,13 @@ VERSION_SUFFIX_PATTERN = re.compile(
 #: Nombre por defecto de la base de datos de cache (REQ-006).
 DEFAULT_CACHE_DB_NAME = "cache.db"
 
+#: Numero maximo de reintentos automaticos (en escaneos normales, sin "forzar
+#: rescan") para un fichero sin cambios cuya conversion sigue en ERROR. Evita
+#: que un fichero permanentemente irrecuperable (p.ej. cifrado) se reprocese
+#: en cada escaneo para siempre: al alcanzar el limite, vuelve a requerir
+#: "forzar rescan completo" (ver `ScanCommand._collect_stale_error_paths`).
+MAX_AUTO_ERROR_RETRIES = 3
+
 #: Nombre del fichero que registra la última tanda de rutas escaneadas/deduplicadas
 #: por proyecto (escrito por `ScanCommand._resolve_scan_paths`, releído por
 #: `web/routes/duplicates.py` para re-escanear sin pedir las carpetas de nuevo).
@@ -121,6 +128,7 @@ __all__ = [
     "IGNORED_NAMES",
     "LOGIN_LOCKOUT_SECONDS",
     "LOGIN_MAX_ATTEMPTS",
+    "MAX_AUTO_ERROR_RETRIES",
     "PROJECT_NAME_FORBIDDEN_CHARS",
     "PROJECT_NAME_MAX_LENGTH",
     "PROJECT_NAME_RESERVED_PATTERN",

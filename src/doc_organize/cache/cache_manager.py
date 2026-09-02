@@ -19,19 +19,21 @@ CREATE TABLE IF NOT EXISTS cache_entries (
     timestamp REAL NOT NULL,
     status TEXT NOT NULL,
     conversion_status TEXT,
-    error_message TEXT
+    error_message TEXT,
+    error_retry_count INTEGER NOT NULL DEFAULT 0
 )
 """
 
 _UPSERT = """
-INSERT INTO cache_entries (file_path, sha256_hash, timestamp, status, conversion_status, error_message)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO cache_entries (file_path, sha256_hash, timestamp, status, conversion_status, error_message, error_retry_count)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(file_path) DO UPDATE SET
     sha256_hash=excluded.sha256_hash,
     timestamp=excluded.timestamp,
     status=excluded.status,
     conversion_status=excluded.conversion_status,
-    error_message=excluded.error_message
+    error_message=excluded.error_message,
+    error_retry_count=excluded.error_retry_count
 """
 
 
@@ -82,14 +84,21 @@ class CacheManager:
         return self
 
     async def _migrate_schema(self) -> None:
-        """Anade `error_message` a `cache_entries` si falta (bases de datos creadas
+        """Anade columnas nuevas a `cache_entries` si faltan (bases de datos creadas
         antes de esta revision). SQLite no soporta `ADD COLUMN IF NOT EXISTS`, de ahi
         la comprobacion manual via `PRAGMA table_info` — mismo patron que
         `AuthStore._migrate_schema()`."""
         cursor = await self._connection.execute("PRAGMA table_info(cache_entries)")
         columns = {row[1] for row in await cursor.fetchall()}
+
+        altered = False
         if "error_message" not in columns:
             await self._connection.execute("ALTER TABLE cache_entries ADD COLUMN error_message TEXT")
+            altered = True
+        if "error_retry_count" not in columns:
+            await self._connection.execute("ALTER TABLE cache_entries ADD COLUMN error_retry_count INTEGER NOT NULL DEFAULT 0")
+            altered = True
+        if altered:
             await self._connection.commit()
 
     async def __aexit__(self, *exc_info: object) -> None:
@@ -106,9 +115,9 @@ class CacheManager:
     async def load_cache(self) -> dict[str, CacheEntry]:
         """Lee todas las entradas de `cache.db`."""
         cache: dict[str, CacheEntry] = {}
-        query = "SELECT file_path, sha256_hash, timestamp, status, conversion_status, error_message FROM cache_entries"
+        query = "SELECT file_path, sha256_hash, timestamp, status, conversion_status, error_message, error_retry_count FROM cache_entries"
         async with self._connection.execute(query) as cursor:
-            async for file_path, sha256_hash, timestamp, status, conversion_status, error_message in cursor:
+            async for file_path, sha256_hash, timestamp, status, conversion_status, error_message, error_retry_count in cursor:
                 cache[file_path] = CacheEntry(
                     file_path=file_path,
                     sha256_hash=sha256_hash,
@@ -116,6 +125,7 @@ class CacheManager:
                     status=DocumentStatus(status),
                     conversion_status=ConversionStatus(conversion_status) if conversion_status else None,
                     error_message=error_message,
+                    error_retry_count=error_retry_count,
                 )
         return cache
 
@@ -160,7 +170,7 @@ class CacheManager:
         Example:
             >>> page = await cache.load_cache_page(limit=50, offset=0)
         """
-        query = "SELECT file_path, sha256_hash, timestamp, status, conversion_status, error_message FROM cache_entries"
+        query = "SELECT file_path, sha256_hash, timestamp, status, conversion_status, error_message, error_retry_count FROM cache_entries"
         params: list[object] = []
         if search:
             query += " WHERE py_lower(file_path) LIKE py_lower(?) ESCAPE '\\'"
@@ -170,7 +180,7 @@ class CacheManager:
 
         entries: list[CacheEntry] = []
         async with self._connection.execute(query, params) as cursor:
-            async for file_path, sha256_hash, timestamp, status, conversion_status, error_message in cursor:
+            async for file_path, sha256_hash, timestamp, status, conversion_status, error_message, error_retry_count in cursor:
                 entries.append(
                     CacheEntry(
                         file_path=file_path,
@@ -179,6 +189,7 @@ class CacheManager:
                         status=DocumentStatus(status),
                         conversion_status=ConversionStatus(conversion_status) if conversion_status else None,
                         error_message=error_message,
+                        error_retry_count=error_retry_count,
                     )
                 )
         return entries
@@ -240,6 +251,7 @@ class CacheManager:
                 entry.status.value,
                 entry.conversion_status.value if entry.conversion_status else None,
                 entry.error_message,
+                entry.error_retry_count,
             )
             for entry in entries
         ]

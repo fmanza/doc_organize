@@ -797,11 +797,67 @@ async def test_scan_websocket_retries_error_entries_without_force(tmp_path, nati
     retry_events = _scan({"use_ocr": False, "use_gpu": False})
     assert retry_events[-1]["data"]["unchanged"] == 1  # el hash no cambió
     assert retry_events[-1]["data"]["converted"] == 1  # pero se reintentó por estar en ERROR
+    assert retry_events[-1]["data"]["error_retries"] == 1
 
     async with CacheManager(cache_db) as cache:
         reloaded = await cache.load_cache()
     assert reloaded[file_path].conversion_status == ConversionStatus.SUCCESS
     assert reloaded[file_path].error_message is None
+    assert reloaded[file_path].error_retry_count == 0
+
+
+@pytest.mark.asyncio
+async def test_scan_websocket_does_not_retry_error_entry_past_retry_limit(tmp_path, native_pdf) -> None:
+    """Un fichero en ERROR que ya acumula `MAX_AUTO_ERROR_RETRIES` fallos
+    consecutivos deja de reintentarse en escaneos normales (evita reprocesar
+    para siempre un fichero irrecuperable) — pero el escaneo lo refleja en
+    `error_retries_capped`, no lo descarta en silencio (ver AUDIT_PLAN)."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    client = TestClient(app)
+    add_response = client.post(f"/api/projects/{project.name}/folders/library", json={"path": str(native_pdf.parent)})
+    assert add_response.status_code == 200
+
+    from doc_organize.core.constants import MAX_AUTO_ERROR_RETRIES
+    from doc_organize.utils.hash_utils import hash_file
+
+    file_hash = await hash_file(str(native_pdf))
+    cache_db = tmp_path / "workspaces" / project.name / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [
+                CacheEntry(
+                    file_path=str(native_pdf),
+                    sha256_hash=file_hash,
+                    timestamp=native_pdf.stat().st_mtime,
+                    status=DocumentStatus.UNCHANGED,
+                    conversion_status=ConversionStatus.ERROR,
+                    error_message="fallo persistente",
+                    error_retry_count=MAX_AUTO_ERROR_RETRIES,
+                )
+            ]
+        )
+
+    with client.websocket_connect(f"/api/projects/{project.name}/scan") as websocket:
+        websocket.send_json({"use_ocr": False, "use_gpu": False})
+        events = []
+        while True:
+            message = websocket.receive_json()
+            events.append(message)
+            if message["event"] == "completed":
+                break
+
+    assert events[-1]["data"]["converted"] == 0  # no se reintenta: limite ya alcanzado
+    assert events[-1]["data"]["error_retries"] == 0
+    assert events[-1]["data"]["error_retries_capped"] == 1
+
+    async with CacheManager(cache_db) as cache:
+        reloaded = await cache.load_cache()
+    # La entrada no se toca: sigue en ERROR con el mismo contador y mensaje.
+    assert reloaded[str(native_pdf)].conversion_status == ConversionStatus.ERROR
+    assert reloaded[str(native_pdf)].error_retry_count == MAX_AUTO_ERROR_RETRIES
 
 
 @pytest.mark.asyncio

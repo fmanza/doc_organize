@@ -23,6 +23,7 @@ from pathlib import Path
 
 from doc_organize.cache import CacheManager
 from doc_organize.converter import DocumentConverter, OCRScheduler
+from doc_organize.core.constants import MAX_AUTO_ERROR_RETRIES
 from doc_organize.core.models import (
     CacheEntry,
     ConversionResult,
@@ -50,16 +51,19 @@ class ScanSummary:
     conversion_errors: int = 0
     ocr_required: int = 0
     ocr_processed: int = 0
+    error_retries: int = 0
+    error_retries_capped: int = 0
 
     def render(self) -> str:
-        return "\n".join(
-            [
-                f"Documentos escaneados: {self.scanned}",
-                f"  nuevos: {self.new} | modificados: {self.modified} | sin cambios: {self.unchanged}",
-                f"Convertidos: {self.converted} (errores: {self.conversion_errors})",
-                f"Requieren OCR: {self.ocr_required} (procesados con OCR: {self.ocr_processed})",
-            ]
-        )
+        lines = [
+            f"Documentos escaneados: {self.scanned}",
+            f"  nuevos: {self.new} | modificados: {self.modified} | sin cambios: {self.unchanged}",
+            f"Convertidos: {self.converted} (errores: {self.conversion_errors}, reintentos de errores previos: {self.error_retries})",
+            f"Requieren OCR: {self.ocr_required} (procesados con OCR: {self.ocr_processed})",
+        ]
+        if self.error_retries_capped:
+            lines.append(f"Sin reintentar (límite de {MAX_AUTO_ERROR_RETRIES} reintentos alcanzado): {self.error_retries_capped}")
+        return "\n".join(lines)
 
 
 @dataclass
@@ -182,7 +186,9 @@ class ScanCommand:
             modified_set = set(modified_files)
             to_process_paths = new_set | modified_set
             docs_by_path = {doc.full_path: doc for doc in scan_result.documents}
-            error_retry_paths = self._collect_stale_error_paths(cached_entries, docs_by_path, to_process_paths)
+            error_retry_paths, error_retries_capped_paths = self._collect_stale_error_paths(cached_entries, docs_by_path, to_process_paths)
+            summary.error_retries = len(error_retry_paths)
+            summary.error_retries_capped = len(error_retries_capped_paths)
             already_converting = to_process_paths | error_retry_paths
             docs_to_process = [docs_by_path[path] for path in already_converting if path in docs_by_path]
             yield ScanEvent(
@@ -206,12 +212,14 @@ class ScanCommand:
             entries: list[CacheEntry] = []
             ocr_candidates: list[DocumentMetadata] = []
 
-            async for event in self._convert_documents(docs_to_process, output_dir, new_set, modified_set, summary, entries, ocr_candidates):
+            async for event in self._convert_documents(
+                docs_to_process, output_dir, new_set, modified_set, cached_entries, summary, entries, ocr_candidates
+            ):
                 yield event
 
             if use_ocr:
                 self._collect_stale_ocr_candidates(cached_entries, docs_by_path, already_converting, ocr_candidates)
-                async for event in self._process_ocr(ocr_candidates, output_dir, use_gpu, entries, summary):
+                async for event in self._process_ocr(ocr_candidates, output_dir, use_gpu, entries, cached_entries, summary):
                     yield event
 
             await cache.save_entries(entries)
@@ -285,6 +293,7 @@ class ScanCommand:
         output_dir: Path,
         new_set: set[str],
         modified_set: set[str],
+        cached_entries: dict[str, CacheEntry],
         summary: ScanSummary,
         entries: list[CacheEntry],
         ocr_candidates: list[DocumentMetadata],
@@ -294,7 +303,9 @@ class ScanCommand:
         `docs_to_process` incluye tanto ficheros nuevos/modificados (`new_set`/
         `modified_set`) como reintentos de ficheros sin cambios cuya conversión
         anterior quedó en `ERROR` (`_collect_stale_error_paths`) — estos últimos
-        conservan `status=UNCHANGED`, ya que su hash no varió.
+        conservan `status=UNCHANGED`, ya que su hash no varió. `cached_entries`
+        se usa solo para leer el `error_retry_count` previo de cada documento
+        (`_build_entry` lo incrementa en fallo / lo resetea en éxito).
 
         Muta `summary`/`entries`/`ocr_candidates` in-place (son del llamador) en vez
         de devolverlos: es la forma más simple de combinar "acumula resultados" con
@@ -317,7 +328,9 @@ class ScanCommand:
                 if result.ocr_required:
                     summary.ocr_required += 1
                     ocr_candidates.append(doc)
-                entries.append(self._build_entry(doc, result, status, ocr_pending=result.ocr_required))
+                cached = cached_entries.get(doc.full_path)
+                previous_retry_count = cached.error_retry_count if cached else 0
+                entries.append(self._build_entry(doc, result, status, ocr_pending=result.ocr_required, previous_retry_count=previous_retry_count))
                 yield ScanEvent(
                     event=ScanEventType.FILE_CONVERTED,
                     data={"path": doc.full_path, "success": result.success, "ocr_required": result.ocr_required},
@@ -328,20 +341,34 @@ class ScanCommand:
         cached_entries: dict[str, CacheEntry],
         docs_by_path: dict[str, DocumentMetadata],
         to_process_paths: set[str],
-    ) -> set[str]:
-        """Devuelve las rutas de documentos sin cambios cuya conversión anterior
-        quedó en `ERROR`, para reintentarlas en el siguiente escaneo normal.
+    ) -> tuple[set[str], set[str]]:
+        """Devuelve `(reintentables, límite_agotado)`: rutas de documentos sin
+        cambios cuya conversión anterior quedó en `ERROR`, separadas según si ya
+        acumulan `MAX_AUTO_ERROR_RETRIES` fallos consecutivos.
 
         Sin esto, `get_changes()` clasifica estos ficheros como `unchanged` (su
         hash no varió) y quedarían excluidos de `docs_to_process` para siempre,
         obligando a "forzar rescan completo" (que reprocesa todo el proyecto)
-        para poder reintentar un único fichero fallido.
+        para poder reintentar un único fichero fallido. El límite evita que un
+        fichero irrecuperable (p.ej. cifrado) se reprocese en cada escaneo para
+        siempre; las rutas con límite agotado se devuelven igualmente (no se
+        descartan sin más) para que el llamante las refleje en
+        `ScanSummary.error_retries_capped` — el límite no debe volver a excluir
+        ficheros del resumen en silencio, que es justo el bug que este método
+        resuelve para el caso general.
         """
-        return {
-            entry.file_path
-            for entry in cached_entries.values()
-            if entry.conversion_status == ConversionStatus.ERROR and entry.file_path not in to_process_paths and entry.file_path in docs_by_path
-        }
+        retryable: set[str] = set()
+        capped: set[str] = set()
+        for entry in cached_entries.values():
+            if entry.conversion_status != ConversionStatus.ERROR:
+                continue
+            if entry.file_path in to_process_paths or entry.file_path not in docs_by_path:
+                continue
+            if entry.error_retry_count >= MAX_AUTO_ERROR_RETRIES:
+                capped.add(entry.file_path)
+            else:
+                retryable.add(entry.file_path)
+        return retryable, capped
 
     @staticmethod
     def _collect_stale_ocr_candidates(
@@ -369,6 +396,7 @@ class ScanCommand:
         output_dir: Path,
         use_gpu: bool,
         entries: list[CacheEntry],
+        cached_entries: dict[str, CacheEntry],
         summary: ScanSummary,
     ) -> AsyncIterator[ScanEvent]:
         """Reprocesa `ocr_candidates` con OCR, yieldeando un `OCR_PROCESSED` por unidad.
@@ -385,19 +413,31 @@ class ScanCommand:
         for doc, result in zip(ocr_candidates, ocr_results, strict=True):
             previous = entries_by_path.get(doc.full_path)
             status = previous.status if previous else DocumentStatus.UNCHANGED
-            new_entry = self._build_entry(doc, result, status, ocr_pending=False)
+            if previous is not None:
+                previous_retry_count = previous.error_retry_count
+            else:
+                cached = cached_entries.get(doc.full_path)
+                previous_retry_count = cached.error_retry_count if cached else 0
+            new_entry = self._build_entry(doc, result, status, ocr_pending=False, previous_retry_count=previous_retry_count)
             entries_by_path[doc.full_path] = new_entry
             yield ScanEvent(event=ScanEventType.OCR_PROCESSED, data={"path": doc.full_path, "success": result.success})
         entries[:] = list(entries_by_path.values())
 
     @staticmethod
-    def _build_entry(doc: DocumentMetadata, result: ConversionResult, status: DocumentStatus, *, ocr_pending: bool) -> CacheEntry:
+    def _build_entry(
+        doc: DocumentMetadata,
+        result: ConversionResult,
+        status: DocumentStatus,
+        *,
+        ocr_pending: bool,
+        previous_retry_count: int = 0,
+    ) -> CacheEntry:
         if not result.success:
             conversion_status = ConversionStatus.ERROR
-        elif ocr_pending:
-            conversion_status = ConversionStatus.OCR_PENDING
+            error_retry_count = previous_retry_count + 1
         else:
-            conversion_status = ConversionStatus.SUCCESS
+            error_retry_count = 0
+            conversion_status = ConversionStatus.OCR_PENDING if ocr_pending else ConversionStatus.SUCCESS
         return CacheEntry(
             file_path=doc.full_path,
             sha256_hash=doc.sha256_hash,
@@ -405,6 +445,7 @@ class ScanCommand:
             status=status,
             conversion_status=conversion_status,
             error_message=result.error,
+            error_retry_count=error_retry_count,
         )
 
 
