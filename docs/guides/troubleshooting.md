@@ -4,6 +4,20 @@
 
 No tienes instalado el extra `web`. `pip install doc_organize[web]`.
 
+## `libgomp.so.1` no encontrado en Linux mínimo/contenedores
+
+RapidOCR (motor OCR por defecto, incluido en el núcleo) usa ONNX Runtime, que
+enlaza en tiempo de ejecución con `libgomp.so.1` (OpenMP de GCC). Las imágenes
+completas de Ubuntu/Debian ya lo incluyen, pero variantes `slim`/`alpine` o
+distros mínimas no. Instala el paquete del sistema:
+
+```bash
+apt-get install -y libgomp1    # Debian/Ubuntu
+# equivalente en otras distros: busca el paquete "libgomp" con tu gestor
+```
+
+Ver también [Instalación → Núcleo (CLI)](installation.md#nucleo-cli).
+
 ## Un documento escaneado nunca sale de "OCR pendiente"
 
 `--use-ocr` reprocesa en la misma ejecución los documentos detectados como
@@ -54,6 +68,48 @@ drivers) con el servidor ya arrancado, reinicia el proceso
 (`python -m doc_organize web`) — el nuevo proceso vuelve a detectar el entorno
 desde cero. Un reinicio **no** soluciona la causa más común de arriba, solo
 esta.
+
+## `ImportError: libGL.so.1` al usar `ocr-gpu` en Linux/Docker
+
+`opencv-python` (parte del extra `ocr-gpu`, necesario para EasyOCR) enlaza con
+librerías gráficas del sistema. En servidores o imágenes de contenedor sin
+entorno gráfico, `import cv2` falla con
+`libGL.so.1: cannot open shared object file`. Dos soluciones:
+
+```bash
+# Opción 1: instalar la librería del sistema
+apt-get install -y libgl1        # Debian/Ubuntu
+
+# Opción 2: si no necesitas funciones de GUI de OpenCV
+pip uninstall opencv-python
+pip install opencv-python-headless
+```
+
+Ver también [Instalación → Aceleración GPU](installation.md#aceleracion-gpu-para-ocr-opcional).
+
+## `pip install .[av]` falla por `numba`/`llvmlite` en Python 3.14
+
+El extra `[av]` arrastra Whisper (`docling[asr]`), y Whisper depende de
+`numba`/`llvmlite`. A fecha de esta revisión, esas dos librerías todavía no
+publican wheels precompilados para Python 3.14, así que `pip` falla al
+resolver la instalación en ese intérprete.
+
+**No es un bug de `doc_organize`** — revisa `src/doc_organize/utils/av_detector.py`:
+no importa ni depende de `numba` en ningún punto, solo comprueba
+`find_spec("whisper")` y `shutil.which("ffmpeg")`. Es un problema de
+resolución de dependencias de `pip`/Whisper en un intérprete todavía no
+soportado por esas librerías, no de la lógica de `doc_organize`.
+
+Soluciones (de entorno, no de código):
+
+1. Crea el entorno virtual con **Python 3.11, 3.12 o 3.13** e instala `[av]`
+   ahí — el resto del proyecto no impone esta restricción, solo este extra.
+2. Si no necesitas transcribir audio/vídeo, no instales `[av]` ni actives
+   `--include-audio-video` (CLI) / el checkbox equivalente (web). El resto de
+   `doc_organize` (scan, convert, dedup, cache, OCR) funciona sin restricción
+   en Python 3.14.
+
+Ver también [Instalación → Formato extendido: audio/vídeo](installation.md#formato-extendido-audiovideo-opcional).
 
 ## `scan --include-audio-video` falla antes de escanear nada
 
