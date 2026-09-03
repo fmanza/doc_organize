@@ -1,11 +1,16 @@
 # 📦 Descarga de Documentación como ZIP
 
-> **⚠️ Nota de verificación (2026-08-28)**: `scripts/build_docs_zip.py` (referenciado en toda esta
-> guía) no existe en el repo — la funcionalidad de ZIP de release nunca se completó (ver
-> `.github/workflows/docs-release.yml` y `docs-zip-release.yml`, ambos rotos por esta misma razón).
-> Las referencias a "Zensical" en esta guía son heredadas de una herramienta evaluada y descartada
-> (ver `.ai/DECISIONS_LOG.md`) — el proyecto usa MkDocs. Tratar esta guía como aspiracional, no como
-> documentación de algo funcional hoy.
+> **⚠️ Nota de verificación (2026-08-28, corregida 2026-09-03)**: la nota original de esta fecha
+> afirmaba que `scripts/build_docs_zip.py` no existía en el repo y que la funcionalidad de ZIP de
+> release nunca se completó — **eso ya no es cierto**: el script existe (342 líneas), tiene 13 tests
+> en verde (`tests/unit/test_build_docs_zip.py`) y `.github/workflows/docs-zip-release.yml` lo invoca
+> con éxito en cada push a `main`/`develop` que toque `docs/` (verificado en la sesión de
+> maturity-assessment 2026-09-03). `.github/workflows/docs-release.yml` (el basado en tags `v*`, la
+> otra referencia de esta nota) se **retiró** en esa misma sesión por redundante — usa solo
+> `docs-zip-release.yml`. Las referencias a "Zensical" y a `python scripts/build_docs_zip.py` **sin**
+> `--builder mkdocs` en los ejemplos de más abajo siguen sin actualizar (el script real exige ese
+> flag) — el resto de esta guía (Quick Start, estructura de archivos) sigue sin revisar en detalle,
+> trátala con cautela hasta que se audite completa.
 
 Esta guía explica cómo generar y distribuir la documentación de doc_organize como ZIP, con **mkdocs**.
 

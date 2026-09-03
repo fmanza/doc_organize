@@ -2,7 +2,7 @@
 
 import json
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -110,7 +110,7 @@ async def test_resolve_duplicates_computes_duration_from_started_at(tmp_path) ->
     manager = DeduplicationManager()
     groups = manager.find_duplicates([newer_doc, older_doc])
     duplicates_dir = tmp_path / "duplicados"
-    started_at = datetime.now(timezone.utc) - timedelta(seconds=5)
+    started_at = datetime.now(UTC) - timedelta(seconds=5)
 
     report = await manager.resolve_duplicates(groups, duplicates_dir, started_at=started_at)
 

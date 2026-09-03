@@ -37,17 +37,13 @@ async def change_password_submit(
         return RedirectResponse("/", status_code=303)
 
     if new_password != confirm_password:
-        return _templates.TemplateResponse(
-            request, "change_password.html.j2", {"error": "Las contraseñas nuevas no coinciden."}, status_code=422
-        )
+        return _templates.TemplateResponse(request, "change_password.html.j2", {"error": "Las contraseñas nuevas no coinciden."}, status_code=422)
 
     async with get_auth_store(request) as store:
         success = await store.change_password(user_id, current_password, new_password)
 
     if not success:
-        return _templates.TemplateResponse(
-            request, "change_password.html.j2", {"error": "La contraseña actual no es correcta."}, status_code=401
-        )
+        return _templates.TemplateResponse(request, "change_password.html.j2", {"error": "La contraseña actual no es correcta."}, status_code=401)
 
     return RedirectResponse("/", status_code=303)
 

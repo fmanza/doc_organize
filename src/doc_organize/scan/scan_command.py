@@ -22,7 +22,7 @@ import uuid
 
 from collections.abc import AsyncIterator
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from doc_organize.cache import CacheManager
@@ -220,7 +220,7 @@ class ScanCommand:
                 desactiva la persistencia del histórico de tiempos.
         """
         scan_run_id = uuid.uuid4().hex
-        started_at = datetime.now(timezone.utc).isoformat()
+        started_at = datetime.now(UTC).isoformat()
         start = time.monotonic()
         summary = ScanSummary()
         completed_ok = False
@@ -236,9 +236,7 @@ class ScanCommand:
                 # documentos nuevos; una reconversion posterior en el mismo pase borra esa
                 # carpeta (`shutil.rmtree` en `DocumentConverter._write_outputs`) y la
                 # "conversion" de esa imagen falla con FileNotFoundError.
-                scan_result = await scanner.scan_folders(
-                    clean_paths, include_audio_video=include_audio_video, exclude_dir=output_dir.resolve()
-                )
+                scan_result = await scanner.scan_folders(clean_paths, include_audio_video=include_audio_video, exclude_dir=output_dir.resolve())
             summary.scanned = len(scan_result.documents)
             summary.discovery_duration_seconds = scan_result.scan_duration_seconds
 
@@ -327,7 +325,7 @@ class ScanCommand:
                     if error_entries:
                         report = ScanErrorReport(
                             scan_run_id=scan_run_id,
-                            timestamp=datetime.now(timezone.utc).isoformat(),
+                            timestamp=datetime.now(UTC).isoformat(),
                             total_scanned=summary.scanned,
                             entries=error_entries,
                         )
@@ -349,7 +347,7 @@ class ScanCommand:
                     ScanRunReport(
                         scan_run_id=scan_run_id,
                         started_at=started_at,
-                        finished_at=datetime.now(timezone.utc).isoformat(),
+                        finished_at=datetime.now(UTC).isoformat(),
                         duration_seconds=summary.duration_seconds,
                         total_scanned=summary.scanned,
                         completed=True,
@@ -366,7 +364,7 @@ class ScanCommand:
                 run_report = ScanRunReport(
                     scan_run_id=scan_run_id,
                     started_at=started_at,
-                    finished_at=datetime.now(timezone.utc).isoformat(),
+                    finished_at=datetime.now(UTC).isoformat(),
                     duration_seconds=time.monotonic() - start,
                     total_scanned=summary.scanned,
                     completed=False,
@@ -461,7 +459,7 @@ class ScanCommand:
         duplicados" (escaneo + detección + movimiento), mismo criterio que
         `duration_seconds` en `ScanSummary`/`ScanRunReport` para Escanear.
         """
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         yield DedupEvent(event=DedupEventType.STARTED, data={})
 
         clean_paths, warnings = await self._resolve_scan_paths(paths, folders_json)

@@ -281,9 +281,7 @@ class DocumentConverter:
             "chunks": await asyncio.to_thread(self._build_chunks, docling_result.document, picture_description_applied),
         }
 
-        await asyncio.to_thread(
-            json_path.write_text, json.dumps(document_json, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+        await asyncio.to_thread(json_path.write_text, json.dumps(document_json, indent=2, ensure_ascii=False), encoding="utf-8")
         return markdown_path, json_path, images_dir
 
     @staticmethod

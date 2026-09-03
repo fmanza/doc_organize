@@ -11,7 +11,7 @@ import secrets
 import unicodedata
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Self
 from uuid import uuid4
@@ -133,7 +133,7 @@ def _verify_password(password: str, salt: str, expected_hash: str) -> bool:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _validate_role_name(name: str) -> str:
@@ -322,15 +322,11 @@ class AuthStore:
         )
 
     async def _load_role_project_names(self, role_id: str) -> list[str]:
-        cursor = await self._connection.execute(
-            "SELECT project_name FROM role_projects WHERE role_id = ? ORDER BY project_name", (role_id,)
-        )
+        cursor = await self._connection.execute("SELECT project_name FROM role_projects WHERE role_id = ? ORDER BY project_name", (role_id,))
         return [row[0] for row in await cursor.fetchall()]
 
     async def _load_role_scan_roots(self, role_id: str) -> list[str]:
-        cursor = await self._connection.execute(
-            "SELECT root_path FROM role_scan_roots WHERE role_id = ? ORDER BY root_path", (role_id,)
-        )
+        cursor = await self._connection.execute("SELECT root_path FROM role_scan_roots WHERE role_id = ? ORDER BY root_path", (role_id,))
         return [row[0] for row in await cursor.fetchall()]
 
     # ===== Tenants =====
@@ -361,9 +357,7 @@ class AuthStore:
             raise TenantAlreadyExistsError(f"Ya existe un tenant con id '{slug}'.")
 
         tenant = Tenant(id=slug, name=stripped, created_at=_now_iso())
-        admin_role = Role(
-            id=str(uuid4()), tenant_id=slug, name=DEFAULT_ADMIN_ROLE_NAME, is_admin=True, created_at=tenant.created_at
-        )
+        admin_role = Role(id=str(uuid4()), tenant_id=slug, name=DEFAULT_ADMIN_ROLE_NAME, is_admin=True, created_at=tenant.created_at)
         salt, password_hash = await asyncio.to_thread(_hash_password, DEFAULT_ADMIN_PASSWORD)
         admin_user = User(
             id=str(uuid4()),
@@ -404,9 +398,7 @@ class AuthStore:
 
     async def _role_name_taken(self, tenant_id: str, name: str, *, exclude_role_id: str | None = None) -> bool:
         if exclude_role_id is None:
-            cursor = await self._connection.execute(
-                "SELECT 1 FROM roles WHERE tenant_id = ? AND name = ? COLLATE NOCASE", (tenant_id, name)
-            )
+            cursor = await self._connection.execute("SELECT 1 FROM roles WHERE tenant_id = ? AND name = ? COLLATE NOCASE", (tenant_id, name))
         else:
             cursor = await self._connection.execute(
                 "SELECT 1 FROM roles WHERE tenant_id = ? AND name = ? COLLATE NOCASE AND id != ?",
@@ -415,9 +407,7 @@ class AuthStore:
         return await cursor.fetchone() is not None
 
     async def _username_taken(self, tenant_id: str, username: str) -> bool:
-        cursor = await self._connection.execute(
-            "SELECT 1 FROM users WHERE tenant_id = ? AND username = ? COLLATE NOCASE", (tenant_id, username)
-        )
+        cursor = await self._connection.execute("SELECT 1 FROM users WHERE tenant_id = ? AND username = ? COLLATE NOCASE", (tenant_id, username))
         return await cursor.fetchone() is not None
 
     # ===== Roles =====
@@ -495,8 +485,13 @@ class AuthStore:
             allowed_scan_roots = await self._load_role_scan_roots(row[0])
             roles.append(
                 Role(
-                    id=row[0], tenant_id=row[1], name=row[2], is_admin=bool(row[3]),
-                    project_names=project_names, allowed_scan_roots=allowed_scan_roots, created_at=row[4],
+                    id=row[0],
+                    tenant_id=row[1],
+                    name=row[2],
+                    is_admin=bool(row[3]),
+                    project_names=project_names,
+                    allowed_scan_roots=allowed_scan_roots,
+                    created_at=row[4],
                 )
             )
         return roles
@@ -518,8 +513,13 @@ class AuthStore:
         project_names = await self._load_role_project_names(row[0])
         allowed_scan_roots = await self._load_role_scan_roots(row[0])
         return Role(
-            id=row[0], tenant_id=row[1], name=row[2], is_admin=bool(row[3]),
-            project_names=project_names, allowed_scan_roots=allowed_scan_roots, created_at=row[4],
+            id=row[0],
+            tenant_id=row[1],
+            name=row[2],
+            is_admin=bool(row[3]),
+            project_names=project_names,
+            allowed_scan_roots=allowed_scan_roots,
+            created_at=row[4],
         )
 
     @staticmethod
@@ -548,9 +548,7 @@ class AuthStore:
         new_name = current.name if name is None else _validate_role_name(name)
         new_is_admin = current.is_admin if is_admin is None else is_admin
         new_project_names = current.project_names if project_names is None else list(dict.fromkeys(project_names))
-        new_scan_roots = (
-            current.allowed_scan_roots if allowed_scan_roots is None else list(dict.fromkeys(allowed_scan_roots))
-        )
+        new_scan_roots = current.allowed_scan_roots if allowed_scan_roots is None else list(dict.fromkeys(allowed_scan_roots))
         if is_admin is False and current.allowed_scan_roots and allowed_scan_roots is None:
             new_scan_roots = []
 
@@ -596,19 +594,20 @@ class AuthStore:
             allowed_scan_roots=allowed_scan_roots,
         )
 
-        if new_name.lower() != current.name.lower() and await self._role_name_taken(
-            tenant_id, new_name, exclude_role_id=role_id
-        ):
+        if new_name.lower() != current.name.lower() and await self._role_name_taken(tenant_id, new_name, exclude_role_id=role_id):
             raise RoleAlreadyExistsError(f"Ya existe un rol '{new_name}' en el tenant '{tenant_id}'.")
 
-        await self._connection.execute(
-            "UPDATE roles SET name = ?, is_admin = ? WHERE id = ?", (new_name, int(new_is_admin), role_id)
-        )
+        await self._connection.execute("UPDATE roles SET name = ?, is_admin = ? WHERE id = ?", (new_name, int(new_is_admin), role_id))
         await self._replace_role_associations(role_id, new_project_names, new_scan_roots)
         await self._connection.commit()
         return Role(
-            id=role_id, tenant_id=tenant_id, name=new_name, is_admin=new_is_admin,
-            project_names=new_project_names, allowed_scan_roots=new_scan_roots, created_at=current.created_at,
+            id=role_id,
+            tenant_id=tenant_id,
+            name=new_name,
+            is_admin=new_is_admin,
+            project_names=new_project_names,
+            allowed_scan_roots=new_scan_roots,
+            created_at=current.created_at,
         )
 
     async def delete_role(self, tenant_id: str, role_id: str) -> None:
@@ -650,9 +649,7 @@ class AuthStore:
         en `role_projects`. Comparación de nombre case-insensitive (mismo criterio
         que `ProjectRegistry.get_project()`).
         """
-        cursor = await self._connection.execute(
-            "SELECT is_admin FROM roles WHERE id = ? AND tenant_id = ?", (role_id, tenant_id)
-        )
+        cursor = await self._connection.execute("SELECT is_admin FROM roles WHERE id = ? AND tenant_id = ?", (role_id, tenant_id))
         row = await cursor.fetchone()
         if row is None:
             return False
@@ -666,9 +663,7 @@ class AuthStore:
 
     # ===== Usuarios =====
 
-    async def create_user(
-        self, tenant_id: str, username: str, password: str, role_id: str | None = None, must_change_password: bool = False
-    ) -> User:
+    async def create_user(self, tenant_id: str, username: str, password: str, role_id: str | None = None, must_change_password: bool = False) -> User:
         """Crea un usuario dentro de `tenant_id`; `username` es único por tenant (case-insensitive).
 
         Args:
@@ -732,15 +727,11 @@ class AuthStore:
     async def list_users(self, tenant_id: str) -> list[User]:
         """Lista los usuarios de `tenant_id`, ordenados por fecha de creación."""
         cursor = await self._connection.execute(
-            "SELECT id, tenant_id, username, role_id, must_change_password, created_at FROM users "
-            "WHERE tenant_id = ? ORDER BY created_at",
+            "SELECT id, tenant_id, username, role_id, must_change_password, created_at FROM users WHERE tenant_id = ? ORDER BY created_at",
             (tenant_id,),
         )
         rows = await cursor.fetchall()
-        return [
-            User(id=r[0], tenant_id=r[1], username=r[2], role_id=r[3], must_change_password=bool(r[4]), created_at=r[5])
-            for r in rows
-        ]
+        return [User(id=r[0], tenant_id=r[1], username=r[2], role_id=r[3], must_change_password=bool(r[4]), created_at=r[5]) for r in rows]
 
     async def get_user(self, tenant_id: str, user_id: str) -> User:
         """Devuelve el usuario `user_id` de `tenant_id`.
@@ -749,8 +740,7 @@ class AuthStore:
             UserNotFoundError: Si no existe, o pertenece a otro tenant.
         """
         cursor = await self._connection.execute(
-            "SELECT id, tenant_id, username, role_id, must_change_password, created_at FROM users "
-            "WHERE id = ? AND tenant_id = ?",
+            "SELECT id, tenant_id, username, role_id, must_change_password, created_at FROM users WHERE id = ? AND tenant_id = ?",
             (user_id, tenant_id),
         )
         row = await cursor.fetchone()
@@ -760,8 +750,7 @@ class AuthStore:
 
     async def _count_other_admins(self, tenant_id: str, exclude_user_id: str) -> int:
         cursor = await self._connection.execute(
-            "SELECT COUNT(*) FROM users u JOIN roles r ON u.role_id = r.id "
-            "WHERE u.tenant_id = ? AND r.is_admin = 1 AND u.id != ?",
+            "SELECT COUNT(*) FROM users u JOIN roles r ON u.role_id = r.id WHERE u.tenant_id = ? AND r.is_admin = 1 AND u.id != ?",
             (tenant_id, exclude_user_id),
         )
         count_row = await cursor.fetchone()
@@ -769,9 +758,7 @@ class AuthStore:
         (count,) = count_row
         return int(count)
 
-    async def update_user(
-        self, tenant_id: str, user_id: str, *, role_id: str | None = None, password: str | None = None
-    ) -> User:
+    async def update_user(self, tenant_id: str, user_id: str, *, role_id: str | None = None, password: str | None = None) -> User:
         """Actualiza el rol y/o restablece la contraseña de un usuario (uso admin).
 
         Restablecer `password` fija `must_change_password=True` — el usuario debe
@@ -811,8 +798,12 @@ class AuthStore:
 
         await self._connection.commit()
         return User(
-            id=user_id, tenant_id=tenant_id, username=current.username, role_id=new_role_id,
-            must_change_password=must_change_password, created_at=current.created_at,
+            id=user_id,
+            tenant_id=tenant_id,
+            username=current.username,
+            role_id=new_role_id,
+            must_change_password=must_change_password,
+            created_at=current.created_at,
         )
 
     async def delete_user(self, tenant_id: str, user_id: str) -> None:
@@ -901,7 +892,7 @@ class AuthStore:
         filtran las expiradas en lectura, pero nunca las borraban — sin este
         barrido la tabla crecía sin límite a lo largo de la vida de `auth.db`.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         await self._connection.execute("DELETE FROM sessions WHERE expires_at < ?", (now.isoformat(),))
         session = Session(
             token=secrets.token_urlsafe(32),
@@ -928,7 +919,7 @@ class AuthStore:
             return None
 
         session = Session(token=row[0], user_id=row[1], tenant_id=row[2], created_at=row[3], expires_at=row[4])
-        if datetime.fromisoformat(session.expires_at) <= datetime.now(timezone.utc):
+        if datetime.fromisoformat(session.expires_at) <= datetime.now(UTC):
             return None
         return session
 
@@ -952,12 +943,10 @@ class AuthStore:
 
         token_value, user_id, tenant_id, created_at, expires_at, role_id, must_change_password, is_admin = row
         session = Session(token=token_value, user_id=user_id, tenant_id=tenant_id, created_at=created_at, expires_at=expires_at)
-        if datetime.fromisoformat(session.expires_at) <= datetime.now(timezone.utc):
+        if datetime.fromisoformat(session.expires_at) <= datetime.now(UTC):
             return None
 
-        return AuthenticatedSession(
-            session=session, role_id=role_id, is_admin=bool(is_admin), must_change_password=bool(must_change_password)
-        )
+        return AuthenticatedSession(session=session, role_id=role_id, is_admin=bool(is_admin), must_change_password=bool(must_change_password))
 
     async def delete_session(self, token: str) -> None:
         """Logout selectivo: borra solo la sesión de `token`.

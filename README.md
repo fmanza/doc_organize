@@ -59,7 +59,7 @@ y [funcionalidad por módulo](docs/functional/index.md).
 
 ```bash
 python -m pytest                    # todos los tests
-python -m pytest -k "not slow"      # sin los de integración con Docling real
+python -m pytest -m "not slow"      # sin los de integración con Docling real
 python -m pytest --cov=src          # con cobertura
 ```
 

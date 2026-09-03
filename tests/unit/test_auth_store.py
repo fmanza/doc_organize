@@ -2,7 +2,7 @@
 
 import sqlite3
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -177,10 +177,8 @@ async def test_get_session_returns_none_when_expired(tmp_path) -> None:
         user = await store.create_user(tenant.id, "alice", "s3cr3t-password")
         session = await store.create_session(user)
 
-        expired = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-        await store._connection.execute(
-            "UPDATE sessions SET expires_at = ? WHERE token = ?", (expired, session.token)
-        )
+        expired = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+        await store._connection.execute("UPDATE sessions SET expires_at = ? WHERE token = ?", (expired, session.token))
         await store._connection.commit()
 
         result = await store.get_session(session.token)
@@ -285,9 +283,7 @@ async def test_create_role_default_has_no_allowed_scan_roots(tmp_path) -> None:
 async def test_create_role_with_allowed_scan_roots(tmp_path) -> None:
     async with AuthStore(tmp_path / "auth.db") as store:
         tenant = await store.create_tenant("Acme Corp")
-        role = await store.create_role(
-            tenant.id, "Lector", project_names=["Proyecto A"], allowed_scan_roots=["/repo/entrada"]
-        )
+        role = await store.create_role(tenant.id, "Lector", project_names=["Proyecto A"], allowed_scan_roots=["/repo/entrada"])
         fetched = await store.get_role(tenant.id, role.id)
     assert role.allowed_scan_roots == ["/repo/entrada"]
     assert fetched.allowed_scan_roots == ["/repo/entrada"]
@@ -437,9 +433,7 @@ async def test_change_password_wrong_current_password_fails(tmp_path) -> None:
 async def test_change_password_success_clears_must_change_password(tmp_path) -> None:
     async with AuthStore(tmp_path / "auth.db") as store:
         tenant = await store.create_tenant("Acme Corp")
-        success = await store.change_password(
-            (await store.list_users(tenant.id))[0].id, DEFAULT_ADMIN_PASSWORD, "nueva-password-admin"
-        )
+        success = await store.change_password((await store.list_users(tenant.id))[0].id, DEFAULT_ADMIN_PASSWORD, "nueva-password-admin")
         authenticated = await store.authenticate(tenant.id, DEFAULT_ADMIN_USERNAME, "nueva-password-admin")
 
     assert success is True
@@ -471,7 +465,7 @@ async def test_migration_backfills_users_without_role_to_admin_role(tmp_path) ->
     """
     import sqlite3
 
-    from datetime import datetime, timezone
+    from datetime import datetime
     from uuid import uuid4
 
     db_path = tmp_path / "auth.db"
@@ -486,11 +480,10 @@ async def test_migration_backfills_users_without_role_to_admin_role(tmp_path) ->
             );
             """
         )
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         conn.execute("INSERT INTO tenants (id, name, created_at) VALUES ('acme-corp', 'Acme Corp', ?)", (now,))
         conn.execute(
-            "INSERT INTO users (id, tenant_id, username, password_hash, password_salt, created_at) "
-            "VALUES (?, 'acme-corp', 'alice', 'x', 'y', ?)",
+            "INSERT INTO users (id, tenant_id, username, password_hash, password_salt, created_at) VALUES (?, 'acme-corp', 'alice', 'x', 'y', ?)",
             (str(uuid4()), now),
         )
         conn.commit()

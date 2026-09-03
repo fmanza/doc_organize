@@ -50,7 +50,7 @@ Fase: PLAN y AUDIT_PLAN únicamente.   # o "completa" para llegar hasta VERSION
 | `.github/SHARED_INSTRUCTIONS.md` | idem | copiar + reescribir dominio |
 | `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md`, `.github/AGENTS.md`, `.cursorrules` | idem | copiar + reescribir dominio |
 | `docs/codex_guide.md` (guía de uso de Codex) | idem | copiar + reescribir dominio |
-| `scripts/build_docs_zip.py` + `.github/workflows/docs-release.yml` | idem | copiar + adaptar builder/secrets/prefijo ZIP |
+| `scripts/build_docs_zip.py` + `.github/workflows/docs-zip-release.yml` | idem | copiar + adaptar builder/secrets/prefijo ZIP |
 | `.ai/{product,architecture,runtime,glossary,standards}.md` | idem | **regenerar desde cero** |
 
 ---

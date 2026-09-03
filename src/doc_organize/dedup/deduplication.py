@@ -6,7 +6,7 @@ import asyncio
 import shutil
 import uuid
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from doc_organize.core.constants import DEDUP_HISTORY_JSONL_NAME, DEDUP_REPORT_JSON_NAME, VERSION_SUFFIX_PATTERN
@@ -111,7 +111,7 @@ class DeduplicationManager:
         `None` (sin dato) en vez de medir solo el movimiento de ficheros, que
         sería una duración parcial engañosa.
         """
-        finished_at = datetime.now(timezone.utc)
+        finished_at = datetime.now(UTC)
         audit_path = duplicates_dir / DEDUP_REPORT_JSON_NAME
         report = DeduplicationReport(
             timestamp=finished_at.isoformat(),
@@ -127,9 +127,7 @@ class DeduplicationManager:
         await self._append_to_history(duplicates_dir, report)
         return report
 
-    async def resolve_duplicates(
-        self, groups: list[DuplicateGroup], duplicates_dir: Path, started_at: datetime | None = None
-    ) -> DeduplicationReport:
+    async def resolve_duplicates(self, groups: list[DuplicateGroup], duplicates_dir: Path, started_at: datetime | None = None) -> DeduplicationReport:
         """Mueve los documentos descartados de cada grupo a `duplicates_dir`,
         preservando su estructura de directorios original, y escribe
         `DEDUP_REPORT.json` (solo el último run) y añade una línea a

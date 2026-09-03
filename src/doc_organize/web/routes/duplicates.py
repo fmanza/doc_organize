@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import json
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -220,7 +220,7 @@ async def resolve_duplicates(name: str, payload: ResolveDuplicatesRequest, reque
     miembro real del grupo correspondiente se ignora (se loguea, no se aplica) — ver
     AUDIT_PLAN de `§2.7.4` para el hallazgo de seguridad que motiva este diseño.
     """
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     project = await _get_project(request, name)
     groups = await _detect_duplicates(project)
 

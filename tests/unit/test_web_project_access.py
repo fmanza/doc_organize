@@ -38,9 +38,7 @@ async def _setup(tmp_path):
         await store.create_tenant(_TENANT_NAME)
 
     async with _client(app) as admin_client:
-        await admin_client.post(
-            "/login", data={"tenant_id": _TENANT_ID, "username": DEFAULT_ADMIN_USERNAME, "password": DEFAULT_ADMIN_PASSWORD}
-        )
+        await admin_client.post("/login", data={"tenant_id": _TENANT_ID, "username": DEFAULT_ADMIN_USERNAME, "password": DEFAULT_ADMIN_PASSWORD})
         await admin_client.post(
             "/change-password",
             data={"current_password": DEFAULT_ADMIN_PASSWORD, "new_password": "nueva-admin-pw", "confirm_password": "nueva-admin-pw"},

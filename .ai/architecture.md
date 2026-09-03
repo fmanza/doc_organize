@@ -33,7 +33,10 @@ nivel, nunca "hacia arriba").
 │    utils/
 │    ├── hash_utils.py     # hash_file() — única fuente de verdad SHA-256, async
 │    ├── path_utils.py     # safe_path_join() — anti path-traversal
-│    └── logging.py        # get_logger() — JSON estructurado
+│    ├── logging.py        # get_logger()/configure_logging() — logging estructurado
+│    ├── date_format.py    # format_datetime()/format_duration() — filtros Jinja
+│    ├── gpu_detector.py   # detect_gpu_status() — soporte de GPU del entorno
+│    └── av_detector.py    # detect_av_status() — soporte de audio/vídeo del entorno
 │
 ├─── NIVEL 2: SERVICIOS INDEPENDIENTES (cada uno resuelve una responsabilidad, sin depender
 │    │        de sus pares de Nivel 2 — solo de Nivel 1)
@@ -87,7 +90,23 @@ graph TB
     Dedup --> Utils
     Cache --> Utils
     Projects --> Utils
+    Projects --> Validators
 ```
+
+## Excepción documentada: `projects/` importa de `validators/` (Nivel 2 → Nivel 2)
+
+`ProjectRegistry.create_project()` (`projects/project_registry.py`) usa
+`ProjectValidator.validate_name()` (`validators/project_validator.py`) para
+validar el nombre de proyecto antes de crear la carpeta. Es una excepción
+deliberada a "un módulo de Nivel 2 nunca depende de otro módulo de Nivel 2":
+`ProjectValidator` es una validación pura de cadena (sin estado, sin I/O,
+mismo perfil que `FolderValidator`, su par natural en `validators/`) — no
+genera dependencia circular (`validators/` no depende de `projects/`) ni
+acoplamiento real de comportamiento. La alternativa (mover la validación a
+`core/`) cambiaría el rol de `core/` (hoy solo modelos/excepciones/constantes,
+sin lógica de negocio) por evitar una violación que no causa ningún problema
+concreto — se documenta la excepción en vez de forzar ese cambio
+(maturity-assessment, sesión 2026-09-03).
 
 ---
 

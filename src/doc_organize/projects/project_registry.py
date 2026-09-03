@@ -7,7 +7,7 @@ import json
 import os
 import shutil
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Self
 
@@ -122,7 +122,7 @@ class ProjectRegistry:
                 project = Project(
                     name=normalized_name,
                     root_path=str(project_root),
-                    created_at=datetime.now(timezone.utc).isoformat(),
+                    created_at=datetime.now(UTC).isoformat(),
                     tenant_id=tenant_id,
                 )
                 await asyncio.to_thread(

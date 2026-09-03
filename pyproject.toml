@@ -90,11 +90,6 @@ include-package-data = true
 [tool.setuptools.packages]
 find = {where = ["src"]}
 
-[tool.pytest.ini_options]
-minversion = "7.0"
-addopts = "-v --cov=src --cov-report=term-missing --cov-report=html"
-testpaths = ["tests"]
-
 [tool.mypy]
 python_version = "3.12"
 plugins = ["pydantic.mypy"]
@@ -114,7 +109,7 @@ ignore_errors = true
 
 [tool.ruff]
 line-length = 150
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 extend-select = ["E", "W", "F", "I", "B", "C4", "UP", "N"]
@@ -128,6 +123,14 @@ lines-between-types = 1
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
+# UP042 sugiere `enum.StrEnum` (3.11+) en vez de `class X(str, Enum)` para los 6
+# enums de este módulo. No es un cambio cosmético: `str(member)`/f-string sobre
+# un `StrEnum` devuelve el valor ("red"), mientras que sobre `(str, Enum)`
+# devuelve "Clase.MIEMBRO" -- observable por cualquier log/f-string existente
+# sobre estos enums. Ruff lo marca como "unsafe fix" por esta misma razón;
+# decisión deliberada de no aplicarlo sin una revisión propia (maturity-assessment,
+# sesión 2026-09-03) -- no una omisión.
+"src/doc_organize/core/models.py" = ["UP042"]
 
 [tool.ruff.format]
 quote-style = "double"

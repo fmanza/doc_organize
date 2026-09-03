@@ -4,7 +4,7 @@ import io
 import json
 import zipfile
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -215,7 +215,7 @@ async def test_export_cache_xlsx_contains_full_hash_and_all_entries(tmp_path) ->
     assert second[3] == full_hash  # hash completo, no truncado a 12 caracteres
     assert second[4] == "new"
     assert second[5] == "success"
-    assert second[6] == datetime.fromtimestamp(1_700_000_000.0, tz=timezone.utc).isoformat()
+    assert second[6] == datetime.fromtimestamp(1_700_000_000.0, tz=UTC).isoformat()
 
 
 @pytest.mark.asyncio

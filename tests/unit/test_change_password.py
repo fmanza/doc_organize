@@ -28,9 +28,7 @@ async def _create_tenant(tmp_path) -> None:
 
 
 async def _login_admin(client: httpx.AsyncClient) -> httpx.Response:
-    return await client.post(
-        "/login", data={"tenant_id": _TENANT_ID, "username": DEFAULT_ADMIN_USERNAME, "password": DEFAULT_ADMIN_PASSWORD}
-    )
+    return await client.post("/login", data={"tenant_id": _TENANT_ID, "username": DEFAULT_ADMIN_USERNAME, "password": DEFAULT_ADMIN_PASSWORD})
 
 
 @pytest.mark.asyncio
@@ -100,9 +98,7 @@ async def test_new_password_works_on_next_login(tmp_path) -> None:
             data={"current_password": DEFAULT_ADMIN_PASSWORD, "new_password": "nueva-admin-pw", "confirm_password": "nueva-admin-pw"},
         )
         await client.post("/logout")
-        relogin = await client.post(
-            "/login", data={"tenant_id": _TENANT_ID, "username": DEFAULT_ADMIN_USERNAME, "password": "nueva-admin-pw"}
-        )
+        relogin = await client.post("/login", data={"tenant_id": _TENANT_ID, "username": DEFAULT_ADMIN_USERNAME, "password": "nueva-admin-pw"})
         no_longer_blocked = await client.get("/api/projects")
 
     assert SESSION_COOKIE_NAME in relogin.cookies

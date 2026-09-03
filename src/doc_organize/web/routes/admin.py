@@ -76,14 +76,21 @@ class UpdateUserRequest(BaseModel):
 
 def _role_response(role: Role) -> RoleResponse:
     return RoleResponse(
-        id=role.id, name=role.name, is_admin=role.is_admin, project_names=role.project_names,
-        allowed_scan_roots=role.allowed_scan_roots, created_at=role.created_at,
+        id=role.id,
+        name=role.name,
+        is_admin=role.is_admin,
+        project_names=role.project_names,
+        allowed_scan_roots=role.allowed_scan_roots,
+        created_at=role.created_at,
     )
 
 
 def _user_response(user: User) -> UserResponse:
     return UserResponse(
-        id=user.id, username=user.username, role_id=user.role_id, must_change_password=user.must_change_password,
+        id=user.id,
+        username=user.username,
+        role_id=user.role_id,
+        must_change_password=user.must_change_password,
         created_at=user.created_at,
     )
 
@@ -181,9 +188,7 @@ async def create_user(payload: CreateUserRequest, request: Request) -> UserRespo
     """
     try:
         async with get_auth_store(request) as store:
-            user = await store.create_user(
-                get_tenant_id(request), payload.username, payload.password, role_id=payload.role_id
-            )
+            user = await store.create_user(get_tenant_id(request), payload.username, payload.password, role_id=payload.role_id)
     except RoleNotFoundError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _user_response(user)

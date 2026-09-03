@@ -33,9 +33,7 @@ async def _create_restricted_user(tmp_path, username: str, password: str, projec
 
 
 async def _login_admin(client: httpx.AsyncClient) -> httpx.Response:
-    return await client.post(
-        "/login", data={"tenant_id": _TENANT_ID, "username": DEFAULT_ADMIN_USERNAME, "password": DEFAULT_ADMIN_PASSWORD}
-    )
+    return await client.post("/login", data={"tenant_id": _TENANT_ID, "username": DEFAULT_ADMIN_USERNAME, "password": DEFAULT_ADMIN_PASSWORD})
 
 
 @pytest.mark.asyncio
@@ -74,19 +72,20 @@ async def test_admin_can_create_role_and_user_via_api(tmp_path) -> None:
     app = _non_loopback_app(tmp_path)
     async with _client(app) as client:
         await _login_admin(client)
-        await client.post("/change-password", data={
-            "current_password": DEFAULT_ADMIN_PASSWORD, "new_password": "nueva-admin-pw", "confirm_password": "nueva-admin-pw",
-        })
-
-        create_role = await client.post(
-            "/api/roles", json={"name": "Lector", "is_admin": False, "project_names": ["Proyecto A"]}
+        await client.post(
+            "/change-password",
+            data={
+                "current_password": DEFAULT_ADMIN_PASSWORD,
+                "new_password": "nueva-admin-pw",
+                "confirm_password": "nueva-admin-pw",
+            },
         )
+
+        create_role = await client.post("/api/roles", json={"name": "Lector", "is_admin": False, "project_names": ["Proyecto A"]})
         assert create_role.status_code == 201
         role_id = create_role.json()["id"]
 
-        create_user = await client.post(
-            "/api/users", json={"username": "carol", "password": "s3cr3t-password", "role_id": role_id}
-        )
+        create_user = await client.post("/api/users", json={"username": "carol", "password": "s3cr3t-password", "role_id": role_id})
         assert create_user.status_code == 201
         assert create_user.json()["role_id"] == role_id
         assert create_user.json()["must_change_password"] is False
@@ -117,9 +116,7 @@ async def test_create_role_admin_with_scan_roots_returns_422(tmp_path) -> None:
     app = _non_loopback_app(tmp_path)
     async with _client(app) as client:
         await _login_admin_and_change_password(client)
-        response = await client.post(
-            "/api/roles", json={"name": "Super", "is_admin": True, "allowed_scan_roots": ["/repo/entrada"]}
-        )
+        response = await client.post("/api/roles", json={"name": "Super", "is_admin": True, "allowed_scan_roots": ["/repo/entrada"]})
     assert response.status_code == 422
 
 
@@ -129,12 +126,15 @@ async def test_create_role_admin_with_projects_returns_422(tmp_path) -> None:
     app = _non_loopback_app(tmp_path)
     async with _client(app) as client:
         await _login_admin(client)
-        await client.post("/change-password", data={
-            "current_password": DEFAULT_ADMIN_PASSWORD, "new_password": "nueva-admin-pw", "confirm_password": "nueva-admin-pw",
-        })
-        response = await client.post(
-            "/api/roles", json={"name": "Super", "is_admin": True, "project_names": ["Proyecto A"]}
+        await client.post(
+            "/change-password",
+            data={
+                "current_password": DEFAULT_ADMIN_PASSWORD,
+                "new_password": "nueva-admin-pw",
+                "confirm_password": "nueva-admin-pw",
+            },
         )
+        response = await client.post("/api/roles", json={"name": "Super", "is_admin": True, "project_names": ["Proyecto A"]})
     assert response.status_code == 422
 
 
@@ -144,9 +144,14 @@ async def test_delete_last_admin_role_returns_409(tmp_path) -> None:
     app = _non_loopback_app(tmp_path)
     async with _client(app) as client:
         await _login_admin(client)
-        await client.post("/change-password", data={
-            "current_password": DEFAULT_ADMIN_PASSWORD, "new_password": "nueva-admin-pw", "confirm_password": "nueva-admin-pw",
-        })
+        await client.post(
+            "/change-password",
+            data={
+                "current_password": DEFAULT_ADMIN_PASSWORD,
+                "new_password": "nueva-admin-pw",
+                "confirm_password": "nueva-admin-pw",
+            },
+        )
         roles = (await client.get("/api/roles")).json()["roles"]
         admin_role_id = next(r["id"] for r in roles if r["is_admin"])
         response = await client.delete(f"/api/roles/{admin_role_id}")
@@ -159,9 +164,14 @@ async def test_admin_users_page_loads_for_admin(tmp_path) -> None:
     app = _non_loopback_app(tmp_path)
     async with _client(app) as client:
         await _login_admin(client)
-        await client.post("/change-password", data={
-            "current_password": DEFAULT_ADMIN_PASSWORD, "new_password": "nueva-admin-pw", "confirm_password": "nueva-admin-pw",
-        })
+        await client.post(
+            "/change-password",
+            data={
+                "current_password": DEFAULT_ADMIN_PASSWORD,
+                "new_password": "nueva-admin-pw",
+                "confirm_password": "nueva-admin-pw",
+            },
+        )
         response = await client.get("/admin/users")
     assert response.status_code == 200
     assert "admin" in response.text
@@ -169,9 +179,14 @@ async def test_admin_users_page_loads_for_admin(tmp_path) -> None:
 
 async def _login_admin_and_change_password(client: httpx.AsyncClient) -> None:
     await _login_admin(client)
-    await client.post("/change-password", data={
-        "current_password": DEFAULT_ADMIN_PASSWORD, "new_password": "nueva-admin-pw", "confirm_password": "nueva-admin-pw",
-    })
+    await client.post(
+        "/change-password",
+        data={
+            "current_password": DEFAULT_ADMIN_PASSWORD,
+            "new_password": "nueva-admin-pw",
+            "confirm_password": "nueva-admin-pw",
+        },
+    )
 
 
 @pytest.mark.asyncio

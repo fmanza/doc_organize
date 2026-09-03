@@ -7,7 +7,7 @@ import os
 import tempfile
 import zipfile
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -55,7 +55,7 @@ def _build_export_zip(project_root: Path, cached_entries: dict[str, CacheEntry])
     unchanged_files = [e.file_path for e in cached_entries.values() if e.status is DocumentStatus.UNCHANGED]
 
     snapshot = CacheExportSnapshot(
-        export_timestamp=datetime.now(timezone.utc).isoformat(),
+        export_timestamp=datetime.now(UTC).isoformat(),
         total_entries=len(cached_entries),
         new_files=new_files,
         modified_files=modified_files,
@@ -141,7 +141,7 @@ def _build_cache_export_xlsx(cached_entries: dict[str, CacheEntry]) -> Path:
             "Hash SHA-256": entry.sha256_hash,
             "Estado": entry.status.value,
             "Conversión": entry.conversion_status.value if entry.conversion_status else "",
-            "Última actualización (UTC)": datetime.fromtimestamp(entry.timestamp, tz=timezone.utc).isoformat(),
+            "Última actualización (UTC)": datetime.fromtimestamp(entry.timestamp, tz=UTC).isoformat(),
         }
         for entry in sorted(cached_entries.values(), key=lambda entry: entry.file_path)
     ]

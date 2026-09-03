@@ -769,9 +769,7 @@ def test_main_web_starts_on_loopback(tmp_path, monkeypatch) -> None:
     calls: list[dict] = []
     monkeypatch.setattr("uvicorn.run", lambda app, host, port: calls.append({"app": app, "host": host, "port": port}))
 
-    exit_code = main(
-        ["web", "--registry-path", str(tmp_path / "p.json"), "--auth-db-path", str(tmp_path / "auth.db")]
-    )
+    exit_code = main(["web", "--registry-path", str(tmp_path / "p.json"), "--auth-db-path", str(tmp_path / "auth.db")])
 
     assert exit_code == 0
     assert len(calls) == 1

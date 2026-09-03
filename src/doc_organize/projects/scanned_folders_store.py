@@ -6,7 +6,7 @@ import asyncio
 import json
 import os
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from doc_organize.core.exceptions import (
@@ -77,7 +77,7 @@ class ScannedFoldersStore:
             if existing is not None:
                 return existing
 
-            entry = ScannedFolder(path=normalized, added_at=datetime.now(timezone.utc).isoformat(), used=False)
+            entry = ScannedFolder(path=normalized, added_at=datetime.now(UTC).isoformat(), used=False)
             folders.append(entry)
             await self._save(project, folders)
         return entry
@@ -113,7 +113,7 @@ class ScannedFoldersStore:
         if not paths:
             return
         normalized = {str(Path(p).expanduser().resolve()) for p in paths}
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         async with self._lock:
             folders = await self._load(project)

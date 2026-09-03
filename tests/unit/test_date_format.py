@@ -1,7 +1,7 @@
 """Tests de `doc_organize.utils.date_format` (formato de fecha/hora parametrizable,
 por defecto español/España)."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from doc_organize.utils.date_format import format_datetime, format_duration
 
@@ -36,7 +36,7 @@ def test_format_datetime_invalid_timezone_degrades_to_raw_value_instead_of_raisi
 
 
 def test_format_datetime_accepts_datetime_object() -> None:
-    dt = datetime(2026, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+    dt = datetime(2026, 1, 15, 10, 0, 0, tzinfo=UTC)
     assert format_datetime(dt) == "15/01/2026 11:00:00"
 
 
