@@ -73,9 +73,10 @@ def require_admin(request: Request) -> None:
 async def get_allowed_scan_roots(request: Request) -> list[str] | None:
     """Resuelve las raíces de escaneo permitidas para la sesión de `request`, o `None` si no hay restricción.
 
-    Equivalente HTTP de la comprobación que `scan.py::_authorize_scan_websocket`
-    hace a mano para el WebSocket (`BaseHTTPMiddleware` no cubre WebSocket, así
-    que ese handler no puede depender de `AuthMiddleware`/`request.state`). Usado
+    Equivalente HTTP de la comprobación que `scan.py::_authorize_project_websocket`
+    hace a mano para los WebSocket de escaneo/deduplicación (`BaseHTTPMiddleware`
+    no cubre WebSocket, así que ese handler no puede depender de
+    `AuthMiddleware`/`request.state`). Usado
     por los endpoints REST del explorador de carpetas y de la lista persistente
     de carpetas (`web/routes/filesystem.py`, `web/routes/scan.py`), que sí pasan
     por `AuthMiddleware` y ya tienen `request.state.is_admin`/`role_id` resueltos.

@@ -108,7 +108,7 @@
 <p class="text-sm text-gray-600 my-2">
     Última ejecución:
     {% if last_scan_run %}
-    <span id="last-scan-run-text">{{ last_scan_run.finished_at | format_datetime }} — duración: {{ last_scan_run.duration_seconds | format_duration }}{% if not last_scan_run.completed %} (interrumpida){% endif %}</span>
+    <span id="last-scan-run-text">{{ last_scan_run.finished_at | format_datetime }} — duración: {{ last_scan_run.duration_seconds | format_duration }}{% if not last_scan_run.completed %} (interrumpida){% endif %}{% if last_scan_run.discovery_duration_seconds is not none %} (descubrimiento: {{ last_scan_run.discovery_duration_seconds | format_duration }}, conversión: {{ last_scan_run.total_conversion_seconds | format_duration }}){% endif %}</span>
     {% else %}
     <span id="last-scan-run-text" class="text-gray-500">todavía no se ha ejecutado ningún escaneo.</span>
     {% endif %}
@@ -220,6 +220,8 @@
             <th class="py-1 pr-2">Inicio</th>
             <th class="py-1 pr-2">Fin</th>
             <th class="py-1 pr-2 text-right">Duración</th>
+            <th class="py-1 pr-2 text-right">Descubrimiento</th>
+            <th class="py-1 pr-2 text-right">Conversión</th>
             <th class="py-1 pr-2 text-right">Documentos escaneados</th>
             <th class="py-1 pr-2">Estado</th>
         </tr>
@@ -230,6 +232,8 @@
             <td class="py-1 pr-2 whitespace-nowrap">{{ run.started_at | format_datetime }}</td>
             <td class="py-1 pr-2 whitespace-nowrap">{{ run.finished_at | format_datetime }}</td>
             <td class="py-1 pr-2 text-right whitespace-nowrap">{{ run.duration_seconds | format_duration }}</td>
+            <td class="py-1 pr-2 text-right whitespace-nowrap">{{ run.discovery_duration_seconds | format_duration if run.discovery_duration_seconds is not none else "—" }}</td>
+            <td class="py-1 pr-2 text-right whitespace-nowrap">{{ run.total_conversion_seconds | format_duration if run.total_conversion_seconds is not none else "—" }}</td>
             <td class="py-1 pr-2 text-right whitespace-nowrap">{{ run.total_scanned }}</td>
             <td class="py-1 pr-2 whitespace-nowrap">
                 {% if run.completed %}
@@ -533,8 +537,11 @@ form.addEventListener("submit", async (submitEvent) => {
             setSemaforo(SCAN_PHASE.COMPLETED);
             handleScanCompletedFileProgress();
             const durationLabel = formatDurationClientSide(scanEvent.data.duration_seconds || 0);
+            const discoveryLabel = formatDurationClientSide(scanEvent.data.discovery_duration_seconds || 0);
+            const conversionLabel = formatDurationClientSide(scanEvent.data.total_conversion_seconds || 0);
             semaforoDurationText.textContent = "Duración: " + durationLabel;
-            lastScanRunText.textContent = "ahora mismo — duración: " + durationLabel;
+            lastScanRunText.textContent =
+                "ahora mismo — duración: " + durationLabel + " (descubrimiento: " + discoveryLabel + ", conversión: " + conversionLabel + ")";
             lastScanRunText.classList.remove("text-gray-500");
             unlockCacheTab();
             ws.close();

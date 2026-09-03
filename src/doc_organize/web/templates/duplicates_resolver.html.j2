@@ -36,6 +36,12 @@
         <span class="text-xs text-gray-600">Finalización</span>
     </span>
     <span id="dedup-semaforo-status-text" class="text-sm font-medium text-gray-600 ml-2">Sin iniciar</span>
+    <span id="dedup-semaforo-duration-text" class="text-sm text-gray-500 ml-2"></span>
+</div>
+
+<div id="dedup-group-progress" class="my-3" hidden>
+    <p id="dedup-group-progress-text" class="text-sm text-gray-700 mb-1"></p>
+    <progress id="dedup-group-progress-bar" class="w-full h-2" max="1" value="0"></progress>
 </div>
 
 <div id="resolve-results-container">
@@ -241,6 +247,7 @@ const dedupSemaforoLights = {
     completed: document.getElementById("dedup-light-completed"),
 };
 const dedupSemaforoText = document.getElementById("dedup-semaforo-status-text");
+const dedupSemaforoDurationText = document.getElementById("dedup-semaforo-duration-text");
 const LIGHT_OFF = "bg-gray-300 border-gray-400";
 const LIGHT_ON_AMBER = "bg-amber-400 border-amber-500";
 const LIGHT_ON_GREEN = "bg-green-500 border-green-600";
@@ -260,7 +267,63 @@ function resetDedupSemaforo() {
     paintLight(dedupSemaforoLights.completed, LIGHT_OFF);
     dedupSemaforoText.textContent = "Sin iniciar";
     dedupSemaforoText.className = "text-sm font-medium text-gray-600 ml-2";
+    dedupSemaforoDurationText.textContent = "";
     dedupSemaforoPhase = DEDUP_PHASE.IDLE;
+}
+
+function formatDurationClientSide(seconds) {
+    const total = Math.round(seconds);
+    const minutes = Math.floor(total / 60);
+    const secs = total % 60;
+    return minutes ? minutes + "m " + secs + "s" : secs + "s";
+}
+
+// --- Progreso en vivo (grupos de duplicados detectados/movidos) ---
+
+const dedupGroupProgressContainer = document.getElementById("dedup-group-progress");
+const dedupGroupProgressText = document.getElementById("dedup-group-progress-text");
+const dedupGroupProgressBar = document.getElementById("dedup-group-progress-bar");
+let dedupHasGroupsToResolve = false;
+
+function resetDedupGroupProgress() {
+    dedupGroupProgressContainer.hidden = true;
+    dedupGroupProgressText.textContent = "";
+    dedupGroupProgressBar.max = 1;
+    dedupGroupProgressBar.value = 0;
+    dedupHasGroupsToResolve = false;
+}
+
+function handleDuplicatesFoundEvent(data) {
+    if (!data.groups_found) {
+        dedupGroupProgressContainer.hidden = false;
+        dedupGroupProgressText.textContent = "Sin grupos de duplicados detectados.";
+        dedupGroupProgressBar.max = 1;
+        dedupGroupProgressBar.value = 1;
+        return;
+    }
+    dedupHasGroupsToResolve = true;
+    dedupGroupProgressContainer.hidden = false;
+    dedupGroupProgressBar.max = data.groups_found;
+    dedupGroupProgressBar.value = 0;
+    dedupGroupProgressText.textContent = "Detectado(s) " + data.groups_found + " grupo(s), moviendo…";
+}
+
+function handleGroupStartedEvent(data) {
+    dedupGroupProgressContainer.hidden = false;
+    dedupGroupProgressBar.max = data.total;
+    dedupGroupProgressBar.value = data.index - 1;
+    dedupGroupProgressText.textContent = "Moviendo grupo " + data.index + "/" + data.total + "…";
+}
+
+function handleGroupResolvedEvent() {
+    dedupGroupProgressBar.value = Math.min(Number(dedupGroupProgressBar.value) + 1, Number(dedupGroupProgressBar.max));
+}
+
+function handleDedupCompletedGroupProgress() {
+    if (!dedupHasGroupsToResolve) return;
+    const total = Number(dedupGroupProgressBar.max);
+    dedupGroupProgressBar.value = total;
+    dedupGroupProgressText.textContent = "Completado: " + total + " grupo(s) procesado(s).";
 }
 
 function setDedupSemaforo(phase) {
@@ -320,37 +383,60 @@ async function refreshDynamicPanels() {
     setupHistorySearch();
 }
 
+const DEDUP_RUNNING_EVENTS = new Set(["duplicates_found", "group_started", "group_resolved"]);
+
 if (deduplicateBtn) {
-    deduplicateBtn.addEventListener("click", async () => {
+    deduplicateBtn.addEventListener("click", () => {
         if (dedupOperationInProgress) return;
         deduplicateErrorEl.textContent = "";
         resetDedupSemaforo();
-        setDedupSemaforo(DEDUP_PHASE.STARTED);
+        resetDedupGroupProgress();
         lockDedupControls();
-        try {
-            const fetchPromise = fetch(
-                "/api/projects/" + encodeURIComponent(projectName) + "/scan/deduplicate",
-                { method: "POST" }
-            );
-            setDedupSemaforo(DEDUP_PHASE.RUNNING);
-            const response = await fetchPromise;
-            const data = await response.json();
-            if (!response.ok) {
-                deduplicateErrorEl.textContent = (data && data.detail) || "No se pudieron buscar duplicados.";
-                setDedupSemaforo(DEDUP_PHASE.ERROR);
-                unlockDedupControls();
-                return;
+
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const ws = new WebSocket(
+            protocol + "//" + window.location.host + "/api/projects/" + encodeURIComponent(projectName) + "/scan/deduplicate"
+        );
+        let dedupFinished = false;
+
+        ws.onopen = () => {
+            setDedupSemaforo(DEDUP_PHASE.STARTED);
+        };
+        ws.onmessage = async (message) => {
+            const dedupEvent = JSON.parse(message.data);
+            if (dedupEvent.event === "duplicates_found") {
+                handleDuplicatesFoundEvent(dedupEvent.data);
+            } else if (dedupEvent.event === "group_started") {
+                handleGroupStartedEvent(dedupEvent.data);
+            } else if (dedupEvent.event === "group_resolved") {
+                handleGroupResolvedEvent();
             }
-            setDedupSemaforo(DEDUP_PHASE.COMPLETED);
-            unlockDedupControls();
-            // Los grupos resueltos por esta ejecucion deben desaparecer de
-            // "pendientes" y pasar a verse en el historico.
-            await refreshDynamicPanels();
-        } catch (error) {
-            deduplicateErrorEl.textContent = "No se pudieron buscar duplicados.";
+            if (dedupEvent.event === "completed") {
+                dedupFinished = true;
+                setDedupSemaforo(DEDUP_PHASE.COMPLETED);
+                handleDedupCompletedGroupProgress();
+                dedupSemaforoDurationText.textContent = "Duración: " + formatDurationClientSide(dedupEvent.data.duration_seconds || 0);
+                unlockDedupControls();
+                ws.close();
+                // Los grupos resueltos por esta ejecucion deben desaparecer de
+                // "pendientes" y pasar a verse en el historico.
+                await refreshDynamicPanels();
+            } else if (DEDUP_RUNNING_EVENTS.has(dedupEvent.event)) {
+                setDedupSemaforo(DEDUP_PHASE.RUNNING);
+            }
+        };
+        ws.onerror = () => {
+            deduplicateErrorEl.textContent = "Error de conexión al buscar duplicados.";
             setDedupSemaforo(DEDUP_PHASE.ERROR);
             unlockDedupControls();
-        }
+        };
+        ws.onclose = (closeEvent) => {
+            if (!dedupFinished) {
+                deduplicateErrorEl.textContent = closeEvent.reason || "No se pudieron buscar duplicados.";
+                setDedupSemaforo(DEDUP_PHASE.ERROR);
+                unlockDedupControls();
+            }
+        };
     });
 }
 

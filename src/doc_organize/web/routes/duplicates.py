@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ValidationError
 
-from doc_organize.core.constants import DUPLICATES_FOLDER_NAME, SCAN_FOLDERS_JSON_NAME
+from doc_organize.core.constants import DEDUP_HISTORY_JSONL_NAME, DUPLICATES_FOLDER_NAME, SCAN_FOLDERS_JSON_NAME
 from doc_organize.core.models import DeduplicationReport, DuplicateGroup, Project
 from doc_organize.dedup import DeduplicationManager
 from doc_organize.scanner import DocumentScanner
@@ -131,7 +131,7 @@ def _load_dedup_history(project: Project) -> list[DeduplicationReport]:
     escribiendo en disco (contrato externo, `DeduplicationReport.audit_json_path`
     apunta ahí), pero esta página ya no lo lee.
     """
-    history_path = Path(project.root_path) / DUPLICATES_FOLDER_NAME / "DEDUP_HISTORY.jsonl"
+    history_path = Path(project.root_path) / DUPLICATES_FOLDER_NAME / DEDUP_HISTORY_JSONL_NAME
     if not history_path.is_file():
         return []
     reports: list[DeduplicationReport] = []

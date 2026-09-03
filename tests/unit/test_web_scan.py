@@ -626,11 +626,22 @@ async def test_validate_folders_404_for_missing_project(tmp_path) -> None:
     assert response.status_code == 404
 
 
-# ===== POST /api/projects/{name}/scan/deduplicate =====
+# ===== WS /api/projects/{name}/scan/deduplicate =====
+
+
+def _run_dedup_websocket(client: TestClient, project_name: str) -> list[dict]:
+    events: list[dict] = []
+    with client.websocket_connect(f"/api/projects/{project_name}/scan/deduplicate") as websocket:
+        while True:
+            message = websocket.receive_json()
+            events.append(message)
+            if message["event"] == "completed":
+                break
+    return events
 
 
 @pytest.mark.asyncio
-async def test_deduplicate_endpoint_moves_exact_duplicates(tmp_path) -> None:
+async def test_deduplicate_websocket_moves_exact_duplicates(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
     app = create_app(registry_path=registry_path)
@@ -641,14 +652,19 @@ async def test_deduplicate_endpoint_moves_exact_duplicates(tmp_path) -> None:
     original.write_bytes(b"contenido-duplicado")
     (folder / "copia.pdf").write_bytes(original.read_bytes())
 
-    async with _client(app) as client:
-        await client.post(f"/api/projects/{project.name}/folders/library", json={"path": str(folder)})
-        response = await client.post(f"/api/projects/{project.name}/scan/deduplicate")
+    client = TestClient(app)
+    add_response = client.post(f"/api/projects/{project.name}/folders/library", json={"path": str(folder)})
+    assert add_response.status_code == 200
 
-    assert response.status_code == 200
-    payload = response.json()
-    duration_seconds = payload.pop("duration_seconds")
-    assert payload == {"groups_found": 1, "moved": 1, "warnings": []}
+    events = _run_dedup_websocket(client, project.name)
+
+    event_types = [event["event"] for event in events]
+    assert event_types == ["started", "duplicates_found", "group_started", "group_resolved", "completed"]
+    duplicates_found = next(event for event in events if event["event"] == "duplicates_found")
+    assert duplicates_found["data"]["groups_found"] == 1
+    completed = events[-1]
+    duration_seconds = completed["data"].pop("duration_seconds")
+    assert completed["data"] == {"groups_found": 1, "moved": 1, "warnings": []}
     assert duration_seconds >= 0.0
 
     root = Path(project.root_path)
@@ -658,19 +674,22 @@ async def test_deduplicate_endpoint_moves_exact_duplicates(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_deduplicate_endpoint_rejects_when_no_saved_folders(tmp_path) -> None:
+async def test_deduplicate_websocket_rejects_when_no_saved_folders(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
     app = create_app(registry_path=registry_path)
 
-    async with _client(app) as client:
-        response = await client.post(f"/api/projects/{project.name}/scan/deduplicate")
-
-    assert response.status_code == 409
+    client = TestClient(app)
+    with (
+        pytest.raises(WebSocketDisconnect) as exc_info,
+        client.websocket_connect(f"/api/projects/{project.name}/scan/deduplicate") as websocket,
+    ):
+        websocket.receive_json()
+    assert exc_info.value.code == 1008
 
 
 @pytest.mark.asyncio
-async def test_deduplicate_endpoint_history_accumulates_across_runs(tmp_path) -> None:
+async def test_deduplicate_websocket_history_accumulates_across_runs(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
     app = create_app(registry_path=registry_path)
@@ -681,17 +700,19 @@ async def test_deduplicate_endpoint_history_accumulates_across_runs(tmp_path) ->
     first.write_bytes(b"primer-duplicado")
     (folder / "first_copy.pdf").write_bytes(first.read_bytes())
 
-    async with _client(app) as client:
-        await client.post(f"/api/projects/{project.name}/folders/library", json={"path": str(folder)})
-        first_response = await client.post(f"/api/projects/{project.name}/scan/deduplicate")
-        assert first_response.json()["groups_found"] == 1
+    client = TestClient(app)
+    add_response = client.post(f"/api/projects/{project.name}/folders/library", json={"path": str(folder)})
+    assert add_response.status_code == 200
 
-        # Segunda tanda de duplicados, tras la primera ejecucion.
-        second = folder / "second.pdf"
-        second.write_bytes(b"segundo-duplicado")
-        (folder / "second_copy.pdf").write_bytes(second.read_bytes())
-        second_response = await client.post(f"/api/projects/{project.name}/scan/deduplicate")
-        assert second_response.json()["groups_found"] == 1
+    first_events = _run_dedup_websocket(client, project.name)
+    assert first_events[-1]["data"]["groups_found"] == 1
+
+    # Segunda tanda de duplicados, tras la primera ejecucion.
+    second = folder / "second.pdf"
+    second.write_bytes(b"segundo-duplicado")
+    (folder / "second_copy.pdf").write_bytes(second.read_bytes())
+    second_events = _run_dedup_websocket(client, project.name)
+    assert second_events[-1]["data"]["groups_found"] == 1
 
     history_path = Path(project.root_path) / "duplicados" / "DEDUP_HISTORY.jsonl"
     lines = [line for line in history_path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -701,7 +722,7 @@ async def test_deduplicate_endpoint_history_accumulates_across_runs(tmp_path) ->
 
 
 @pytest.mark.asyncio
-async def test_deduplicate_endpoint_rejects_path_outside_allowed_roots(tmp_path) -> None:
+async def test_deduplicate_websocket_rejects_path_outside_allowed_roots(tmp_path) -> None:
     auth_db_path = tmp_path / "auth.db"
     async with AuthStore(auth_db_path) as store:
         tenant = await store.create_tenant("Acme Corp")
@@ -720,11 +741,13 @@ async def test_deduplicate_endpoint_rejects_path_outside_allowed_roots(tmp_path)
     outside_path.mkdir()
     await ScannedFoldersStore().add_folder(project, str(outside_path))
 
-    async with _client(app) as client:
-        client.cookies.set(SESSION_COOKIE_NAME, session.token)
-        response = await client.post(f"/api/projects/{project.name}/scan/deduplicate")
-
-    assert response.status_code == 403
+    client = TestClient(app, cookies={SESSION_COOKIE_NAME: session.token})
+    with (
+        pytest.raises(WebSocketDisconnect) as exc_info,
+        client.websocket_connect(f"/api/projects/{project.name}/scan/deduplicate") as websocket,
+    ):
+        websocket.receive_json()
+    assert exc_info.value.code == 1008
 
 
 # ===== WS /api/projects/{name}/scan =====
@@ -761,6 +784,14 @@ async def test_scan_websocket_loopback_full_pipeline_empty_paths(tmp_path) -> No
     assert events[-1]["data"]["scanned"] == 0
     assert events[-1]["data"]["duration_seconds"] > 0
 
+    # Descubrimiento de ficheros (ya calculado por DocumentScanner, ahora
+    # tambien surfaced en el evento SCANNED y en el resumen final).
+    scanned_event = next(event for event in events if event["event"] == "scanned")
+    assert scanned_event["data"]["discovery_duration_seconds"] >= 0.0
+    assert events[-1]["data"]["discovery_duration_seconds"] >= 0.0
+    # Sin documentos que convertir, el acumulado de conversion es 0.
+    assert events[-1]["data"]["total_conversion_seconds"] == 0.0
+
     # El histórico de duración de ejecuciones (nueva funcionalidad) registra esta
     # ejecución como completada.
     history_path = tmp_path / "workspaces" / project.name / SCAN_HISTORY_FOLDER_NAME / SCAN_HISTORY_JSONL_NAME
@@ -768,6 +799,8 @@ async def test_scan_websocket_loopback_full_pipeline_empty_paths(tmp_path) -> No
     history_entry = json.loads(history_path.read_text(encoding="utf-8").strip())
     assert history_entry["completed"] is True
     assert history_entry["total_scanned"] == 0
+    assert history_entry["discovery_duration_seconds"] >= 0.0
+    assert history_entry["total_conversion_seconds"] == 0.0
 
 
 @pytest.mark.asyncio
@@ -884,6 +917,13 @@ async def test_scan_websocket_loopback_converts_real_document(tmp_path, native_p
     event_types = [event["event"] for event in events]
     assert "file_converted" in event_types
     assert events[-1]["data"]["converted"] == 1
+
+    # Duración de conversión por documento (ConversionResult.duration_seconds,
+    # antes calculada y descartada) ahora viaja en el evento y se acumula en el
+    # resumen final.
+    file_converted_event = next(event for event in events if event["event"] == "file_converted")
+    assert file_converted_event["data"]["duration_seconds"] >= 0.0
+    assert events[-1]["data"]["total_conversion_seconds"] >= 0.0
 
 
 @pytest.mark.slow

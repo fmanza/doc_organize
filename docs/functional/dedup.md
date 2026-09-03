@@ -46,9 +46,14 @@ sequenceDiagram
 
 `resolve_duplicates()` tiene tres llamadores: el botón "Buscar duplicados" de
 la pestaña "Buscar duplicados" de la página Duplicados y el subcomando
-`deduplicate` (CLI), ambos vía `ScanCommand.deduplicate()`; y el formulario
-interactivo de resolución manual de esa misma pestaña, que llama a
-`DeduplicationManager` directamente. Los tres alimentan el mismo
+`deduplicate` (CLI), ambos vía `ScanCommand.deduplicate_streaming()`
+(progreso en vivo por grupo — WebSocket `WS /api/projects/{name}/scan/deduplicate`
+en la web); y el formulario interactivo de resolución manual de esa misma
+pestaña, que llama a `DeduplicationManager` directamente. Internamente,
+`resolve_duplicates()` y `deduplicate_streaming()` comparten las mismas dos
+primitivas (`DeduplicationManager.move_group()` por grupo,
+`DeduplicationManager.finalize_report()` para la persistencia) — solo difieren
+en si yieldean progreso entre medias. Los tres alimentan el mismo
 `DEDUP_HISTORY.jsonl`. Buscar duplicados es una acción independiente del
 escaneo, a petición explícita del usuario, no un paso automático dentro de él.
 

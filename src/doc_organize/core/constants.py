@@ -91,11 +91,18 @@ MAX_AUTO_ERROR_RETRIES = 3
 #: `web/routes/duplicates.py` para re-escanear sin pedir las carpetas de nuevo).
 SCAN_FOLDERS_JSON_NAME = "folders.json"
 
-#: Carpeta donde `DeduplicationManager.resolve_duplicates` mueve los documentos
-#: descartados de cada proyecto, y donde escribe `DEDUP_REPORT.json`/
-#: `DEDUP_HISTORY.jsonl` (releídos por `web/routes/duplicates.py` y
-#: `web/routes/downloads.py`).
+#: Carpeta donde `DeduplicationManager.resolve_duplicates`/`finalize_report` mueve
+#: los documentos descartados de cada proyecto, y donde escribe
+#: `DEDUP_REPORT_JSON_NAME`/`DEDUP_HISTORY_JSONL_NAME` (releídos por
+#: `web/routes/duplicates.py` y `web/routes/downloads.py`).
 DUPLICATES_FOLDER_NAME = "duplicados"
+
+#: Fichero con el resultado de la última deduplicación (solo el último run) y
+#: fichero del histórico acumulado (una línea JSON por ejecución, nunca se
+#: sobrescribe), ambos dentro de `DUPLICATES_FOLDER_NAME`. Escritos por
+#: `DeduplicationManager.finalize_report`.
+DEDUP_REPORT_JSON_NAME = "DEDUP_REPORT.json"
+DEDUP_HISTORY_JSONL_NAME = "DEDUP_HISTORY.jsonl"
 
 #: Carpeta y fichero del histórico de errores de escaneo, dentro de la raíz del
 #: proyecto (gestión de errores de escaneo agrupados por ejecución): una línea JSON
@@ -192,6 +199,8 @@ __all__ = [
     "DEFAULT_ADMIN_USERNAME",
     "DEFAULT_AUTH_DB_NAME",
     "DEFAULT_CACHE_DB_NAME",
+    "DEDUP_HISTORY_JSONL_NAME",
+    "DEDUP_REPORT_JSON_NAME",
     "DUPLICATES_FOLDER_NAME",
     "IGNORED_NAMES",
     "LOGIN_LOCKOUT_SECONDS",

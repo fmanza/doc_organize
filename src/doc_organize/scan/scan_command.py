@@ -7,11 +7,11 @@ distintos — el CLI (`main.py`, Fase D-1) y la interfaz web (`web/routes/scan.p
 Fase D-2b) — así que no debe pertenecer a ninguno de los dos; vive en su propio
 módulo para que ninguno dependa del otro.
 
-`run`/`run_streaming` (escanear+cachear+convertir) y `deduplicate` (buscar y
-mover duplicados) son dos acciones independientes, no un único pipeline: la
-deduplicación es una acción explícita a petición del usuario, no un paso
-automático del escaneo — ambos entry points la ofrecen como una operación
-separada que el usuario ejecuta antes de escanear.
+`run`/`run_streaming` (escanear+cachear+convertir) y `deduplicate_streaming`
+(buscar y mover duplicados) son dos acciones independientes, no un único
+pipeline: la deduplicación es una acción explícita a petición del usuario, no
+un paso automático del escaneo — ambos entry points la ofrecen como una
+operación separada que el usuario ejecuta antes de escanear.
 """
 
 import asyncio
@@ -32,6 +32,8 @@ from doc_organize.core.models import (
     CacheEntry,
     ConversionResult,
     ConversionStatus,
+    DedupEvent,
+    DedupEventType,
     DocumentMetadata,
     DocumentStatus,
     ScanErrorEntry,
@@ -65,6 +67,8 @@ class ScanSummary:
     error_retries: int = 0
     error_retries_capped: int = 0
     duration_seconds: float = 0.0
+    discovery_duration_seconds: float = 0.0
+    total_conversion_seconds: float = 0.0
 
     def render(self) -> str:
         lines = [
@@ -75,15 +79,19 @@ class ScanSummary:
         ]
         if self.error_retries_capped:
             lines.append(f"Sin reintentar (límite de {MAX_AUTO_ERROR_RETRIES} reintentos alcanzado): {self.error_retries_capped}")
+        lines.append(
+            f"Descubrimiento de ficheros: {format_duration(self.discovery_duration_seconds)} "
+            f"| Conversión (total acumulado): {format_duration(self.total_conversion_seconds)}"
+        )
         lines.append(f"Tiempo de ejecución: {format_duration(self.duration_seconds)}")
         return "\n".join(lines)
 
 
 @dataclass
 class DeduplicationSummary:
-    """Resumen imprimible del resultado de `ScanCommand.deduplicate()` (uso interno,
-    no un modelo de dominio — el contrato JSON de la web usa su propio Pydantic
-    response model, ver `web/routes/scan.py`)."""
+    """Resumen imprimible del resultado de `ScanCommand.deduplicate_streaming()`
+    (su evento `COMPLETED`), uso interno, no un modelo de dominio — el WebSocket
+    retransmite `DedupEvent` tal cual, ver `web/routes/scan.py`."""
 
     groups_found: int = 0
     moved: int = 0
@@ -232,6 +240,7 @@ class ScanCommand:
                     clean_paths, include_audio_video=include_audio_video, exclude_dir=output_dir.resolve()
                 )
             summary.scanned = len(scan_result.documents)
+            summary.discovery_duration_seconds = scan_result.scan_duration_seconds
 
             async with CacheManager(cache_db) as cache:
                 cached_entries = await cache.load_cache()
@@ -272,6 +281,10 @@ class ScanCommand:
                         # progreso ("Procesando X/to_process"), junto al indice
                         # que viaja en cada evento FILE_STARTED.
                         "to_process": len(docs_to_process),
+                        # Ya calculado por DocumentScanner.scan_folders() (ScanResult.
+                        # scan_duration_seconds) -- se surface aqui en vez de quedar
+                        # como una metrica muerta que solo se logueaba.
+                        "discovery_duration_seconds": summary.discovery_duration_seconds,
                         # Antes (checkboxes + preflight `/folders/validate`) el cliente
                         # ya llegaba aquí con rutas limpias y el usuario veía cualquier
                         # aviso antes de escanear. Ahora las rutas vienen siempre de
@@ -340,6 +353,8 @@ class ScanCommand:
                         duration_seconds=summary.duration_seconds,
                         total_scanned=summary.scanned,
                         completed=True,
+                        discovery_duration_seconds=summary.discovery_duration_seconds,
+                        total_conversion_seconds=summary.total_conversion_seconds,
                     ),
                 )
             completed_ok = True
@@ -355,6 +370,8 @@ class ScanCommand:
                     duration_seconds=time.monotonic() - start,
                     total_scanned=summary.scanned,
                     completed=False,
+                    discovery_duration_seconds=summary.discovery_duration_seconds,
+                    total_conversion_seconds=summary.total_conversion_seconds,
                 )
                 await self._persist_scan_run(history_log_path, run_report)
 
@@ -418,8 +435,13 @@ class ScanCommand:
                 except OSError as exc:
                     logger.warning(f"No se pudo borrar '{images_dir}' (huérfana): {exc}")
 
-    async def deduplicate(self, paths: list[str], duplicates_dir: Path, folders_json: Path) -> DeduplicationSummary:
-        """Busca y mueve duplicados en `paths`, a petición explícita del usuario.
+    async def deduplicate_streaming(self, paths: list[str], duplicates_dir: Path, folders_json: Path) -> AsyncIterator[DedupEvent]:
+        """Busca y mueve duplicados en `paths`, a petición explícita del usuario,
+        emitiendo progreso (mismo criterio que `run_streaming()` para Escanear:
+        un método de orquestación por evento, sin una variante síncrona
+        "resumen final" aparte -- los llamadores que solo necesitan el resumen
+        (CLI, `main.py::_run_deduplicate`) consumen el generador y se quedan con
+        el evento `COMPLETED`).
 
         Acción independiente del pipeline de `run`/`run_streaming` (ver su
         docstring): no convierte ni cachea nada, solo escanea para poder
@@ -428,18 +450,20 @@ class ScanCommand:
         tras un escaneo — así `web/routes/duplicates.py` funciona aunque el
         usuario solo haya deduplicado y no haya llegado a escanear todavía.
 
-        Llama a `resolve_duplicates()` siempre, incluso sin grupos (`groups`
-        vacío): así cada ejecución de "Buscar duplicados" queda registrada en
-        `DEDUP_HISTORY.jsonl` (histórico completo de cada vez que se pulsó el
-        botón, no solo de las veces que se movió algo).
+        Llama a `DeduplicationManager.finalize_report()` siempre, incluso sin
+        grupos (`groups` vacío): así cada ejecución de "Buscar duplicados" queda
+        registrada en `DEDUP_HISTORY.jsonl` (histórico completo de cada vez que
+        se pulsó el botón, no solo de las veces que se movió algo).
 
         `started_at` se captura aquí, antes del re-escaneo, no solo antes de
-        `resolve_duplicates()`: la duración mostrada en pantalla debe cubrir la
+        mover ficheros: la duración mostrada en pantalla debe cubrir la
         operación completa que el usuario percibe al pulsar "Buscar
         duplicados" (escaneo + detección + movimiento), mismo criterio que
         `duration_seconds` en `ScanSummary`/`ScanRunReport` para Escanear.
         """
         started_at = datetime.now(timezone.utc)
+        yield DedupEvent(event=DedupEventType.STARTED, data={})
+
         clean_paths, warnings = await self._resolve_scan_paths(paths, folders_json)
 
         async with DocumentScanner() as scanner:
@@ -447,11 +471,28 @@ class ScanCommand:
 
         dedup_manager = DeduplicationManager()
         groups = dedup_manager.find_duplicates(scan_result.documents)
-        report = await dedup_manager.resolve_duplicates(groups, duplicates_dir, started_at=started_at)
-        moved = report.total_exact_duplicates + report.total_version_conflicts
+        yield DedupEvent(event=DedupEventType.DUPLICATES_FOUND, data={"groups_found": len(groups), "warnings": warnings})
 
+        duplicates_dir = Path(duplicates_dir)
+        await asyncio.to_thread(duplicates_dir.mkdir, parents=True, exist_ok=True)
+
+        total = len(groups)
+        exact_moved = 0
+        version_resolved = 0
+        for index, group in enumerate(groups, start=1):
+            yield DedupEvent(event=DedupEventType.GROUP_STARTED, data={"index": index, "total": total, "reason": group.reason.value})
+            exact, version = await dedup_manager.move_group(group, duplicates_dir)
+            exact_moved += exact
+            version_resolved += version
+            yield DedupEvent(event=DedupEventType.GROUP_RESOLVED, data={"index": index, "total": total, "moved": exact + version})
+
+        report = await dedup_manager.finalize_report(groups, duplicates_dir, exact_moved, version_resolved, started_at=started_at)
+        moved = report.total_exact_duplicates + report.total_version_conflicts
         duration_seconds = report.duration_seconds if report.duration_seconds is not None else 0.0
-        return DeduplicationSummary(groups_found=len(groups), moved=moved, duration_seconds=duration_seconds, warnings=warnings)
+        yield DedupEvent(
+            event=DedupEventType.COMPLETED,
+            data={"groups_found": total, "moved": moved, "duration_seconds": duration_seconds, "warnings": warnings},
+        )
 
     async def _convert_documents(
         self,
@@ -509,12 +550,18 @@ class ScanCommand:
                 if result.ocr_required:
                     summary.ocr_required += 1
                     ocr_candidates.append(doc)
+                summary.total_conversion_seconds += result.duration_seconds
                 cached = cached_entries.get(doc.full_path)
                 previous_retry_count = cached.error_retry_count if cached else 0
                 entries.append(self._build_entry(doc, result, status, ocr_pending=result.ocr_required, previous_retry_count=previous_retry_count))
                 yield ScanEvent(
                     event=ScanEventType.FILE_CONVERTED,
-                    data={"path": doc.full_path, "success": result.success, "ocr_required": result.ocr_required},
+                    data={
+                        "path": doc.full_path,
+                        "success": result.success,
+                        "ocr_required": result.ocr_required,
+                        "duration_seconds": result.duration_seconds,
+                    },
                 )
 
     @staticmethod
@@ -609,7 +656,11 @@ class ScanCommand:
                 previous_retry_count = cached.error_retry_count if cached else 0
             new_entry = self._build_entry(doc, result, status, ocr_pending=False, previous_retry_count=previous_retry_count)
             entries_by_path[doc.full_path] = new_entry
-            yield ScanEvent(event=ScanEventType.OCR_PROCESSED, data={"path": doc.full_path, "success": result.success})
+            summary.total_conversion_seconds += result.duration_seconds
+            yield ScanEvent(
+                event=ScanEventType.OCR_PROCESSED,
+                data={"path": doc.full_path, "success": result.success, "duration_seconds": result.duration_seconds},
+            )
         entries[:] = list(entries_by_path.values())
 
     @staticmethod

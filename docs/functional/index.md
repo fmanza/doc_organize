@@ -85,10 +85,11 @@ ninguno de los dos.
   opcional. `run()` devuelve solo el resumen final (uso del CLI);
   `run_streaming()` emite progreso incremental por evento (usado por el
   WebSocket de la web). Ya no deduplica.
-- `deduplicate()`: busca y mueve duplicados, a petición explícita del usuario
-  (botón "Buscar duplicados" en la web, subcomando `deduplicate` en el CLI).
-  En la interfaz web, `run_streaming()` queda bloqueado hasta que esta acción
-  se haya ejecutado con éxito en la misma visita a la página.
+- `deduplicate_streaming()`: busca y mueve duplicados, a petición explícita del
+  usuario (botón "Buscar duplicados" de la página Duplicados en la web,
+  subcomando `deduplicate` en el CLI), emitiendo progreso por grupo (mismo
+  criterio que `run_streaming()`: un WebSocket dedicado en la web,
+  `WS /api/projects/{name}/scan/deduplicate`).
 
 ### `web/` (extra `[web]`)
 

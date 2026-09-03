@@ -67,6 +67,21 @@ class ScanEventType(str, Enum):
     COMPLETED = "completed"
 
 
+class DedupEventType(str, Enum):
+    """Tipo de evento de progreso emitido por `ScanCommand.deduplicate_streaming()`.
+
+    Mismo criterio que `ScanEventType`: `DUPLICATES_FOUND` (tras `find_duplicates()`)
+    es el análogo de `SCANNED`, y `GROUP_STARTED`/`GROUP_RESOLVED` (antes/después de
+    mover cada grupo) el análogo de `FILE_STARTED`/`FILE_CONVERTED`.
+    """
+
+    STARTED = "started"
+    DUPLICATES_FOUND = "duplicates_found"
+    GROUP_STARTED = "group_started"
+    GROUP_RESOLVED = "group_resolved"
+    COMPLETED = "completed"
+
+
 # ===== Modelos Pydantic (API / serialización JSON) =====
 
 
@@ -239,6 +254,12 @@ class ScanRunReport(BaseModel):
     duration_seconds: float = Field(..., description="Tiempo total transcurrido entre inicio y fin")
     total_scanned: int = Field(..., description="Total de documentos escaneados en esta ejecución (0 si no llegó a escanear)")
     completed: bool = Field(..., description="Si el escaneo llegó a emitir el evento COMPLETED, o se interrumpió antes")
+    discovery_duration_seconds: float | None = Field(
+        None, description="Tiempo empleado en descubrir/hashear ficheros (None en históricos previos a este campo)"
+    )
+    total_conversion_seconds: float | None = Field(
+        None, description="Suma de la duración de conversión de cada documento procesado, incluido OCR (None en históricos previos a este campo)"
+    )
 
 
 class CacheExportSnapshot(BaseModel):
@@ -295,6 +316,17 @@ class ScanEvent(BaseModel):
     """
 
     event: ScanEventType = Field(..., description="Tipo de evento de progreso")
+    data: dict[str, Any] = Field(default_factory=dict, description="Payload del evento; su forma depende de `event`")
+
+
+class DedupEvent(BaseModel):
+    """Un evento de progreso emitido por `ScanCommand.deduplicate_streaming()`.
+
+    Mismo criterio que `ScanEvent`: payload `dict[str, Any]` laxo en vez de un
+    modelo por tipo de evento.
+    """
+
+    event: DedupEventType = Field(..., description="Tipo de evento de progreso")
     data: dict[str, Any] = Field(default_factory=dict, description="Payload del evento; su forma depende de `event`")
 
 
@@ -492,6 +524,8 @@ __all__ = [
     "CacheExportSnapshot",
     "ConversionResult",
     "ConversionStatus",
+    "DedupEvent",
+    "DedupEventType",
     "DeduplicationReport",
     "DirectoryListing",
     "DirectoryTree",

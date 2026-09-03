@@ -739,8 +739,8 @@ async def test_duplicates_page_has_two_tabs(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_duplicates_page_shows_deduplicate_button_moved_from_scan(tmp_path) -> None:
     """El "Paso 1: Buscar duplicados" de la antigua página Escanear vive ahora en
-    la pestaña "Buscar duplicados" de esta página, llamando al mismo endpoint
-    POST /api/projects/{name}/scan/deduplicate."""
+    la pestaña "Buscar duplicados" de esta página, llamando al mismo WebSocket
+    WS /api/projects/{name}/scan/deduplicate."""
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
     project_root = tmp_path / "workspaces" / project.name

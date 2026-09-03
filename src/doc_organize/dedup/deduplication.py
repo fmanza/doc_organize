@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from doc_organize.core.constants import VERSION_SUFFIX_PATTERN
+from doc_organize.core.constants import DEDUP_HISTORY_JSONL_NAME, DEDUP_REPORT_JSON_NAME, VERSION_SUFFIX_PATTERN
 from doc_organize.core.models import DeduplicationReport, DocumentMetadata, DuplicateGroup, DuplicateReason
 from doc_organize.utils.logging import get_logger
 from doc_organize.utils.path_utils import safe_path_join
@@ -63,41 +63,56 @@ class DeduplicationManager:
         self.logger.info(f"Deduplicación: {len(groups)} grupos detectados sobre {len(docs)} documentos")
         return groups
 
-    async def resolve_duplicates(
-        self, groups: list[DuplicateGroup], duplicates_dir: Path, started_at: datetime | None = None
+    async def move_group(self, group: DuplicateGroup, duplicates_dir: Path) -> tuple[int, int]:
+        """Mueve los documentos descartados de un único `group` a `duplicates_dir`.
+
+        Devuelve `(duplicados_exactos_movidos, conflictos_de_version_resueltos)`
+        de este grupo (0 en el que no aplique, según `group.reason`). Extraído
+        de `resolve_duplicates()` (que lo reutiliza en su propio bucle) para que
+        `ScanCommand.deduplicate_streaming()` pueda yieldear progreso por grupo
+        sin duplicar la lógica de movimiento -- mismo criterio que la relación
+        entre `DocumentConverter.convert_document()` (por documento) y el bucle
+        de `ScanCommand._convert_documents()`.
+        """
+        keep = group.user_choice or group.canonical_doc
+        to_move = [doc for doc in [group.canonical_doc, *group.duplicates] if doc.full_path != keep.full_path]
+        for doc in to_move:
+            await self._move_to_duplicates(Path(doc.full_path), duplicates_dir, doc.sha256_hash)
+        if group.reason == DuplicateReason.EXACT_DUPLICATE:
+            return len(to_move), 0
+        return 0, len(to_move)
+
+    async def finalize_report(
+        self,
+        groups: list[DuplicateGroup],
+        duplicates_dir: Path,
+        exact_moved: int,
+        version_resolved: int,
+        started_at: datetime | None = None,
     ) -> DeduplicationReport:
-        """Mueve los documentos descartados de cada grupo a `duplicates_dir`,
-        preservando su estructura de directorios original, y escribe
+        """Construye el `DeduplicationReport` de una resolución ya completada
+        (todos los grupos ya movidos vía `move_group`), escribe
         `DEDUP_REPORT.json` (solo el último run) y añade una línea a
         `DEDUP_HISTORY.jsonl` (histórico acumulado de todas las ejecuciones).
+
+        Público (no un detalle interno de `resolve_duplicates()`):
+        `ScanCommand.deduplicate_streaming()` también lo llama, tras su propio
+        bucle con progreso por grupo -- mismo criterio de "no importar símbolos
+        privados entre módulos" ya establecido en el proyecto (ver
+        `web/scan_errors_data.py`).
 
         `started_at` es opcional (compatibilidad con llamadores no adaptados):
         cuando se pasa, `duration_seconds` cubre desde ahí hasta que este método
         termina -- el llamador debe capturarlo *antes* de detectar los grupos
-        (`find_duplicates`/re-escaneo), no solo antes de esta llamada, para que
+        (`find_duplicates`/re-escaneo), no solo antes de mover ficheros, para que
         la duración mostrada en pantalla represente la operación completa
         ("Buscar duplicados"), igual que `ScanRunReport` cubre el run entero de
         Escanear. Si se omite, `DeduplicationReport.duration_seconds` queda en
         `None` (sin dato) en vez de medir solo el movimiento de ficheros, que
-        sería una duración parcial engañosa."""
-        duplicates_dir = Path(duplicates_dir)
-        await asyncio.to_thread(duplicates_dir.mkdir, parents=True, exist_ok=True)
-
-        exact_moved = 0
-        version_resolved = 0
-
-        for group in groups:
-            keep = group.user_choice or group.canonical_doc
-            to_move = [doc for doc in [group.canonical_doc, *group.duplicates] if doc.full_path != keep.full_path]
-            for doc in to_move:
-                await self._move_to_duplicates(Path(doc.full_path), duplicates_dir, doc.sha256_hash)
-            if group.reason == DuplicateReason.EXACT_DUPLICATE:
-                exact_moved += len(to_move)
-            else:
-                version_resolved += len(to_move)
-
+        sería una duración parcial engañosa.
+        """
         finished_at = datetime.now(timezone.utc)
-        audit_path = duplicates_dir / "DEDUP_REPORT.json"
+        audit_path = duplicates_dir / DEDUP_REPORT_JSON_NAME
         report = DeduplicationReport(
             timestamp=finished_at.isoformat(),
             total_exact_duplicates=exact_moved,
@@ -110,6 +125,35 @@ class DeduplicationManager:
         )
         await asyncio.to_thread(audit_path.write_text, report.model_dump_json(indent=2), encoding="utf-8")
         await self._append_to_history(duplicates_dir, report)
+        return report
+
+    async def resolve_duplicates(
+        self, groups: list[DuplicateGroup], duplicates_dir: Path, started_at: datetime | None = None
+    ) -> DeduplicationReport:
+        """Mueve los documentos descartados de cada grupo a `duplicates_dir`,
+        preservando su estructura de directorios original, y escribe
+        `DEDUP_REPORT.json` (solo el último run) y añade una línea a
+        `DEDUP_HISTORY.jsonl` (histórico acumulado de todas las ejecuciones).
+
+        Composición de `move_group()` (bucle, sin progreso) + `finalize_report()`
+        (persistencia) -- la vía "todo de una vez" usada por el resolver
+        interactivo (`web/routes/duplicates.py`). `ScanCommand.
+        deduplicate_streaming()` usa las mismas dos primitivas por separado, con
+        eventos de progreso entre medias.
+
+        `started_at` es opcional, ver `finalize_report()`.
+        """
+        duplicates_dir = Path(duplicates_dir)
+        await asyncio.to_thread(duplicates_dir.mkdir, parents=True, exist_ok=True)
+
+        exact_moved = 0
+        version_resolved = 0
+        for group in groups:
+            exact, version = await self.move_group(group, duplicates_dir)
+            exact_moved += exact
+            version_resolved += version
+
+        report = await self.finalize_report(groups, duplicates_dir, exact_moved, version_resolved, started_at)
         self.logger.info(f"Deduplicación resuelta: {exact_moved} duplicados exactos, {version_resolved} conflictos de versión")
         return report
 
@@ -120,7 +164,7 @@ class DeduplicationManager:
         este fichero acumula todas las ejecuciones para poder consultarlas —
         tanto las lanzadas desde "Buscar duplicados" como las del formulario
         interactivo de resolución manual, ambas pasan por aquí."""
-        history_path = duplicates_dir / "DEDUP_HISTORY.jsonl"
+        history_path = duplicates_dir / DEDUP_HISTORY_JSONL_NAME
         line = report.model_dump_json() + "\n"
 
         def _append() -> None:

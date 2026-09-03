@@ -107,13 +107,6 @@ class AddFolderRequest(BaseModel):
     path: str
 
 
-class DeduplicateFoldersResponse(BaseModel):
-    groups_found: int
-    moved: int
-    duration_seconds: float
-    warnings: list[str]
-
-
 @router.get("/projects/{name}/scan", response_class=HTMLResponse, dependencies=[Depends(require_project_access)])
 async def folder_selector(
     name: str,
@@ -247,46 +240,11 @@ async def validate_folders(name: str, payload: ValidateFoldersRequest, request: 
     return ValidateFoldersResponse(valid=result.is_valid, warnings=result.warnings, clean_paths=result.clean_paths)
 
 
-@router.post(
-    "/api/projects/{name}/scan/deduplicate",
-    response_model=DeduplicateFoldersResponse,
-    dependencies=[Depends(require_project_access)],
-)
-async def deduplicate_folders(name: str, request: Request) -> DeduplicateFoldersResponse:
-    """Busca y mueve duplicados sobre TODAS las carpetas guardadas del proyecto,
-    a petición del usuario (botón "Buscar duplicados" del menú Escaneo).
-
-    Paso previo obligatorio antes de poder escanear: `folder_selector.html.j2`
-    mantiene "Escanear" deshabilitado hasta que este endpoint responda con
-    éxito en la misma visita a la página — un gate solo de cliente (sin
-    persistencia entre visitas, se resetea al recargar), no una barrera de
-    seguridad: saltárselo llamando directamente al WebSocket de escaneo no
-    expone nada que no fuera ya posible antes de que existiera este endpoint.
-    """
-    async with get_project_registry(request) as registry:
-        project = await registry.get_project(name, tenant_id=get_tenant_id(request))
-
-    allowed_roots = await get_allowed_scan_roots(request)
-    folders = await get_scanned_folders_store().list_folders(project)
-    saved_paths = [folder.path for folder in folders]
-    if not saved_paths:
-        raise HTTPException(status_code=409, detail="No hay carpetas guardadas para este proyecto.")
-    if not paths_within_roots(saved_paths, allowed_roots):
-        raise HTTPException(status_code=403, detail="No tienes acceso a alguna de las carpetas guardadas.")
-
-    root = Path(project.root_path)
-    summary = await ScanCommand().deduplicate(
-        paths=saved_paths,
-        duplicates_dir=root / DUPLICATES_FOLDER_NAME,
-        folders_json=root / SCAN_FOLDERS_JSON_NAME,
-    )
-    return DeduplicateFoldersResponse(
-        groups_found=summary.groups_found, moved=summary.moved, duration_seconds=summary.duration_seconds, warnings=summary.warnings
-    )
-
-
-async def _authorize_scan_websocket(websocket: WebSocket, project_name: str) -> tuple[str, list[str] | None] | None:
+async def _authorize_project_websocket(websocket: WebSocket, project_name: str) -> tuple[str, list[str] | None] | None:
     """Autentica (si aplica) y resuelve `tenant_id` + `allowed_scan_roots` para la conexión.
+
+    Compartida por `scan_websocket` y `deduplicate_websocket` (ambas operan sobre
+    las mismas carpetas guardadas del proyecto, con la misma restricción de acceso).
 
     Autenticación manual (Fase D-2b, §2.7.3): `AuthMiddleware` extiende
     `BaseHTTPMiddleware`, que **no** intercepta conexiones WebSocket — Starlette pasa
@@ -328,7 +286,7 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
     """Escanea/convierte el proyecto `name`, retransmitiendo cada `ScanEvent` como JSON."""
     await websocket.accept()
 
-    auth_result = await _authorize_scan_websocket(websocket, name)
+    auth_result = await _authorize_project_websocket(websocket, name)
     if auth_result is None:
         return
     tenant_id, allowed_scan_roots = auth_result
@@ -400,6 +358,54 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
             await websocket.send_json(event.model_dump(mode="json"))
     except WebSocketDisconnect:
         logger.info(f"Cliente desconectado durante el escaneo de '{name}' (tenant '{tenant_id}')")
+        return
+
+    await websocket.close()
+
+
+@router.websocket("/api/projects/{name}/scan/deduplicate")
+async def deduplicate_websocket(name: str, websocket: WebSocket) -> None:
+    """Busca y mueve duplicados sobre TODAS las carpetas guardadas del proyecto
+    `name`, a petición del usuario (botón "Buscar duplicados", pestaña
+    "Duplicados"), retransmitiendo cada `DedupEvent` como JSON.
+
+    Mismo patrón que `scan_websocket`: sin payload de entrada (a diferencia del
+    escaneo, no hay opciones que configurar), autorización + resolución de
+    carpetas guardadas compartidas vía `_authorize_project_websocket`.
+    """
+    await websocket.accept()
+
+    auth_result = await _authorize_project_websocket(websocket, name)
+    if auth_result is None:
+        return
+    tenant_id, allowed_scan_roots = auth_result
+
+    async with get_project_registry(websocket) as registry:
+        try:
+            project = await registry.get_project(name, tenant_id=tenant_id)
+        except ProjectNotFoundError:
+            await websocket.close(code=1008, reason="Project not found")
+            return
+
+    folders = await get_scanned_folders_store().list_folders(project)
+    saved_paths = [folder.path for folder in folders]
+    if not saved_paths:
+        await websocket.close(code=1008, reason="No hay carpetas guardadas para este proyecto")
+        return
+    if not paths_within_roots(saved_paths, allowed_scan_roots):
+        await websocket.close(code=1008, reason="Forbidden path")
+        return
+
+    root = Path(project.root_path)
+    try:
+        async for event in ScanCommand().deduplicate_streaming(
+            paths=saved_paths,
+            duplicates_dir=root / DUPLICATES_FOLDER_NAME,
+            folders_json=root / SCAN_FOLDERS_JSON_NAME,
+        ):
+            await websocket.send_json(event.model_dump(mode="json"))
+    except WebSocketDisconnect:
+        logger.info(f"Cliente desconectado durante la deduplicación de '{name}' (tenant '{tenant_id}')")
         return
 
     await websocket.close()

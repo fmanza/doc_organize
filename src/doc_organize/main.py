@@ -12,6 +12,7 @@ from pathlib import Path
 from doc_organize.auth import AuthStore
 from doc_organize.core.constants import (
     DEFAULT_CACHE_DB_NAME,
+    DUPLICATES_FOLDER_NAME,
     SCAN_ERRORS_FOLDER_NAME,
     SCAN_ERRORS_HISTORY_JSONL_NAME,
     SCAN_FOLDERS_JSON_NAME,
@@ -19,6 +20,7 @@ from doc_organize.core.constants import (
     SCAN_HISTORY_JSONL_NAME,
 )
 from doc_organize.core.exceptions import DocOrganizeError
+from doc_organize.core.models import DedupEventType
 from doc_organize.projects import ProjectRegistry
 from doc_organize.scan import DeduplicationSummary, ScanCommand, ScanSummary
 from doc_organize.utils.av_detector import detect_av_status
@@ -151,7 +153,7 @@ async def _resolve_dedup_paths(args: argparse.Namespace) -> tuple[Path, Path]:
         async with _registry(args) as registry:
             project = await registry.get_project(args.project)
         root = Path(project.root_path)
-        duplicates_dir = Path(args.duplicates_dir) if args.duplicates_dir else root / "duplicados"
+        duplicates_dir = Path(args.duplicates_dir) if args.duplicates_dir else root / DUPLICATES_FOLDER_NAME
         return duplicates_dir, root / SCAN_FOLDERS_JSON_NAME
 
     if not args.duplicates_dir:
@@ -235,7 +237,10 @@ async def _run_scan(args: argparse.Namespace) -> int:
 
 async def _run_deduplicate(args: argparse.Namespace) -> int:
     duplicates_dir, folders_json = await _resolve_dedup_paths(args)
-    summary = await ScanCommand().deduplicate(paths=args.paths, duplicates_dir=duplicates_dir, folders_json=folders_json)
+    summary = DeduplicationSummary()
+    async for event in ScanCommand().deduplicate_streaming(paths=args.paths, duplicates_dir=duplicates_dir, folders_json=folders_json):
+        if event.event is DedupEventType.COMPLETED:
+            summary = DeduplicationSummary(**event.data)
     print(summary.render())
     return 0
 

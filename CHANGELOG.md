@@ -6,6 +6,54 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-03
+
+### Added
+
+- `src/doc_organize/core/models.py`: `ScanRunReport` gana `discovery_duration_seconds`/
+  `total_conversion_seconds` (ambos opcionales — `None` en históricos previos a estos campos,
+  para no romper la carga de líneas ya escritas en `SCAN_HISTORY.jsonl`). Nuevo `DedupEventType`
+  (`started`/`duplicates_found`/`group_started`/`group_resolved`/`completed`) y `DedupEvent`,
+  mismo patrón que `ScanEventType`/`ScanEvent`, emitidos por `ScanCommand.deduplicate_streaming()`.
+- `src/doc_organize/scan/scan_command.py`: el payload de `FILE_CONVERTED`/`OCR_PROCESSED` gana
+  `duration_seconds` (ya calculado por `ConversionResult`, antes descartado); el de `SCANNED` gana
+  `discovery_duration_seconds` (ya calculado por `DocumentScanner.scan_folders()`, antes descartado).
+  `ScanSummary` acumula ambos (`total_conversion_seconds`, `discovery_duration_seconds`) y los
+  refleja en `render()` (CLI) y en el evento `COMPLETED`.
+- `src/doc_organize/dedup/deduplication.py`: `DeduplicationManager` gana `move_group()` (mueve los
+  descartados de un único grupo) y `finalize_report()` (persiste `DEDUP_REPORT.json`/
+  `DEDUP_HISTORY.jsonl`), ambos públicos — `resolve_duplicates()` pasa a componerlos.
+- `src/doc_organize/web/routes/scan.py`: nuevo WebSocket `WS /api/projects/{name}/scan/deduplicate`,
+  retransmitiendo cada `DedupEvent` en vivo (progreso por grupo de duplicados detectado/movido) —
+  mismo patrón que el WebSocket de escaneo.
+- `src/doc_organize/web/templates/duplicates_resolver.html.j2`: la pestaña "Buscar duplicados"
+  muestra ahora una barra de progreso en vivo por grupo ("Moviendo grupo X/Y…") y la duración de la
+  ejecución, en vez de un semáforo que solo simulaba "en ejecución" sobre una única llamada bloqueante.
+- `src/doc_organize/web/templates/folder_selector.html.j2`: la pantalla "Escanear" muestra ahora la
+  duración de descubrimiento de ficheros y de conversión acumulada, tanto en la última ejecución
+  (en vivo y tras recargar) como en cada fila del histórico de ejecuciones.
+- `src/doc_organize/core/constants.py`: `DEDUP_REPORT_JSON_NAME` (`DEDUP_REPORT.json`),
+  `DEDUP_HISTORY_JSONL_NAME` (`DEDUP_HISTORY.jsonl`) — nombres de fichero de deduplicación
+  centralizados, mismo patrón que `SCAN_HISTORY_JSONL_NAME`/`SCAN_ERRORS_HISTORY_JSONL_NAME`.
+
+### Changed
+
+- `src/doc_organize/web/routes/scan.py`: `_authorize_scan_websocket` renombrado a
+  `_authorize_project_websocket` — ahora compartido por los WebSocket de escaneo y de deduplicación.
+- `src/doc_organize/dedup/deduplication.py`, `src/doc_organize/web/routes/downloads.py`,
+  `src/doc_organize/web/routes/duplicates.py`, `src/doc_organize/main.py`: los literales
+  `"DEDUP_REPORT.json"`/`"DEDUP_HISTORY.jsonl"`/`"duplicados"` pasan a usar las constantes
+  centralizadas de `core/constants.py` (sin cambio de valor ni de comportamiento).
+
+### Removed
+
+- `src/doc_organize/scan/scan_command.py`: `ScanCommand.deduplicate()` eliminado — sustituido por
+  `deduplicate_streaming()` (async generator con progreso, ver "Added"). Sin variante síncrona de
+  resumen final: los llamadores que solo necesitan el resumen (CLI) consumen el generador y se
+  quedan con su evento `COMPLETED`.
+- `src/doc_organize/web/routes/scan.py`: `POST /api/projects/{name}/scan/deduplicate` eliminado —
+  sustituido por el WebSocket `WS /api/projects/{name}/scan/deduplicate` (ver "Added").
+
 ## [0.6.0] - 2026-09-03
 
 ### Added

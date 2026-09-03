@@ -28,8 +28,11 @@
   documento canónico y una elección opcional del usuario (`user_choice`).
 - **ScanEvent**: evento de progreso emitido por `ScanCommand.run_streaming()`
   (`started`/`scanned`/`file_converted`/`ocr_processed`/`completed`). La deduplicación
-  (`ScanCommand.deduplicate()`) es una acción aparte, a petición del usuario, y no
-  emite `ScanEvent` — devuelve un `DeduplicationSummary` de una sola vez.
+  (`ScanCommand.deduplicate_streaming()`) es una acción aparte, a petición del usuario,
+  con su propio evento análogo (`DedupEvent`:
+  `started`/`duplicates_found`/`group_started`/`group_resolved`/`completed`) — su
+  `COMPLETED` se colapsa en un `DeduplicationSummary` para los llamadores que solo
+  necesitan el resumen final (CLI).
 
 ## Conceptos técnicos
 

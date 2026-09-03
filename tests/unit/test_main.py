@@ -10,8 +10,8 @@ import pytest
 from doc_organize.converter import DocumentConverter
 from doc_organize.core.constants import SCAN_HISTORY_FOLDER_NAME, SCAN_HISTORY_JSONL_NAME
 from doc_organize.core.exceptions import DocOrganizeError
-from doc_organize.core.models import AvStatus, ConversionStatus, ScanEventType
-from doc_organize.main import ScanCommand, _resolve_dedup_paths, _resolve_scan_paths, build_parser, main
+from doc_organize.core.models import AvStatus, ConversionStatus, DedupEventType, ScanEventType
+from doc_organize.main import DeduplicationSummary, ScanCommand, _resolve_dedup_paths, _resolve_scan_paths, build_parser, main
 from doc_organize.projects import ProjectRegistry
 
 _SAMPLE_TEXT = "Informe de prueba doc_organize.\nDocumento de fixture para tests del CLI."
@@ -503,11 +503,14 @@ async def test_scan_command_deduplicate_moves_exact_duplicate(tmp_path) -> None:
     # Copia exacta (mismo contenido) con otro nombre -> duplicado exacto.
     (input_dir / "copia.pdf").write_bytes((input_dir / "original.pdf").read_bytes())
 
-    summary = await ScanCommand().deduplicate(
+    summary = DeduplicationSummary()
+    async for event in ScanCommand().deduplicate_streaming(
         paths=[str(input_dir)],
         duplicates_dir=root / "duplicados",
         folders_json=root / "folders.json",
-    )
+    ):
+        if event.event is DedupEventType.COMPLETED:
+            summary = DeduplicationSummary(**event.data)
 
     assert summary.groups_found == 1
     assert summary.moved == 1
@@ -515,8 +518,8 @@ async def test_scan_command_deduplicate_moves_exact_duplicate(tmp_path) -> None:
     assert (root / "duplicados" / "DEDUP_REPORT.json").exists()
     assert (root / "folders.json").exists()  # para que web/routes/duplicates.py funcione sin haber escaneado
 
-    # `run()` ya no deduplica: la copia se movió por `deduplicate()`, así que
-    # el escaneo posterior ya solo encuentra el canónico.
+    # `run()` ya no deduplica: la copia se movió por `deduplicate_streaming()`,
+    # así que el escaneo posterior ya solo encuentra el canónico.
     scan_summary = await ScanCommand().run(
         paths=[str(input_dir)],
         output_dir=root / "Conversión",
@@ -541,11 +544,14 @@ async def test_scan_command_deduplicate_no_duplicates_returns_zero(tmp_path) -> 
     input_dir.mkdir()
     (input_dir / "unico.pdf").write_bytes(b"contenido-unico")
 
-    summary = await ScanCommand().deduplicate(
+    summary = DeduplicationSummary()
+    async for event in ScanCommand().deduplicate_streaming(
         paths=[str(input_dir)],
         duplicates_dir=root / "duplicados",
         folders_json=root / "folders.json",
-    )
+    ):
+        if event.event is DedupEventType.COMPLETED:
+            summary = DeduplicationSummary(**event.data)
 
     assert summary.groups_found == 0
     assert summary.moved == 0
