@@ -28,17 +28,52 @@
 </p>
 {% endif %}
 
+{% if not av_status.ready %}
+<p class="my-2 px-3 py-2 rounded bg-gray-50 border border-gray-300 text-gray-700 text-sm">
+    Audio/vídeo no disponible en este entorno. {{ av_status.instructions }}
+</p>
+{% endif %}
+
 <h2 class="text-lg font-medium mt-4 mb-2">Escanear</h2>
 <form id="scan-form" class="my-4">
-    <p class="my-2 flex gap-4 flex-wrap">
-        <label class="flex items-center gap-1"><input type="checkbox" id="use_ocr"> Usar OCR si hace falta</label>
-        <label class="flex items-center gap-1" title="{{ '' if gpu_status.gpu_active else (gpu_status.instructions or '') }}">
-            <input type="checkbox" id="use_gpu" {% if not gpu_status.gpu_active %}disabled{% endif %}> OCR con GPU
-        </label>
-        <label class="flex items-center gap-1" title="Vacía la caché y reconvierte todos los documentos desde cero, aunque no hayan cambiado.">
-            <input type="checkbox" id="force"> Forzar rescan completo
-        </label>
-    </p>
+    <div class="flex flex-wrap gap-3 mb-3">
+        <fieldset class="border border-gray-300 rounded px-3 py-2">
+            <legend class="text-xs font-medium text-gray-600 px-1">OCR</legend>
+            <p class="flex gap-4 flex-wrap">
+                <label class="flex items-center gap-1"><input type="checkbox" id="use_ocr"> Usar OCR si hace falta</label>
+                <label class="flex items-center gap-1" title="{{ '' if gpu_status.gpu_active else (gpu_status.instructions or '') }}">
+                    <input type="checkbox" id="use_gpu" {% if not gpu_status.gpu_active %}disabled{% endif %}> OCR con GPU
+                </label>
+            </p>
+        </fieldset>
+        <fieldset class="border border-gray-300 rounded px-3 py-2">
+            <legend class="text-xs font-medium text-gray-600 px-1">Formatos a incluir</legend>
+            <p class="flex gap-4 flex-wrap">
+                <label class="flex items-center gap-1" title="{{ '' if av_status.ready else (av_status.instructions or '') }}">
+                    <input type="checkbox" id="include_audio_video" {% if not av_status.ready %}disabled{% endif %}> Incluir audio/vídeo
+                </label>
+            </p>
+        </fieldset>
+        <fieldset class="border border-gray-300 rounded px-3 py-2">
+            <legend class="text-xs font-medium text-gray-600 px-1">Extracción para IA / RAG</legend>
+            <p class="flex gap-4 flex-wrap">
+                <label class="flex items-center gap-1" title="Extrae las imágenes embebidas a una carpeta 'img/&lt;nombre&gt;' y las referencia desde el Markdown, en vez del marcador de posición por defecto.">
+                    <input type="checkbox" id="extract_images"> Extraer imágenes a carpeta
+                </label>
+                <label class="flex items-center gap-1" title="Genera una descripción textual de cada imagen (modelo local) en el .json, solo para documentos PDF/imagen. Más lento: descarga un modelo la primera vez.">
+                    <input type="checkbox" id="use_picture_description"> Describir imágenes (RAG)
+                </label>
+            </p>
+        </fieldset>
+        <fieldset class="border border-amber-300 bg-amber-50 rounded px-3 py-2">
+            <legend class="text-xs font-medium text-amber-800 px-1">Avanzado ⚠</legend>
+            <p class="flex gap-4 flex-wrap">
+                <label class="flex items-center gap-1" title="Vacía la caché y reconvierte todos los documentos desde cero, aunque no hayan cambiado.">
+                    <input type="checkbox" id="force"> Forzar rescan completo
+                </label>
+            </p>
+        </fieldset>
+    </div>
     <button type="submit" id="scan-submit-btn" {% if not folders %}disabled{% endif %} class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50">Escanear todas las carpetas guardadas</button>
     {% if not folders %}
     <p class="text-xs text-gray-500 mt-1">Deshabilitado hasta guardar al menos una carpeta (menú {{ project.name }}, Carpetas guardadas).</p>
@@ -294,6 +329,9 @@ form.addEventListener("submit", async (submitEvent) => {
     const use_ocr = document.getElementById("use_ocr").checked;
     const use_gpu = document.getElementById("use_gpu").checked;
     const force = document.getElementById("force").checked;
+    const include_audio_video = document.getElementById("include_audio_video").checked;
+    const extract_images = document.getElementById("extract_images").checked;
+    const use_picture_description = document.getElementById("use_picture_description").checked;
 
     if (force && !window.confirm("Esto vaciará la caché y reconvertirá TODOS los documentos, aunque no hayan cambiado. ¿Continuar?")) {
         return;
@@ -316,7 +354,14 @@ form.addEventListener("submit", async (submitEvent) => {
     ws.onopen = () => {
         setSemaforo(SCAN_PHASE.STARTED);
         lockCacheTab();
-        ws.send(JSON.stringify({ use_ocr: use_ocr, use_gpu: use_gpu, force: force }));
+        ws.send(JSON.stringify({
+            use_ocr: use_ocr,
+            use_gpu: use_gpu,
+            force: force,
+            include_audio_video: include_audio_video,
+            extract_images: extract_images,
+            use_picture_description: use_picture_description,
+        }));
     };
     ws.onmessage = (message) => {
         const scanEvent = JSON.parse(message.data);

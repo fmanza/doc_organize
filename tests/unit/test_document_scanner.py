@@ -14,7 +14,7 @@ def _sha256_of(content: bytes) -> str:
 @pytest.mark.asyncio
 async def test_scan_discovers_supported_documents(tmp_path) -> None:
     (tmp_path / "report.pdf").write_bytes(b"pdf-content")
-    (tmp_path / "notes.txt").write_text("ignored: unsupported extension")
+    (tmp_path / "notes.log").write_text("ignored: unsupported extension")
 
     async with DocumentScanner() as scanner:
         result = await scanner.scan_folders([str(tmp_path)])
@@ -87,3 +87,41 @@ async def test_scan_multiple_roots(tmp_path) -> None:
         result = await scanner.scan_folders([str(root_a), str(root_b)])
 
     assert result.summary == {"pdf": 1, "xlsx": 1}
+
+
+@pytest.mark.asyncio
+async def test_scan_discovers_new_base_formats(tmp_path) -> None:
+    """Formatos ampliados (sesion 'soporte de formatos docling') activos por
+    defecto — incluido `.txt`, que no depende de `include_audio_video`."""
+    (tmp_path / "page.html").write_bytes(b"<html></html>")
+    (tmp_path / "data.csv").write_bytes(b"a,b\n1,2")
+    (tmp_path / "doc.odt").write_bytes(b"odt-content")
+    (tmp_path / "book.epub").write_bytes(b"epub-content")
+    (tmp_path / "notes.txt").write_bytes(b"plain text notes")
+
+    async with DocumentScanner() as scanner:
+        result = await scanner.scan_folders([str(tmp_path)])
+
+    assert result.summary == {"html": 1, "csv": 1, "odt": 1, "epub": 1, "txt": 1}
+
+
+@pytest.mark.asyncio
+async def test_scan_ignores_audio_video_by_default(tmp_path) -> None:
+    (tmp_path / "clip.mp3").write_bytes(b"audio-content")
+    (tmp_path / "report.pdf").write_bytes(b"pdf-content")
+
+    async with DocumentScanner() as scanner:
+        result = await scanner.scan_folders([str(tmp_path)])
+
+    assert result.summary == {"pdf": 1}
+
+
+@pytest.mark.asyncio
+async def test_scan_includes_audio_video_when_opted_in(tmp_path) -> None:
+    (tmp_path / "clip.mp3").write_bytes(b"audio-content")
+    (tmp_path / "report.pdf").write_bytes(b"pdf-content")
+
+    async with DocumentScanner() as scanner:
+        result = await scanner.scan_folders([str(tmp_path)], include_audio_video=True)
+
+    assert result.summary == {"pdf": 1, "mp3": 1}

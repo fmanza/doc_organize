@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
 
-from doc_organize.core.constants import IGNORED_NAMES, SUPPORTED_EXTENSIONS
+from doc_organize.core.constants import AV_SUPPORTED_EXTENSIONS, IGNORED_NAMES, SUPPORTED_EXTENSIONS
 from doc_organize.core.models import DirectoryTree, DirectoryTreeNode, DocumentMetadata, ScanResult
 from doc_organize.utils.hash_utils import hash_file
 from doc_organize.utils.logging import get_logger
@@ -61,12 +61,19 @@ class DocumentScanner:
     async def __aexit__(self, *exc_info: object) -> None:
         return None
 
-    async def scan_folders(self, paths: list[str]) -> ScanResult:
+    async def scan_folders(self, paths: list[str], include_audio_video: bool = False) -> ScanResult:
         """Escanea recursivamente `paths` y devuelve documentos, resumen y arbol.
 
         Args:
             paths: Carpetas raiz a escanear (deben existir; validarlas antes
                 con FolderValidator).
+            include_audio_video: Si `True`, amplia el filtro de extension con
+                `AV_SUPPORTED_EXTENSIONS` ademas de `SUPPORTED_EXTENSIONS`. Por
+                defecto `False`: audio/video son opt-in porque requieren el extra
+                `av` (Whisper + ffmpeg) para convertirse, ver
+                `doc_organize.utils.av_detector`. `txt` (y el resto de formatos
+                sin dependencias extra) ya forma parte de `SUPPORTED_EXTENSIONS`,
+                sin necesitar flag.
 
         Returns:
             ScanResult con la lista de documentos descubiertos (con hash
@@ -74,12 +81,13 @@ class DocumentScanner:
             directorios.
         """
         start = time.monotonic()
+        allowed_extensions = SUPPORTED_EXTENSIONS | AV_SUPPORTED_EXTENSIONS if include_audio_video else SUPPORTED_EXTENSIONS
         root_nodes: list[DirectoryTreeNode] = []
         discovered: list[_DiscoveredFile] = []
 
         for raw_path in paths:
             root = Path(raw_path).expanduser().resolve()
-            node, files = await asyncio.to_thread(self._walk_sync, root)
+            node, files = await asyncio.to_thread(self._walk_sync, root, allowed_extensions)
             root_nodes.append(node)
             discovered.extend(files)
 
@@ -101,13 +109,13 @@ class DocumentScanner:
         self.logger.info(f"Escaneo completado: {len(documents)} documentos en {duration:.2f}s")
         return ScanResult(documents=documents, summary=summary, tree=tree, scan_duration_seconds=duration)
 
-    def _walk_sync(self, root: Path) -> tuple[DirectoryTreeNode, list[_DiscoveredFile]]:
+    def _walk_sync(self, root: Path, allowed_extensions: frozenset[str]) -> tuple[DirectoryTreeNode, list[_DiscoveredFile]]:
         """Recorrido sincrono de un arbol de directorios (se ejecuta en un hilo)."""
         files: list[_DiscoveredFile] = []
-        node = self._build_node(root, files)
+        node = self._build_node(root, files, allowed_extensions)
         return node, files
 
-    def _build_node(self, path: Path, files: list[_DiscoveredFile]) -> DirectoryTreeNode:
+    def _build_node(self, path: Path, files: list[_DiscoveredFile], allowed_extensions: frozenset[str]) -> DirectoryTreeNode:
         if path.is_symlink():
             return DirectoryTreeNode(name=path.name, type="file", path=str(path))  # pyright: ignore[reportCallIssue]
 
@@ -121,12 +129,12 @@ class DocumentScanner:
             for entry in entries:
                 if entry.name in IGNORED_NAMES:
                     continue
-                children.append(self._build_node(entry, files))
+                children.append(self._build_node(entry, files, allowed_extensions))
             return DirectoryTreeNode(name=path.name or str(path), type="dir", path=str(path), children=children)  # pyright: ignore[reportCallIssue]
 
         stat = path.stat()
         extension = path.suffix.lower().lstrip(".")
-        if extension in SUPPORTED_EXTENSIONS:
+        if extension in allowed_extensions:
             files.append(
                 _DiscoveredFile(
                     full_path=path,

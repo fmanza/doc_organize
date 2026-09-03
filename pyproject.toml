@@ -78,6 +78,9 @@ ocr-gpu = [
     "torchvision>=0.15",
     "opencv-python>=4.8",
 ]
+av = [
+    "docling[asr]>=2.0.0",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

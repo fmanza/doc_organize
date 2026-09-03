@@ -102,6 +102,14 @@ class ConversionResult(BaseModel):
     error: str | None = Field(None, description="Mensaje de error si falló")
     ocr_required: bool = Field(False, description="Si se necesitó OCR (y quedó diferido)")
     duration_seconds: float = Field(0.0, description="Tiempo empleado en convertir (segundos)")
+    images_dir: str | None = Field(
+        None,
+        description="Carpeta con las imágenes extraídas del documento (subcarpeta de 'img' por documento), si `extract_images=True` y el documento generó alguna",
+    )
+    picture_description_applied: bool = Field(
+        False,
+        description="Si `use_picture_description=True` tuvo efecto real en esta conversión (solo aplica al pipeline PDF/imagen; se ignora en silencio para el resto de formatos)",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -113,6 +121,8 @@ class ConversionResult(BaseModel):
                 "error": None,
                 "ocr_required": False,
                 "duration_seconds": 2.5,
+                "images_dir": None,
+                "picture_description_applied": False,
             }
         }
     )
@@ -399,6 +409,22 @@ class GpuStatus(BaseModel):
     instructions: str | None = Field(None, description="Instrucciones para activar la GPU, si `gpu_active` es `False`")
 
 
+class AvStatus(BaseModel):
+    """Estado de soporte de audio/vídeo del entorno donde corre el servidor (menú Escaneo).
+
+    Mismo patrón que `GpuStatus`: detección de entorno software, sin permisos por
+    usuario/rol. A diferencia de la GPU (cuya ausencia solo degrada a CPU), sin
+    `asr_installed`/`ffmpeg_installed` la conversión de audio/vídeo falla siempre
+    — por eso `ready` se usa también como pre-check bloqueante en el CLI
+    (`_run_scan`), no solo como aviso informativo en la UI web.
+    """
+
+    asr_installed: bool = Field(..., description="Si el backend de transcripción ASR (extra `av`, Whisper) está instalado")
+    ffmpeg_installed: bool = Field(..., description="Si el binario `ffmpeg` está disponible en el PATH del sistema (necesario para vídeo)")
+    ready: bool = Field(..., description="Si `asr_installed` y `ffmpeg_installed` son ambos `True`")
+    instructions: str | None = Field(None, description="Qué falta instalar/configurar, específico a lo que falte; `None` si `ready` es `True`")
+
+
 class DirectoryListing(BaseModel):
     """Resultado de listar el contenido de una carpeta del servidor (explorador de carpetas de escaneo)."""
 
@@ -408,6 +434,7 @@ class DirectoryListing(BaseModel):
 
 
 __all__ = [
+    "AvStatus",
     "CacheConfig",
     "CacheEntry",
     "CacheExportSnapshot",

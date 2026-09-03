@@ -57,6 +57,24 @@ muestra este estado automáticamente (ver
 [Resolución de problemas](troubleshooting.md#el-menu-escaneo-dice-gpu-no-activa-aunque-ya-la-instale-y-funciona)
 si el mensaje no coincide con lo que esperas).
 
+## Formato extendido: audio/vídeo (opcional)
+
+```bash
+pip install doc_organize[av]
+```
+
+Añade el backend de transcripción (Whisper, vía `docling[asr]`) necesario para
+convertir audio y vídeo con `--include-audio-video`. `.txt` no necesita este
+extra ni ningún flag — es una extensión genérica que docling ya soporta,
+incluida en `SUPPORTED_EXTENSIONS` sin opt-in.
+
+⚠️ Además del extra de Python, el vídeo requiere el binario **`ffmpeg`** en el
+`PATH` del sistema (no se instala vía `pip`) — instálalo con el gestor de
+paquetes de tu sistema operativo y comprueba `ffmpeg -version`. Sin ambos
+requisitos, `--include-audio-video` se rechaza con un mensaje explícito antes
+de escanear (ver
+[Resolución de problemas](troubleshooting.md#scan-include-audio-video-falla-antes-de-escanear-nada)).
+
 ## Entorno de desarrollo
 
 ```bash

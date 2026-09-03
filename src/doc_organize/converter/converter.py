@@ -5,16 +5,19 @@ Conversion de documentos a Markdown + JSON via Docling (REQ-003).
 import asyncio
 import json
 import math
+import shutil
 import time
 
 from pathlib import Path
 from typing import Any, Self, cast
 
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import EasyOcrOptions, PdfPipelineOptions
-from docling.document_converter import DocumentConverter as DoclingConverter, PdfFormatOption
+from docling.datamodel.pipeline_options import EasyOcrOptions, PdfPipelineOptions, smolvlm_picture_description
+from docling.document_converter import DocumentConverter as DoclingConverter, ImageFormatOption, PdfFormatOption
 from docling_core.transforms.chunker.doc_chunk import DocChunk
 from docling_core.transforms.chunker.hierarchical_chunker import HierarchicalChunker
+from docling_core.types.doc.base import ImageRefMode
+from docling_core.types.doc.document import DocItem, PictureDescriptionData, PictureItem
 
 from doc_organize.core.exceptions import ConversionError
 from doc_organize.core.models import ConversionResult, DocumentMetadata
@@ -57,7 +60,7 @@ class DocumentConverter:
 
     def __init__(self) -> None:
         self.logger = get_logger(__name__)
-        self._docling_by_mode: dict[tuple[bool, bool], DoclingConverter] | None = None
+        self._docling_by_mode: dict[tuple[bool, bool, bool, bool], DoclingConverter] | None = None
         self._chunker: HierarchicalChunker | None = None
 
     async def __aenter__(self) -> Self:
@@ -69,11 +72,17 @@ class DocumentConverter:
         self._docling_by_mode = None
         self._chunker = None
 
-    def _get_docling(self, use_ocr: bool, use_gpu: bool = False) -> DoclingConverter:
+    def _get_docling(
+        self,
+        use_ocr: bool,
+        use_gpu: bool = False,
+        extract_images: bool = False,
+        use_picture_description: bool = False,
+    ) -> DoclingConverter:
         if self._docling_by_mode is None:
             raise ConversionError("DocumentConverter debe usarse como context manager async ('async with').")
 
-        key = (use_ocr, use_gpu)
+        key = (use_ocr, use_gpu, extract_images, use_picture_description)
         if key not in self._docling_by_mode:
             options = PdfPipelineOptions()
             options.do_ocr = use_ocr
@@ -82,7 +91,29 @@ class DocumentConverter:
                 # aceleracion GPU (torch/cuda) — se activa solo si el llamante lo pide
                 # explicitamente; no es un requisito para que el OCR funcione (AUDIT_PLAN rev. 5).
                 options.ocr_options = EasyOcrOptions(use_gpu=True)
-            self._docling_by_mode[key] = DoclingConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)})
+            if extract_images:
+                options.generate_picture_images = True
+            if use_picture_description:
+                # smolvlm_picture_description (HuggingFaceTB/SmolVLM-256M-Instruct) en vez
+                # del preset granite: mismo patron que EasyOCR/RapidOCR, se prioriza el
+                # modelo local mas ligero por defecto (AUDIT_PLAN "soporte de formatos
+                # docling"). Solo tiene efecto en InputFormat.PDF/IMAGE (StandardPdfPipeline,
+                # unicos formatos configurados abajo con estas `options`) — el resto de
+                # formatos (SimplePipeline) lo ignora sin fallar, ver `convert_document`.
+                options.do_picture_description = True
+                options.picture_description_options = smolvlm_picture_description
+            # InputFormat.IMAGE tambien usa StandardPdfPipeline (igual que PDF); sin
+            # configurarlo aqui, docling aplicaba sus PdfPipelineOptions() por defecto
+            # (do_ocr=True) para imagenes sueltas, ignorando el `use_ocr` del llamante.
+            # ImageFormatOption (no PdfFormatOption) para IMAGE: comparte pipeline_cls
+            # (StandardPdfPipeline) pero su backend por defecto es ImageDocumentBackend,
+            # no el de PDF — reutilizar PdfFormatOption ahi esta deprecado en docling.
+            self._docling_by_mode[key] = DoclingConverter(
+                format_options={
+                    InputFormat.PDF: PdfFormatOption(pipeline_options=options),
+                    InputFormat.IMAGE: ImageFormatOption(pipeline_options=options),
+                }
+            )
         return self._docling_by_mode[key]
 
     async def convert_document(
@@ -91,6 +122,8 @@ class DocumentConverter:
         output_dir: Path,
         use_ocr: bool = False,
         use_gpu: bool = False,
+        extract_images: bool = False,
+        use_picture_description: bool = False,
     ) -> ConversionResult:
         """Convierte `source_doc` a Markdown + JSON bajo `output_dir`.
 
@@ -101,6 +134,22 @@ class DocumentConverter:
             use_ocr: Si `True`, activa OCR en Docling para este documento.
             use_gpu: Si `True` (y `use_ocr=True`), usa un motor OCR acelerado
                 por GPU (EasyOCR) en vez del motor CPU por defecto (RapidOCR).
+            extract_images: Si `True`, extrae las imagenes embebidas a
+                `<carpeta_salida>/img/<stem>/` y el `.md` las referencia con rutas
+                relativas (`ImageRefMode.REFERENCED`) en vez del placeholder
+                `<!-- image -->` por defecto. Solo tiene efecto real en documentos
+                que usan el pipeline PDF/imagen; el resto de formatos no generan
+                imagenes extraibles de la misma forma. Por defecto `False`: cambia
+                el formato del `.md` de salida respecto al comportamiento previo,
+                asi que es opt-in explicito, no automatico.
+            use_picture_description: Si `True`, genera una descripcion textual de
+                cada imagen (modelo local `smolvlm_picture_description`) incluida
+                en el `.json` de salida — pensado para RAG. Solo tiene efecto en
+                documentos PDF/imagen (`StandardPdfPipeline`); se acepta sin error
+                para el resto de formatos, pero no hace nada (ver
+                `ConversionResult.picture_description_applied`). Coste real no
+                trivial: descarga del modelo en el primer uso y latencia de
+                inferencia por imagen.
 
         Returns:
             ConversionResult con las rutas de salida, si tuvo exito, y si el
@@ -110,12 +159,22 @@ class DocumentConverter:
         output_dir = Path(output_dir)
         # _get_docling() valida el uso como context manager; ese error de programacion
         # se propaga (no se atrapa como fallo de conversion de este documento).
-        docling_converter = self._get_docling(use_ocr, use_gpu)
+        docling_converter = self._get_docling(use_ocr, use_gpu, extract_images, use_picture_description)
 
         try:
             docling_result = await asyncio.to_thread(docling_converter.convert, source_doc.full_path)
-        # Excepcion amplia deliberada: cualquier fallo de conversion se reporta en
-        # ConversionResult (success=False), nunca se relanza.
+            ocr_required = self._needs_ocr(docling_result)
+            # do_picture_description solo se configura para InputFormat.PDF/IMAGE en
+            # _get_docling (StandardPdfPipeline) — el resto de formatos usan SimplePipeline,
+            # que no tiene ese paso, asi que el flag pedido por el llamante no tuvo efecto.
+            picture_description_applied = use_picture_description and docling_result.input.format in (InputFormat.PDF, InputFormat.IMAGE)
+            markdown_path, json_path, images_dir = await self._write_outputs(
+                source_doc, docling_result, output_dir, ocr_required, extract_images, picture_description_applied
+            )
+        # Excepcion amplia deliberada: cualquier fallo de conversion o de escritura de
+        # salida (incluida la limpieza de img/<stem>/, AUDIT_CODE) se reporta en
+        # ConversionResult (success=False), nunca se relanza — un documento bloqueado
+        # (fichero en uso, permiso denegado) no debe abortar el resto del batch.
         except Exception as exc:  # noqa: BLE001
             self.logger.warning(f"Error convirtiendo '{source_doc.full_path}': {exc}")
             return ConversionResult(
@@ -128,9 +187,6 @@ class DocumentConverter:
                 duration_seconds=time.monotonic() - start,
             )
 
-        ocr_required = self._needs_ocr(docling_result)
-        markdown_path, json_path = await self._write_outputs(source_doc, docling_result, output_dir, ocr_required)
-
         duration = time.monotonic() - start
         self.logger.info(f"Convertido '{source_doc.full_path}' en {duration:.2f}s (ocr_required={ocr_required})")
         return ConversionResult(
@@ -141,6 +197,8 @@ class DocumentConverter:
             error=None,
             ocr_required=ocr_required,
             duration_seconds=duration,
+            images_dir=str(images_dir) if images_dir else None,
+            picture_description_applied=picture_description_applied,
         )
 
     @staticmethod
@@ -158,17 +216,60 @@ class DocumentConverter:
         target_dir = output_dir.joinpath(*relative_parts[:-1]) if len(relative_parts) > 1 else output_dir
         return target_dir / f"{stem}.md", target_dir / f"{stem}.json"
 
+    @staticmethod
+    def resolve_images_dir(markdown_path: Path) -> Path:
+        """Carpeta de imagenes namespaced (`img/<stem>/`) junto a `markdown_path` —
+        misma convencion que usa `_write_outputs` con `extract_images=True`. Expuesta
+        (no privada) para que `ScanCommand._delete_orphaned_outputs` pueda borrarla al
+        limpiar la salida de un documento huerfano, sin duplicar la convencion de
+        nombrado (AUDIT_CODE)."""
+        return markdown_path.parent / "img" / markdown_path.stem
+
     async def _write_outputs(
         self,
         source_doc: DocumentMetadata,
         docling_result: Any,
         output_dir: Path,
         ocr_required: bool,
-    ) -> tuple[Path, Path]:
-        markdown_text = docling_result.document.export_to_markdown()
-
+        extract_images: bool,
+        picture_description_applied: bool,
+    ) -> tuple[Path, Path, Path | None]:
         markdown_path, json_path = self.resolve_output_paths(source_doc.full_path, output_dir)
         await asyncio.to_thread(markdown_path.parent.mkdir, parents=True, exist_ok=True)
+
+        images_dir: Path | None = None
+        if extract_images:
+            # Relativo (no absoluto): `DoclingDocument._get_output_paths` resuelve un
+            # artifacts_dir relativo contra `markdown_path.parent` y genera referencias
+            # relativas en el .md ("img/<stem>/imagen.png"); uno absoluto produciria
+            # rutas absolutas no portables. Se namespacea por `stem` (no una carpeta
+            # "img" compartida a secas) para que dos documentos distintos convertidos en
+            # el mismo `output_dir` no se pisen las imagenes entre si.
+            relative_images_dir = Path("img") / markdown_path.stem
+            absolute_images_dir = self.resolve_images_dir(markdown_path)
+            # Se borra ANTES de escribir (AUDIT_CODE): `save_as_markdown` solo hace
+            # `mkdir(exist_ok=True)`, nunca limpia el directorio previo, y Docling nombra
+            # cada imagen con un sufijo de hash de contenido — una reconversion con
+            # imagenes distintas (documento editado, o el segundo pase de OCR
+            # reconvirtiendo tras el primero) ACUMULARIA ficheros obsoletos en vez de
+            # sobrescribirlos, y `_finalize_images_dir` no podria distinguir "sin
+            # imagenes en esta conversion" de "restos de una conversion anterior".
+            # Sin ignore_errors=True: un fallo real (permiso denegado, fichero
+            # bloqueado) debe propagarse y marcar la conversion como fallida (capturado
+            # por el try/except de `convert_document`), no dejar `img/<stem>/` a medio
+            # limpiar en silencio.
+            if await asyncio.to_thread(absolute_images_dir.exists):
+                await asyncio.to_thread(shutil.rmtree, absolute_images_dir)
+            await asyncio.to_thread(
+                docling_result.document.save_as_markdown,
+                markdown_path,
+                artifacts_dir=relative_images_dir,
+                image_mode=ImageRefMode.REFERENCED,
+            )
+            images_dir = await asyncio.to_thread(self._finalize_images_dir, absolute_images_dir)
+        else:
+            markdown_text = docling_result.document.export_to_markdown()
+            await asyncio.to_thread(markdown_path.write_text, markdown_text, encoding="utf-8")
 
         document_json = {
             "source_path": source_doc.full_path,
@@ -177,16 +278,27 @@ class DocumentConverter:
             "sha256_hash": source_doc.sha256_hash,
             "modified_time": source_doc.modified_time,
             "ocr_required": ocr_required,
-            "chunks": await asyncio.to_thread(self._build_chunks, docling_result.document),
+            "chunks": await asyncio.to_thread(self._build_chunks, docling_result.document, picture_description_applied),
         }
 
-        await asyncio.to_thread(markdown_path.write_text, markdown_text, encoding="utf-8")
         await asyncio.to_thread(
             json_path.write_text, json.dumps(document_json, indent=2, ensure_ascii=False), encoding="utf-8"
         )
-        return markdown_path, json_path
+        return markdown_path, json_path, images_dir
 
-    def _build_chunks(self, document: Any) -> list[dict[str, Any]]:
+    @staticmethod
+    def _finalize_images_dir(candidate_dir: Path) -> Path | None:
+        """Devuelve `candidate_dir` si `save_as_markdown` escribio alguna imagen ahi,
+        o `None` tras borrarla si quedo vacia (documento sin imagenes embebidas pese
+        a `extract_images=True` — `save_as_markdown` crea el directorio igualmente)."""
+        if not candidate_dir.is_dir():
+            return None
+        if any(candidate_dir.iterdir()):
+            return candidate_dir
+        candidate_dir.rmdir()
+        return None
+
+    def _build_chunks(self, document: Any, include_picture_descriptions: bool = False) -> list[dict[str, Any]]:
         """Trocea `document` en chunks por seccion, sin geometria (REQ-003).
 
         Usa `HierarchicalChunker` en vez de `HybridChunker`: no necesita un
@@ -210,8 +322,25 @@ class DocumentConverter:
             }
             if chunk.meta.captions:
                 entry["captions"] = chunk.meta.captions
+            if include_picture_descriptions:
+                descriptions = self._collect_picture_descriptions(chunk.meta.doc_items)
+                if descriptions:
+                    entry["image_descriptions"] = descriptions
             chunks.append(entry)
         return chunks
+
+    @staticmethod
+    def _collect_picture_descriptions(doc_items: list[DocItem]) -> list[str]:
+        """Extrae el texto de `PictureDescriptionData` de las `PictureItem` de
+        `doc_items` (generadas por `do_picture_description`, ver `_get_docling`)."""
+        descriptions = []
+        for item in doc_items:
+            if not isinstance(item, PictureItem):
+                continue
+            for annotation in item.annotations:
+                if isinstance(annotation, PictureDescriptionData):
+                    descriptions.append(annotation.text)
+        return descriptions
 
     @staticmethod
     def _needs_ocr(docling_result: Any) -> bool:

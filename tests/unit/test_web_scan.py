@@ -720,6 +720,51 @@ async def test_scan_websocket_loopback_converts_real_document(tmp_path, native_p
 
 @pytest.mark.slow
 @pytest.mark.asyncio
+async def test_scan_websocket_propagates_audio_video_and_extract_images_flags(tmp_path, native_pdf) -> None:
+    """Flags nuevos (sesion 'soporte de formatos docling') llegan desde el payload
+    JSON del WebSocket hasta `ScanCommand.run_streaming`: `.txt` ya se escanea
+    siempre (sin flag, forma parte de `SUPPORTED_EXTENSIONS`), `include_audio_video`
+    hace que se recoja tambien el audio de la carpeta (aunque su conversion pueda
+    fallar sin el extra `[av]` instalado en este entorno de test — lo relevante es
+    que se DESCUBRA, no que se convierta con exito), y `extract_images` no rompe la
+    conversion de un documento sin imagenes embebidas."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    (native_pdf.parent / "notes.txt").write_text("nota suelta, siempre escaneada", encoding="utf-8")
+    (native_pdf.parent / "clip.mp3").write_bytes(b"fake-audio-content")
+
+    client = TestClient(app)
+    add_response = client.post(f"/api/projects/{project.name}/folders/library", json={"path": str(native_pdf.parent)})
+    assert add_response.status_code == 200
+
+    with client.websocket_connect(f"/api/projects/{project.name}/scan") as websocket:
+        websocket.send_json(
+            {
+                "use_ocr": False,
+                "use_gpu": False,
+                "include_audio_video": True,
+                "extract_images": True,
+                "use_picture_description": False,
+            }
+        )
+        events = []
+        while True:
+            message = websocket.receive_json()
+            events.append(message)
+            if message["event"] == "completed":
+                break
+
+    # pdf + txt (siempre) + mp3 (opt-in via include_audio_video)
+    assert events[-1]["data"]["scanned"] == 3
+    # pdf + txt deben convertir bien; el mp3 puede fallar si el entorno de test no
+    # tiene el extra [av] instalado — no se afirma nada sobre su resultado concreto.
+    assert events[-1]["data"]["converted"] >= 2
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
 async def test_scan_websocket_force_reconverts_unchanged_document(tmp_path, native_pdf) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)

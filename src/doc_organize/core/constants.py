@@ -5,6 +5,14 @@ Constantes compartidas de doc_organize (REQ-002, REQ-005).
 import re
 
 #: Extensiones de documento soportadas por el escaner (REQ-002), sin el punto.
+#: Ampliado (sesion "soporte de formatos docling") con el subconjunto de formatos
+#: adicionales que Docling convierte de forma nativa sin ambiguedad de extension:
+#: html/htm/xhtml, csv, odt/ods/odp (OpenOffice), adoc/asciidoc/asc, epub, eml, txt.
+#: Quedan fuera deliberadamente `xml` (Docling lo reparte entre xml_jats/xml_xbrl/
+#: xml_uspto sin distincion por extension), los formatos nicho sin caso de uso
+#: identificado (latex, boxnote, dclx, mets_gbs, json_docling) y audio/video, que
+#: siguen siendo opt-in via `include_audio_video` (ver `AV_SUPPORTED_EXTENSIONS`)
+#: por requerir el extra `av` (Whisper + ffmpeg) para convertirse.
 SUPPORTED_EXTENSIONS: frozenset[str] = frozenset(
     {
         "pdf",
@@ -19,6 +27,40 @@ SUPPORTED_EXTENSIONS: frozenset[str] = frozenset(
         "jpeg",
         "tiff",
         "bmp",
+        "html",
+        "htm",
+        "xhtml",
+        "csv",
+        "odt",
+        "ods",
+        "odp",
+        "adoc",
+        "asciidoc",
+        "asc",
+        "epub",
+        "eml",
+        "txt",
+    }
+)
+
+#: Extensiones de audio/video, opt-in via `include_audio_video` (REQ-002, sesion
+#: "soporte de formatos docling"): requieren el extra `av` (Whisper + binario
+#: `ffmpeg` del sistema, ver `doc_organize.utils.av_detector`) para convertirse —
+#: no se activan por defecto para no fallar conversiones por dependencias
+#: ausentes en un escaneo normal.
+AV_SUPPORTED_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        "wav",
+        "mp3",
+        "m4a",
+        "aac",
+        "ogg",
+        "flac",
+        "mp4",
+        "avi",
+        "mov",
+        "mkv",
+        "webm",
     }
 )
 
@@ -120,6 +162,7 @@ DEFAULT_ADMIN_USERNAME = "admin"
 DEFAULT_ADMIN_PASSWORD = "admin"
 
 __all__ = [
+    "AV_SUPPORTED_EXTENSIONS",
     "DEFAULT_ADMIN_PASSWORD",
     "DEFAULT_ADMIN_ROLE_NAME",
     "DEFAULT_ADMIN_USERNAME",

@@ -14,6 +14,7 @@ from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME, SCAN_FOLDERS_JSON
 from doc_organize.core.exceptions import DocOrganizeError
 from doc_organize.projects import ProjectRegistry
 from doc_organize.scan import DeduplicationSummary, ScanCommand, ScanSummary
+from doc_organize.utils.av_detector import detect_av_status
 from doc_organize.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -50,6 +51,21 @@ def build_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--use-gpu", action="store_true", help="Usar motor OCR acelerado por GPU (EasyOCR) si --use-ocr")
     scan_parser.add_argument(
         "--force", action="store_true", help="Forzar rescan completo: vacía la caché y reconvierte todos los documentos"
+    )
+    scan_parser.add_argument(
+        "--include-audio-video",
+        action="store_true",
+        help="Incluir también audio/vídeo en el escaneo (requiere el extra [av] y el binario ffmpeg)",
+    )
+    scan_parser.add_argument(
+        "--extract-images",
+        action="store_true",
+        help="Extraer las imágenes embebidas a 'img/<nombre>' junto al .md y referenciarlas, en vez del placeholder por defecto",
+    )
+    scan_parser.add_argument(
+        "--use-picture-description",
+        action="store_true",
+        help="Generar descripción textual de imágenes (modelo local ligero) en el .json, solo para documentos PDF/imagen",
     )
 
     dedup_parser = subparsers.add_parser(
@@ -185,6 +201,14 @@ async def _run_project_list(args: argparse.Namespace) -> int:
 
 
 async def _run_scan(args: argparse.Namespace) -> int:
+    if args.include_audio_video:
+        # Pre-check ANTES de tocar cache_db: sin esto, un escaneo con audio/vídeo sin
+        # el extra [av]/ffmpeg instalados fallaría archivo por archivo con una traza
+        # críptica de docling, en vez de un mensaje claro de qué falta instalar.
+        av_status = detect_av_status()
+        if not av_status.ready:
+            raise DocOrganizeError(av_status.instructions)
+
     output_dir, cache_db, folders_json = await _resolve_scan_paths(args)
     summary = await ScanCommand().run(
         paths=args.paths,
@@ -194,6 +218,9 @@ async def _run_scan(args: argparse.Namespace) -> int:
         use_ocr=args.use_ocr,
         use_gpu=args.use_gpu,
         force=args.force,
+        include_audio_video=args.include_audio_video,
+        extract_images=args.extract_images,
+        use_picture_description=args.use_picture_description,
     )
     print(summary.render())
     return 0

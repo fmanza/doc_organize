@@ -41,8 +41,16 @@ class OCRScheduler:
         docs: list[DocumentMetadata],
         output_dir: Path,
         use_gpu: bool = False,
+        extract_images: bool = False,
+        use_picture_description: bool = False,
     ) -> list[ConversionResult]:
         """Reconvierte `docs` con OCR activado y escribe los resultados en `output_dir`.
+
+        `extract_images`/`use_picture_description` se propagan tal cual a
+        `DocumentConverter.convert_document()` (mismo significado que en la
+        primera pasada, ver `ScanCommand._convert_documents`): un documento que
+        solo se resuelve en esta segunda pasada (porque necesitaba OCR) no debe
+        quedarse sin imagenes/descripciones solo por haber requerido OCR.
 
         Nota de IMPLEMENT: `output_dir` se añadió a este método porque
         `DocumentConverter.convert_document()` lo necesita para saber dónde
@@ -52,7 +60,14 @@ class OCRScheduler:
         results: list[ConversionResult] = []
         async with DocumentConverter() as converter:
             for doc in docs:
-                result = await converter.convert_document(doc, output_dir, use_ocr=True, use_gpu=use_gpu)
+                result = await converter.convert_document(
+                    doc,
+                    output_dir,
+                    use_ocr=True,
+                    use_gpu=use_gpu,
+                    extract_images=extract_images,
+                    use_picture_description=use_picture_description,
+                )
                 results.append(result)
 
         succeeded = sum(1 for result in results if result.success)

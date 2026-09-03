@@ -16,6 +16,7 @@ separada que el usuario ejecuta antes de escanear.
 
 import asyncio
 import json
+import shutil
 
 from collections.abc import AsyncIterator
 from dataclasses import asdict, dataclass, field
@@ -37,6 +38,8 @@ from doc_organize.dedup import DeduplicationManager
 from doc_organize.scanner import DocumentScanner
 from doc_organize.utils.logging import get_logger
 from doc_organize.validators import FolderValidator
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -112,13 +115,27 @@ class ScanCommand:
         use_ocr: bool,
         use_gpu: bool,
         force: bool = False,
+        include_audio_video: bool = False,
+        extract_images: bool = False,
+        use_picture_description: bool = False,
     ) -> ScanSummary:
         """Ejecuta el pipeline y devuelve solo el resumen final (contrato sin cambios,
         Fase D-1). Consume `run_streaming()` y se queda con su evento `completed` —
         ver `§2.7.3` (Fase D-2b): la orquestación real vive ahora ahí.
         """
         summary = ScanSummary()
-        async for event in self.run_streaming(paths, output_dir, cache_db, folders_json, use_ocr, use_gpu, force):
+        async for event in self.run_streaming(
+            paths,
+            output_dir,
+            cache_db,
+            folders_json,
+            use_ocr,
+            use_gpu,
+            force,
+            include_audio_video,
+            extract_images,
+            use_picture_description,
+        ):
             if event.event is ScanEventType.COMPLETED:
                 summary = ScanSummary(**event.data)
         return summary
@@ -132,6 +149,9 @@ class ScanCommand:
         use_ocr: bool,
         use_gpu: bool,
         force: bool = False,
+        include_audio_video: bool = False,
+        extract_images: bool = False,
+        use_picture_description: bool = False,
     ) -> AsyncIterator[ScanEvent]:
         """Orquesta escaneo + caché + conversión, emitiendo progreso.
 
@@ -165,7 +185,7 @@ class ScanCommand:
         clean_paths, path_warnings = await self._resolve_scan_paths(paths, folders_json)
 
         async with DocumentScanner() as scanner:
-            scan_result = await scanner.scan_folders(clean_paths)
+            scan_result = await scanner.scan_folders(clean_paths, include_audio_video=include_audio_video)
         summary.scanned = len(scan_result.documents)
 
         async with CacheManager(cache_db) as cache:
@@ -213,13 +233,24 @@ class ScanCommand:
             ocr_candidates: list[DocumentMetadata] = []
 
             async for event in self._convert_documents(
-                docs_to_process, output_dir, new_set, modified_set, cached_entries, summary, entries, ocr_candidates
+                docs_to_process,
+                output_dir,
+                new_set,
+                modified_set,
+                cached_entries,
+                summary,
+                entries,
+                ocr_candidates,
+                extract_images,
+                use_picture_description,
             ):
                 yield event
 
             if use_ocr:
                 self._collect_stale_ocr_candidates(cached_entries, docs_by_path, already_converting, ocr_candidates)
-                async for event in self._process_ocr(ocr_candidates, output_dir, use_gpu, entries, cached_entries, summary):
+                async for event in self._process_ocr(
+                    ocr_candidates, output_dir, use_gpu, entries, cached_entries, summary, extract_images, use_picture_description
+                ):
                     yield event
 
             await cache.save_entries(entries)
@@ -247,18 +278,32 @@ class ScanCommand:
 
     @staticmethod
     async def _delete_orphaned_outputs(orphaned_paths: set[str], output_dir: Path) -> None:
-        """Borra los `.md`/`.json` de `orphaned_paths` bajo `output_dir`, si existen.
+        """Borra el `.md`/`.json`/`img/<stem>/` de `orphaned_paths` bajo `output_dir`, si existen.
 
         Usado por "forzar rescan" (`force=True`): `orphaned_paths` son rutas que
         estaban en la caché anterior pero no en el escaneo actual (fichero
         renombrado, movido o eliminado desde la última pasada) — su salida
         antigua, calculada con el mismo algoritmo que `DocumentConverter` usa al
-        generarla, quedaría huérfana si no se borra aquí.
+        generarla, quedaría huérfana si no se borra aquí. Incluye `img/<stem>/`
+        (AUDIT_CODE): sin esto, la carpeta de imágenes de un documento borrado con
+        `extract_images=True` quedaba huérfana para siempre.
         """
         for path in orphaned_paths:
-            for artifact in DocumentConverter.resolve_output_paths(path, output_dir):
+            markdown_path, json_path = DocumentConverter.resolve_output_paths(path, output_dir)
+            for artifact in (markdown_path, json_path):
                 if await asyncio.to_thread(artifact.exists):
                     await asyncio.to_thread(artifact.unlink)
+            images_dir = DocumentConverter.resolve_images_dir(markdown_path)
+            # Sin ignore_errors=True (AUDIT_CODE): un fallo real (permiso denegado,
+            # fichero bloqueado) debe quedar registrado, no silenciado — coherente con
+            # que el `.unlink()` de arriba tampoco traga errores. `images_dir` puede no
+            # existir (documento nunca convertido con extract_images=True); eso es
+            # normal y no se loguea como fallo.
+            if await asyncio.to_thread(images_dir.exists):
+                try:
+                    await asyncio.to_thread(shutil.rmtree, images_dir)
+                except OSError as exc:
+                    logger.warning(f"No se pudo borrar '{images_dir}' (huérfana): {exc}")
 
     async def deduplicate(self, paths: list[str], duplicates_dir: Path, folders_json: Path) -> DeduplicationSummary:
         """Busca y mueve duplicados en `paths`, a petición explícita del usuario.
@@ -297,6 +342,8 @@ class ScanCommand:
         summary: ScanSummary,
         entries: list[CacheEntry],
         ocr_candidates: list[DocumentMetadata],
+        extract_images: bool = False,
+        use_picture_description: bool = False,
     ) -> AsyncIterator[ScanEvent]:
         """Convierte cada documento, yieldeando un `FILE_CONVERTED` por unidad.
 
@@ -314,7 +361,9 @@ class ScanCommand:
         """
         async with DocumentConverter() as converter:
             for doc in docs_to_process:
-                result = await converter.convert_document(doc, output_dir, use_ocr=False)
+                result = await converter.convert_document(
+                    doc, output_dir, use_ocr=False, extract_images=extract_images, use_picture_description=use_picture_description
+                )
                 if doc.full_path in new_set:
                     status = DocumentStatus.NEW
                 elif doc.full_path in modified_set:
@@ -398,8 +447,14 @@ class ScanCommand:
         entries: list[CacheEntry],
         cached_entries: dict[str, CacheEntry],
         summary: ScanSummary,
+        extract_images: bool = False,
+        use_picture_description: bool = False,
     ) -> AsyncIterator[ScanEvent]:
         """Reprocesa `ocr_candidates` con OCR, yieldeando un `OCR_PROCESSED` por unidad.
+
+        `extract_images`/`use_picture_description` se propagan igual que en la primera
+        pasada (`_convert_documents`): un documento que necesitó OCR no debe perder
+        estas opciones solo por resolverse en esta segunda pasada.
 
         Muta `entries`/`summary` in-place, mismo contrato que `_convert_documents`. Un
         `return` temprano en una función `async def` con `yield` es válido: simplemente
@@ -407,7 +462,9 @@ class ScanCommand:
         """
         if not ocr_candidates:
             return
-        ocr_results = await OCRScheduler().process_with_ocr(ocr_candidates, output_dir, use_gpu=use_gpu)
+        ocr_results = await OCRScheduler().process_with_ocr(
+            ocr_candidates, output_dir, use_gpu=use_gpu, extract_images=extract_images, use_picture_description=use_picture_description
+        )
         summary.ocr_processed = sum(1 for result in ocr_results if result.success)
         entries_by_path = {entry.file_path: entry for entry in entries}
         for doc, result in zip(ocr_candidates, ocr_results, strict=True):

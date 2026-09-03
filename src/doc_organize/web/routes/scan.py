@@ -18,6 +18,7 @@ from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME, SCAN_FOLDERS_JSON
 from doc_organize.core.exceptions import ProjectNotFoundError
 from doc_organize.core.models import Project, ScanEventType, ScannedFolder
 from doc_organize.scan import ScanCommand
+from doc_organize.utils.av_detector import detect_av_status
 from doc_organize.utils.gpu_detector import detect_gpu_status
 from doc_organize.utils.logging import get_logger
 from doc_organize.utils.path_utils import paths_within_roots
@@ -109,6 +110,9 @@ async def folder_selector(
     # asyncio.to_thread: importar torch (si está instalado) e inicializar CUDA
     # tiene coste no trivial — no debe bloquear el event loop (AUDIT_PLAN GPU).
     gpu_status = await asyncio.to_thread(detect_gpu_status)
+    # Mismo motivo que gpu_status: find_spec/shutil.which son baratos, pero se
+    # mantiene el mismo patrón (asyncio.to_thread) por consistencia.
+    av_status = await asyncio.to_thread(detect_av_status)
 
     # La pestaña Caché se renderiza siempre en la misma respuesta (igual que el
     # resto de la app: todo server-rendered, sin fragmentos cargados por AJAX) para
@@ -123,6 +127,7 @@ async def folder_selector(
             "project": project,
             "folders": folders,
             "gpu_status": gpu_status,
+            "av_status": av_status,
             "active_tab": "cache" if tab == "cache" else "scan",
             "cache_entries": cache_entries,
             "cache_q": cache_q,
@@ -327,6 +332,9 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
     use_ocr = bool(request_payload.get("use_ocr", False))
     use_gpu = bool(request_payload.get("use_gpu", False))
     force = bool(request_payload.get("force", False))
+    include_audio_video = bool(request_payload.get("include_audio_video", False))
+    extract_images = bool(request_payload.get("extract_images", False))
+    use_picture_description = bool(request_payload.get("use_picture_description", False))
 
     root = Path(project.root_path)
     try:
@@ -338,6 +346,9 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
             use_ocr=use_ocr,
             use_gpu=use_gpu,
             force=force,
+            include_audio_video=include_audio_video,
+            extract_images=extract_images,
+            use_picture_description=use_picture_description,
         ):
             if event.event == ScanEventType.COMPLETED:
                 # Se marca ANTES de retransmitir el evento "completed" al cliente

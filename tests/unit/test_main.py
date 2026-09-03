@@ -7,7 +7,7 @@ import pytest
 
 from doc_organize.converter import DocumentConverter
 from doc_organize.core.exceptions import DocOrganizeError
-from doc_organize.core.models import ConversionStatus, ScanEventType
+from doc_organize.core.models import AvStatus, ConversionStatus, ScanEventType
 from doc_organize.main import ScanCommand, _resolve_dedup_paths, _resolve_scan_paths, build_parser, main
 from doc_organize.projects import ProjectRegistry
 
@@ -576,6 +576,41 @@ def test_main_scan_end_to_end(tmp_path, capsys) -> None:
     assert "Documentos escaneados: 1" in output
     assert "Convertidos: 1" in output
     assert list((base / "Proyecto CLI" / "Conversión").rglob("native.md"))
+
+
+def test_main_scan_rejects_include_audio_video_without_av_support(tmp_path, capsys, monkeypatch) -> None:
+    """Pre-check bloqueante (sesion 'soporte de formatos docling'): sin el extra
+    `av`/`ffmpeg`, `--include-audio-video` falla ANTES de tocar `cache.db`, con
+    un mensaje de qué falta — en vez de fallar tarde, archivo por archivo, dentro
+    del pipeline de conversion."""
+    not_ready = AvStatus(asr_installed=False, ffmpeg_installed=False, ready=False, instructions="Falta instalar cosas específicas.")
+    monkeypatch.setattr("doc_organize.main.detect_av_status", lambda: not_ready)
+
+    registry_path = str(tmp_path / "projects.json")
+    base = tmp_path / "workspaces"
+    base.mkdir()
+    main(["project", "create", "Proyecto CLI AV", "--location", str(base), "--registry-path", registry_path])
+    capsys.readouterr()
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+
+    exit_code = main(
+        [
+            "scan",
+            "--paths",
+            str(input_dir),
+            "--project",
+            "Proyecto CLI AV",
+            "--registry-path",
+            registry_path,
+            "--include-audio-video",
+        ]
+    )
+
+    assert exit_code == 1
+    assert "Falta instalar cosas específicas." in capsys.readouterr().err
+    assert not (base / "Proyecto CLI AV" / "cache.db").exists()
 
 
 @pytest.mark.slow

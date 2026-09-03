@@ -55,6 +55,26 @@ drivers) con el servidor ya arrancado, reinicia el proceso
 desde cero. Un reinicio **no** soluciona la causa más común de arriba, solo
 esta.
 
+## `scan --include-audio-video` falla antes de escanear nada
+
+Es el pre-check de `detect_av_status()` (`utils/av_detector.py`, mismo patrón
+que `detect_gpu_status()`): sin el backend de transcripción (extra `[av]`) o
+sin el binario `ffmpeg` en el `PATH`, la conversión de audio/vídeo fallaría
+garantizado en cada fichero — así que el CLI rechaza `--include-audio-video`
+entero, con un mensaje que dice exactamente qué falta, antes de tocar la
+caché. `.txt` no se ve afectado por este pre-check: se escanea siempre, sin
+depender de este flag ni del extra `[av]`. Instala lo que falte:
+
+```bash
+pip install doc_organize[av]
+# y verifica que 'ffmpeg' está en el PATH:
+ffmpeg -version
+```
+
+En la interfaz web el checkbox equivalente ("Incluir audio/vídeo") aparece
+deshabilitado con el mismo mensaje en el tooltip, en vez de fallar al enviar
+el formulario.
+
 ## Rutas de salida muy largas o error de ruta en Windows
 
 `DocumentConverter` replica la ruta **absoluta completa** del documento de origen
