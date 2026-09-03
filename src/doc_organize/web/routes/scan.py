@@ -110,6 +110,7 @@ class AddFolderRequest(BaseModel):
 class DeduplicateFoldersResponse(BaseModel):
     groups_found: int
     moved: int
+    duration_seconds: float
     warnings: list[str]
 
 
@@ -279,7 +280,9 @@ async def deduplicate_folders(name: str, request: Request) -> DeduplicateFolders
         duplicates_dir=root / DUPLICATES_FOLDER_NAME,
         folders_json=root / SCAN_FOLDERS_JSON_NAME,
     )
-    return DeduplicateFoldersResponse(groups_found=summary.groups_found, moved=summary.moved, warnings=summary.warnings)
+    return DeduplicateFoldersResponse(
+        groups_found=summary.groups_found, moved=summary.moved, duration_seconds=summary.duration_seconds, warnings=summary.warnings
+    )
 
 
 async def _authorize_scan_websocket(websocket: WebSocket, project_name: str) -> tuple[str, list[str] | None] | None:

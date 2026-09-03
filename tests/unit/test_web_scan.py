@@ -647,7 +647,9 @@ async def test_deduplicate_endpoint_moves_exact_duplicates(tmp_path) -> None:
 
     assert response.status_code == 200
     payload = response.json()
+    duration_seconds = payload.pop("duration_seconds")
     assert payload == {"groups_found": 1, "moved": 1, "warnings": []}
+    assert duration_seconds >= 0.0
 
     root = Path(project.root_path)
     assert (root / "duplicados" / "DEDUP_REPORT.json").exists()

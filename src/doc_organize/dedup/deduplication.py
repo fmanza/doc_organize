@@ -63,11 +63,23 @@ class DeduplicationManager:
         self.logger.info(f"Deduplicación: {len(groups)} grupos detectados sobre {len(docs)} documentos")
         return groups
 
-    async def resolve_duplicates(self, groups: list[DuplicateGroup], duplicates_dir: Path) -> DeduplicationReport:
+    async def resolve_duplicates(
+        self, groups: list[DuplicateGroup], duplicates_dir: Path, started_at: datetime | None = None
+    ) -> DeduplicationReport:
         """Mueve los documentos descartados de cada grupo a `duplicates_dir`,
         preservando su estructura de directorios original, y escribe
         `DEDUP_REPORT.json` (solo el último run) y añade una línea a
-        `DEDUP_HISTORY.jsonl` (histórico acumulado de todas las ejecuciones)."""
+        `DEDUP_HISTORY.jsonl` (histórico acumulado de todas las ejecuciones).
+
+        `started_at` es opcional (compatibilidad con llamadores no adaptados):
+        cuando se pasa, `duration_seconds` cubre desde ahí hasta que este método
+        termina -- el llamador debe capturarlo *antes* de detectar los grupos
+        (`find_duplicates`/re-escaneo), no solo antes de esta llamada, para que
+        la duración mostrada en pantalla represente la operación completa
+        ("Buscar duplicados"), igual que `ScanRunReport` cubre el run entero de
+        Escanear. Si se omite, `DeduplicationReport.duration_seconds` queda en
+        `None` (sin dato) en vez de medir solo el movimiento de ficheros, que
+        sería una duración parcial engañosa."""
         duplicates_dir = Path(duplicates_dir)
         await asyncio.to_thread(duplicates_dir.mkdir, parents=True, exist_ok=True)
 
@@ -84,12 +96,15 @@ class DeduplicationManager:
             else:
                 version_resolved += len(to_move)
 
+        finished_at = datetime.now(timezone.utc)
         audit_path = duplicates_dir / "DEDUP_REPORT.json"
         report = DeduplicationReport(
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=finished_at.isoformat(),
             total_exact_duplicates=exact_moved,
             total_version_conflicts=version_resolved,
             duplicates_folder_path=str(duplicates_dir),
+            started_at=started_at.isoformat() if started_at else None,
+            duration_seconds=(finished_at - started_at).total_seconds() if started_at else None,
             audit_json_path=str(audit_path),
             groups=groups,
         )

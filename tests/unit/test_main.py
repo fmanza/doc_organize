@@ -263,15 +263,55 @@ async def test_scan_command_run_streaming_emits_expected_event_sequence(tmp_path
     assert event_types == [
         ScanEventType.STARTED,
         ScanEventType.SCANNED,
+        ScanEventType.FILE_STARTED,
         ScanEventType.FILE_CONVERTED,
         ScanEventType.COMPLETED,
     ]
+    assert events[1].data["to_process"] == 1
     assert events[-1].data["scanned"] == 1
     assert events[-1].data["converted"] == 1
     assert events[-1].data["duration_seconds"] > 0
-    file_converted = events[2]
+    file_started = events[2]
+    assert file_started.data == {"path": file_started.data["path"], "index": 1, "total": 1}
+    assert file_started.data["path"].endswith("native.pdf")
+    file_converted = events[3]
     assert file_converted.data["success"] is True
     assert file_converted.data["path"].endswith("native.pdf")
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_scan_command_run_streaming_no_file_started_when_nothing_to_convert(tmp_path) -> None:
+    # `to_process=0` (todo ya en cache, sin cambios): no debe emitirse ningun
+    # FILE_STARTED/FILE_CONVERTED -- la UI depende de esto para mostrar "Sin
+    # ficheros nuevos que convertir" en vez de una barra de progreso vacia.
+    base = tmp_path / "workspaces"
+    base.mkdir()
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        project = await registry.create_project("Proyecto Sin Cambios", base)
+    root = Path(project.root_path)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    _make_native_pdf(input_dir / "native.pdf")
+
+    run_kwargs = {
+        "paths": [str(input_dir)],
+        "output_dir": root / "Conversión",
+        "cache_db": root / "cache.db",
+        "folders_json": root / "folders.json",
+        "use_ocr": False,
+        "use_gpu": False,
+    }
+    await ScanCommand().run(**run_kwargs)
+
+    events = [event async for event in ScanCommand().run_streaming(**run_kwargs)]
+
+    event_types = [event.event for event in events]
+    assert ScanEventType.FILE_STARTED not in event_types
+    assert ScanEventType.FILE_CONVERTED not in event_types
+    scanned_event = next(event for event in events if event.event == ScanEventType.SCANNED)
+    assert scanned_event.data["to_process"] == 0
 
 
 @pytest.mark.slow
@@ -471,6 +511,7 @@ async def test_scan_command_deduplicate_moves_exact_duplicate(tmp_path) -> None:
 
     assert summary.groups_found == 1
     assert summary.moved == 1
+    assert summary.duration_seconds >= 0.0
     assert (root / "duplicados" / "DEDUP_REPORT.json").exists()
     assert (root / "folders.json").exists()  # para que web/routes/duplicates.py funcione sin haber escaneado
 

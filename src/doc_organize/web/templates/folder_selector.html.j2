@@ -100,6 +100,11 @@
     <span id="semaforo-duration-text" class="text-sm text-gray-500 ml-2"></span>
 </div>
 
+<div id="scan-file-progress" class="my-3" hidden>
+    <p id="scan-file-progress-text" class="text-sm text-gray-700 mb-1"></p>
+    <progress id="scan-file-progress-bar" class="w-full h-2" max="1" value="0"></progress>
+</div>
+
 <p class="text-sm text-gray-600 my-2">
     Última ejecución:
     {% if last_scan_run %}
@@ -109,9 +114,11 @@
     {% endif %}
 </p>
 
-<h2 class="text-lg font-medium mt-4 mb-2">Resultado del escaneo</h2>
-<label for="progress" class="sr-only">Resultado del escaneo</label>
-<textarea id="progress" readonly rows="12" class="w-full border border-gray-300 rounded px-2 py-1.5 font-mono text-xs bg-gray-50"></textarea>
+<details class="mt-4">
+    <summary class="cursor-pointer select-none text-lg font-medium">Resultado del escaneo</summary>
+    <label for="progress" class="sr-only">Registro detallado del escaneo</label>
+    <textarea id="progress" readonly rows="12" class="w-full border border-gray-300 rounded px-2 py-1.5 font-mono text-xs bg-gray-50 mt-2"></textarea>
+</details>
 
 </div>
 
@@ -332,7 +339,67 @@ const submitBtn = document.getElementById("scan-submit-btn");
 const progressBox = document.getElementById("progress");
 const errorEl = document.getElementById("scan-error");
 
-const RUNNING_EVENTS = new Set(["scanned", "file_converted", "ocr_processed"]);
+const RUNNING_EVENTS = new Set(["scanned", "file_started", "file_converted", "ocr_processed"]);
+
+// --- Progreso en vivo (total de ficheros a procesar + cual se esta procesando) ---
+
+const fileProgressContainer = document.getElementById("scan-file-progress");
+const fileProgressText = document.getElementById("scan-file-progress-text");
+const fileProgressBar = document.getElementById("scan-file-progress-bar");
+// Distingue "la barra se ve porque hay ficheros en curso" de "se ve porque no
+// habia nada que convertir" -- `handleScanCompletedFileProgress()` solo debe
+// sustituir el texto final en el primer caso (ver su propio comentario).
+let scanHasFilesToProcess = false;
+
+function resetFileProgress() {
+    fileProgressContainer.hidden = true;
+    fileProgressText.textContent = "";
+    fileProgressBar.max = 1;
+    fileProgressBar.value = 0;
+    scanHasFilesToProcess = false;
+}
+
+function handleScannedEvent(data) {
+    // `to_process` es el total real de ficheros a convertir en esta ejecucion
+    // (ver scan_command.py) -- puede ser 0 si todo estaba ya al dia en cache.
+    if (!data.to_process) {
+        fileProgressContainer.hidden = false;
+        fileProgressText.textContent = "Sin ficheros nuevos que convertir.";
+        fileProgressBar.max = 1;
+        fileProgressBar.value = 1;
+        return;
+    }
+    scanHasFilesToProcess = true;
+    fileProgressContainer.hidden = false;
+    fileProgressBar.max = data.to_process;
+    fileProgressBar.value = 0;
+    fileProgressText.textContent = "Preparando conversión de " + data.to_process + " fichero(s)…";
+}
+
+function handleFileStartedEvent(data) {
+    fileProgressContainer.hidden = false;
+    fileProgressBar.max = data.total;
+    fileProgressBar.value = data.index - 1;
+    fileProgressText.textContent = "Procesando " + data.index + "/" + data.total + ": " + data.path;
+}
+
+function handleFileConvertedEvent(data) {
+    // El indice exacto ya lo fijo `file_started`; aqui solo se refleja que ese
+    // fichero termino, sin depender de un contador propio (evita divergencias
+    // si algun fichero se saltara el evento `file_started` en el futuro).
+    fileProgressBar.value = Math.min(Number(fileProgressBar.value) + 1, Number(fileProgressBar.max));
+}
+
+function handleScanCompletedFileProgress() {
+    // Sin esto, el texto se queda congelado en "Procesando N/N: <ultimo fichero>"
+    // tras terminar -- da la impresion de que sigue en curso. El caso "0 a
+    // procesar" ya dejo su propio texto final ("Sin ficheros nuevos...") en
+    // `handleScannedEvent` -- `scanHasFilesToProcess` evita pisarlo aqui.
+    if (!scanHasFilesToProcess) return;
+    const total = Number(fileProgressBar.max);
+    fileProgressBar.value = total;
+    fileProgressText.textContent = "Completado: " + total + " fichero(s) procesado(s).";
+}
 
 // --- Semáforo de estado (Inicio / Ejecución / Finalización / Error) ---
 
@@ -431,6 +498,7 @@ form.addEventListener("submit", async (submitEvent) => {
     submitBtn.disabled = true;
     progressBox.value = "";
     resetSemaforo();
+    resetFileProgress();
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(
@@ -453,9 +521,17 @@ form.addEventListener("submit", async (submitEvent) => {
     ws.onmessage = (message) => {
         const scanEvent = JSON.parse(message.data);
         appendProgress(scanEvent);
+        if (scanEvent.event === "scanned") {
+            handleScannedEvent(scanEvent.data);
+        } else if (scanEvent.event === "file_started") {
+            handleFileStartedEvent(scanEvent.data);
+        } else if (scanEvent.event === "file_converted") {
+            handleFileConvertedEvent(scanEvent.data);
+        }
         if (scanEvent.event === "completed") {
             scanFinished = true;
             setSemaforo(SCAN_PHASE.COMPLETED);
+            handleScanCompletedFileProgress();
             const durationLabel = formatDurationClientSide(scanEvent.data.duration_seconds || 0);
             semaforoDurationText.textContent = "Duración: " + durationLabel;
             lastScanRunText.textContent = "ahora mismo — duración: " + durationLabel;

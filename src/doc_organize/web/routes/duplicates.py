@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -219,6 +220,7 @@ async def resolve_duplicates(name: str, payload: ResolveDuplicatesRequest, reque
     miembro real del grupo correspondiente se ignora (se loguea, no se aplica) — ver
     AUDIT_PLAN de `§2.7.4` para el hallazgo de seguridad que motiva este diseño.
     """
+    started_at = datetime.now(timezone.utc)
     project = await _get_project(request, name)
     groups = await _detect_duplicates(project)
 
@@ -241,7 +243,7 @@ async def resolve_duplicates(name: str, payload: ResolveDuplicatesRequest, reque
         resolved_count += 1
 
     duplicates_dir = Path(project.root_path) / DUPLICATES_FOLDER_NAME
-    report = await DeduplicationManager().resolve_duplicates(groups, duplicates_dir)
+    report = await DeduplicationManager().resolve_duplicates(groups, duplicates_dir, started_at=started_at)
     moved = report.total_exact_duplicates + report.total_version_conflicts
     return ResolveDuplicatesResponse(moved=moved, groups_resolved=resolved_count)
 

@@ -110,6 +110,14 @@ async def test_duplicates_resolve_moves_non_chosen_member(tmp_path) -> None:
     assert not discard_path.exists()  # el otro se movio
     assert list((project_root / "duplicados").rglob("discard.pdf"))
 
+    # El formulario interactivo tambien registra duracion en DEDUP_HISTORY.jsonl
+    # (mismo campo que "Buscar duplicados", capturado antes del re-escaneo).
+    history_path = project_root / "duplicados" / "DEDUP_HISTORY.jsonl"
+    last_entry = json.loads(history_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert last_entry["duration_seconds"] is not None
+    assert last_entry["duration_seconds"] >= 0.0
+    assert last_entry["started_at"] is not None
+
 
 @pytest.mark.asyncio
 async def test_duplicates_resolve_ignores_path_not_in_group(tmp_path) -> None:
@@ -391,6 +399,76 @@ async def test_duplicates_page_explains_already_resolved_by_scan_dedup(tmp_path)
     # plantilla mostrara números equivocados.
     assert "2 duplicado" in response.text
     assert "1 conflicto" in response.text
+
+
+@pytest.mark.asyncio
+async def test_duplicates_page_shows_duration_of_last_run(tmp_path) -> None:
+    # Mismo criterio que "Escanear" (ScanRunReport/format_duration): la duracion
+    # de la ultima ejecucion de "Buscar duplicados" debe verse en pantalla.
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "unico.pdf").write_bytes(b"sin duplicados pendientes")
+    _write_folders_json(project_root, [str(input_dir)])
+
+    duplicados_dir = project_root / "duplicados"
+    _write_dedup_history(
+        duplicados_dir,
+        {
+            "timestamp": "2026-08-31T10:00:00+00:00",
+            "total_exact_duplicates": 0,
+            "total_version_conflicts": 0,
+            "duplicates_folder_path": str(duplicados_dir),
+            "audit_json_path": str(duplicados_dir / "DEDUP_REPORT.json"),
+            "groups": [],
+            "started_at": "2026-08-31T09:59:55+00:00",
+            "duration_seconds": 65.4,
+        },
+    )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/duplicates")
+
+    assert response.status_code == 200
+    assert "duración: 1m 5s" in response.text
+
+
+@pytest.mark.asyncio
+async def test_duplicates_page_missing_duration_does_not_crash_old_history(tmp_path) -> None:
+    # DEDUP_HISTORY.jsonl escrito antes de este cambio no tiene duration_seconds
+    # -- debe seguir cargando sin 500 ni mostrar una duracion inventada.
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "unico.pdf").write_bytes(b"sin duplicados pendientes")
+    _write_folders_json(project_root, [str(input_dir)])
+
+    duplicados_dir = project_root / "duplicados"
+    _write_dedup_history(
+        duplicados_dir,
+        {
+            "timestamp": "2026-08-31T10:00:00+00:00",
+            "total_exact_duplicates": 0,
+            "total_version_conflicts": 0,
+            "duplicates_folder_path": str(duplicados_dir),
+            "audit_json_path": str(duplicados_dir / "DEDUP_REPORT.json"),
+            "groups": [],
+        },
+    )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/duplicates")
+
+    assert response.status_code == 200
+    assert "duración:" not in response.text
 
 
 @pytest.mark.asyncio

@@ -87,12 +87,14 @@ class DeduplicationSummary:
 
     groups_found: int = 0
     moved: int = 0
+    duration_seconds: float = 0.0
     warnings: list[str] = field(default_factory=list)
 
     def render(self) -> str:
         lines = [
             f"Grupos de duplicados detectados: {self.groups_found}",
             f"Archivos movidos a duplicados/: {self.moved}",
+            f"Tiempo de ejecución: {format_duration(self.duration_seconds)}",
         ]
         if self.warnings:
             lines.append(f"Avisos ({len(self.warnings)}):")
@@ -261,6 +263,15 @@ class ScanCommand:
                         "new": summary.new,
                         "modified": summary.modified,
                         "unchanged": summary.unchanged,
+                        # Total real de ficheros que se van a convertir en esta
+                        # ejecucion -- distinto de "scanned" (todos los documentos
+                        # descubiertos, incluidos los que no se tocan) y de
+                        # "new + modified" (tambien incluye reintentos de ficheros
+                        # en ERROR sin cambios, ver `_collect_stale_error_paths`).
+                        # El cliente lo usa como denominador de la barra de
+                        # progreso ("Procesando X/to_process"), junto al indice
+                        # que viaja en cada evento FILE_STARTED.
+                        "to_process": len(docs_to_process),
                         # Antes (checkboxes + preflight `/folders/validate`) el cliente
                         # ya llegaba aquí con rutas limpias y el usuario veía cualquier
                         # aviso antes de escanear. Ahora las rutas vienen siempre de
@@ -421,7 +432,14 @@ class ScanCommand:
         vacío): así cada ejecución de "Buscar duplicados" queda registrada en
         `DEDUP_HISTORY.jsonl` (histórico completo de cada vez que se pulsó el
         botón, no solo de las veces que se movió algo).
+
+        `started_at` se captura aquí, antes del re-escaneo, no solo antes de
+        `resolve_duplicates()`: la duración mostrada en pantalla debe cubrir la
+        operación completa que el usuario percibe al pulsar "Buscar
+        duplicados" (escaneo + detección + movimiento), mismo criterio que
+        `duration_seconds` en `ScanSummary`/`ScanRunReport` para Escanear.
         """
+        started_at = datetime.now(timezone.utc)
         clean_paths, warnings = await self._resolve_scan_paths(paths, folders_json)
 
         async with DocumentScanner() as scanner:
@@ -429,10 +447,11 @@ class ScanCommand:
 
         dedup_manager = DeduplicationManager()
         groups = dedup_manager.find_duplicates(scan_result.documents)
-        report = await dedup_manager.resolve_duplicates(groups, duplicates_dir)
+        report = await dedup_manager.resolve_duplicates(groups, duplicates_dir, started_at=started_at)
         moved = report.total_exact_duplicates + report.total_version_conflicts
 
-        return DeduplicationSummary(groups_found=len(groups), moved=moved, warnings=warnings)
+        duration_seconds = report.duration_seconds if report.duration_seconds is not None else 0.0
+        return DeduplicationSummary(groups_found=len(groups), moved=moved, duration_seconds=duration_seconds, warnings=warnings)
 
     async def _convert_documents(
         self,
@@ -447,7 +466,8 @@ class ScanCommand:
         extract_images: bool = False,
         use_picture_description: bool = False,
     ) -> AsyncIterator[ScanEvent]:
-        """Convierte cada documento, yieldeando un `FILE_CONVERTED` por unidad.
+        """Convierte cada documento, yieldeando `FILE_STARTED` (antes de convertirlo)
+        y `FILE_CONVERTED` (al terminar) por unidad.
 
         `docs_to_process` incluye tanto ficheros nuevos/modificados (`new_set`/
         `modified_set`) como reintentos de ficheros sin cambios cuya conversión
@@ -456,13 +476,23 @@ class ScanCommand:
         se usa solo para leer el `error_retry_count` previo de cada documento
         (`_build_entry` lo incrementa en fallo / lo resetea en éxito).
 
+        `FILE_STARTED` lleva `index` (1-based) y `total = len(docs_to_process)`,
+        mismo total que ya viaja en el evento `SCANNED` (`to_process`) — así el
+        cliente puede mostrar "Procesando X/Y: nombre" en vivo, en vez de solo
+        poder inferir el fichero recién terminado a partir de `FILE_CONVERTED`.
+
         Muta `summary`/`entries`/`ocr_candidates` in-place (son del llamador) en vez
         de devolverlos: es la forma más simple de combinar "acumula resultados" con
         "yieldea progreso" sin duplicar la lógica en dos métodos (uno con `yield`,
         otro con `return`) — contrato interno de esta clase, no una API pública.
         """
+        total = len(docs_to_process)
         async with DocumentConverter() as converter:
-            for doc in docs_to_process:
+            for index, doc in enumerate(docs_to_process, start=1):
+                yield ScanEvent(
+                    event=ScanEventType.FILE_STARTED,
+                    data={"path": doc.full_path, "index": index, "total": total},
+                )
                 result = await converter.convert_document(
                     doc, output_dir, use_ocr=False, extract_images=extract_images, use_picture_description=use_picture_description
                 )

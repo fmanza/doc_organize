@@ -2,6 +2,8 @@
 
 import json
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from doc_organize.core.models import DocumentMetadata, DuplicateReason
@@ -87,6 +89,34 @@ async def test_resolve_duplicates_moves_files_and_writes_report(tmp_path) -> Non
     assert audit_path.exists()
     payload = json.loads(audit_path.read_text(encoding="utf-8"))
     assert payload["total_exact_duplicates"] == 1
+    # Sin `started_at`, la duracion queda sin dato -- no un `0.0` enganoso que
+    # sugiera una operacion instantanea.
+    assert report.duration_seconds is None
+    assert report.started_at is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_duplicates_computes_duration_from_started_at(tmp_path) -> None:
+    source_dir = tmp_path / "docs"
+    source_dir.mkdir()
+    older = source_dir / "original.pdf"
+    newer = source_dir / "copy.pdf"
+    older.write_bytes(b"same-content")
+    newer.write_bytes(b"same-content")
+
+    older_doc = _doc(str(older), "same-hash", modified_time=1.0)
+    newer_doc = _doc(str(newer), "same-hash", modified_time=2.0)
+
+    manager = DeduplicationManager()
+    groups = manager.find_duplicates([newer_doc, older_doc])
+    duplicates_dir = tmp_path / "duplicados"
+    started_at = datetime.now(timezone.utc) - timedelta(seconds=5)
+
+    report = await manager.resolve_duplicates(groups, duplicates_dir, started_at=started_at)
+
+    assert report.started_at == started_at.isoformat()
+    assert report.duration_seconds is not None
+    assert report.duration_seconds >= 5.0
 
 
 @pytest.mark.asyncio

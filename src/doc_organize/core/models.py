@@ -61,6 +61,7 @@ class ScanEventType(str, Enum):
 
     STARTED = "started"
     SCANNED = "scanned"
+    FILE_STARTED = "file_started"
     FILE_CONVERTED = "file_converted"
     OCR_PROCESSED = "ocr_processed"
     COMPLETED = "completed"
@@ -176,6 +177,12 @@ class DeduplicationReport(BaseModel):
     duplicates_folder_path: str = Field(..., description="Ruta a la carpeta donde se movieron los duplicados")
     audit_json_path: str = Field(..., description="Ruta al fichero DEDUP_REPORT.json")
     groups: list[DuplicateGroup] = Field(default_factory=list, description="Grupos detallados")
+    started_at: str | None = Field(
+        None, description="Timestamp ISO 8601 de inicio de esta ejecución (None en históricos previos a este campo)"
+    )
+    duration_seconds: float | None = Field(
+        None, description="Tiempo total transcurrido entre inicio y fin (None en históricos previos a este campo)"
+    )
 
 
 class CacheEntry(BaseModel):

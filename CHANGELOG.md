@@ -6,6 +6,39 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-03
+
+### Added
+
+- `src/doc_organize/core/models.py`: `DeduplicationReport` gana `started_at`/`duration_seconds`
+  (ambos opcionales — `None` en históricos previos a este campo, para no romper la carga de líneas ya
+  escritas en `DEDUP_HISTORY.jsonl`).
+- `src/doc_organize/dedup/deduplication.py`: `DeduplicationManager.resolve_duplicates()` acepta un
+  nuevo parámetro opcional `started_at: datetime | None = None` — cuando se pasa, calcula
+  `duration_seconds` cubriendo desde ahí hasta que termina la resolución.
+- `src/doc_organize/scan/scan_command.py`: `DeduplicationSummary` gana `duration_seconds`;
+  `ScanCommand.deduplicate()` captura `started_at` antes de re-escanear/detectar duplicados, para que
+  la duración cubra la operación completa de "Buscar duplicados" (mismo criterio que
+  `duration_seconds` en `ScanSummary`/`ScanRunReport` para "Escanear").
+- `src/doc_organize/web/routes/scan.py`: `DeduplicateFoldersResponse` gana `duration_seconds`.
+- `src/doc_organize/web/routes/duplicates.py`: el formulario interactivo de resolución
+  (`POST /api/projects/{name}/duplicates/resolve`) también captura y persiste `started_at`/
+  `duration_seconds`, mismo criterio que la acción masiva "Buscar duplicados".
+- `src/doc_organize/web/templates/duplicates_resolver.html.j2`: la pantalla "Duplicados" muestra ahora
+  la duración de la última ejecución de "Buscar duplicados" (banner) y de cada ejecución del histórico,
+  reutilizando el filtro Jinja `format_duration` ya existente.
+- `src/doc_organize/core/models.py`: nuevo `ScanEventType.FILE_STARTED`, emitido por
+  `ScanCommand._convert_documents()` justo antes de convertir cada documento, con
+  `{"path", "index", "total"}` (`total` = ficheros a convertir en esta ejecución).
+- `src/doc_organize/scan/scan_command.py`: el payload del evento `SCANNED` gana `to_process` (total
+  real de ficheros que se van a convertir, distinto de `scanned`/`new + modified`: también incluye
+  reintentos de ficheros en `ERROR` sin cambios).
+- `src/doc_organize/web/templates/folder_selector.html.j2`: la pantalla "Escanear" muestra ahora una
+  barra de progreso en vivo con "Procesando X/Y: nombre_de_fichero" mientras el escaneo corre, y un
+  mensaje final ("Completado: N fichero(s) procesado(s)." o "Sin ficheros nuevos que convertir."); el
+  registro JSON detallado de eventos pasa a un `<details>` colapsado ("Resultado del escaneo") en vez
+  de ser el elemento principal de la pantalla.
+
 ## [0.5.0] - 2026-09-03
 
 ### Added
