@@ -13,13 +13,19 @@ repetir el olvido.
 
 También registra aquí el filtro `highlight`, común a todas las páginas con
 buscador server-side (pestaña Caché de Escanear, Proyectos): antes cada módulo
-de rutas que lo necesitaba lo redefinía por su cuenta.
+de rutas que lo necesitaba lo redefinía por su cuenta. Igual criterio para
+`format_datetime`/`format_duration` (revisión de formato de fecha/hora): antes
+cada plantilla mostraba el timestamp ISO 8601 UTC crudo (`{{ x.created_at }}`)
+directamente; ahora pasa por `doc_organize.utils.date_format`, que centraliza
+la zona horaria y el patrón de visualización (por defecto, español/España).
 """
 
 from pathlib import Path
 
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup, escape
+
+from doc_organize.utils.date_format import format_datetime, format_duration
 
 
 def _highlight(text: str, query: str | None) -> Markup:
@@ -58,6 +64,8 @@ def create_templates(directory: str | Path) -> Jinja2Templates:
     templates = Jinja2Templates(directory=str(directory))
     templates.env.autoescape = True
     templates.env.filters["highlight"] = _highlight
+    templates.env.filters["format_datetime"] = format_datetime
+    templates.env.filters["format_duration"] = format_duration
     return templates
 
 

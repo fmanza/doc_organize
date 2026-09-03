@@ -106,6 +106,15 @@ DUPLICATES_FOLDER_NAME = "duplicados"
 SCAN_ERRORS_FOLDER_NAME = "errores_escaneo"
 SCAN_ERRORS_HISTORY_JSONL_NAME = "SCAN_ERRORS_HISTORY.jsonl"
 
+#: Carpeta y fichero del histórico de duración de ejecuciones de escaneo, dentro de
+#: la raíz del proyecto: una línea JSON (`ScanRunReport`) por cada llamada a
+#: `ScanCommand.run_streaming()` (completada o no), añadida por
+#: `scan.scan_history_store.append_scan_run` y releída por `web/routes/scan.py`.
+#: A diferencia de `SCAN_ERRORS_HISTORY_JSONL_NAME`, se registra toda ejecución,
+#: no solo las que producen error.
+SCAN_HISTORY_FOLDER_NAME = "historial_escaneo"
+SCAN_HISTORY_JSONL_NAME = "SCAN_HISTORY.jsonl"
+
 #: Longitud maxima de un nombre de proyecto (REQ-008), tras strip().
 PROJECT_NAME_MAX_LENGTH = 100
 
@@ -196,6 +205,8 @@ __all__ = [
     "SCAN_ERRORS_FOLDER_NAME",
     "SCAN_ERRORS_HISTORY_JSONL_NAME",
     "SCAN_FOLDERS_JSON_NAME",
+    "SCAN_HISTORY_FOLDER_NAME",
+    "SCAN_HISTORY_JSONL_NAME",
     "SCRYPT_DKLEN",
     "SCRYPT_MAXMEM",
     "SCRYPT_N",

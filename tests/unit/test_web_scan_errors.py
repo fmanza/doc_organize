@@ -151,12 +151,15 @@ async def test_scan_errors_page_shows_history_grouped_by_run_most_recent_first(t
 
     assert response.status_code == 200
     text = response.text
-    assert "2026-08-01T10:00:00+00:00" in text
-    assert "2026-08-02T10:00:00+00:00" in text
+    # Los timestamps ISO 8601 UTC se muestran formateados (español/España, ver
+    # `doc_organize.utils.date_format`): 10:00 UTC en agosto (horario de verano,
+    # UTC+2) se ve como las 12:00 en Europe/Madrid.
+    assert "01/08/2026 12:00:00" in text
+    assert "02/08/2026 12:00:00" in text
     assert "a.pdf" in text
     assert "b.pdf" in text
     assert "c.pdf" in text
-    assert text.index("2026-08-02T10:00:00+00:00") < text.index("2026-08-01T10:00:00+00:00")
+    assert text.index("02/08/2026 12:00:00") < text.index("01/08/2026 12:00:00")
 
 
 @pytest.mark.asyncio

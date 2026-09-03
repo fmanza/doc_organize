@@ -89,7 +89,7 @@
     La última ejecución de "Buscar duplicados" resolvió
     {{ last_dedup_report.total_exact_duplicates }} duplicado(s) exacto(s) y
     {{ last_dedup_report.total_version_conflicts }} conflicto(s) de versión (conservando por
-    defecto el documento más antiguo de cada grupo) el {{ last_dedup_report.timestamp }}.
+    defecto el documento más antiguo de cada grupo) el {{ last_dedup_report.timestamp | format_datetime }}.
     Los ficheros descartados se movieron a la carpeta <code>duplicados/</code> del proyecto.
 </p>
 {% endif %}
@@ -119,7 +119,7 @@
 {% for entry in history_entries %}
 <details class="border border-gray-200 rounded p-3 mb-3 bg-gray-50">
     <summary class="cursor-pointer select-none font-medium text-gray-700">
-        {{ entry.report.timestamp }} —
+        {{ entry.report.timestamp | format_datetime }} —
         {{ entry.report.total_exact_duplicates }} duplicado(s) exacto(s),
         {{ entry.report.total_version_conflicts }} conflicto(s) de versión
     </summary>

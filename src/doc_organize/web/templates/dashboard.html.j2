@@ -6,7 +6,7 @@
 <h1 class="text-xl font-semibold mb-4">{{ project.name }}</h1>
 <table class="w-full border-collapse mt-4">
     <tr><th class="text-left px-2.5 py-1.5 border-b border-gray-300">Carpeta raíz</th><td class="px-2.5 py-1.5 border-b border-gray-300">{{ project.root_path }}</td></tr>
-    <tr><th class="text-left px-2.5 py-1.5 border-b border-gray-300">Creado</th><td class="px-2.5 py-1.5 border-b border-gray-300">{{ project.created_at }}</td></tr>
+    <tr><th class="text-left px-2.5 py-1.5 border-b border-gray-300">Creado</th><td class="px-2.5 py-1.5 border-b border-gray-300">{{ project.created_at | format_datetime }}</td></tr>
 </table>
 
 <h2 class="text-lg font-medium mt-6 mb-2">Carpetas guardadas</h2>

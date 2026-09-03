@@ -20,10 +20,12 @@ from doc_organize.core.constants import (
     SCAN_ERRORS_FOLDER_NAME,
     SCAN_ERRORS_HISTORY_JSONL_NAME,
     SCAN_FOLDERS_JSON_NAME,
+    SCAN_HISTORY_FOLDER_NAME,
+    SCAN_HISTORY_JSONL_NAME,
 )
 from doc_organize.core.exceptions import ProjectNotFoundError
-from doc_organize.core.models import Project, ScanEventType, ScannedFolder
-from doc_organize.scan import ScanCommand
+from doc_organize.core.models import Project, ScanEventType, ScannedFolder, ScanRunReport
+from doc_organize.scan import ScanCommand, list_scan_runs
 from doc_organize.utils.av_detector import detect_av_status
 from doc_organize.utils.gpu_detector import detect_gpu_status
 from doc_organize.utils.logging import get_logger
@@ -64,6 +66,18 @@ _templates.env.filters["dirname"] = _dirname
 _templates.env.filters["basename"] = _basename
 
 router = APIRouter(tags=["scan"])
+
+
+def _scan_history_path(project: Project) -> Path:
+    """Ruta a `historial_escaneo/SCAN_HISTORY.jsonl` de `project` (histórico de
+    duración de ejecuciones, ver `scan.scan_history_store`)."""
+    return Path(project.root_path) / SCAN_HISTORY_FOLDER_NAME / SCAN_HISTORY_JSONL_NAME
+
+
+async def _load_scan_history(project: Project) -> list[ScanRunReport]:
+    """Histórico de ejecuciones de escaneo de `project`, más reciente primero
+    (usado tanto para la pestaña "Historial" como para "Última ejecución")."""
+    return await asyncio.to_thread(list_scan_runs, _scan_history_path(project))
 
 
 async def _load_cache_page(project: Project, *, q: str | None, page: int, page_size: int) -> tuple[list[CacheEntryResponse], Page]:
@@ -126,6 +140,19 @@ async def folder_selector(
     cache_q = (q.strip() or None) if q else None
     cache_entries, cache_page = await _load_cache_page(project, q=cache_q, page=page, page_size=page_size)
 
+    # Histórico de duración de ejecuciones (tiempo de la última ejecución +
+    # pestaña "Historial de ejecuciones"): igual que la pestaña Caché, se carga
+    # siempre en la misma respuesta, sin fragmentos cargados por AJAX.
+    scan_history = await _load_scan_history(project)
+    last_scan_run = scan_history[0] if scan_history else None
+
+    if tab == "cache":
+        active_tab = "cache"
+    elif tab == "history":
+        active_tab = "history"
+    else:
+        active_tab = "scan"
+
     return _templates.TemplateResponse(
         request,
         "folder_selector.html.j2",
@@ -134,7 +161,9 @@ async def folder_selector(
             "folders": folders,
             "gpu_status": gpu_status,
             "av_status": av_status,
-            "active_tab": "cache" if tab == "cache" else "scan",
+            "active_tab": active_tab,
+            "last_scan_run": last_scan_run,
+            "scan_history": scan_history,
             "cache_entries": cache_entries,
             "cache_q": cache_q,
             "cache_page": cache_page.number,
@@ -356,6 +385,7 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
             extract_images=extract_images,
             use_picture_description=use_picture_description,
             error_log_path=root / SCAN_ERRORS_FOLDER_NAME / SCAN_ERRORS_HISTORY_JSONL_NAME,
+            history_log_path=root / SCAN_HISTORY_FOLDER_NAME / SCAN_HISTORY_JSONL_NAME,
         ):
             if event.event == ScanEventType.COMPLETED:
                 # Se marca ANTES de retransmitir el evento "completed" al cliente

@@ -9,6 +9,7 @@ Modelos Pydantic v2 usados en todos los módulos:
 - CacheEntry: entrada individual del cache en SQLite
 - DirectoryTree: estructura jerárquica de directorios
 - CacheExportSnapshot: exportación de solo lectura del cache para descarga ZIP
+- ScanRunReport: duración de una ejecución de escaneo (histórico de tiempos)
 """
 
 from enum import Enum
@@ -214,6 +215,23 @@ class ScanErrorReport(BaseModel):
     timestamp: str = Field(..., description="Timestamp ISO 8601 de finalización del escaneo")
     total_scanned: int = Field(..., description="Total de documentos escaneados en esta ejecución")
     entries: list[ScanErrorEntry] = Field(default_factory=list, description="Errores detectados en esta ejecución")
+
+
+class ScanRunReport(BaseModel):
+    """Duración de una ejecución de `ScanCommand.run_streaming()` (histórico de tiempos).
+
+    Se persiste siempre (append-only, una línea JSON por ejecución, mismo patrón que
+    `ScanErrorReport`), a diferencia de `ScanErrorReport` que solo se escribe si hubo
+    errores: aquí el objetivo es visibilidad de cuánto tarda cada escaneo, incluidas
+    ejecuciones canceladas o interrumpidas por una excepción (`completed=False`).
+    """
+
+    scan_run_id: str = Field(..., description="Identificador único de esta ejecución de escaneo (UUID4 hex)")
+    started_at: str = Field(..., description="Timestamp ISO 8601 de inicio del escaneo")
+    finished_at: str = Field(..., description="Timestamp ISO 8601 de fin (éxito, error o cancelación)")
+    duration_seconds: float = Field(..., description="Tiempo total transcurrido entre inicio y fin")
+    total_scanned: int = Field(..., description="Total de documentos escaneados en esta ejecución (0 si no llegó a escanear)")
+    completed: bool = Field(..., description="Si el escaneo llegó a emitir el evento COMPLETED, o se interrumpió antes")
 
 
 class CacheExportSnapshot(BaseModel):
@@ -486,6 +504,7 @@ __all__ = [
     "ScanEvent",
     "ScanEventType",
     "ScanResult",
+    "ScanRunReport",
     "ScannedFolder",
     "SecurityConfig",
     "Session",

@@ -6,13 +6,15 @@
 <h1 class="text-xl font-semibold mb-4">Escanear: {{ project.name }}</h1>
 
 <div role="tablist" class="flex gap-1 border-b border-gray-300 mb-4">
-    <button type="button" id="tab-btn-scan" role="tab" aria-selected="{{ 'true' if active_tab != 'cache' else 'false' }}" aria-controls="tab-panel-scan"
-            class="page-tab-btn px-3 py-1.5 border border-b-0 rounded-t cursor-pointer {{ 'bg-white border-gray-300 font-medium' if active_tab != 'cache' else 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100' }}">Escanear</button>
+    <button type="button" id="tab-btn-scan" role="tab" aria-selected="{{ 'true' if active_tab == 'scan' else 'false' }}" aria-controls="tab-panel-scan"
+            class="page-tab-btn px-3 py-1.5 border border-b-0 rounded-t cursor-pointer {{ 'bg-white border-gray-300 font-medium' if active_tab == 'scan' else 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100' }}">Escanear</button>
     <button type="button" id="tab-btn-cache" role="tab" aria-selected="{{ 'true' if active_tab == 'cache' else 'false' }}" aria-controls="tab-panel-cache"
             class="page-tab-btn px-3 py-1.5 border border-b-0 rounded-t cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 {{ 'bg-white border-gray-300 font-medium' if active_tab == 'cache' else 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100' }}">Caché</button>
+    <button type="button" id="tab-btn-history" role="tab" aria-selected="{{ 'true' if active_tab == 'history' else 'false' }}" aria-controls="tab-panel-history"
+            class="page-tab-btn px-3 py-1.5 border border-b-0 rounded-t cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 {{ 'bg-white border-gray-300 font-medium' if active_tab == 'history' else 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100' }}">Historial de ejecuciones</button>
 </div>
 
-<div id="tab-panel-scan" role="tabpanel" aria-labelledby="tab-btn-scan" {% if active_tab == 'cache' %}hidden{% endif %}>
+<div id="tab-panel-scan" role="tabpanel" aria-labelledby="tab-btn-scan" {% if active_tab != 'scan' %}hidden{% endif %}>
 
 {% if gpu_status.gpu_active %}
 <p class="my-2 px-3 py-2 rounded bg-green-50 border border-green-300 text-green-800 text-sm">
@@ -95,7 +97,17 @@
         <span class="text-xs text-gray-600">Finalización</span>
     </span>
     <span id="semaforo-status-text" class="text-sm font-medium text-gray-600 ml-2">Sin iniciar</span>
+    <span id="semaforo-duration-text" class="text-sm text-gray-500 ml-2"></span>
 </div>
+
+<p class="text-sm text-gray-600 my-2">
+    Última ejecución:
+    {% if last_scan_run %}
+    <span id="last-scan-run-text">{{ last_scan_run.finished_at | format_datetime }} — duración: {{ last_scan_run.duration_seconds | format_duration }}{% if not last_scan_run.completed %} (interrumpida){% endif %}</span>
+    {% else %}
+    <span id="last-scan-run-text" class="text-gray-500">todavía no se ha ejecutado ningún escaneo.</span>
+    {% endif %}
+</p>
 
 <h2 class="text-lg font-medium mt-4 mb-2">Resultado del escaneo</h2>
 <label for="progress" class="sr-only">Resultado del escaneo</label>
@@ -189,14 +201,63 @@
 
 </div>
 
+<div id="tab-panel-history" role="tabpanel" aria-labelledby="tab-btn-history" {% if active_tab != 'history' %}hidden{% endif %}>
+
+<h2 class="text-lg font-medium mt-2 mb-2">Historial de ejecuciones</h2>
+{% if scan_history %}
+<p class="text-gray-500 text-sm mb-2">{{ scan_history | length }} ejecución(es), más reciente primero.</p>
+<div class="overflow-x-auto">
+<table class="w-full text-sm border-collapse">
+    <thead>
+        <tr class="text-left text-gray-600 border-b border-gray-300">
+            <th class="py-1 pr-2">Inicio</th>
+            <th class="py-1 pr-2">Fin</th>
+            <th class="py-1 pr-2 text-right">Duración</th>
+            <th class="py-1 pr-2 text-right">Documentos escaneados</th>
+            <th class="py-1 pr-2">Estado</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for run in scan_history %}
+        <tr class="border-t border-gray-200">
+            <td class="py-1 pr-2 whitespace-nowrap">{{ run.started_at | format_datetime }}</td>
+            <td class="py-1 pr-2 whitespace-nowrap">{{ run.finished_at | format_datetime }}</td>
+            <td class="py-1 pr-2 text-right whitespace-nowrap">{{ run.duration_seconds | format_duration }}</td>
+            <td class="py-1 pr-2 text-right whitespace-nowrap">{{ run.total_scanned }}</td>
+            <td class="py-1 pr-2 whitespace-nowrap">
+                {% if run.completed %}
+                <span class="text-green-700">Finalizada</span>
+                {% else %}
+                <span class="text-amber-700">Interrumpida</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<p class="my-2 text-gray-500">Todavía no se ha registrado ninguna ejecución de escaneo.</p>
+{% endif %}
+
+</div>
+
 <script>
 const projectName = {{ project.name | tojson }};
 const libraryBaseUrl = "/api/projects/" + encodeURIComponent(projectName) + "/folders/library";
 
-// --- Pestañas (Escanear / Caché) ---
+// --- Pestañas (Escanear / Caché / Historial de ejecuciones) ---
 
-const tabButtons = { scan: document.getElementById("tab-btn-scan"), cache: document.getElementById("tab-btn-cache") };
-const tabPanels = { scan: document.getElementById("tab-panel-scan"), cache: document.getElementById("tab-panel-cache") };
+const tabButtons = {
+    scan: document.getElementById("tab-btn-scan"),
+    cache: document.getElementById("tab-btn-cache"),
+    history: document.getElementById("tab-btn-history"),
+};
+const tabPanels = {
+    scan: document.getElementById("tab-panel-scan"),
+    cache: document.getElementById("tab-panel-cache"),
+    history: document.getElementById("tab-panel-history"),
+};
 
 function activateTab(tabName) {
     for (const name of Object.keys(tabButtons)) {
@@ -214,28 +275,36 @@ function activateTab(tabName) {
 
 tabButtons.scan.addEventListener("click", () => activateTab("scan"));
 
-// La pestaña Caché y el botón de envío se bloquean mientras corre un escaneo: la
-// caché quedaría obsoleta en cuanto termine, y un segundo envío abriría un WebSocket
-// de escaneo concurrente sobre las mismas carpetas. Al desbloquear tras el escaneo,
-// se marca "cacheStale" (solo si de verdad llegó a arrancar, ver "scanStarted") para
-// forzar una recarga con datos frescos la próxima vez que se pulse la pestaña Caché,
-// en vez de solo alternar visibilidad como hace activateTab().
+// La pestaña Caché, la pestaña Historial y el botón de envío se bloquean mientras
+// corre un escaneo: ambas quedarían obsoletas en cuanto termine (la caché con las
+// nuevas conversiones, el historial con la ejecución en curso), y un segundo envío
+// abriría un WebSocket de escaneo concurrente sobre las mismas carpetas. Al
+// desbloquear tras el escaneo, se marca "cacheStale"/"historyStale" (solo si de
+// verdad llegó a arrancar, ver "scanStarted") para forzar una recarga con datos
+// frescos la próxima vez que se pulse cada pestaña, en vez de solo alternar
+// visibilidad como hace activateTab().
 let cacheStale = false;
+let historyStale = false;
 let scanStarted = false;
 
 function lockCacheTab() {
     scanStarted = true;
     tabButtons.cache.disabled = true;
     tabButtons.cache.title = "Disponible cuando termine el escaneo en curso";
+    tabButtons.history.disabled = true;
+    tabButtons.history.title = "Disponible cuando termine el escaneo en curso";
     submitBtn.disabled = true;
 }
 
 function unlockCacheTab() {
     tabButtons.cache.disabled = false;
     tabButtons.cache.removeAttribute("title");
+    tabButtons.history.disabled = false;
+    tabButtons.history.removeAttribute("title");
     submitBtn.disabled = false;
     if (scanStarted) {
         cacheStale = true;
+        historyStale = true;
         scanStarted = false;
     }
 }
@@ -246,6 +315,14 @@ tabButtons.cache.addEventListener("click", () => {
         return;
     }
     activateTab("cache");
+});
+
+tabButtons.history.addEventListener("click", () => {
+    if (historyStale) {
+        window.location.href = window.location.pathname + "?tab=history";
+        return;
+    }
+    activateTab("history");
 });
 
 // --- Escaneo ---
@@ -265,6 +342,15 @@ const semaforoLights = {
     completed: document.getElementById("light-completed"),
 };
 const semaforoText = document.getElementById("semaforo-status-text");
+const semaforoDurationText = document.getElementById("semaforo-duration-text");
+const lastScanRunText = document.getElementById("last-scan-run-text");
+
+function formatDurationClientSide(seconds) {
+    const total = Math.round(seconds);
+    const minutes = Math.floor(total / 60);
+    const secs = total % 60;
+    return minutes ? minutes + "m " + secs + "s" : secs + "s";
+}
 const LIGHT_OFF = "bg-gray-300 border-gray-400";
 const LIGHT_ON_AMBER = "bg-amber-400 border-amber-500";
 const LIGHT_ON_GREEN = "bg-green-500 border-green-600";
@@ -284,6 +370,7 @@ function resetSemaforo() {
     paintLight(semaforoLights.completed, LIGHT_OFF);
     semaforoText.textContent = "Sin iniciar";
     semaforoText.className = "text-sm font-medium text-gray-600 ml-2";
+    semaforoDurationText.textContent = "";
     semaforoPhase = SCAN_PHASE.IDLE;
 }
 
@@ -369,6 +456,10 @@ form.addEventListener("submit", async (submitEvent) => {
         if (scanEvent.event === "completed") {
             scanFinished = true;
             setSemaforo(SCAN_PHASE.COMPLETED);
+            const durationLabel = formatDurationClientSide(scanEvent.data.duration_seconds || 0);
+            semaforoDurationText.textContent = "Duración: " + durationLabel;
+            lastScanRunText.textContent = "ahora mismo — duración: " + durationLabel;
+            lastScanRunText.classList.remove("text-gray-500");
             unlockCacheTab();
             ws.close();
         } else if (RUNNING_EVENTS.has(scanEvent.event)) {

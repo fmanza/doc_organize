@@ -17,6 +17,7 @@ separada que el usuario ejecuta antes de escanear.
 import asyncio
 import json
 import shutil
+import time
 import uuid
 
 from collections.abc import AsyncIterator
@@ -37,9 +38,12 @@ from doc_organize.core.models import (
     ScanErrorReport,
     ScanEvent,
     ScanEventType,
+    ScanRunReport,
 )
 from doc_organize.dedup import DeduplicationManager
+from doc_organize.scan.scan_history_store import append_scan_run
 from doc_organize.scanner import DocumentScanner
+from doc_organize.utils.date_format import format_duration
 from doc_organize.utils.logging import get_logger
 from doc_organize.validators import FolderValidator
 
@@ -60,6 +64,7 @@ class ScanSummary:
     ocr_processed: int = 0
     error_retries: int = 0
     error_retries_capped: int = 0
+    duration_seconds: float = 0.0
 
     def render(self) -> str:
         lines = [
@@ -70,6 +75,7 @@ class ScanSummary:
         ]
         if self.error_retries_capped:
             lines.append(f"Sin reintentar (límite de {MAX_AUTO_ERROR_RETRIES} reintentos alcanzado): {self.error_retries_capped}")
+        lines.append(f"Tiempo de ejecución: {format_duration(self.duration_seconds)}")
         return "\n".join(lines)
 
 
@@ -123,6 +129,7 @@ class ScanCommand:
         extract_images: bool = False,
         use_picture_description: bool = False,
         error_log_path: Path | None = None,
+        history_log_path: Path | None = None,
     ) -> ScanSummary:
         """Ejecuta el pipeline y devuelve solo el resumen final (contrato sin cambios,
         Fase D-1). Consume `run_streaming()` y se queda con su evento `completed` —
@@ -141,6 +148,7 @@ class ScanCommand:
             extract_images,
             use_picture_description,
             error_log_path,
+            history_log_path,
         ):
             if event.event is ScanEventType.COMPLETED:
                 summary = ScanSummary(**event.data)
@@ -159,6 +167,7 @@ class ScanCommand:
         extract_images: bool = False,
         use_picture_description: bool = False,
         error_log_path: Path | None = None,
+        history_log_path: Path | None = None,
     ) -> AsyncIterator[ScanEvent]:
         """Orquesta escaneo + caché + conversión, emitiendo progreso.
 
@@ -191,103 +200,164 @@ class ScanCommand:
                 defecto) desactiva la persistencia del histórico de errores sin
                 afectar al resto del pipeline — usado por llamadores que no operan
                 sobre un proyecto (p. ej. el CLI sin `--project`).
+            history_log_path: Si se indica, se añade una línea `ScanRunReport` a
+                este fichero JSONL (append-only, se crea la carpeta si falta) al
+                terminar la ejecución — con `completed=True` si se alcanzó el
+                evento `COMPLETED`, o `completed=False` si una excepción
+                interrumpió el pipeline antes. A diferencia de `error_log_path`,
+                se registra SIEMPRE (no solo si hubo errores): mide cuánto tarda
+                cada ejecución, no gestiona errores. `None` (por defecto)
+                desactiva la persistencia del histórico de tiempos.
         """
+        scan_run_id = uuid.uuid4().hex
+        started_at = datetime.now(timezone.utc).isoformat()
+        start = time.monotonic()
         summary = ScanSummary()
-        yield ScanEvent(event=ScanEventType.STARTED, data={})
+        completed_ok = False
+        try:
+            yield ScanEvent(event=ScanEventType.STARTED, data={})
 
-        clean_paths, path_warnings = await self._resolve_scan_paths(paths, folders_json)
+            clean_paths, path_warnings = await self._resolve_scan_paths(paths, folders_json)
 
-        async with DocumentScanner() as scanner:
-            # exclude_dir=output_dir: sin esto, si una de `clean_paths` contiene el
-            # `output_dir` de un escaneo previo con `extract_images=True`, el escaneo
-            # redescubre las imagenes ya extraidas (`img/<stem>/*.png`) como
-            # documentos nuevos; una reconversion posterior en el mismo pase borra esa
-            # carpeta (`shutil.rmtree` en `DocumentConverter._write_outputs`) y la
-            # "conversion" de esa imagen falla con FileNotFoundError.
-            scan_result = await scanner.scan_folders(
-                clean_paths, include_audio_video=include_audio_video, exclude_dir=output_dir.resolve()
-            )
-        summary.scanned = len(scan_result.documents)
+            async with DocumentScanner() as scanner:
+                # exclude_dir=output_dir: sin esto, si una de `clean_paths` contiene el
+                # `output_dir` de un escaneo previo con `extract_images=True`, el escaneo
+                # redescubre las imagenes ya extraidas (`img/<stem>/*.png`) como
+                # documentos nuevos; una reconversion posterior en el mismo pase borra esa
+                # carpeta (`shutil.rmtree` en `DocumentConverter._write_outputs`) y la
+                # "conversion" de esa imagen falla con FileNotFoundError.
+                scan_result = await scanner.scan_folders(
+                    clean_paths, include_audio_video=include_audio_video, exclude_dir=output_dir.resolve()
+                )
+            summary.scanned = len(scan_result.documents)
 
-        async with CacheManager(cache_db) as cache:
-            cached_entries = await cache.load_cache()
-            if force:
-                current_paths = {doc.full_path for doc in scan_result.documents}
-                orphaned_paths = set(cached_entries) - current_paths
-                await self._delete_orphaned_outputs(orphaned_paths, output_dir)
-                await cache.clear()
-                cached_entries = {}
-            new_files, modified_files, unchanged_files = cache.get_changes(cached_entries, scan_result.documents)
-            summary.new, summary.modified, summary.unchanged = (
-                len(new_files),
-                len(modified_files),
-                len(unchanged_files),
-            )
-            new_set = set(new_files)
-            modified_set = set(modified_files)
-            to_process_paths = new_set | modified_set
-            docs_by_path = {doc.full_path: doc for doc in scan_result.documents}
-            error_retry_paths, error_retries_capped_paths = self._collect_stale_error_paths(cached_entries, docs_by_path, to_process_paths)
-            summary.error_retries = len(error_retry_paths)
-            summary.error_retries_capped = len(error_retries_capped_paths)
-            already_converting = to_process_paths | error_retry_paths
-            docs_to_process = [docs_by_path[path] for path in already_converting if path in docs_by_path]
-            yield ScanEvent(
-                event=ScanEventType.SCANNED,
-                data={
-                    "scanned": summary.scanned,
-                    "new": summary.new,
-                    "modified": summary.modified,
-                    "unchanged": summary.unchanged,
-                    # Antes (checkboxes + preflight `/folders/validate`) el cliente
-                    # ya llegaba aquí con rutas limpias y el usuario veía cualquier
-                    # aviso antes de escanear. Ahora las rutas vienen siempre de
-                    # `ScannedFoldersStore` sin ese preflight, así que una carpeta
-                    # guardada que ya no exista en disco se descarta en silencio si
-                    # no se retransmite aquí — el cliente ya muestra cada evento tal
-                    # cual en el cuadro de progreso.
-                    "warnings": path_warnings,
-                },
-            )
+            async with CacheManager(cache_db) as cache:
+                cached_entries = await cache.load_cache()
+                if force:
+                    current_paths = {doc.full_path for doc in scan_result.documents}
+                    orphaned_paths = set(cached_entries) - current_paths
+                    await self._delete_orphaned_outputs(orphaned_paths, output_dir)
+                    await cache.clear()
+                    cached_entries = {}
+                new_files, modified_files, unchanged_files = cache.get_changes(cached_entries, scan_result.documents)
+                summary.new, summary.modified, summary.unchanged = (
+                    len(new_files),
+                    len(modified_files),
+                    len(unchanged_files),
+                )
+                new_set = set(new_files)
+                modified_set = set(modified_files)
+                to_process_paths = new_set | modified_set
+                docs_by_path = {doc.full_path: doc for doc in scan_result.documents}
+                error_retry_paths, error_retries_capped_paths = self._collect_stale_error_paths(cached_entries, docs_by_path, to_process_paths)
+                summary.error_retries = len(error_retry_paths)
+                summary.error_retries_capped = len(error_retries_capped_paths)
+                already_converting = to_process_paths | error_retry_paths
+                docs_to_process = [docs_by_path[path] for path in already_converting if path in docs_by_path]
+                yield ScanEvent(
+                    event=ScanEventType.SCANNED,
+                    data={
+                        "scanned": summary.scanned,
+                        "new": summary.new,
+                        "modified": summary.modified,
+                        "unchanged": summary.unchanged,
+                        # Antes (checkboxes + preflight `/folders/validate`) el cliente
+                        # ya llegaba aquí con rutas limpias y el usuario veía cualquier
+                        # aviso antes de escanear. Ahora las rutas vienen siempre de
+                        # `ScannedFoldersStore` sin ese preflight, así que una carpeta
+                        # guardada que ya no exista en disco se descarta en silencio si
+                        # no se retransmite aquí — el cliente ya muestra cada evento tal
+                        # cual en el cuadro de progreso.
+                        "warnings": path_warnings,
+                    },
+                )
 
-            entries: list[CacheEntry] = []
-            ocr_candidates: list[DocumentMetadata] = []
+                entries: list[CacheEntry] = []
+                ocr_candidates: list[DocumentMetadata] = []
 
-            async for event in self._convert_documents(
-                docs_to_process,
-                output_dir,
-                new_set,
-                modified_set,
-                cached_entries,
-                summary,
-                entries,
-                ocr_candidates,
-                extract_images,
-                use_picture_description,
-            ):
-                yield event
-
-            if use_ocr:
-                self._collect_stale_ocr_candidates(cached_entries, docs_by_path, already_converting, ocr_candidates)
-                async for event in self._process_ocr(
-                    ocr_candidates, output_dir, use_gpu, entries, cached_entries, summary, extract_images, use_picture_description
+                async for event in self._convert_documents(
+                    docs_to_process,
+                    output_dir,
+                    new_set,
+                    modified_set,
+                    cached_entries,
+                    summary,
+                    entries,
+                    ocr_candidates,
+                    extract_images,
+                    use_picture_description,
                 ):
                     yield event
 
-            await cache.save_entries(entries)
+                if use_ocr:
+                    self._collect_stale_ocr_candidates(cached_entries, docs_by_path, already_converting, ocr_candidates)
+                    async for event in self._process_ocr(
+                        ocr_candidates, output_dir, use_gpu, entries, cached_entries, summary, extract_images, use_picture_description
+                    ):
+                        yield event
 
-            if error_log_path is not None:
-                error_entries = self._collect_error_entries(entries, error_retries_capped_paths, cached_entries)
-                if error_entries:
-                    report = ScanErrorReport(
-                        scan_run_id=uuid.uuid4().hex,
-                        timestamp=datetime.now(timezone.utc).isoformat(),
+                await cache.save_entries(entries)
+
+                if error_log_path is not None:
+                    error_entries = self._collect_error_entries(entries, error_retries_capped_paths, cached_entries)
+                    if error_entries:
+                        report = ScanErrorReport(
+                            scan_run_id=scan_run_id,
+                            timestamp=datetime.now(timezone.utc).isoformat(),
+                            total_scanned=summary.scanned,
+                            entries=error_entries,
+                        )
+                        await self._persist_error_report(error_log_path, report)
+
+            summary.duration_seconds = time.monotonic() - start
+            if history_log_path is not None:
+                # Persistido ANTES de yieldear COMPLETED (no en el `finally`, más
+                # abajo): el cliente (folder_selector.html.j2) cierra el WebSocket
+                # en cuanto recibe "completed", así que si esta escritura quedara
+                # para después de que el generador se reanude tras el yield,
+                # competiría con esa desconexión -- comprobado en la práctica
+                # (`test_scan_websocket_loopback_full_pipeline_empty_paths` era
+                # intermitente con esta escritura en el `finally`). Aquí, en
+                # cambio, ya es un hecho consumado antes de que el cliente pueda
+                # reaccionar al evento.
+                await self._persist_scan_run(
+                    history_log_path,
+                    ScanRunReport(
+                        scan_run_id=scan_run_id,
+                        started_at=started_at,
+                        finished_at=datetime.now(timezone.utc).isoformat(),
+                        duration_seconds=summary.duration_seconds,
                         total_scanned=summary.scanned,
-                        entries=error_entries,
-                    )
-                    await self._persist_error_report(error_log_path, report)
+                        completed=True,
+                    ),
+                )
+            completed_ok = True
+            yield ScanEvent(event=ScanEventType.COMPLETED, data=asdict(summary))
+        finally:
+            # Solo cubre el camino de aborto (excepción antes de completar): el
+            # camino de éxito ya persistió su `ScanRunReport` más arriba.
+            if history_log_path is not None and not completed_ok:
+                run_report = ScanRunReport(
+                    scan_run_id=scan_run_id,
+                    started_at=started_at,
+                    finished_at=datetime.now(timezone.utc).isoformat(),
+                    duration_seconds=time.monotonic() - start,
+                    total_scanned=summary.scanned,
+                    completed=False,
+                )
+                await self._persist_scan_run(history_log_path, run_report)
 
-        yield ScanEvent(event=ScanEventType.COMPLETED, data=asdict(summary))
+    async def _persist_scan_run(self, history_log_path: Path, report: ScanRunReport) -> None:
+        """Añade `report` al histórico de duración de ejecuciones (`append_scan_run`),
+        sin propagar el fallo si la escritura falla (permiso denegado, disco lleno,
+        ruta bloqueada...): es telemetría opcional (AUDIT_CODE, sesión de tiempos de
+        escaneo) — no debe poder abortar un escaneo que ya terminó (con éxito o no)
+        por un problema ajeno al pipeline en sí, ni enmascarar la excepción original
+        del camino de aborto con un segundo fallo de la misma causa."""
+        try:
+            await append_scan_run(history_log_path, report)
+        except OSError as exc:
+            self.logger.warning(f"No se pudo persistir el histórico de escaneo en '{history_log_path}': {exc}")
 
     async def _resolve_scan_paths(self, paths: list[str], folders_json: Path) -> tuple[list[str], list[str]]:
         """Valida `paths`, persiste el resultado en `folders_json`, devuelve
@@ -578,18 +648,26 @@ class ScanCommand:
                 )
         return sorted(error_entries, key=lambda entry: entry.file_path)
 
-    @staticmethod
-    async def _persist_error_report(error_log_path: Path, report: ScanErrorReport) -> None:
+    async def _persist_error_report(self, error_log_path: Path, report: ScanErrorReport) -> None:
         """Añade `report` como una línea JSON a `error_log_path` (crea la carpeta
         contenedora si falta). Mismo patrón append-only que `DEDUP_HISTORY.jsonl`
-        (`web/routes/duplicates.py`): una línea por ejecución, nunca se reescribe."""
-        await asyncio.to_thread(error_log_path.parent.mkdir, parents=True, exist_ok=True)
+        (`web/routes/duplicates.py`): una línea por ejecución, nunca se reescribe.
 
-        def _append() -> None:
-            with error_log_path.open("a", encoding="utf-8") as handle:
-                handle.write(report.model_dump_json() + "\n")
+        No propaga el fallo si la escritura falla (permiso denegado, disco lleno,
+        ruta bloqueada...): mismo criterio que `_persist_scan_run` (AUDIT_CODE,
+        sesión de tiempos de escaneo) — es un histórico informativo, no debe poder
+        abortar un escaneo que por lo demás terminó con éxito.
+        """
+        try:
+            await asyncio.to_thread(error_log_path.parent.mkdir, parents=True, exist_ok=True)
 
-        await asyncio.to_thread(_append)
+            def _append() -> None:
+                with error_log_path.open("a", encoding="utf-8") as handle:
+                    handle.write(report.model_dump_json() + "\n")
+
+            await asyncio.to_thread(_append)
+        except OSError as exc:
+            self.logger.warning(f"No se pudo persistir el histórico de errores de escaneo en '{error_log_path}': {exc}")
 
 
 __all__ = ["DeduplicationSummary", "ScanCommand", "ScanSummary"]

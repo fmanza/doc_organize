@@ -53,7 +53,7 @@
         <tr>
             <td class="px-2.5 py-1.5 border-b border-gray-300"><a class="text-blue-600 underline" href="/projects/{{ project.name | urlencode }}">{{ project.name | highlight(q) }}</a></td>
             <td class="px-2.5 py-1.5 border-b border-gray-300 text-gray-600 font-mono text-xs">{{ project.root_path | highlight(q) }}</td>
-            <td class="px-2.5 py-1.5 border-b border-gray-300">{{ project.created_at }}</td>
+            <td class="px-2.5 py-1.5 border-b border-gray-300">{{ project.created_at | format_datetime }}</td>
         </tr>
     {% endfor %}
     </tbody>

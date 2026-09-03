@@ -15,6 +15,8 @@ from doc_organize.core.constants import (
     SCAN_ERRORS_FOLDER_NAME,
     SCAN_ERRORS_HISTORY_JSONL_NAME,
     SCAN_FOLDERS_JSON_NAME,
+    SCAN_HISTORY_FOLDER_NAME,
+    SCAN_HISTORY_JSONL_NAME,
 )
 from doc_organize.core.exceptions import DocOrganizeError
 from doc_organize.projects import ProjectRegistry
@@ -212,6 +214,7 @@ async def _run_scan(args: argparse.Namespace) -> int:
 
     output_dir, cache_db, folders_json = await _resolve_scan_paths(args)
     error_log_path = folders_json.parent / SCAN_ERRORS_FOLDER_NAME / SCAN_ERRORS_HISTORY_JSONL_NAME
+    history_log_path = folders_json.parent / SCAN_HISTORY_FOLDER_NAME / SCAN_HISTORY_JSONL_NAME
     summary = await ScanCommand().run(
         paths=args.paths,
         output_dir=output_dir,
@@ -224,6 +227,7 @@ async def _run_scan(args: argparse.Namespace) -> int:
         extract_images=args.extract_images,
         use_picture_description=args.use_picture_description,
         error_log_path=error_log_path,
+        history_log_path=history_log_path,
     )
     print(summary.render())
     return 0

@@ -18,7 +18,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from doc_organize.auth import AuthStore
 from doc_organize.cache import CacheManager
-from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME
+from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME, SCAN_HISTORY_FOLDER_NAME, SCAN_HISTORY_JSONL_NAME
 from doc_organize.core.models import CacheEntry, ConversionStatus, DocumentStatus, SecurityConfig
 from doc_organize.projects import ProjectRegistry, ScannedFoldersStore
 from doc_organize.web import create_app
@@ -34,6 +34,13 @@ async def _create_project(tmp_path, registry_path, name: str = "Proyecto Scan", 
     base.mkdir(exist_ok=True)
     async with ProjectRegistry(registry_path) as registry:
         return await registry.create_project(name, base, tenant_id=tenant_id)
+
+
+def _write_scan_history(project_root: Path, *runs: dict) -> None:
+    history_dir = project_root / SCAN_HISTORY_FOLDER_NAME
+    history_dir.mkdir(parents=True, exist_ok=True)
+    lines = "\n".join(json.dumps(run) for run in runs)
+    (history_dir / SCAN_HISTORY_JSONL_NAME).write_text(lines + "\n", encoding="utf-8")
 
 
 # ===== GET /projects/{name}/scan (Folder Selector) =====
@@ -140,6 +147,156 @@ async def test_folder_selector_scan_button_enabled_with_saved_folders(tmp_path) 
 
     assert response.status_code == 200
     assert 'id="scan-submit-btn" disabled' not in response.text
+
+
+# ===== "Última ejecución" y pestaña "Historial de ejecuciones" (tiempo de escaneo) =====
+
+
+@pytest.mark.asyncio
+async def test_folder_selector_shows_no_execution_yet_when_history_empty(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/scan")
+
+    assert response.status_code == 200
+    assert "todavía no se ha ejecutado ningún escaneo" in response.text
+
+
+@pytest.mark.asyncio
+async def test_folder_selector_shows_last_execution_duration_formatted(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+
+    _write_scan_history(
+        project_root,
+        {
+            "scan_run_id": "run-1",
+            "started_at": "2026-08-01T09:59:00+00:00",
+            "finished_at": "2026-08-01T10:00:00+00:00",
+            "duration_seconds": 65.4,
+            "total_scanned": 3,
+            "completed": True,
+        },
+    )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/scan")
+
+    assert response.status_code == 200
+    text = response.text
+    # 10:00 UTC en agosto (horario de verano) son las 12:00 en Europe/Madrid.
+    assert "01/08/2026 12:00:00" in text
+    assert "duración: 1m 5s" in text
+
+
+@pytest.mark.asyncio
+async def test_folder_selector_marks_interrupted_execution_as_such(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+
+    _write_scan_history(
+        project_root,
+        {
+            "scan_run_id": "run-cancelado",
+            "started_at": "2026-08-01T09:59:00+00:00",
+            "finished_at": "2026-08-01T10:00:00+00:00",
+            "duration_seconds": 12.0,
+            "total_scanned": 1,
+            "completed": False,
+        },
+    )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/scan")
+
+    assert response.status_code == 200
+    assert "(interrumpida)" in response.text
+
+
+@pytest.mark.asyncio
+async def test_folder_selector_history_tab_lists_runs_most_recent_first(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+
+    _write_scan_history(
+        project_root,
+        {
+            "scan_run_id": "run-1",
+            "started_at": "2026-08-01T09:59:00+00:00",
+            "finished_at": "2026-08-01T10:00:00+00:00",
+            "duration_seconds": 30.0,
+            "total_scanned": 2,
+            "completed": True,
+        },
+        {
+            "scan_run_id": "run-2",
+            "started_at": "2026-08-02T09:59:00+00:00",
+            "finished_at": "2026-08-02T10:00:00+00:00",
+            "duration_seconds": 45.0,
+            "total_scanned": 4,
+            "completed": True,
+        },
+    )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/scan", params={"tab": "history"})
+
+    assert response.status_code == 200
+    text = response.text
+    assert "02/08/2026 12:00:00" in text
+    assert "01/08/2026 12:00:00" in text
+    assert text.index("02/08/2026 12:00:00") < text.index("01/08/2026 12:00:00")
+
+
+@pytest.mark.asyncio
+async def test_folder_selector_survives_corrupted_timestamp_in_history(tmp_path) -> None:
+    """AUDIT_CODE: un timestamp no-ISO en una entrada del historial (backup
+    restaurado, edición manual del JSONL) no debe tumbar la página con un 500 --
+    `format_datetime` degrada a mostrar el valor crudo (ver `test_date_format.py`)."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+
+    _write_scan_history(
+        project_root,
+        {
+            "scan_run_id": "run-1",
+            "started_at": "fecha-corrupta",
+            "finished_at": "fecha-corrupta",
+            "duration_seconds": 5.0,
+            "total_scanned": 1,
+            "completed": True,
+        },
+    )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/scan", params={"tab": "history"})
+
+    assert response.status_code == 200
+    assert "fecha-corrupta" in response.text
+
+
+@pytest.mark.asyncio
+async def test_folder_selector_history_tab_empty_state(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/scan", params={"tab": "history"})
+
+    assert response.status_code == 200
+    assert "Todavía no se ha registrado ninguna ejecución de escaneo." in response.text
 
 
 # ===== Pestaña Caché de la página Escanear (antigua página Caché, GET /projects/{name}/cache) =====
@@ -600,6 +757,15 @@ async def test_scan_websocket_loopback_full_pipeline_empty_paths(tmp_path) -> No
     # POST /scan/deduplicate) — el escaneo ya no emite "deduplicated".
     assert event_types == ["started", "scanned", "completed"]
     assert events[-1]["data"]["scanned"] == 0
+    assert events[-1]["data"]["duration_seconds"] > 0
+
+    # El histórico de duración de ejecuciones (nueva funcionalidad) registra esta
+    # ejecución como completada.
+    history_path = tmp_path / "workspaces" / project.name / SCAN_HISTORY_FOLDER_NAME / SCAN_HISTORY_JSONL_NAME
+    assert history_path.is_file()
+    history_entry = json.loads(history_path.read_text(encoding="utf-8").strip())
+    assert history_entry["completed"] is True
+    assert history_entry["total_scanned"] == 0
 
 
 @pytest.mark.asyncio

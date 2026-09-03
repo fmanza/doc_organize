@@ -6,8 +6,34 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-03
+
 ### Added
 
+- `src/doc_organize/utils/date_format.py`: nuevo módulo `format_datetime(value, pattern=None, tz_name=None)` /
+  `format_duration(seconds)`, registrados como filtros Jinja (`web/templating.py`) — centraliza cómo se
+  muestran al usuario los timestamps ISO 8601 UTC que genera el resto del proyecto. Parametrizable vía las
+  variables de entorno `DOC_ORGANIZE_DATE_FORMAT` / `DOC_ORGANIZE_TIMEZONE` (mismo patrón que
+  `utils/logging.py`); por defecto, formato español (`dd/mm/aaaa HH:MM:SS`) y zona horaria de España
+  (`Europe/Madrid`, con cambio automático de horario de verano/invierno).
+- `src/doc_organize/core/models.py`: nuevo modelo `ScanRunReport` (`scan_run_id`, `started_at`,
+  `finished_at`, `duration_seconds`, `total_scanned`, `completed`) — histórico de duración de ejecuciones
+  de escaneo.
+- `src/doc_organize/scan/scan_history_store.py`: nuevo store JSONL append-only
+  (`append_scan_run(history_path, report)` / `list_scan_runs(history_path)`), exportado desde
+  `doc_organize.scan`. Mismo patrón que `SCAN_ERRORS_HISTORY.jsonl`/`DEDUP_HISTORY.jsonl`, pero registra
+  **toda** ejecución (completada o no), no solo las que producen error.
+- `src/doc_organize/core/constants.py`: `SCAN_HISTORY_FOLDER_NAME` (`historial_escaneo`),
+  `SCAN_HISTORY_JSONL_NAME` (`SCAN_HISTORY.jsonl`).
+- `src/doc_organize/scan/scan_command.py`: `ScanCommand.run()`/`run_streaming()` aceptan un nuevo
+  parámetro opcional `history_log_path: Path | None = None`; `ScanSummary` incluye `duration_seconds`
+  (también en el resumen impreso por el CLI, línea "Tiempo de ejecución: …"). Cada ejecución —completada
+  o interrumpida por una excepción— se registra en el histórico con `completed=True`/`False`.
+- `src/doc_organize/web/routes/scan.py` / `web/templates/folder_selector.html.j2`: la pantalla "Escanear"
+  muestra ahora la duración de la última ejecución, y una nueva pestaña "Historial de ejecuciones" lista
+  cada ejecución registrada (inicio, fin, duración, documentos escaneados, si terminó o se interrumpió).
+- `pyproject.toml`: nueva dependencia `tzdata` (requerida por `zoneinfo` para resolver zonas horarias
+  IANA como `Europe/Madrid` en Windows).
 - `scripts/build_docs_zip.py`: nuevo script para empaquetar la documentación compilada como ZIP
   con checksums SHA256 para distribución offline. Genera:
   - `dist/doc_organize-docs-{version}.zip` (sitio MkDocs completo comprimido)
@@ -20,7 +46,7 @@ releases publicados antes de esa versión).
   3. Crea GitHub Release con tag `docs-v{version}` y adjunta ZIP + checksums
   4. Publica en [Releases](https://github.com/fmanza/doc_organize/releases)
 
-**Features:**
+**Features (documentación offline):**
 - ✅ Descarga offline de documentación completa con búsqueda
 - ✅ Verificación de integridad por SHA256 (portable, compatible con `sha256sum -c`)
 - ✅ Histórico de builds en `CHECKSUMS.txt` para auditoría
@@ -36,6 +62,25 @@ python scripts/build_docs_zip.py --no-build  # rezip site/ existente
 # Automático (CI/CD)
 # En cada push que toque docs/ → GitHub Release automático
 ```
+
+### Changed
+
+- `web/templates/dashboard.html.j2`, `project_selector.html.j2`, `duplicates_resolver.html.j2`,
+  `scan_errors.html.j2`: los timestamps ISO 8601 UTC que antes se mostraban crudos ahora pasan por el
+  filtro `format_datetime` (formato español/España por defecto, configurable — ver `date_format.py`
+  arriba).
+
+### Fixed
+
+- `format_datetime()` degrada a mostrar el valor original (en vez de lanzar una excepción y tumbar la
+  página) ante un timestamp no parseable o una zona horaria mal configurada — mismo criterio de
+  tolerancia a datos corruptos que ya aplican `load_error_history`/`_load_dedup_history`.
+- La persistencia del histórico de duración de ejecuciones se realiza ahora **antes** de emitir el evento
+  `COMPLETED` (no después, en un `finally`): evita una carrera intermitente con la desconexión del cliente
+  WebSocket, que cierra la conexión en cuanto recibe ese evento.
+- Un fallo de E/S al escribir el histórico de tiempos de escaneo o el histórico de errores de escaneo
+  (permiso denegado, disco lleno…) ya no aborta un escaneo que por lo demás terminó con éxito — ambas
+  escrituras son ahora best-effort (se loguea un warning en vez de propagar la excepción).
 
 ---
 

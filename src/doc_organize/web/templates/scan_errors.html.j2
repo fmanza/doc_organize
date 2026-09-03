@@ -76,7 +76,7 @@
 <details class="border border-gray-200 rounded p-3 mb-3 bg-gray-50"
           data-search="{{ (report.entries | map(attribute='file_path') | join(' ') | lower) }}">
     <summary class="cursor-pointer select-none font-medium text-gray-700">
-        {{ report.timestamp }} — {{ report.entries | length }} error(es) de {{ report.total_scanned }} documento(s) escaneados
+        {{ report.timestamp | format_datetime }} — {{ report.entries | length }} error(es) de {{ report.total_scanned }} documento(s) escaneados
     </summary>
     <div class="overflow-x-auto">
     <table class="w-full text-sm border-collapse mt-2">

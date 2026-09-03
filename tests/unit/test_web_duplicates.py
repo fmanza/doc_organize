@@ -563,10 +563,12 @@ async def test_duplicates_page_shows_history_of_all_dedup_runs(tmp_path) -> None
     assert response.status_code == 200
     html = response.text
     assert "Histórico de deduplicaciones" in html
-    assert "2026-08-30T09:00:00+00:00" in html
-    assert "2026-08-31T10:00:00+00:00" in html
+    # Los timestamps ISO 8601 UTC se muestran formateados (español/España, ver
+    # `doc_organize.utils.date_format`): horario de verano en agosto (UTC+2).
+    assert "30/08/2026 11:00:00" in html
+    assert "31/08/2026 12:00:00" in html
     # Mas reciente primero.
-    assert html.index("2026-08-31T10:00:00+00:00") < html.index("2026-08-30T09:00:00+00:00")
+    assert html.index("31/08/2026 12:00:00") < html.index("30/08/2026 11:00:00")
     # El detalle de archivos de AMBAS ejecuciones debe verse, no solo el de la
     # ultima -- esto es justo lo que se pidio: histórico de cada ejecución.
     assert "reciente.pdf" in html
@@ -608,7 +610,7 @@ async def test_duplicates_page_history_skips_corrupt_lines(tmp_path) -> None:
 
     assert response.status_code == 200
     assert "Histórico de deduplicaciones" in response.text
-    assert "2026-08-31T10:00:00+00:00" in response.text
+    assert "31/08/2026 12:00:00" in response.text
 
 
 @pytest.mark.asyncio

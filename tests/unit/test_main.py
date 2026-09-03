@@ -1,11 +1,14 @@
 """Tests de main.py (CLI, Fase D-1): resolucion de rutas y orquestacion de `scan`."""
 
+import json
+
 from pathlib import Path
 from typing import Self
 
 import pytest
 
 from doc_organize.converter import DocumentConverter
+from doc_organize.core.constants import SCAN_HISTORY_FOLDER_NAME, SCAN_HISTORY_JSONL_NAME
 from doc_organize.core.exceptions import DocOrganizeError
 from doc_organize.core.models import AvStatus, ConversionStatus, ScanEventType
 from doc_organize.main import ScanCommand, _resolve_dedup_paths, _resolve_scan_paths, build_parser, main
@@ -265,6 +268,7 @@ async def test_scan_command_run_streaming_emits_expected_event_sequence(tmp_path
     ]
     assert events[-1].data["scanned"] == 1
     assert events[-1].data["converted"] == 1
+    assert events[-1].data["duration_seconds"] > 0
     file_converted = events[2]
     assert file_converted.data["success"] is True
     assert file_converted.data["path"].endswith("native.pdf")
@@ -575,7 +579,17 @@ def test_main_scan_end_to_end(tmp_path, capsys) -> None:
     output = capsys.readouterr().out
     assert "Documentos escaneados: 1" in output
     assert "Convertidos: 1" in output
+    assert "Tiempo de ejecución:" in output
     assert list((base / "Proyecto CLI" / "Conversión").rglob("native.md"))
+
+    # El histórico de duración de ejecuciones (nueva funcionalidad) registra
+    # esta ejecución completa, con la misma cuenta de documentos que el resumen.
+    history_path = base / "Proyecto CLI" / SCAN_HISTORY_FOLDER_NAME / SCAN_HISTORY_JSONL_NAME
+    assert history_path.is_file()
+    history_entry = json.loads(history_path.read_text(encoding="utf-8").strip())
+    assert history_entry["completed"] is True
+    assert history_entry["total_scanned"] == 1
+    assert history_entry["duration_seconds"] > 0
 
 
 def test_main_scan_rejects_include_audio_video_without_av_support(tmp_path, capsys, monkeypatch) -> None:

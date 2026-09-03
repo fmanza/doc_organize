@@ -6,10 +6,14 @@ El resto de `ScanCommand` se cubre de extremo a extremo vía `test_web_scan.py`
 
 import pytest
 
+import doc_organize.scan.scan_command as scan_command_module
+
 from doc_organize.converter import DocumentConverter
 from doc_organize.core.constants import MAX_AUTO_ERROR_RETRIES
-from doc_organize.core.models import CacheEntry, ConversionStatus, DocumentMetadata, DocumentStatus
+from doc_organize.core.models import CacheEntry, ConversionStatus, DocumentMetadata, DocumentStatus, ScanErrorEntry
 from doc_organize.scan import ScanCommand
+from doc_organize.scan.scan_history_store import list_scan_runs
+from doc_organize.scanner import DocumentScanner
 
 
 def _entry(file_path: str, conversion_status: ConversionStatus | None, error_retry_count: int = 0) -> CacheEntry:
@@ -166,3 +170,127 @@ def test_collect_stale_error_paths_above_limit_is_capped_not_retried() -> None:
 
     assert retryable == set()
     assert capped == {"/repo/irrecuperable.pdf"}
+
+
+# ===== `history_log_path` (histórico de duración de ejecuciones): camino de aborto
+# y tolerancia a fallos de la propia escritura (AUDIT_CODE, sesión de tiempos de
+# escaneo) =====
+
+
+@pytest.mark.asyncio
+async def test_run_streaming_persists_completed_false_on_pipeline_exception(tmp_path, monkeypatch) -> None:
+    """Una excepción real durante el pipeline (aquí, en el descubrimiento de
+    ficheros) debe seguir propagándose al llamador, pero antes debe quedar
+    registrada en `history_log_path` con `completed=False` -- es el requisito
+    explícito de "runs incompletos" del PLAN de esta funcionalidad, y no tenía
+    ningún test que lo ejercitara a través de `ScanCommand` (solo a través del
+    store/plantillas con JSONL escrito a mano)."""
+
+    async def _boom(self, paths, include_audio_video=False, exclude_dir=None):
+        raise RuntimeError("fallo simulado de escaneo")
+
+    monkeypatch.setattr(DocumentScanner, "scan_folders", _boom)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    history_path = tmp_path / "historial_escaneo" / "SCAN_HISTORY.jsonl"
+
+    with pytest.raises(RuntimeError, match="fallo simulado de escaneo"):
+        async for _event in ScanCommand().run_streaming(
+            paths=[str(input_dir)],
+            output_dir=tmp_path / "Conversión",
+            cache_db=tmp_path / "cache.db",
+            folders_json=tmp_path / "folders.json",
+            use_ocr=False,
+            use_gpu=False,
+            history_log_path=history_path,
+        ):
+            pass
+
+    runs = list_scan_runs(history_path)
+    assert len(runs) == 1
+    assert runs[0].completed is False
+    assert runs[0].total_scanned == 0
+    assert runs[0].duration_seconds > 0
+
+
+@pytest.mark.asyncio
+async def test_run_streaming_completes_even_if_persisting_history_fails(tmp_path, monkeypatch, caplog) -> None:
+    """Un fallo al escribir `history_log_path` (permiso denegado, disco lleno...)
+    es telemetría opcional -- no debe abortar un escaneo que por lo demás
+    termina con éxito ni impedir que el cliente reciba el evento `completed`."""
+
+    async def _raise_os_error(history_log_path, report):
+        raise OSError("simulated disk full")
+
+    monkeypatch.setattr(scan_command_module, "append_scan_run", _raise_os_error)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()  # carpeta vacia: sin documentos que convertir, rapido
+
+    with caplog.at_level("WARNING"):
+        events = [
+            event
+            async for event in ScanCommand().run_streaming(
+                paths=[str(input_dir)],
+                output_dir=tmp_path / "Conversión",
+                cache_db=tmp_path / "cache.db",
+                folders_json=tmp_path / "folders.json",
+                use_ocr=False,
+                use_gpu=False,
+                history_log_path=tmp_path / "historial_escaneo" / "SCAN_HISTORY.jsonl",
+            )
+        ]
+
+    assert events[-1].event.value == "completed"
+    assert any("simulated disk full" in record.message for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_run_streaming_completes_even_if_persisting_error_report_fails(tmp_path, monkeypatch, caplog) -> None:
+    """Mismo criterio que `test_run_streaming_completes_even_if_persisting_history_fails`,
+    aplicado a `error_log_path`/`_persist_error_report` (AUDIT_CODE, ronda de
+    consistencia): un fallo real de I/O al escribir el histórico de errores de
+    escaneo no debe abortar un escaneo que por lo demás termina con éxito."""
+
+    # Se fuerza que haya "errores" que persistir sin necesitar una conversion
+    # real fallida -- lo que se prueba aqui es la tolerancia a fallos de
+    # _persist_error_report, no _collect_error_entries (ya cubierto por los
+    # tests de _collect_stale_error_paths de arriba).
+    monkeypatch.setattr(
+        ScanCommand,
+        "_collect_error_entries",
+        staticmethod(
+            lambda entries, capped_paths, cached_entries: [
+                ScanErrorEntry(file_path="/repo/roto.pdf", error_message="fallo simulado", error_retry_count=1, capped=False)
+            ]
+        ),
+    )
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()  # carpeta vacia: sin documentos que convertir, rapido
+
+    # Colision real de filesystem (no un mock): un fichero donde se espera una
+    # carpeta hace que `error_log_path.parent.mkdir(parents=True, exist_ok=True)`
+    # lance OSError de verdad, ejercitando el try/except de _persist_error_report
+    # en vez de simular la excepcion desde fuera.
+    blocked_path = tmp_path / "blocked_history"
+    blocked_path.write_bytes(b"archivo, no carpeta")
+    error_log_path = blocked_path / "SCAN_ERRORS_HISTORY.jsonl"
+
+    with caplog.at_level("WARNING"):
+        events = [
+            event
+            async for event in ScanCommand().run_streaming(
+                paths=[str(input_dir)],
+                output_dir=tmp_path / "Conversión",
+                cache_db=tmp_path / "cache.db",
+                folders_json=tmp_path / "folders.json",
+                use_ocr=False,
+                use_gpu=False,
+                error_log_path=error_log_path,
+            )
+        ]
+
+    assert events[-1].event.value == "completed"
+    assert any("No se pudo persistir el histórico de errores de escaneo" in record.message for record in caplog.records)
