@@ -189,6 +189,33 @@ class CacheEntry(BaseModel):
     error_retry_count: int = Field(0, description="Fallos consecutivos sin cambios en el fichero (0 si el último intento tuvo éxito)")
 
 
+class ScanErrorEntry(BaseModel):
+    """Un documento cuya conversión/OCR falló en una ejecución de escaneo concreta."""
+
+    file_path: str = Field(..., description="Ruta absoluta al fichero que falló")
+    error_message: str = Field(..., description="Mensaje de error capturado")
+    error_retry_count: int = Field(..., description="Fallos consecutivos acumulados en este fichero, incluido este")
+    capped: bool = Field(
+        False,
+        description="Si el fichero alcanzó MAX_AUTO_ERROR_RETRIES y no se reintentó automáticamente en esta ejecución",
+    )
+
+
+class ScanErrorReport(BaseModel):
+    """Errores de conversión/OCR producidos en una ejecución de `ScanCommand.run_streaming()`.
+
+    Se persiste solo cuando `entries` no está vacío (append-only, una línea JSON por
+    ejecución con errores, mismo patrón que `DEDUP_HISTORY.jsonl`): un escaneo sin
+    ningún error no añade línea al histórico, para que este quede acotado a lo
+    relevante para la gestión de errores en vez de crecer con cada escaneo rutinario.
+    """
+
+    scan_run_id: str = Field(..., description="Identificador único de esta ejecución de escaneo (UUID4 hex)")
+    timestamp: str = Field(..., description="Timestamp ISO 8601 de finalización del escaneo")
+    total_scanned: int = Field(..., description="Total de documentos escaneados en esta ejecución")
+    entries: list[ScanErrorEntry] = Field(default_factory=list, description="Errores detectados en esta ejecución")
+
+
 class CacheExportSnapshot(BaseModel):
     """Instantánea de solo lectura del cache para descarga/exportación."""
 
@@ -454,6 +481,8 @@ __all__ = [
     "Project",
     "ProjectNameValidation",
     "Role",
+    "ScanErrorEntry",
+    "ScanErrorReport",
     "ScanEvent",
     "ScanEventType",
     "ScanResult",

@@ -42,6 +42,7 @@ from doc_organize.web.routes.duplicates import router as duplicates_router
 from doc_organize.web.routes.filesystem import router as filesystem_router
 from doc_organize.web.routes.projects import router as projects_router
 from doc_organize.web.routes.scan import router as scan_router
+from doc_organize.web.routes.scan_errors import router as scan_errors_router
 from doc_organize.web.templating import create_templates
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -123,6 +124,7 @@ def create_app(
     app.include_router(admin_router)
     app.include_router(projects_router)
     app.include_router(scan_router)
+    app.include_router(scan_errors_router)
     app.include_router(filesystem_router)
     app.include_router(cache_router)
     app.include_router(downloads_router)

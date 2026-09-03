@@ -18,8 +18,15 @@ from starlette.background import BackgroundTask
 
 from doc_organize.cache import CacheManager
 from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME
-from doc_organize.core.models import CacheEntry, CacheExportSnapshot, DocumentStatus
+from doc_organize.core.models import CacheEntry, CacheExportSnapshot, DocumentStatus, ScanErrorReport
 from doc_organize.web.dependencies import get_project_registry, get_tenant_id, require_project_access
+
+# Reutiliza las mismas consultas que la página HTML de Errores de Escaneo (no las
+# duplica): la vista "Estado actual" y el parseo tolerante a lineas corruptas del
+# histórico JSONL solo tienen sentido en un sitio (AUDIT_CODE, deuda técnica
+# aceptada: acoplamiento a funciones "privadas" de `scan_errors.py`, válido
+# mientras solo haya estos dos consumidores).
+from doc_organize.web.routes.scan_errors import _load_current_errors, _load_error_history
 
 router = APIRouter(tags=["downloads"])
 
@@ -81,9 +88,10 @@ def _build_export_zip(project_root: Path, cached_entries: dict[str, CacheEntry])
 async def export_project(name: str, request: Request) -> FileResponse:
     """Descarga un ZIP con `Conversión/` + `cache_export.json` + `DEDUP_REPORT.json` (si existe).
 
-    No incluye logs: hoy ningún módulo invoca `get_logger(log_file=...)`, así que no
-    existe ningún fichero de log por proyecto que empaquetar (recorte explícito del
-    DoD original, `§2.7.4`).
+    No incluye logs: `doc_organize.log` (ver `utils.logging.configure_logging`) es un
+    fichero de proceso, compartido por todos los proyectos que gestiona esta
+    instancia, no un artefacto por proyecto — no tiene sitio natural dentro de un
+    export que es, precisamente, "todo lo de este proyecto".
     """
     # ProjectNotFoundError se propaga sin capturar: el handler global de
     # web/app.py (_EXCEPTION_STATUS_CODES) la traduce a 404.
@@ -171,6 +179,87 @@ async def export_cache_xlsx(name: str, request: Request) -> FileResponse:
         tmp_path,
         media_type=_CACHE_XLSX_MEDIA_TYPE,
         filename=f"{project.name}-cache.xlsx",
+        background=BackgroundTask(os.unlink, tmp_path),
+    )
+
+
+_SCAN_ERRORS_XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_SCAN_ERRORS_CURRENT_COLUMNS = ("Archivo", "Carpeta", "Ruta completa", "Mensaje de error", "Reintentos", "Límite alcanzado")
+_SCAN_ERRORS_HISTORY_COLUMNS = (
+    "Ejecución (scan_run_id)",
+    "Fecha (UTC)",
+    "Archivo",
+    "Carpeta",
+    "Ruta completa",
+    "Mensaje de error",
+    "Reintentos",
+    "Límite alcanzado",
+)
+
+
+def _build_scan_errors_export_xlsx(current_errors: list[dict[str, object]], history: list[ScanErrorReport]) -> Path:
+    """Construye el Excel de errores de escaneo en un fichero temporal del sistema,
+    con "Estado actual" e "Histórico" como hojas separadas del mismo libro (un único
+    `.xlsx`, no dos ficheros) — mismo patrón síncrono que `_build_cache_export_xlsx`,
+    llamado vía `asyncio.to_thread` desde la ruta.
+    """
+    current_rows = [
+        {
+            "Archivo": _excel_safe(Path(str(item["file_path"])).name),
+            "Carpeta": _excel_safe(str(Path(str(item["file_path"])).parent)),
+            "Ruta completa": _excel_safe(str(item["file_path"])),
+            "Mensaje de error": _excel_safe(str(item["error_message"])),
+            "Reintentos": item["error_retry_count"],
+            "Límite alcanzado": "Sí" if item["capped"] else "No",
+        }
+        for item in current_errors
+    ]
+    history_rows = [
+        {
+            "Ejecución (scan_run_id)": report.scan_run_id,
+            "Fecha (UTC)": report.timestamp,
+            "Archivo": _excel_safe(Path(entry.file_path).name),
+            "Carpeta": _excel_safe(str(Path(entry.file_path).parent)),
+            "Ruta completa": _excel_safe(entry.file_path),
+            "Mensaje de error": _excel_safe(entry.error_message),
+            "Reintentos": entry.error_retry_count,
+            "Límite alcanzado": "Sí" if entry.capped else "No",
+        }
+        for report in history
+        for entry in report.entries
+    ]
+    current_frame = pd.DataFrame(current_rows, columns=list(_SCAN_ERRORS_CURRENT_COLUMNS))
+    history_frame = pd.DataFrame(history_rows, columns=list(_SCAN_ERRORS_HISTORY_COLUMNS))
+
+    fd, tmp_path_str = tempfile.mkstemp(suffix=".xlsx", prefix="doc_organize_scan_errors_export_")
+    os.close(fd)
+    tmp_path = Path(tmp_path_str)
+    with pd.ExcelWriter(tmp_path) as writer:
+        current_frame.to_excel(writer, sheet_name="Estado actual", index=False)
+        history_frame.to_excel(writer, sheet_name="Histórico", index=False)
+    return tmp_path
+
+
+@router.get("/downloads/projects/{name}/scan-errors-export.xlsx", dependencies=[Depends(require_project_access)])
+async def export_scan_errors_xlsx(name: str, request: Request) -> FileResponse:
+    """Descarga un único Excel (.xlsx) con los errores de escaneo del proyecto:
+    "Estado actual" (acumulado en `cache.db`) e "Histórico" (agrupado por ejecución
+    de escaneo, `SCAN_ERRORS_HISTORY.jsonl`), como dos hojas del mismo libro.
+    """
+    # ProjectNotFoundError se propaga sin capturar: el handler global de
+    # web/app.py (_EXCEPTION_STATUS_CODES) la traduce a 404.
+    async with get_project_registry(request) as registry:
+        project = await registry.get_project(name, tenant_id=get_tenant_id(request))
+
+    current_errors = await _load_current_errors(project)
+    history = await asyncio.to_thread(_load_error_history, project)
+
+    tmp_path = await asyncio.to_thread(_build_scan_errors_export_xlsx, current_errors, history)
+
+    return FileResponse(
+        tmp_path,
+        media_type=_SCAN_ERRORS_XLSX_MEDIA_TYPE,
+        filename=f"{project.name}-scan-errors.xlsx",
         background=BackgroundTask(os.unlink, tmp_path),
     )
 

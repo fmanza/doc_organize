@@ -10,12 +10,17 @@ import sys
 from pathlib import Path
 
 from doc_organize.auth import AuthStore
-from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME, SCAN_FOLDERS_JSON_NAME
+from doc_organize.core.constants import (
+    DEFAULT_CACHE_DB_NAME,
+    SCAN_ERRORS_FOLDER_NAME,
+    SCAN_ERRORS_HISTORY_JSONL_NAME,
+    SCAN_FOLDERS_JSON_NAME,
+)
 from doc_organize.core.exceptions import DocOrganizeError
 from doc_organize.projects import ProjectRegistry
 from doc_organize.scan import DeduplicationSummary, ScanCommand, ScanSummary
 from doc_organize.utils.av_detector import detect_av_status
-from doc_organize.utils.logging import get_logger
+from doc_organize.utils.logging import configure_logging, get_logger
 
 logger = get_logger(__name__)
 
@@ -49,9 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--cache-file", help="Ruta a cache.db (uso avanzado sin proyecto)")
     scan_parser.add_argument("--use-ocr", action="store_true", help="Reprocesar con OCR los documentos que lo necesiten")
     scan_parser.add_argument("--use-gpu", action="store_true", help="Usar motor OCR acelerado por GPU (EasyOCR) si --use-ocr")
-    scan_parser.add_argument(
-        "--force", action="store_true", help="Forzar rescan completo: vacía la caché y reconvierte todos los documentos"
-    )
+    scan_parser.add_argument("--force", action="store_true", help="Forzar rescan completo: vacía la caché y reconvierte todos los documentos")
     scan_parser.add_argument(
         "--include-audio-video",
         action="store_true",
@@ -68,9 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Generar descripción textual de imágenes (modelo local ligero) en el .json, solo para documentos PDF/imagen",
     )
 
-    dedup_parser = subparsers.add_parser(
-        "deduplicate", help="Buscar y mover duplicados, a petición del usuario (REQ-005)", parents=[registry_flag]
-    )
+    dedup_parser = subparsers.add_parser("deduplicate", help="Buscar y mover duplicados, a petición del usuario (REQ-005)", parents=[registry_flag])
     dedup_parser.add_argument("--paths", nargs="+", required=True, help="Carpetas de entrada a deduplicar")
     dedup_parser.add_argument("--project", help="Nombre de un proyecto existente (REQ-008)")
     dedup_parser.add_argument("--duplicates-dir", help="Carpeta de duplicados (uso avanzado sin proyecto)")
@@ -210,6 +211,7 @@ async def _run_scan(args: argparse.Namespace) -> int:
             raise DocOrganizeError(av_status.instructions)
 
     output_dir, cache_db, folders_json = await _resolve_scan_paths(args)
+    error_log_path = folders_json.parent / SCAN_ERRORS_FOLDER_NAME / SCAN_ERRORS_HISTORY_JSONL_NAME
     summary = await ScanCommand().run(
         paths=args.paths,
         output_dir=output_dir,
@@ -221,6 +223,7 @@ async def _run_scan(args: argparse.Namespace) -> int:
         include_audio_video=args.include_audio_video,
         extract_images=args.extract_images,
         use_picture_description=args.use_picture_description,
+        error_log_path=error_log_path,
     )
     print(summary.render())
     return 0
@@ -263,7 +266,16 @@ def _run_web(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Punto de entrada del CLI (`python -m doc_organize ...`)."""
+    """Punto de entrada del CLI (`python -m doc_organize ...`).
+
+    Configura el logging de todo el proceso (consola + fichero con rotación diaria,
+    ver `utils.logging.configure_logging`) antes de despachar cualquier subcomando —
+    incluido `web`, que arranca el servidor sobre el mismo proceso. Es el único punto
+    donde se llama a `configure_logging()`: `web.create_app()` no lo hace por su
+    cuenta (es una factoría pura, reutilizable embebida en otro proceso/test sin
+    imponerle esta configuración de logging global).
+    """
+    configure_logging()
     parser = build_parser()
     args = parser.parse_args(argv)
 

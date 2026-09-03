@@ -165,9 +165,7 @@ async def test_export_cache_xlsx_works_when_never_scanned(tmp_path) -> None:
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     rows = _read_xlsx_rows(response.content)
-    assert rows == [
-        ("Archivo", "Carpeta", "Ruta completa", "Hash SHA-256", "Estado", "Conversión", "Última actualización (UTC)")
-    ]
+    assert rows == [("Archivo", "Carpeta", "Ruta completa", "Hash SHA-256", "Estado", "Conversión", "Última actualización (UTC)")]
 
 
 @pytest.mark.asyncio
@@ -280,3 +278,120 @@ async def test_export_cache_xlsx_requires_session_when_non_loopback(tmp_path) ->
         response = await client.get(f"/downloads/projects/{project.name}/cache-export.xlsx")
 
     assert response.status_code == 401
+
+
+def _read_xlsx_sheet_rows(content: bytes, sheet_name: str) -> list[tuple]:
+    workbook = openpyxl.load_workbook(io.BytesIO(content))
+    sheet = workbook[sheet_name]
+    return list(sheet.iter_rows(values_only=True))
+
+
+@pytest.mark.asyncio
+async def test_export_scan_errors_xlsx_404_for_missing_project(tmp_path) -> None:
+    app = create_app(registry_path=tmp_path / "projects.json")
+    async with _client(app) as client:
+        response = await client.get("/downloads/projects/No Existe/scan-errors-export.xlsx")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_export_scan_errors_xlsx_has_current_and_history_sheets(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [
+                CacheEntry(
+                    file_path="/repo/docs/roto.pdf",
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.ERROR,
+                    error_message="Documento cifrado",
+                    error_retry_count=1,
+                )
+            ]
+        )
+
+    history_dir = project_root / "errores_escaneo"
+    history_dir.mkdir(parents=True)
+    report = {
+        "scan_run_id": "run-1",
+        "timestamp": "2026-08-01T10:00:00+00:00",
+        "total_scanned": 5,
+        "entries": [{"file_path": "/repo/docs/viejo.pdf", "error_message": "Error previo", "error_retry_count": 3, "capped": True}],
+    }
+    (history_dir / "SCAN_ERRORS_HISTORY.jsonl").write_text(json.dumps(report) + "\n", encoding="utf-8")
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/downloads/projects/{project.name}/scan-errors-export.xlsx")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+    workbook = openpyxl.load_workbook(io.BytesIO(response.content))
+    assert workbook.sheetnames == ["Estado actual", "Histórico"]
+
+    current_rows = _read_xlsx_sheet_rows(response.content, "Estado actual")
+    assert current_rows[0] == ("Archivo", "Carpeta", "Ruta completa", "Mensaje de error", "Reintentos", "Límite alcanzado")
+    assert current_rows[1][0] == "roto.pdf"
+    assert current_rows[1][3] == "Documento cifrado"
+    assert current_rows[1][5] == "No"
+
+    history_rows = _read_xlsx_sheet_rows(response.content, "Histórico")
+    assert history_rows[0] == (
+        "Ejecución (scan_run_id)",
+        "Fecha (UTC)",
+        "Archivo",
+        "Carpeta",
+        "Ruta completa",
+        "Mensaje de error",
+        "Reintentos",
+        "Límite alcanzado",
+    )
+    assert history_rows[1][0] == "run-1"
+    assert history_rows[1][2] == "viejo.pdf"
+    assert history_rows[1][7] == "Sí"
+
+
+@pytest.mark.asyncio
+async def test_export_scan_errors_xlsx_empty_state_has_headers_only(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/downloads/projects/{project.name}/scan-errors-export.xlsx")
+
+    assert response.status_code == 200
+    assert _read_xlsx_sheet_rows(response.content, "Estado actual") == [
+        ("Archivo", "Carpeta", "Ruta completa", "Mensaje de error", "Reintentos", "Límite alcanzado")
+    ]
+    assert _read_xlsx_sheet_rows(response.content, "Histórico") == [
+        (
+            "Ejecución (scan_run_id)",
+            "Fecha (UTC)",
+            "Archivo",
+            "Carpeta",
+            "Ruta completa",
+            "Mensaje de error",
+            "Reintentos",
+            "Límite alcanzado",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_export_scan_errors_xlsx_tenant_isolation(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path, tenant_id="acme-corp")
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/downloads/projects/{project.name}/scan-errors-export.xlsx")
+
+    assert response.status_code == 404

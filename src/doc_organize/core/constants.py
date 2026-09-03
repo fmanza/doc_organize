@@ -91,6 +91,15 @@ MAX_AUTO_ERROR_RETRIES = 3
 #: `web/routes/duplicates.py` para re-escanear sin pedir las carpetas de nuevo).
 SCAN_FOLDERS_JSON_NAME = "folders.json"
 
+#: Carpeta y fichero del histórico de errores de escaneo, dentro de la raíz del
+#: proyecto (gestión de errores de escaneo agrupados por ejecución): una línea JSON
+#: (`ScanErrorReport`) por ejecución de `ScanCommand.run_streaming()` que produjo
+#: al menos un error, añadida por `ScanCommand._persist_error_report` y releída por
+#: `web/routes/scan_errors.py`. Constantes (no una única `Path` ya compuesta) para
+#: que cada llamador pueda construir la ruta absoluta con su propia raíz de proyecto.
+SCAN_ERRORS_FOLDER_NAME = "errores_escaneo"
+SCAN_ERRORS_HISTORY_JSONL_NAME = "SCAN_ERRORS_HISTORY.jsonl"
+
 #: Longitud maxima de un nombre de proyecto (REQ-008), tras strip().
 PROJECT_NAME_MAX_LENGTH = 100
 
@@ -177,6 +186,8 @@ __all__ = [
     "PROJECT_NAME_RESERVED_PATTERN",
     "ROLE_NAME_MAX_LENGTH",
     "ROLE_NAME_PATTERN",
+    "SCAN_ERRORS_FOLDER_NAME",
+    "SCAN_ERRORS_HISTORY_JSONL_NAME",
     "SCAN_FOLDERS_JSON_NAME",
     "SCRYPT_DKLEN",
     "SCRYPT_MAXMEM",

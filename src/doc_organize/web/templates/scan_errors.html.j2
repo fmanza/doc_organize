@@ -1,0 +1,167 @@
+{% extends "base.html.j2" %}
+{% from "_nav_macros.html.j2" import project_nav %}
+{% block title %}doc_organize — Errores de Escaneo: {{ project.name }}{% endblock %}
+{% block sidebar_items %}{{ project_nav(project, "scan_errors") }}{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-4">Errores de Escaneo: {{ project.name }}</h1>
+
+<a href="/downloads/projects/{{ project.name | urlencode }}/scan-errors-export.xlsx"
+   class="inline-block px-3 py-1.5 mb-4 border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">⬇ Exportar a Excel</a>
+
+<div role="tablist" class="flex gap-1 border-b border-gray-300 mb-4">
+    <button type="button" id="tab-btn-current" role="tab" aria-selected="{{ 'true' if active_tab != 'history' else 'false' }}" aria-controls="tab-panel-current"
+            class="page-tab-btn px-3 py-1.5 border border-b-0 rounded-t cursor-pointer {{ 'bg-white border-gray-300 font-medium' if active_tab != 'history' else 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100' }}">Estado actual</button>
+    <button type="button" id="tab-btn-history" role="tab" aria-selected="{{ 'true' if active_tab == 'history' else 'false' }}" aria-controls="tab-panel-history"
+            class="page-tab-btn px-3 py-1.5 border border-b-0 rounded-t cursor-pointer {{ 'bg-white border-gray-300 font-medium' if active_tab == 'history' else 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100' }}">Histórico por ejecución</button>
+</div>
+
+<div id="tab-panel-current" role="tabpanel" aria-labelledby="tab-btn-current" {% if active_tab == 'history' %}hidden{% endif %}>
+
+<h2 class="text-lg font-medium mt-2 mb-2">Estado actual</h2>
+<p class="text-sm text-gray-600 mb-2">Ficheros cuya última conversión/OCR terminó en error, tal y como están ahora mismo en la caché del proyecto (se sobrescribe en cada escaneo).</p>
+
+{% if current_errors %}
+<p class="text-gray-500 text-sm mb-2">{{ current_errors | length }} fichero(s) en error.</p>
+<div class="overflow-x-auto">
+<table class="w-full text-sm border-collapse">
+    <thead>
+        <tr class="text-left text-gray-600 border-b border-gray-300">
+            <th class="py-1 pr-2">Archivo</th>
+            <th class="py-1 pr-2">Carpeta</th>
+            <th class="py-1 pr-2">Mensaje de error</th>
+            <th class="py-1 pr-2 text-right">Reintentos</th>
+            <th class="py-1 pr-2">Estado</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in current_errors %}
+        <tr class="border-t border-gray-200">
+            <td class="py-1 pr-2 align-top break-all">{{ item.file_path | basename }}</td>
+            <td class="py-1 pr-2 align-top break-all text-gray-600 font-mono text-xs" title="{{ item.file_path }}">{{ item.file_path | dirname }}</td>
+            <td class="py-1 pr-2 align-top break-all text-red-700">{{ item.error_message }}</td>
+            <td class="py-1 pr-2 align-top text-right whitespace-nowrap">{{ item.error_retry_count }}</td>
+            <td class="py-1 pr-2 align-top whitespace-nowrap">
+                {% if item.capped %}
+                <span class="text-red-700">Límite alcanzado (requiere forzar rescan)</span>
+                {% else %}
+                <span class="text-amber-700">Se reintentará en el próximo escaneo</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<p class="my-2 text-gray-500">No hay ficheros en error en este momento.</p>
+{% endif %}
+
+</div>
+
+<div id="tab-panel-history" role="tabpanel" aria-labelledby="tab-btn-history" {% if active_tab != 'history' %}hidden{% endif %}>
+
+{% if history %}
+<div class="my-3 flex flex-wrap items-center gap-3">
+    <div>
+        <label for="scan-errors-search" class="block text-sm font-medium mb-1">Buscar por nombre o carpeta</label>
+        <input type="text" id="scan-errors-search" placeholder="Filtra por nombre de archivo o ruta de carpeta…"
+               class="border border-gray-300 rounded px-2 py-1.5 w-full max-w-md">
+    </div>
+    <p class="text-gray-500 text-sm" id="scan-errors-count">{{ total_history_errors }} error(es) en {{ history | length }} ejecución(es).</p>
+</div>
+<p id="scan-errors-no-results" class="text-gray-500 my-2" hidden>
+    Sin resultados para «<span id="scan-errors-no-results-query"></span>».
+</p>
+{% for report in history %}
+<details class="border border-gray-200 rounded p-3 mb-3 bg-gray-50"
+          data-search="{{ (report.entries | map(attribute='file_path') | join(' ') | lower) }}">
+    <summary class="cursor-pointer select-none font-medium text-gray-700">
+        {{ report.timestamp }} — {{ report.entries | length }} error(es) de {{ report.total_scanned }} documento(s) escaneados
+    </summary>
+    <div class="overflow-x-auto">
+    <table class="w-full text-sm border-collapse mt-2">
+        <thead>
+            <tr class="text-left text-gray-600 border-b border-gray-300">
+                <th class="py-1 pr-2">Archivo</th>
+                <th class="py-1 pr-2">Carpeta</th>
+                <th class="py-1 pr-2">Mensaje de error</th>
+                <th class="py-1 pr-2 text-right">Reintentos</th>
+                <th class="py-1 pr-2">Límite alcanzado</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for entry in report.entries %}
+            <tr class="border-t border-gray-200">
+                <td class="py-1 pr-2 align-top break-all">{{ entry.file_path | basename }}</td>
+                <td class="py-1 pr-2 align-top break-all text-gray-600 font-mono text-xs" title="{{ entry.file_path }}">{{ entry.file_path | dirname }}</td>
+                <td class="py-1 pr-2 align-top break-all text-red-700">{{ entry.error_message }}</td>
+                <td class="py-1 pr-2 align-top text-right whitespace-nowrap">{{ entry.error_retry_count }}</td>
+                <td class="py-1 pr-2 align-top whitespace-nowrap">{{ "Sí" if entry.capped else "No" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</details>
+{% endfor %}
+{% else %}
+<p class="my-2 text-gray-500">Todavía no se ha registrado ningún error de escaneo.</p>
+{% endif %}
+
+</div>
+
+<script>
+// --- Pestañas (Estado actual / Histórico por ejecución) ---
+const tabButtons = { current: document.getElementById("tab-btn-current"), history: document.getElementById("tab-btn-history") };
+const tabPanels = { current: document.getElementById("tab-panel-current"), history: document.getElementById("tab-panel-history") };
+
+function activateTab(tabName) {
+    for (const name of Object.keys(tabButtons)) {
+        const isActive = name === tabName;
+        tabPanels[name].hidden = !isActive;
+        tabButtons[name].setAttribute("aria-selected", isActive ? "true" : "false");
+        tabButtons[name].classList.toggle("bg-white", isActive);
+        tabButtons[name].classList.toggle("border-gray-300", isActive);
+        tabButtons[name].classList.toggle("font-medium", isActive);
+        tabButtons[name].classList.toggle("bg-gray-50", !isActive);
+        tabButtons[name].classList.toggle("border-transparent", !isActive);
+        tabButtons[name].classList.toggle("text-gray-600", !isActive);
+    }
+}
+tabButtons.current.addEventListener("click", () => activateTab("current"));
+tabButtons.history.addEventListener("click", () => activateTab("history"));
+
+// --- Filtro de busqueda del histórico (mismo patrón que Duplicados: oculta
+// <details> con `hidden`, sin llamada al servidor). ---
+const searchInput = document.getElementById("scan-errors-search");
+if (searchInput) {
+    const detailsBlocks = Array.from(document.querySelectorAll("#tab-panel-history details[data-search]"));
+    const noResults = document.getElementById("scan-errors-no-results");
+    const noResultsQuery = document.getElementById("scan-errors-no-results-query");
+    const countEl = document.getElementById("scan-errors-count");
+    const totalLabel = countEl.textContent;
+    const totalCount = detailsBlocks.length;
+
+    searchInput.addEventListener("input", () => {
+        const rawQuery = searchInput.value.trim();
+        const query = rawQuery.toLowerCase();
+        let visibleCount = 0;
+        for (const details of detailsBlocks) {
+            const matches = query === "" || details.dataset.search.includes(query);
+            details.hidden = !matches;
+            if (matches) {
+                visibleCount += 1;
+                if (query !== "") details.open = true;
+            }
+        }
+        if (query !== "" && visibleCount === 0) {
+            noResultsQuery.textContent = rawQuery;
+            noResults.hidden = false;
+        } else {
+            noResults.hidden = true;
+        }
+        countEl.textContent = query === "" ? totalLabel : visibleCount + " de " + totalCount + " ejecución(es) coinciden.";
+    });
+}
+</script>
+{% endblock %}

@@ -14,7 +14,12 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from doc_organize.cache import CacheManager
-from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME, SCAN_FOLDERS_JSON_NAME
+from doc_organize.core.constants import (
+    DEFAULT_CACHE_DB_NAME,
+    SCAN_ERRORS_FOLDER_NAME,
+    SCAN_ERRORS_HISTORY_JSONL_NAME,
+    SCAN_FOLDERS_JSON_NAME,
+)
 from doc_organize.core.exceptions import ProjectNotFoundError
 from doc_organize.core.models import Project, ScanEventType, ScannedFolder
 from doc_organize.scan import ScanCommand
@@ -349,6 +354,7 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
             include_audio_video=include_audio_video,
             extract_images=extract_images,
             use_picture_description=use_picture_description,
+            error_log_path=root / SCAN_ERRORS_FOLDER_NAME / SCAN_ERRORS_HISTORY_JSONL_NAME,
         ):
             if event.event == ScanEventType.COMPLETED:
                 # Se marca ANTES de retransmitir el evento "completed" al cliente

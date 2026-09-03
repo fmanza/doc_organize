@@ -17,9 +17,11 @@ separada que el usuario ejecuta antes de escanear.
 import asyncio
 import json
 import shutil
+import uuid
 
 from collections.abc import AsyncIterator
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from doc_organize.cache import CacheManager
@@ -31,6 +33,8 @@ from doc_organize.core.models import (
     ConversionStatus,
     DocumentMetadata,
     DocumentStatus,
+    ScanErrorEntry,
+    ScanErrorReport,
     ScanEvent,
     ScanEventType,
 )
@@ -118,6 +122,7 @@ class ScanCommand:
         include_audio_video: bool = False,
         extract_images: bool = False,
         use_picture_description: bool = False,
+        error_log_path: Path | None = None,
     ) -> ScanSummary:
         """Ejecuta el pipeline y devuelve solo el resumen final (contrato sin cambios,
         Fase D-1). Consume `run_streaming()` y se queda con su evento `completed` —
@@ -135,6 +140,7 @@ class ScanCommand:
             include_audio_video,
             extract_images,
             use_picture_description,
+            error_log_path,
         ):
             if event.event is ScanEventType.COMPLETED:
                 summary = ScanSummary(**event.data)
@@ -152,6 +158,7 @@ class ScanCommand:
         include_audio_video: bool = False,
         extract_images: bool = False,
         use_picture_description: bool = False,
+        error_log_path: Path | None = None,
     ) -> AsyncIterator[ScanEvent]:
         """Orquesta escaneo + caché + conversión, emitiendo progreso.
 
@@ -178,6 +185,12 @@ class ScanCommand:
                 última pasada). Los ficheros que sí siguen presentes no se
                 borran de antemano: `DocumentConverter` ya sobrescribe su
                 salida al reconvertirlos, en el mismo path derivado de su ruta.
+            error_log_path: Si se indica y esta ejecución produce algún error de
+                conversión/OCR, se añade una línea `ScanErrorReport` a este fichero
+                JSONL (append-only, se crea la carpeta si falta). `None` (por
+                defecto) desactiva la persistencia del histórico de errores sin
+                afectar al resto del pipeline — usado por llamadores que no operan
+                sobre un proyecto (p. ej. el CLI sin `--project`).
         """
         summary = ScanSummary()
         yield ScanEvent(event=ScanEventType.STARTED, data={})
@@ -254,6 +267,17 @@ class ScanCommand:
                     yield event
 
             await cache.save_entries(entries)
+
+            if error_log_path is not None:
+                error_entries = self._collect_error_entries(entries, error_retries_capped_paths, cached_entries)
+                if error_entries:
+                    report = ScanErrorReport(
+                        scan_run_id=uuid.uuid4().hex,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        total_scanned=summary.scanned,
+                        entries=error_entries,
+                    )
+                    await self._persist_error_report(error_log_path, report)
 
         yield ScanEvent(event=ScanEventType.COMPLETED, data=asdict(summary))
 
@@ -504,6 +528,60 @@ class ScanCommand:
             error_message=result.error,
             error_retry_count=error_retry_count,
         )
+
+    @staticmethod
+    def _collect_error_entries(
+        entries: list[CacheEntry],
+        capped_paths: set[str],
+        cached_entries: dict[str, CacheEntry],
+    ) -> list[ScanErrorEntry]:
+        """Construye los `ScanErrorEntry` de esta ejecución: ficheros reprocesados que
+        siguen en `ERROR` (`entries`) más los que agotaron `MAX_AUTO_ERROR_RETRIES` y
+        no se reintentaron en esta pasada (`capped_paths`) — su `error_message`/
+        `error_retry_count` se leen de la caché anterior (`cached_entries`), ya que
+        `_collect_stale_error_paths` los excluye deliberadamente de `entries`.
+
+        Ordena el resultado por `file_path` (AUDIT_CODE): `entries` recorre
+        `docs_to_process`, cuyo orden depende de la iteración de un `set`
+        (`already_converting`, en `run_streaming`) — sin este orden explícito, el
+        orden de los ficheros dentro de un mismo `ScanErrorReport` persistido sería
+        no determinista entre ejecuciones idénticas.
+        """
+        error_entries = [
+            ScanErrorEntry(
+                file_path=entry.file_path,
+                error_message=entry.error_message or "",
+                error_retry_count=entry.error_retry_count,
+                capped=False,
+            )
+            for entry in entries
+            if entry.conversion_status == ConversionStatus.ERROR
+        ]
+        for path in capped_paths:
+            cached = cached_entries.get(path)
+            if cached is not None:
+                error_entries.append(
+                    ScanErrorEntry(
+                        file_path=path,
+                        error_message=cached.error_message or "",
+                        error_retry_count=cached.error_retry_count,
+                        capped=True,
+                    )
+                )
+        return sorted(error_entries, key=lambda entry: entry.file_path)
+
+    @staticmethod
+    async def _persist_error_report(error_log_path: Path, report: ScanErrorReport) -> None:
+        """Añade `report` como una línea JSON a `error_log_path` (crea la carpeta
+        contenedora si falta). Mismo patrón append-only que `DEDUP_HISTORY.jsonl`
+        (`web/routes/duplicates.py`): una línea por ejecución, nunca se reescribe."""
+        await asyncio.to_thread(error_log_path.parent.mkdir, parents=True, exist_ok=True)
+
+        def _append() -> None:
+            with error_log_path.open("a", encoding="utf-8") as handle:
+                handle.write(report.model_dump_json() + "\n")
+
+        await asyncio.to_thread(_append)
 
 
 __all__ = ["DeduplicationSummary", "ScanCommand", "ScanSummary"]
