@@ -4,7 +4,7 @@
 - **Fecha**: 2026-09-03
 - **Tipo**: `feature` (PLAN → AUDIT_PLAN → IMPLEMENT → AUDIT_CODE) + `refactor` (PLAN → AUDIT_PLAN → IMPLEMENT) sobre la deuda técnica que dejó la propia AUDIT_CODE
 - **Rama**: `develop`
-- **Estado**: ✅ COMPLETADA en código (implementación, auditoría y tests en verde) — **commit pendiente de confirmación del usuario** (ver "Siguientes Pasos")
+- **Estado**: ✅ COMPLETADA (implementación, auditoría, tests y commits en verde)
 
 ## Objetivo
 El usuario pidió dos funcionalidades nuevas en una sola sesión: (1) gestión de
@@ -172,19 +172,15 @@ artefacto en la raíz del repositorio tras ejecutarse.
 ---
 
 ## Siguientes Pasos (Recomendado)
-1. **Confirmar y crear el/los commit(s)** — todo el trabajo de esta sesión
-   está en el working tree sin commitear; pendiente de que el usuario
-   confirme el mensaje de commit (propuesto: `feat: añadir gestión de
-   errores de escaneo y logging a fichero con rotación diaria` +
-   `refactor: extraer consultas de errores de escaneo y constante de carpeta
-   duplicados`, o combinados según prefiera).
-2. Si se quiere parametrizar el nivel de log también desde la CLI (no solo
+1. Si se quiere parametrizar el nivel de log también desde la CLI (no solo
    por variable de entorno), añadir flags `--log-level`/`--log-dir` en
    `main.py::build_parser()` — evaluado y descartado en esta sesión por
    alcance (las variables de entorno ya cubren lo pedido).
-3. Si el volumen de errores/histórico crece de forma notable en el futuro,
+2. Si el volumen de errores/histórico crece de forma notable en el futuro,
    revisar el par de riesgos residuales de performance (filtro SQL en
    `CacheManager`, purga de `SCAN_ERRORS_HISTORY.jsonl`).
+3. `git push` a `origin/develop` — pendiente de confirmación explícita del
+   usuario (no ejecutado en esta sesión).
 
 ---
 
@@ -240,7 +236,7 @@ artefacto en la raíz del repositorio tras ejecutarse.
 
 ## Veredicto
 
-### 🟡 GO_CONDICIONAL
+### 🟢 COMPLETADA
 
 **Criterios**:
 - ✅ PLAN/AUDIT_PLAN ejecutados y las 4 condiciones de GO_CONDICIONAL
@@ -252,13 +248,17 @@ artefacto en la raíz del repositorio tras ejecutarse.
 - ✅ Refactor de la deuda técnica señalada por la propia auditoría, con su
   propio PLAN/AUDIT_PLAN, sin cambios funcionales ni de API pública
 - ✅ Suite completa en verde (406 passed), sin dejar artefactos en el repo
-- ⬜ **Commit pendiente**: todo el trabajo está en el working tree sin
-  commitear, a la espera de confirmación explícita del usuario sobre el
-  mensaje de commit
+- ✅ Commits creados en `develop`, separando feature y refactor (mensaje
+  confirmado explícitamente por el usuario)
+- ⬜ Push a `origin/develop`: pendiente de confirmación explícita del usuario
 
 **Evidencia**:
 - Branch: `develop`
-- Commits: ninguno todavía (working tree con cambios sin commitear)
-- Tests: 406 passed (`python -m pytest -q --no-cov`)
+- Commits: `1261016` (feat: gestión de errores de escaneo y logging a
+  fichero con rotación diaria), `cc8c9f4` (refactor: extraer consultas de
+  errores de escaneo y constante de carpeta duplicados)
+- Tests: 406 passed (`python -m pytest -q --no-cov`), verificados tanto
+  antes como después de cada commit (estado intermedio reconstruido para
+  separar feature de refactor sin dejar ningún commit roto)
 
-**Sesión abierta**: 2026-09-03 (pendiente de cierre tras el commit)
+**Sesión cerrada**: 2026-09-03
