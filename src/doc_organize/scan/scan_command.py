@@ -198,7 +198,15 @@ class ScanCommand:
         clean_paths, path_warnings = await self._resolve_scan_paths(paths, folders_json)
 
         async with DocumentScanner() as scanner:
-            scan_result = await scanner.scan_folders(clean_paths, include_audio_video=include_audio_video)
+            # exclude_dir=output_dir: sin esto, si una de `clean_paths` contiene el
+            # `output_dir` de un escaneo previo con `extract_images=True`, el escaneo
+            # redescubre las imagenes ya extraidas (`img/<stem>/*.png`) como
+            # documentos nuevos; una reconversion posterior en el mismo pase borra esa
+            # carpeta (`shutil.rmtree` en `DocumentConverter._write_outputs`) y la
+            # "conversion" de esa imagen falla con FileNotFoundError.
+            scan_result = await scanner.scan_folders(
+                clean_paths, include_audio_video=include_audio_video, exclude_dir=output_dir.resolve()
+            )
         summary.scanned = len(scan_result.documents)
 
         async with CacheManager(cache_db) as cache:

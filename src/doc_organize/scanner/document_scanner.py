@@ -61,7 +61,7 @@ class DocumentScanner:
     async def __aexit__(self, *exc_info: object) -> None:
         return None
 
-    async def scan_folders(self, paths: list[str], include_audio_video: bool = False) -> ScanResult:
+    async def scan_folders(self, paths: list[str], include_audio_video: bool = False, exclude_dir: Path | None = None) -> ScanResult:
         """Escanea recursivamente `paths` y devuelve documentos, resumen y arbol.
 
         Args:
@@ -74,6 +74,16 @@ class DocumentScanner:
                 `doc_organize.utils.av_detector`. `txt` (y el resto de formatos
                 sin dependencias extra) ya forma parte de `SUPPORTED_EXTENSIONS`,
                 sin necesitar flag.
+            exclude_dir: Si se indica (resuelto, absoluto), esta carpeta se omite
+                por completo del recorrido (ni ella ni su contenido aparecen en
+                `documents` ni en el arbol). Pensado para excluir el `output_dir`
+                del propio proyecto (p.ej. "Conversión/"): si una de `paths` lo
+                contiene, sin esto el escaneo redescubriria como "documentos
+                nuevos" las imagenes que el propio `DocumentConverter` extrajo en
+                `img/<stem>/` (`extract_images=True`), con el riesgo de que una
+                reconversion posterior borre esa carpeta a mitad de escaneo
+                (`shutil.rmtree` en `_write_outputs`) y el intento de "convertir"
+                esa imagen falle con `FileNotFoundError`.
 
         Returns:
             ScanResult con la lista de documentos descubiertos (con hash
@@ -87,7 +97,7 @@ class DocumentScanner:
 
         for raw_path in paths:
             root = Path(raw_path).expanduser().resolve()
-            node, files = await asyncio.to_thread(self._walk_sync, root, allowed_extensions)
+            node, files = await asyncio.to_thread(self._walk_sync, root, allowed_extensions, exclude_dir)
             root_nodes.append(node)
             discovered.extend(files)
 
@@ -109,13 +119,17 @@ class DocumentScanner:
         self.logger.info(f"Escaneo completado: {len(documents)} documentos en {duration:.2f}s")
         return ScanResult(documents=documents, summary=summary, tree=tree, scan_duration_seconds=duration)
 
-    def _walk_sync(self, root: Path, allowed_extensions: frozenset[str]) -> tuple[DirectoryTreeNode, list[_DiscoveredFile]]:
+    def _walk_sync(
+        self, root: Path, allowed_extensions: frozenset[str], exclude_dir: Path | None = None
+    ) -> tuple[DirectoryTreeNode, list[_DiscoveredFile]]:
         """Recorrido sincrono de un arbol de directorios (se ejecuta en un hilo)."""
         files: list[_DiscoveredFile] = []
-        node = self._build_node(root, files, allowed_extensions)
+        node = self._build_node(root, files, allowed_extensions, exclude_dir)
         return node, files
 
-    def _build_node(self, path: Path, files: list[_DiscoveredFile], allowed_extensions: frozenset[str]) -> DirectoryTreeNode:
+    def _build_node(
+        self, path: Path, files: list[_DiscoveredFile], allowed_extensions: frozenset[str], exclude_dir: Path | None = None
+    ) -> DirectoryTreeNode:
         if path.is_symlink():
             return DirectoryTreeNode(name=path.name, type="file", path=str(path))  # pyright: ignore[reportCallIssue]
 
@@ -129,7 +143,9 @@ class DocumentScanner:
             for entry in entries:
                 if entry.name in IGNORED_NAMES:
                     continue
-                children.append(self._build_node(entry, files, allowed_extensions))
+                if exclude_dir is not None and entry == exclude_dir:
+                    continue
+                children.append(self._build_node(entry, files, allowed_extensions, exclude_dir))
             return DirectoryTreeNode(name=path.name or str(path), type="dir", path=str(path), children=children)  # pyright: ignore[reportCallIssue]
 
         stat = path.stat()

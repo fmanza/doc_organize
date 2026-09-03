@@ -125,3 +125,28 @@ async def test_scan_includes_audio_video_when_opted_in(tmp_path) -> None:
         result = await scanner.scan_folders([str(tmp_path)], include_audio_video=True)
 
     assert result.summary == {"pdf": 1, "mp3": 1}
+
+
+@pytest.mark.asyncio
+async def test_scan_excludes_output_dir(tmp_path) -> None:
+    """`exclude_dir` evita redescubrir la salida del propio proyecto como fuente.
+
+    Reproduce el escenario real: `output_dir` ("Conversión/") cuelga de una de
+    las carpetas escaneadas y contiene imagenes ya extraidas por una conversion
+    previa (`img/<stem>/*.png`, ver `DocumentConverter._write_outputs`). Sin
+    `exclude_dir`, el escaner las trataria como documentos nuevos y una
+    reconversion posterior del documento original (que borra y regenera esa
+    carpeta) haria fallar su "conversion" con FileNotFoundError.
+    """
+    output_dir = tmp_path / "Conversión"
+    images_dir = output_dir / "sub" / "img" / "documento"
+    images_dir.mkdir(parents=True)
+    (images_dir / "image_000000_abc123.png").write_bytes(b"extracted-image")
+    (tmp_path / "sub" / "documento.docx").parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "sub" / "documento.docx").write_bytes(b"real-source-document")
+
+    async with DocumentScanner() as scanner:
+        result = await scanner.scan_folders([str(tmp_path)], exclude_dir=output_dir.resolve())
+
+    assert result.summary == {"docx": 1}
+    assert [doc.display_name for doc in result.documents] == ["documento.docx"]
