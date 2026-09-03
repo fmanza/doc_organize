@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from doc_organize.cache import CacheManager
 from doc_organize.core.constants import (
     DEFAULT_CACHE_DB_NAME,
+    DUPLICATES_FOLDER_NAME,
     SCAN_ERRORS_FOLDER_NAME,
     SCAN_ERRORS_HISTORY_JSONL_NAME,
     SCAN_FOLDERS_JSON_NAME,
@@ -246,7 +247,7 @@ async def deduplicate_folders(name: str, request: Request) -> DeduplicateFolders
     root = Path(project.root_path)
     summary = await ScanCommand().deduplicate(
         paths=saved_paths,
-        duplicates_dir=root / "duplicados",
+        duplicates_dir=root / DUPLICATES_FOLDER_NAME,
         folders_json=root / SCAN_FOLDERS_JSON_NAME,
     )
     return DeduplicateFoldersResponse(groups_found=summary.groups_found, moved=summary.moved, warnings=summary.warnings)

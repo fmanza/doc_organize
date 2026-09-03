@@ -91,6 +91,12 @@ MAX_AUTO_ERROR_RETRIES = 3
 #: `web/routes/duplicates.py` para re-escanear sin pedir las carpetas de nuevo).
 SCAN_FOLDERS_JSON_NAME = "folders.json"
 
+#: Carpeta donde `DeduplicationManager.resolve_duplicates` mueve los documentos
+#: descartados de cada proyecto, y donde escribe `DEDUP_REPORT.json`/
+#: `DEDUP_HISTORY.jsonl` (releídos por `web/routes/duplicates.py` y
+#: `web/routes/downloads.py`).
+DUPLICATES_FOLDER_NAME = "duplicados"
+
 #: Carpeta y fichero del histórico de errores de escaneo, dentro de la raíz del
 #: proyecto (gestión de errores de escaneo agrupados por ejecución): una línea JSON
 #: (`ScanErrorReport`) por ejecución de `ScanCommand.run_streaming()` que produjo
@@ -177,6 +183,7 @@ __all__ = [
     "DEFAULT_ADMIN_USERNAME",
     "DEFAULT_AUTH_DB_NAME",
     "DEFAULT_CACHE_DB_NAME",
+    "DUPLICATES_FOLDER_NAME",
     "IGNORED_NAMES",
     "LOGIN_LOCKOUT_SECONDS",
     "LOGIN_MAX_ATTEMPTS",

@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ValidationError
 
-from doc_organize.core.constants import SCAN_FOLDERS_JSON_NAME
+from doc_organize.core.constants import DUPLICATES_FOLDER_NAME, SCAN_FOLDERS_JSON_NAME
 from doc_organize.core.models import DeduplicationReport, DuplicateGroup, Project
 from doc_organize.dedup import DeduplicationManager
 from doc_organize.scanner import DocumentScanner
@@ -130,7 +130,7 @@ def _load_dedup_history(project: Project) -> list[DeduplicationReport]:
     escribiendo en disco (contrato externo, `DeduplicationReport.audit_json_path`
     apunta ahí), pero esta página ya no lo lee.
     """
-    history_path = Path(project.root_path) / "duplicados" / "DEDUP_HISTORY.jsonl"
+    history_path = Path(project.root_path) / DUPLICATES_FOLDER_NAME / "DEDUP_HISTORY.jsonl"
     if not history_path.is_file():
         return []
     reports: list[DeduplicationReport] = []
@@ -240,7 +240,7 @@ async def resolve_duplicates(name: str, payload: ResolveDuplicatesRequest, reque
         group.user_choice = member
         resolved_count += 1
 
-    duplicates_dir = Path(project.root_path) / "duplicados"
+    duplicates_dir = Path(project.root_path) / DUPLICATES_FOLDER_NAME
     report = await DeduplicationManager().resolve_duplicates(groups, duplicates_dir)
     moved = report.total_exact_duplicates + report.total_version_conflicts
     return ResolveDuplicatesResponse(moved=moved, groups_resolved=resolved_count)

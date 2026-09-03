@@ -17,16 +17,14 @@ from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
 from doc_organize.cache import CacheManager
-from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME
+from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME, DUPLICATES_FOLDER_NAME
 from doc_organize.core.models import CacheEntry, CacheExportSnapshot, DocumentStatus, ScanErrorReport
 from doc_organize.web.dependencies import get_project_registry, get_tenant_id, require_project_access
 
 # Reutiliza las mismas consultas que la página HTML de Errores de Escaneo (no las
 # duplica): la vista "Estado actual" y el parseo tolerante a lineas corruptas del
-# histórico JSONL solo tienen sentido en un sitio (AUDIT_CODE, deuda técnica
-# aceptada: acoplamiento a funciones "privadas" de `scan_errors.py`, válido
-# mientras solo haya estos dos consumidores).
-from doc_organize.web.routes.scan_errors import _load_current_errors, _load_error_history
+# histórico JSONL solo tienen sentido en un sitio.
+from doc_organize.web.scan_errors_data import load_current_errors, load_error_history
 
 router = APIRouter(tags=["downloads"])
 
@@ -70,7 +68,7 @@ def _build_export_zip(project_root: Path, cached_entries: dict[str, CacheEntry])
     tmp_path = Path(tmp_path_str)
 
     conversion_dir = project_root / "Conversión"
-    dedup_report = project_root / "duplicados" / "DEDUP_REPORT.json"
+    dedup_report = project_root / DUPLICATES_FOLDER_NAME / "DEDUP_REPORT.json"
 
     with zipfile.ZipFile(tmp_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zip_file:
         if conversion_dir.is_dir():
@@ -251,8 +249,8 @@ async def export_scan_errors_xlsx(name: str, request: Request) -> FileResponse:
     async with get_project_registry(request) as registry:
         project = await registry.get_project(name, tenant_id=get_tenant_id(request))
 
-    current_errors = await _load_current_errors(project)
-    history = await asyncio.to_thread(_load_error_history, project)
+    current_errors = await load_current_errors(project)
+    history = await asyncio.to_thread(load_error_history, project)
 
     tmp_path = await asyncio.to_thread(_build_scan_errors_export_xlsx, current_errors, history)
 
