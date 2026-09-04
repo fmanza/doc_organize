@@ -76,17 +76,41 @@ def _release_operation_lock(request: Request, key: tuple[str, str]) -> None:
     request.app.state.active_project_operations.discard(key)
 
 
+def _safe_file_size(path: Path) -> int:
+    """Tamaño de `path` en bytes, o 0 si no se puede leer (permisos, enlace roto)."""
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
 def _compute_impact(root: Path) -> tuple[int, int]:
-    """Cuenta ficheros y tamaño total (bytes) bajo `root`, para el resumen de impacto."""
+    """Cuenta ficheros y tamaño total (bytes) bajo `root`, para el resumen de impacto.
+
+    No sigue symlinks (mismo criterio que `scanner.document_scanner`, que los trata
+    como nodo opaco sin recursión ni hashing): recorrido manual con `iterdir()`, no
+    `Path.rglob()`, que antes de Python 3.13 sigue subcarpetas enlazadas por defecto
+    (este proyecto soporta `>=3.11`) — sin este cuidado, un enlace simbólico dentro de
+    la carpeta del proyecto podría hacer que este recuento (admin, pero solo de
+    lectura) recorriera/leyera el tamaño de un árbol arbitrario fuera de `root`.
+    """
     file_count = 0
     total_size = 0
-    for entry in root.rglob("*"):
-        if entry.is_file():
-            file_count += 1
-            try:
-                total_size += entry.stat().st_size
-            except OSError:
-                continue  # entrada ilegible (permisos, enlace roto): se omite del tamaño, no del conteo
+    pending = [root]
+    while pending:
+        current = pending.pop()
+        try:
+            children = list(current.iterdir())
+        except OSError:
+            continue  # carpeta ilegible (permisos): se omite del recuento
+        for child in children:
+            if child.is_symlink():
+                continue
+            if child.is_dir():
+                pending.append(child)
+            elif child.is_file():
+                file_count += 1
+                total_size += _safe_file_size(child)
     return file_count, total_size
 
 

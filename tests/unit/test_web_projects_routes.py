@@ -84,6 +84,33 @@ async def test_get_impact_as_non_admin_forbidden(tmp_path) -> None:
     assert response.status_code == 403
 
 
+@pytest.mark.asyncio
+async def test_get_impact_does_not_follow_symlinked_directory(tmp_path) -> None:
+    """Un symlink dentro del proyecto no debe hacer que el recuento de impacto
+    recorra/lea el tamaño de un árbol fuera de `root_path` (mismo criterio que
+    `scanner.document_scanner`, que trata los symlinks como nodo opaco)."""
+    app, base = await _setup(tmp_path)
+
+    outside = tmp_path / "fuera-del-proyecto"
+    outside.mkdir()
+    (outside / "leaked.bin").write_bytes(b"x" * 10_000)
+
+    link_path = base / "Proyecto A" / "link_to_outside"
+    try:
+        link_path.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("El entorno no permite crear symlinks (privilegios insuficientes en Windows).")
+
+    async with _client(app) as client:
+        await _login_admin(client)
+        response = await client.get("/api/projects/Proyecto A/impact")
+
+    assert response.status_code == 200
+    # project.json (de create_project) + cache.db (creado por _setup); el contenido
+    # de "fuera-del-proyecto" vía el symlink no debe contarse (si no, serían 3).
+    assert response.json()["file_count"] == 2
+
+
 # ===== clear-history =====
 
 
