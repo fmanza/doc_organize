@@ -125,6 +125,14 @@ def create_app(
     # objeto por app, no por peticion, para que el conteo de fallos sobreviva entre
     # llamadas.
     app.state.login_rate_limiter = LoginRateLimiter()
+    # Claves (tenant_id, nombre de proyecto en minúsculas) con un escaneo o
+    # deduplicación en curso ahora mismo -- `web/routes/scan.py` la usa para
+    # rechazar una segunda operación concurrente sobre el MISMO proyecto
+    # (ambas leen/escriben cache.db, Conversión/ y mueven ficheros duplicados
+    # sin ninguna otra coordinación entre sí, AUDIT_CODE sesión 2026-09-04).
+    # Un `set` por app (no por petición, mismo criterio que `project_registry`
+    # de arriba) para que sea compartido de verdad entre conexiones WebSocket.
+    app.state.active_project_operations = set()
     app.add_middleware(AuthMiddleware, security=security, auth_db_path=auth_db_path)
     for exc_type, status_code in _EXCEPTION_STATUS_CODES.items():
         app.add_exception_handler(exc_type, _domain_error_handler(status_code))

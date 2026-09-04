@@ -416,6 +416,15 @@ if (deduplicateBtn) {
                 setDedupSemaforo(DEDUP_PHASE.COMPLETED);
                 handleDedupCompletedGroupProgress();
                 dedupSemaforoDurationText.textContent = "Duración: " + formatDurationClientSide(dedupEvent.data.duration_seconds || 0);
+                // Resiliencia por fichero (AUDIT_CODE, sesión 2026-09-04): un fallo
+                // al mover un fichero concreto ya no aborta toda la operación --
+                // se avisa aquí en vez de perder esa información en silencio.
+                const failedPaths = dedupEvent.data.failed_paths || [];
+                if (failedPaths.length > 0) {
+                    deduplicateErrorEl.textContent =
+                        "No se pudieron mover " + failedPaths.length + " fichero(s) (el resto se movió con normalidad): " +
+                        failedPaths.join(", ");
+                }
                 unlockDedupControls();
                 ws.close();
                 // Los grupos resueltos por esta ejecucion deben desaparecer de
@@ -464,10 +473,26 @@ function setupResolveForm() {
                 }
             );
             if (response.ok) {
+                const data = await response.json();
                 unlockDedupControls();
                 // El grupo resuelto debe desaparecer de "pendientes" y pasar
-                // a verse en el histórico.
+                // a verse en el histórico. Esto reemplaza el HTML de
+                // #resolve-results-container (incluido #resolve-result), así que
+                // el aviso de fallos se fija DESPUÉS, sobre el nodo nuevo.
                 await refreshDynamicPanels();
+                // Resiliencia por fichero (AUDIT_CODE, sesión 2026-09-04): igual
+                // que en "Buscar duplicados", un fallo al mover un fichero
+                // concreto no aborta la resolución -- se avisa en vez de perder
+                // esa información en silencio.
+                const failedPaths = data.failed_paths || [];
+                if (failedPaths.length > 0) {
+                    const resultEl = document.getElementById("resolve-result");
+                    if (resultEl) {
+                        resultEl.textContent =
+                            "No se pudieron mover " + failedPaths.length + " fichero(s) (el resto se movió con normalidad): " +
+                            failedPaths.join(", ");
+                    }
+                }
                 return;
             }
             const data = await response.json();

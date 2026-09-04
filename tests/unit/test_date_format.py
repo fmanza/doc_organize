@@ -68,3 +68,12 @@ def test_format_duration_rounds_to_nearest_second() -> None:
 def test_format_duration_minutes_and_seconds() -> None:
     assert format_duration(125.4) == "2m 5s"
     assert format_duration(60) == "1m 0s"
+
+
+def test_format_duration_negative_treated_as_zero() -> None:
+    """AUDIT_CODE (sesión 2026-09-04): `duration_seconds` se calcula con reloj de
+    pared, no monótono -- un ajuste del reloj hacia atrás a mitad de una
+    operación larga podría producir un valor negativo. Mostrarlo tal cual
+    ("-1m 55s") no tiene sentido para el usuario."""
+    assert format_duration(-5.0) == "0s"
+    assert format_duration(-125.4) == "0s"

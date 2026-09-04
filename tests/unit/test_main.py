@@ -112,6 +112,22 @@ async def test_resolve_dedup_paths_from_project(tmp_path, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_resolve_dedup_paths_warns_when_combining_project_and_explicit_flag(tmp_path, monkeypatch, caplog) -> None:
+    """AUDIT_CODE (sesión 2026-09-04): `_resolve_scan_paths` ya avisaba al
+    combinar `--project` con flags explícitos; `_resolve_dedup_paths` no tenía
+    el mismo aviso para `--duplicates-dir` — asimetría puramente cosmética,
+    ahora corregida."""
+    monkeypatch.setattr("doc_organize.main.ProjectRegistry", lambda: _FakeRegistry(tmp_path / "proj"))
+    args = _Args(project="Mi Proyecto", duplicates_dir="/otra/ruta")
+
+    with caplog.at_level("WARNING"):
+        duplicates_dir, _folders_json = await _resolve_dedup_paths(args)
+
+    assert duplicates_dir == Path("/otra/ruta")  # el flag explicito gana
+    assert any("--project" in record.message and "--duplicates-dir" in record.message for record in caplog.records)
+
+
+@pytest.mark.asyncio
 async def test_resolve_dedup_paths_explicit_without_project() -> None:
     args = _Args(duplicates_dir="/tmp/duplicados")
 
@@ -654,6 +670,48 @@ async def test_deduplicate_streaming_persists_partial_report_on_abort(tmp_path, 
     assert len(lines) == 1
     report = json.loads(lines[0])
     assert report["total_exact_duplicates"] == 1  # el grupo movido antes del fallo, registrado
+
+
+@pytest.mark.asyncio
+async def test_deduplicate_streaming_completes_and_reports_failed_path(tmp_path, monkeypatch) -> None:
+    """AUDIT_CODE (sesión 2026-09-04): un fallo al mover UN fichero ya no aborta
+    toda la deduplicación (resiliencia por fichero, ver
+    test_deduplication.py::test_move_group_continues_after_one_file_fails_to_move)
+    -- el evento COMPLETED se alcanza con normalidad, sin excepción, y refleja
+    qué rutas fallaron en vez de perder esa información en silencio."""
+    base = tmp_path / "workspaces"
+    base.mkdir()
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        project = await registry.create_project("Proyecto Dedup Resiliente", base)
+    root = Path(project.root_path)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    original = input_dir / "original.pdf"
+    copia = input_dir / "copia.pdf"
+    original.write_bytes(b"contenido-duplicado")
+    copia.write_bytes(b"contenido-duplicado")
+
+    async def _always_fails(self, source, dup_dir, sha256_hash):
+        raise PermissionError("simulado: fichero bloqueado por otra aplicación")
+
+    monkeypatch.setattr(DeduplicationManager, "_move_to_duplicates", _always_fails)
+
+    summary = DeduplicationSummary()
+    async for event in ScanCommand().deduplicate_streaming(
+        paths=[str(input_dir)],
+        duplicates_dir=root / "duplicados",
+        folders_json=root / "folders.json",
+    ):
+        if event.event is DedupEventType.COMPLETED:
+            summary = DeduplicationSummary(**event.data)
+
+    assert summary.moved == 0
+    assert len(summary.failed_paths) == 1
+    # Ninguno de los dos se perdió: el canónico nunca se toca, el descartado
+    # se quedó donde estaba porque el movimiento falló (no se borró el origen).
+    assert original.exists()
+    assert copia.exists()
 
 
 # ===== main() end-to-end (usa --registry-path para no tocar ~/.doc_organize/) =====

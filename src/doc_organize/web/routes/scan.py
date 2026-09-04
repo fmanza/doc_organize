@@ -302,6 +302,34 @@ async def _authorize_project_websocket(websocket: WebSocket, project_name: str) 
         return tenant_id, role.allowed_scan_roots
 
 
+def _project_operation_key(tenant_id: str, project_name: str) -> tuple[str, str]:
+    """Clave case-insensitive (mismo criterio que `ProjectRegistry.get_project`)
+    para identificar un proyecto en `app.state.active_project_operations`."""
+    return (tenant_id, project_name.lower())
+
+
+async def _acquire_project_operation_lock(websocket: WebSocket, tenant_id: str, project_name: str) -> tuple[str, str] | None:
+    """Reserva `(tenant_id, project_name)` para esta conexión, para que un
+    escaneo y una deduplicación (o dos escaneos) del MISMO proyecto no corran a
+    la vez — ambos leen/escriben `cache.db`/`Conversión/`/mueven ficheros
+    duplicados sin ninguna otra coordinación entre sí (AUDIT_CODE, sesión
+    2026-09-04). Devuelve la clave reservada (para liberarla después con
+    `_release_project_operation_lock`), o `None` si ya había una operación en
+    curso para ese proyecto (y ya cerró el websocket con 1008 — el llamador no
+    debe hacer nada más)."""
+    key = _project_operation_key(tenant_id, project_name)
+    active = websocket.app.state.active_project_operations
+    if key in active:
+        await websocket.close(code=1008, reason="Ya hay un escaneo o deduplicación en curso para este proyecto")
+        return None
+    active.add(key)
+    return key
+
+
+def _release_project_operation_lock(websocket: WebSocket, key: tuple[str, str]) -> None:
+    websocket.app.state.active_project_operations.discard(key)
+
+
 @router.websocket("/api/projects/{name}/scan")
 async def scan_websocket(name: str, websocket: WebSocket) -> None:
     """Escanea/convierte el proyecto `name`, retransmitiendo cada `ScanEvent` como JSON."""
@@ -312,86 +340,92 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
         return
     tenant_id, allowed_scan_roots = auth_result
 
-    async with get_project_registry(websocket) as registry:
+    operation_key = await _acquire_project_operation_lock(websocket, tenant_id, name)
+    if operation_key is None:
+        return
+    try:
+        async with get_project_registry(websocket) as registry:
+            try:
+                project = await registry.get_project(name, tenant_id=tenant_id)
+            except ProjectNotFoundError:
+                await websocket.close(code=1008, reason="Project not found")
+                return
+
         try:
-            project = await registry.get_project(name, tenant_id=tenant_id)
-        except ProjectNotFoundError:
-            await websocket.close(code=1008, reason="Project not found")
+            request_payload = await websocket.receive_json()
+        except WebSocketDisconnect:
+            return
+        except json.JSONDecodeError:
+            # Payload no-JSON del cliente -- cierre limpio con motivo, mismo patrón
+            # que el resto de esta función ante entrada inválida, en vez de dejar
+            # escapar la excepción cruda (AUDIT_CODE, sesión 2026-09-03).
+            await websocket.close(code=1008, reason="El payload debe ser JSON válido")
             return
 
-    try:
-        request_payload = await websocket.receive_json()
-    except WebSocketDisconnect:
-        return
-    except json.JSONDecodeError:
-        # Payload no-JSON del cliente -- cierre limpio con motivo, mismo patrón
-        # que el resto de esta función ante entrada inválida, en vez de dejar
-        # escapar la excepción cruda (AUDIT_CODE, sesión 2026-09-03).
-        await websocket.close(code=1008, reason="El payload debe ser JSON válido")
-        return
+        if not isinstance(request_payload, dict):
+            await websocket.close(code=1008, reason="El payload debe ser un objeto JSON")
+            return
 
-    if not isinstance(request_payload, dict):
-        await websocket.close(code=1008, reason="El payload debe ser un objeto JSON")
-        return
+        # Ya no se acepta `paths` del cliente (antes, selección manual por checkbox):
+        # se escanean siempre TODAS las carpetas guardadas del proyecto — el cliente ya
+        # no elige un subconjunto. `paths_within_roots` se mantiene como defensa en
+        # profundidad por si el rol perdió acceso a alguna carpeta ya guardada después
+        # de guardarla.
+        folders = await get_scanned_folders_store().list_folders(project)
+        saved_paths = [folder.path for folder in folders]
+        if not saved_paths:
+            await websocket.close(code=1008, reason="No hay carpetas guardadas para este proyecto")
+            return
+        if not paths_within_roots(saved_paths, allowed_scan_roots):
+            await websocket.close(code=1008, reason="Forbidden path")
+            return
 
-    # Ya no se acepta `paths` del cliente (antes, selección manual por checkbox):
-    # se escanean siempre TODAS las carpetas guardadas del proyecto — el cliente ya
-    # no elige un subconjunto. `paths_within_roots` se mantiene como defensa en
-    # profundidad por si el rol perdió acceso a alguna carpeta ya guardada después
-    # de guardarla.
-    folders = await get_scanned_folders_store().list_folders(project)
-    saved_paths = [folder.path for folder in folders]
-    if not saved_paths:
-        await websocket.close(code=1008, reason="No hay carpetas guardadas para este proyecto")
-        return
-    if not paths_within_roots(saved_paths, allowed_scan_roots):
-        await websocket.close(code=1008, reason="Forbidden path")
-        return
+        # Antes, el cliente llamaba a `/folders/validate` y enviaba `clean_paths` en el
+        # payload; `mark_used` marcaba exactamente esas rutas ya validadas. Ahora que
+        # las rutas vienen del store sin ese preflight, se valida aquí para no marcar
+        # como `used` (permanente, ver `ScannedFoldersStore.remove_folder`) una carpeta
+        # guardada que `FolderValidator`/`ScanCommand._resolve_scan_paths` descarta por
+        # no existir ya en disco.
+        paths = FolderValidator().validate_folder_set(saved_paths).clean_paths
 
-    # Antes, el cliente llamaba a `/folders/validate` y enviaba `clean_paths` en el
-    # payload; `mark_used` marcaba exactamente esas rutas ya validadas. Ahora que
-    # las rutas vienen del store sin ese preflight, se valida aquí para no marcar
-    # como `used` (permanente, ver `ScannedFoldersStore.remove_folder`) una carpeta
-    # guardada que `FolderValidator`/`ScanCommand._resolve_scan_paths` descarta por
-    # no existir ya en disco.
-    paths = FolderValidator().validate_folder_set(saved_paths).clean_paths
+        use_ocr = bool(request_payload.get("use_ocr", False))
+        use_gpu = bool(request_payload.get("use_gpu", False))
+        force = bool(request_payload.get("force", False))
+        include_audio_video = bool(request_payload.get("include_audio_video", False))
+        extract_images = bool(request_payload.get("extract_images", False))
+        use_picture_description = bool(request_payload.get("use_picture_description", False))
 
-    use_ocr = bool(request_payload.get("use_ocr", False))
-    use_gpu = bool(request_payload.get("use_gpu", False))
-    force = bool(request_payload.get("force", False))
-    include_audio_video = bool(request_payload.get("include_audio_video", False))
-    extract_images = bool(request_payload.get("extract_images", False))
-    use_picture_description = bool(request_payload.get("use_picture_description", False))
+        root = Path(project.root_path)
+        try:
+            async for event in ScanCommand().run_streaming(
+                paths=paths,
+                output_dir=root / "Conversión",
+                cache_db=root / "cache.db",
+                folders_json=root / SCAN_FOLDERS_JSON_NAME,
+                use_ocr=use_ocr,
+                use_gpu=use_gpu,
+                force=force,
+                include_audio_video=include_audio_video,
+                extract_images=extract_images,
+                use_picture_description=use_picture_description,
+                error_log_path=root / SCAN_ERRORS_FOLDER_NAME / SCAN_ERRORS_HISTORY_JSONL_NAME,
+                history_log_path=root / SCAN_HISTORY_FOLDER_NAME / SCAN_HISTORY_JSONL_NAME,
+            ):
+                if event.event == ScanEventType.COMPLETED:
+                    # Se marca ANTES de retransmitir el evento "completed" al cliente
+                    # (menú Escaneo, lista persistente de carpetas): el cliente cierra
+                    # el WebSocket en cuanto recibe "completed" (ver
+                    # folder_selector.html.j2), así que si `mark_used` fuera después
+                    # de `send_json` competiría con esa desconexión.
+                    await get_scanned_folders_store().mark_used(project, paths)
+                await websocket.send_json(event.model_dump(mode="json"))
+        except WebSocketDisconnect:
+            logger.info(f"Cliente desconectado durante el escaneo de '{name}' (tenant '{tenant_id}')")
+            return
 
-    root = Path(project.root_path)
-    try:
-        async for event in ScanCommand().run_streaming(
-            paths=paths,
-            output_dir=root / "Conversión",
-            cache_db=root / "cache.db",
-            folders_json=root / SCAN_FOLDERS_JSON_NAME,
-            use_ocr=use_ocr,
-            use_gpu=use_gpu,
-            force=force,
-            include_audio_video=include_audio_video,
-            extract_images=extract_images,
-            use_picture_description=use_picture_description,
-            error_log_path=root / SCAN_ERRORS_FOLDER_NAME / SCAN_ERRORS_HISTORY_JSONL_NAME,
-            history_log_path=root / SCAN_HISTORY_FOLDER_NAME / SCAN_HISTORY_JSONL_NAME,
-        ):
-            if event.event == ScanEventType.COMPLETED:
-                # Se marca ANTES de retransmitir el evento "completed" al cliente
-                # (menú Escaneo, lista persistente de carpetas): el cliente cierra
-                # el WebSocket en cuanto recibe "completed" (ver
-                # folder_selector.html.j2), así que si `mark_used` fuera después
-                # de `send_json` competiría con esa desconexión.
-                await get_scanned_folders_store().mark_used(project, paths)
-            await websocket.send_json(event.model_dump(mode="json"))
-    except WebSocketDisconnect:
-        logger.info(f"Cliente desconectado durante el escaneo de '{name}' (tenant '{tenant_id}')")
-        return
-
-    await websocket.close()
+        await websocket.close()
+    finally:
+        _release_project_operation_lock(websocket, operation_key)
 
 
 @router.websocket("/api/projects/{name}/scan/deduplicate")
@@ -411,35 +445,41 @@ async def deduplicate_websocket(name: str, websocket: WebSocket) -> None:
         return
     tenant_id, allowed_scan_roots = auth_result
 
-    async with get_project_registry(websocket) as registry:
-        try:
-            project = await registry.get_project(name, tenant_id=tenant_id)
-        except ProjectNotFoundError:
-            await websocket.close(code=1008, reason="Project not found")
+    operation_key = await _acquire_project_operation_lock(websocket, tenant_id, name)
+    if operation_key is None:
+        return
+    try:
+        async with get_project_registry(websocket) as registry:
+            try:
+                project = await registry.get_project(name, tenant_id=tenant_id)
+            except ProjectNotFoundError:
+                await websocket.close(code=1008, reason="Project not found")
+                return
+
+        folders = await get_scanned_folders_store().list_folders(project)
+        saved_paths = [folder.path for folder in folders]
+        if not saved_paths:
+            await websocket.close(code=1008, reason="No hay carpetas guardadas para este proyecto")
+            return
+        if not paths_within_roots(saved_paths, allowed_scan_roots):
+            await websocket.close(code=1008, reason="Forbidden path")
             return
 
-    folders = await get_scanned_folders_store().list_folders(project)
-    saved_paths = [folder.path for folder in folders]
-    if not saved_paths:
-        await websocket.close(code=1008, reason="No hay carpetas guardadas para este proyecto")
-        return
-    if not paths_within_roots(saved_paths, allowed_scan_roots):
-        await websocket.close(code=1008, reason="Forbidden path")
-        return
+        root = Path(project.root_path)
+        try:
+            async for event in ScanCommand().deduplicate_streaming(
+                paths=saved_paths,
+                duplicates_dir=root / DUPLICATES_FOLDER_NAME,
+                folders_json=root / SCAN_FOLDERS_JSON_NAME,
+            ):
+                await websocket.send_json(event.model_dump(mode="json"))
+        except WebSocketDisconnect:
+            logger.info(f"Cliente desconectado durante la deduplicación de '{name}' (tenant '{tenant_id}')")
+            return
 
-    root = Path(project.root_path)
-    try:
-        async for event in ScanCommand().deduplicate_streaming(
-            paths=saved_paths,
-            duplicates_dir=root / DUPLICATES_FOLDER_NAME,
-            folders_json=root / SCAN_FOLDERS_JSON_NAME,
-        ):
-            await websocket.send_json(event.model_dump(mode="json"))
-    except WebSocketDisconnect:
-        logger.info(f"Cliente desconectado durante la deduplicación de '{name}' (tenant '{tenant_id}')")
-        return
-
-    await websocket.close()
+        await websocket.close()
+    finally:
+        _release_project_operation_lock(websocket, operation_key)
 
 
 __all__ = ["router"]

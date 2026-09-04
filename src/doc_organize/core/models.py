@@ -194,6 +194,14 @@ class DeduplicationReport(BaseModel):
     groups: list[DuplicateGroup] = Field(default_factory=list, description="Grupos detallados")
     started_at: str | None = Field(None, description="Timestamp ISO 8601 de inicio de esta ejecución (None en históricos previos a este campo)")
     duration_seconds: float | None = Field(None, description="Tiempo total transcurrido entre inicio y fin (None en históricos previos a este campo)")
+    failed_paths: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Rutas que no se pudieron mover (permiso denegado, fichero ausente/bloqueado, "
+            "colisión doble tras sufijo de hash) — no abortan el resto del lote (AUDIT_CODE, "
+            "sesión 2026-09-04). Lista vacía en históricos previos a este campo."
+        ),
+    )
 
 
 class CacheEntry(BaseModel):

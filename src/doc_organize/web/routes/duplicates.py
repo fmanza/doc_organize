@@ -66,6 +66,7 @@ class ResolveDuplicatesRequest(BaseModel):
 class ResolveDuplicatesResponse(BaseModel):
     moved: int
     groups_resolved: int
+    failed_paths: list[str] = []
 
 
 def _group_key(group: DuplicateGroup) -> str:
@@ -245,7 +246,7 @@ async def resolve_duplicates(name: str, payload: ResolveDuplicatesRequest, reque
     duplicates_dir = Path(project.root_path) / DUPLICATES_FOLDER_NAME
     report = await DeduplicationManager().resolve_duplicates(groups, duplicates_dir, started_at=started_at)
     moved = report.total_exact_duplicates + report.total_version_conflicts
-    return ResolveDuplicatesResponse(moved=moved, groups_resolved=resolved_count)
+    return ResolveDuplicatesResponse(moved=moved, groups_resolved=resolved_count, failed_paths=report.failed_paths)
 
 
 __all__ = ["router"]

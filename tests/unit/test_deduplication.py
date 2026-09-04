@@ -218,3 +218,49 @@ async def test_move_to_duplicates_raises_on_double_collision_instead_of_overwrit
     assert source_file.exists()  # no se movio ni se borro
     assert base_target.read_bytes() == b"ya-habia-algo-aqui"  # sin sobrescribir
     assert suffixed_target.read_bytes() == b"y-tambien-en-el-sufijado"  # sin sobrescribir
+
+
+@pytest.mark.asyncio
+async def test_move_group_continues_after_one_file_fails_to_move(tmp_path, monkeypatch) -> None:
+    """AUDIT_CODE (sesión 2026-09-04): resiliencia por fichero -- un fallo al
+    mover UN documento del grupo (permiso denegado, fichero bloqueado, ausente)
+    no debe abortar el resto del grupo, mismo criterio que
+    `DocumentConverter.convert_document()` aísla un documento del resto del
+    batch de conversión."""
+    source_dir = tmp_path / "docs"
+    source_dir.mkdir()
+    canonical = source_dir / "original.pdf"
+    dup_a = source_dir / "copia_a.pdf"
+    dup_b = source_dir / "copia_b.pdf"
+    canonical.write_bytes(b"contenido")
+    dup_a.write_bytes(b"contenido")
+    dup_b.write_bytes(b"contenido")
+
+    manager = DeduplicationManager()
+    groups = manager.find_duplicates(
+        [
+            _doc(str(canonical), "hash-igual", modified_time=1.0),
+            _doc(str(dup_a), "hash-igual", modified_time=2.0),
+            _doc(str(dup_b), "hash-igual", modified_time=3.0),
+        ]
+    )
+    assert len(groups) == 1
+    group = groups[0]
+
+    original_move = DeduplicationManager._move_to_duplicates
+
+    async def _flaky_move(self, source, dup_dir, sha256_hash):
+        if source.name == "copia_a.pdf":
+            raise PermissionError("simulado: fichero bloqueado por otra aplicación")
+        return await original_move(self, source, dup_dir, sha256_hash)
+
+    monkeypatch.setattr(DeduplicationManager, "_move_to_duplicates", _flaky_move)
+
+    duplicates_dir = tmp_path / "duplicados"
+    exact, version, failed = await manager.move_group(group, duplicates_dir)
+
+    assert exact == 1  # copia_b.pdf sí se movió, pese al fallo de copia_a.pdf
+    assert version == 0
+    assert failed == [str(dup_a)]
+    assert dup_a.exists()  # no se movió: el fallo la dejó donde estaba, sin perderla
+    assert not dup_b.exists()  # esta sí se movió con normalidad

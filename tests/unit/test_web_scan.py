@@ -664,7 +664,7 @@ async def test_deduplicate_websocket_moves_exact_duplicates(tmp_path) -> None:
     assert duplicates_found["data"]["groups_found"] == 1
     completed = events[-1]
     duration_seconds = completed["data"].pop("duration_seconds")
-    assert completed["data"] == {"groups_found": 1, "moved": 1, "warnings": []}
+    assert completed["data"] == {"groups_found": 1, "moved": 1, "warnings": [], "failed_paths": []}
     assert duration_seconds >= 0.0
 
     root = Path(project.root_path)
@@ -849,6 +849,77 @@ async def test_scan_websocket_rejects_non_dict_json_payload(tmp_path) -> None:
         websocket.send_json(["use_ocr", False])
         websocket.receive_json()
     assert exc_info.value.code == 1008
+
+
+@pytest.mark.asyncio
+async def test_scan_websocket_rejects_when_project_already_has_operation_in_progress(tmp_path) -> None:
+    """AUDIT_CODE (sesión 2026-09-04): un escaneo y una deduplicación (o dos
+    escaneos) del MISMO proyecto no estaban coordinados entre sí -- ambos
+    leen/escriben cache.db/Conversión/mueven ficheros duplicados sin ningún
+    lock compartido. Ahora una segunda operación sobre el mismo proyecto se
+    rechaza mientras la primera sigue en curso (simulada aquí fijando
+    directamente el estado que dejaría una primera conexión real a mitad de
+    la operación, sin depender de temporización real)."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    app.state.active_project_operations.add(("default", project.name.lower()))
+
+    client = TestClient(app)
+    with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect(f"/api/projects/{project.name}/scan") as websocket:
+        websocket.send_json({"use_ocr": False, "use_gpu": False})
+        websocket.receive_json()
+    assert exc_info.value.code == 1008
+
+
+@pytest.mark.asyncio
+async def test_deduplicate_websocket_rejects_when_scan_already_in_progress(tmp_path) -> None:
+    """Mismo lock compartido entre `scan_websocket` y `deduplicate_websocket`
+    (AUDIT_CODE, sesión 2026-09-04): un escaneo en curso también bloquea una
+    deduplicación sobre el mismo proyecto, no solo otro escaneo."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    folder = tmp_path / "datos"
+    folder.mkdir()
+    client = TestClient(app)
+    add_response = client.post(f"/api/projects/{project.name}/folders/library", json={"path": str(folder)})
+    assert add_response.status_code == 200
+
+    app.state.active_project_operations.add(("default", project.name.lower()))
+
+    with (
+        pytest.raises(WebSocketDisconnect) as exc_info,
+        client.websocket_connect(f"/api/projects/{project.name}/scan/deduplicate") as websocket,
+    ):
+        websocket.receive_json()
+    assert exc_info.value.code == 1008
+
+
+@pytest.mark.asyncio
+async def test_scan_websocket_releases_lock_after_completion_allowing_next_scan(tmp_path) -> None:
+    """El lock se libera al terminar (`finally`), incluso en el camino feliz --
+    un segundo escaneo del mismo proyecto, tras completarse el primero, no debe
+    quedar bloqueado para siempre."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    empty_input = tmp_path / "empty-input"
+    empty_input.mkdir()
+    client = TestClient(app)
+    add_response = client.post(f"/api/projects/{project.name}/folders/library", json={"path": str(empty_input)})
+    assert add_response.status_code == 200
+
+    for _ in range(2):
+        with client.websocket_connect(f"/api/projects/{project.name}/scan") as websocket:
+            websocket.send_json({"use_ocr": False, "use_gpu": False})
+            while websocket.receive_json()["event"] != "completed":
+                pass
+
+    assert app.state.active_project_operations == set()
 
 
 @pytest.mark.asyncio

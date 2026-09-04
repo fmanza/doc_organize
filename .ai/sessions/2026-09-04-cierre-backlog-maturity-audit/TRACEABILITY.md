@@ -98,10 +98,48 @@ como paso nuevo en `tests.yml` (mismo job `test`, 8 combos de la matriz).
   usa mypy, no pyright; verificado que mypy ya pasaba limpio sin ellos).
 **Status**: ✅.
 
-### ⏸️ Bloque 4 — Edge cases de robustez (12-20 del resumen previo)
-**No implementado en esta sesión**, por decisión explícita del usuario
-("revisar ítem a ítem contigo antes de IMPLEMENT — no lo trato como lote").
-Pendiente.
+### ✅ Bloque 4 — Edge cases de robustez (revisados ítem a ítem, no como lote)
+**Archivo(s)**: `web/app.py`, `web/routes/scan.py`, `utils/date_format.py`,
+`main.py`, `core/models.py`, `dedup/deduplication.py`, `scan/scan_command.py`,
+`web/routes/duplicates.py`, `web/templates/duplicates_resolver.html.j2`, y
+tests correspondientes.
+
+Revisión ítem a ítem (12-20) con recomendación propia por ítem; el usuario
+confirmó todas salvo el 18, donde pidió explícitamente "nivel de resiliencia".
+
+- **12 (fix) — sin guarda de concurrencia entre operaciones del mismo proyecto**:
+  `app.state.active_project_operations` (`set` de `(tenant_id, nombre_proyecto)`,
+  compartido por app, mismo criterio que `project_registry`) — `scan_websocket`
+  y `deduplicate_websocket` reservan la clave al empezar y la liberan en un
+  `finally`; una segunda conexión sobre el MISMO proyecto se rechaza con
+  `code=1008` mientras la primera sigue en curso. Cubre tanto dos escaneos
+  como un escaneo+deduplicación cruzados.
+- **13, 14, 16, 17, 19 (aceptados tal cual, sin cambio de código)**: cada uno
+  con justificación propia (trade-off estándar de WebSocket, coste de `stat()`
+  despreciable, reprocesamiento sin pérdida de datos real, prerrequisito de
+  explotación ya implica compromiso previo, comportamiento consistente con el
+  resto del CLI).
+- **15 (fix) — `format_duration()` sin guarda ante duración negativa**:
+  `duration_seconds` se calcula con reloj de pared, no monótono; un ajuste
+  del reloj hacia atrás podía producir `"-1m 55s"`. Ahora `max(0, round(seconds))`.
+- **18 (fix, resiliencia pedida explícitamente)** — `move_group()` ahora
+  aísla el fallo de UN fichero (`OSError`, incluye `FileExistsError` de la
+  colisión doble del hotfix anterior) sin abortar el resto del grupo/lote,
+  mismo criterio que `DocumentConverter.convert_document()` por documento.
+  Cambio de contrato: `move_group()` devuelve ahora `(exact, version,
+  rutas_fallidas)` (antes 2-tupla); `DeduplicationReport`/`DeduplicationSummary`/
+  `ResolveDuplicatesResponse` ganan `failed_paths`, persistido en
+  `DEDUP_REPORT.json`/`DEDUP_HISTORY.jsonl` y mostrado en la UI (banner de
+  "Buscar duplicados" y resultado de "Resolver duplicados") en vez de perderse
+  en silencio.
+- **20 (fix) — asimetría de logging `_resolve_scan_paths`/`_resolve_dedup_paths`**:
+  `_resolve_dedup_paths` ahora avisa igual que su análogo al combinar
+  `--project` con `--duplicates-dir` explícito.
+
+**Status**: ✅ 478 tests totales (7 nuevos: 3 de concurrencia, 1 de duración
+negativa, 2 de resiliencia de `move_group`/`deduplicate_streaming`, 1 de la
+asimetría de logging), sin regresiones. `ruff`/`mypy`/`--doctest-modules`
+(26/26) limpios.
 
 ### ⏸️ Diferido, sin cambios
 - Ítem 10 original (consistencia de docstrings de métodos privados): de
@@ -115,13 +153,19 @@ Pendiente.
 ## Impacto
 
 ### Código
-- **Archivos modificados**: 22 (ver `git status`), + `tests/unit/test_hash_utils.py` nuevo.
-- **Cambios funcionales**: sí en Bloque 1 (comportamiento de autorización
-  real: 3 fixes de seguridad); solo docstrings/comentarios/CI en el resto.
+- **Archivos modificados**: 27 (ver `git status`), + `tests/unit/test_hash_utils.py` nuevo.
+- **Cambios funcionales**: sí en Bloque 1 (3 fixes de seguridad) y Bloque 4
+  (guarda de concurrencia por proyecto, resiliencia por fichero en dedup,
+  guarda de duración negativa, aviso de logging); solo docstrings/comentarios/CI
+  en los bloques 2, 3, 5.
 
 ### Compatibilidad
-- **BREAKING**: ninguno.
-- **NO BREAKING**: todo aditivo o corrección de comportamiento ya roto/inconsistente.
+- **BREAKING**: ninguno en API pública externa. `DeduplicationManager.move_group()`
+  (público pero de uso interno entre `resolve_duplicates()`/`deduplicate_streaming()`)
+  cambia de 2-tupla a 3-tupla — sin consumidores externos al propio paquete.
+- **NO BREAKING**: `DeduplicationReport.failed_paths`/`DeduplicationSummary.failed_paths`/
+  `ResolveDuplicatesResponse.failed_paths` son campos nuevos con default `[]` —
+  históricos JSONL previos sin este campo se siguen leyendo igual.
 
 ---
 
@@ -130,7 +174,7 @@ Pendiente.
 python -m ruff check src tests             → All checks passed!
 python -m mypy src                         → Success: no issues found in 52 source files
 python -m pytest --doctest-modules src -q  → 26 passed (dos ejecuciones seguidas, idempotente)
-python -m pytest -q --no-cov               → 471 passed
+python -m pytest -q --no-cov               → 478 passed
 ```
 
 ---
@@ -139,14 +183,16 @@ python -m pytest -q --no-cov               → 471 passed
 
 | Riesgo | Mitigación | Status |
 |--------|-----------|--------|
-| Bloque 4 (9 edge cases de robustez) sigue sin revisar | Pendiente de revisión ítem a ítem con el usuario, por decisión explícita | Pendiente |
 | Los ejemplos `Example:` con `tempfile.mkdtemp()` no limpian el directorio temporal tras ejecutarse | Mismo criterio que el resto de ejemplos ya existentes en el proyecto (ninguno limpiaba) — no es una convención nueva que se rompa | Aceptado, consistente con lo ya establecido |
+| `app.state.active_project_operations` es un `set` en memoria de proceso, no distribuido | Solo relevante si se despliega con más de un worker/proceso — hoy `_run_web` no expone `--workers` (un único proceso), mismo límite ya documentado para `TimedRotatingFileHandler` en `utils/logging.py` | Aceptado, no aplica todavía |
 
 ---
 
 ## Siguientes Pasos (Recomendado)
-1. Revisar Bloque 4 (edge cases 12-20) ítem a ítem con el usuario.
-2. Commit + confirmar push.
+1. Commit + confirmar push.
+2. Si en el futuro se despliega con múltiples workers, revisar si la guarda
+   de concurrencia del bloque 4 (ítem 12) necesita moverse a un mecanismo
+   compartido entre procesos (mismo límite ya aceptado para el logging a fichero).
 
 ---
 
@@ -182,23 +228,44 @@ python -m pytest -q --no-cov               → 471 passed
   repr completo de un `Path` en un doctest que deba pasar en ambos SO]**:
   comparar `.parts[-N:]` (sin la unidad/raíz) o `.name`/`.as_posix()` según
   el caso.
+- **[Un lock que protege un recurso compartido entre WebSockets debe vivir en
+  `app.state`, nunca en una variable de módulo ni en la función misma]**:
+  `active_project_operations` sigue exactamente el mismo patrón ya establecido
+  para `project_registry` (sesión `2026-09-04-audit-code-hotfixes`) — un `set`
+  por app, reservado al empezar una operación y liberado en un `finally`, para
+  que sobreviva a cualquier `return` intermedio (payload inválido, sin
+  carpetas, fuera de `allowed_scan_roots`, etc.).
+- **[Cuando se pide "resiliencia" para un bucle que mueve/procesa varios
+  ítems, el contrato de la función cambia, no solo su cuerpo]**: aislar el
+  fallo de un `move_group()` por fichero obligó a propagar `failed_paths` por
+  toda la cadena (`DeduplicationManager` → `ScanCommand.deduplicate_streaming()`
+  → `DedupEvent`/`DeduplicationSummary` → respuesta HTTP → JS de la plantilla)
+  para que la información no se pierda en silencio en ningún punto intermedio
+  — "resiliente" sin "visible" solo mueve el problema de "crash" a "éxito
+  silencioso pero incompleto", igualmente malo.
+- **[`OSError` ya incluye `FileExistsError`/`PermissionError`/`FileNotFoundError`
+  en su jerarquía]**: un único `except OSError` en `move_group()` captura tanto
+  el caso "fichero bloqueado por otra app" como el de "colisión doble tras
+  sufijo de hash" (el `FileExistsError` explícito del hotfix anterior) sin
+  necesitar dos ramas — verificar la jerarquía de excepciones builtin antes de
+  añadir un segundo `except` que ya sería redundante.
 
 ---
 
 ## Veredicto
 
-### 🟢 COMPLETADA (Bloques 1, 2, 3, 5 — Bloque 4 pendiente por diseño)
+### 🟢 COMPLETADA (Bloques 1-5, backlog completo del `/maturity-assessment` + `/audit-code`)
 
 **Criterios**:
-- ✅ Bloques 1, 2, 3, 5 implementados con tests de regresión donde aplica
-- ✅ Suite completa en verde (471 passed), `ruff`/`mypy` limpios
+- ✅ Los 5 bloques implementados con tests de regresión donde aplica (Bloque 4
+  revisado ítem a ítem, no como lote, según lo acordado)
+- ✅ Suite completa en verde (478 passed), `ruff`/`mypy` limpios
 - ✅ `pytest --doctest-modules src` verde y verificado idempotente (2 ejecuciones)
 - ✅ CI actualizado (`tests.yml`) para no volver a desincronizarse
-- ⬜ Bloque 4: pendiente, revisión ítem a ítem acordada con el usuario
 - ⬜ Commit: pendiente de esta misma sesión
 
 **Evidencia**:
 - Branch: `develop`
-- Tests: 471 passed (`python -m pytest -q --no-cov`)
+- Tests: 478 passed (`python -m pytest -q --no-cov`)
 
 **Sesión cerrada**: 2026-09-04

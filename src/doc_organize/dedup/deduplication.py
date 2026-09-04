@@ -80,24 +80,40 @@ class DeduplicationManager:
         self.logger.info(f"Deduplicación: {len(groups)} grupos detectados sobre {len(docs)} documentos")
         return groups
 
-    async def move_group(self, group: DuplicateGroup, duplicates_dir: Path) -> tuple[int, int]:
+    async def move_group(self, group: DuplicateGroup, duplicates_dir: Path) -> tuple[int, int, list[str]]:
         """Mueve los documentos descartados de un único `group` a `duplicates_dir`.
 
-        Devuelve `(duplicados_exactos_movidos, conflictos_de_version_resueltos)`
-        de este grupo (0 en el que no aplique, según `group.reason`). Extraído
-        de `resolve_duplicates()` (que lo reutiliza en su propio bucle) para que
-        `ScanCommand.deduplicate_streaming()` pueda yieldear progreso por grupo
-        sin duplicar la lógica de movimiento -- mismo criterio que la relación
-        entre `DocumentConverter.convert_document()` (por documento) y el bucle
-        de `ScanCommand._convert_documents()`.
+        Devuelve `(duplicados_exactos_movidos, conflictos_de_version_resueltos,
+        rutas_fallidas)` de este grupo (0/`[]` en lo que no aplique, según
+        `group.reason`). Extraído de `resolve_duplicates()` (que lo reutiliza en
+        su propio bucle) para que `ScanCommand.deduplicate_streaming()` pueda
+        yieldear progreso por grupo sin duplicar la lógica de movimiento --
+        mismo criterio que la relación entre `DocumentConverter.convert_document()`
+        (por documento) y el bucle de `ScanCommand._convert_documents()`.
+
+        Resiliencia por fichero (AUDIT_CODE, sesión 2026-09-04): si mover un
+        documento falla (`OSError` -- permiso denegado, fichero ausente/bloqueado,
+        colisión doble tras sufijo de hash), se registra en `rutas_fallidas` y se
+        sigue con el resto del grupo, en vez de abortar el grupo entero (y, en
+        cascada, el resto del lote) por un único fichero -- mismo criterio que
+        `DocumentConverter.convert_document()` aísla un documento del resto del
+        batch de conversión.
         """
         keep = group.user_choice or group.canonical_doc
         to_move = [doc for doc in [group.canonical_doc, *group.duplicates] if doc.full_path != keep.full_path]
+        moved = 0
+        failed_paths: list[str] = []
         for doc in to_move:
-            await self._move_to_duplicates(Path(doc.full_path), duplicates_dir, doc.sha256_hash)
+            try:
+                await self._move_to_duplicates(Path(doc.full_path), duplicates_dir, doc.sha256_hash)
+            except OSError as exc:
+                self.logger.warning(f"No se pudo mover '{doc.full_path}' a duplicados: {exc}")
+                failed_paths.append(doc.full_path)
+                continue
+            moved += 1
         if group.reason == DuplicateReason.EXACT_DUPLICATE:
-            return len(to_move), 0
-        return 0, len(to_move)
+            return moved, 0, failed_paths
+        return 0, moved, failed_paths
 
     async def finalize_report(
         self,
@@ -106,6 +122,7 @@ class DeduplicationManager:
         exact_moved: int,
         version_resolved: int,
         started_at: datetime | None = None,
+        failed_paths: list[str] | None = None,
     ) -> DeduplicationReport:
         """Construye el `DeduplicationReport` de una resolución ya completada
         (todos los grupos ya movidos vía `move_group`), escribe
@@ -137,6 +154,7 @@ class DeduplicationManager:
             duplicates_folder_path=str(duplicates_dir),
             started_at=started_at.isoformat() if started_at else None,
             duration_seconds=(finished_at - started_at).total_seconds() if started_at else None,
+            failed_paths=failed_paths or [],
             audit_json_path=str(audit_path),
             groups=groups,
         )
@@ -163,13 +181,18 @@ class DeduplicationManager:
 
         exact_moved = 0
         version_resolved = 0
+        failed_paths: list[str] = []
         for group in groups:
-            exact, version = await self.move_group(group, duplicates_dir)
+            exact, version, group_failed = await self.move_group(group, duplicates_dir)
             exact_moved += exact
             version_resolved += version
+            failed_paths.extend(group_failed)
 
-        report = await self.finalize_report(groups, duplicates_dir, exact_moved, version_resolved, started_at)
-        self.logger.info(f"Deduplicación resuelta: {exact_moved} duplicados exactos, {version_resolved} conflictos de versión")
+        report = await self.finalize_report(groups, duplicates_dir, exact_moved, version_resolved, started_at, failed_paths=failed_paths)
+        self.logger.info(
+            f"Deduplicación resuelta: {exact_moved} duplicados exactos, {version_resolved} conflictos de versión"
+            + (f", {len(failed_paths)} fallidos" if failed_paths else "")
+        )
         return report
 
     @staticmethod

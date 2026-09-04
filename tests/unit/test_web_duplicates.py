@@ -356,7 +356,7 @@ async def test_duplicates_resolve_no_duplicates_is_noop(tmp_path) -> None:
 
     assert response.status_code == 200
     result = response.json()
-    assert result == {"moved": 0, "groups_resolved": 0}
+    assert result == {"moved": 0, "groups_resolved": 0, "failed_paths": []}
 
 
 @pytest.mark.asyncio

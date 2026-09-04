@@ -98,6 +98,7 @@ class DeduplicationSummary:
     moved: int = 0
     duration_seconds: float = 0.0
     warnings: list[str] = field(default_factory=list)
+    failed_paths: list[str] = field(default_factory=list)
 
     def render(self) -> str:
         lines = [
@@ -108,6 +109,9 @@ class DeduplicationSummary:
         if self.warnings:
             lines.append(f"Avisos ({len(self.warnings)}):")
             lines.extend(f"  - {warning}" for warning in self.warnings)
+        if self.failed_paths:
+            lines.append(f"No se pudieron mover ({len(self.failed_paths)}):")
+            lines.extend(f"  - {path}" for path in self.failed_paths)
         return "\n".join(lines)
 
 
@@ -475,6 +479,7 @@ class ScanCommand:
         groups: list[DuplicateGroup] = []
         exact_moved = 0
         version_resolved = 0
+        failed_paths: list[str] = []
         completed_ok = False
         try:
             yield DedupEvent(event=DedupEventType.STARTED, data={})
@@ -492,18 +497,30 @@ class ScanCommand:
             total = len(groups)
             for index, group in enumerate(groups, start=1):
                 yield DedupEvent(event=DedupEventType.GROUP_STARTED, data={"index": index, "total": total, "reason": group.reason.value})
-                exact, version = await dedup_manager.move_group(group, duplicates_dir)
+                exact, version, group_failed = await dedup_manager.move_group(group, duplicates_dir)
                 exact_moved += exact
                 version_resolved += version
-                yield DedupEvent(event=DedupEventType.GROUP_RESOLVED, data={"index": index, "total": total, "moved": exact + version})
+                failed_paths.extend(group_failed)
+                yield DedupEvent(
+                    event=DedupEventType.GROUP_RESOLVED,
+                    data={"index": index, "total": total, "moved": exact + version, "failed": len(group_failed)},
+                )
 
-            report = await dedup_manager.finalize_report(groups, duplicates_dir, exact_moved, version_resolved, started_at=started_at)
+            report = await dedup_manager.finalize_report(
+                groups, duplicates_dir, exact_moved, version_resolved, started_at=started_at, failed_paths=failed_paths
+            )
             completed_ok = True
             moved = report.total_exact_duplicates + report.total_version_conflicts
             duration_seconds = report.duration_seconds if report.duration_seconds is not None else 0.0
             yield DedupEvent(
                 event=DedupEventType.COMPLETED,
-                data={"groups_found": total, "moved": moved, "duration_seconds": duration_seconds, "warnings": warnings},
+                data={
+                    "groups_found": total,
+                    "moved": moved,
+                    "duration_seconds": duration_seconds,
+                    "warnings": warnings,
+                    "failed_paths": report.failed_paths,
+                },
             )
         finally:
             # Solo cubre el camino de aborto: el camino de éxito ya persistió su
@@ -513,7 +530,9 @@ class ScanCommand:
             if not completed_ok:
                 try:
                     await asyncio.to_thread(duplicates_dir.mkdir, parents=True, exist_ok=True)
-                    await dedup_manager.finalize_report(groups, duplicates_dir, exact_moved, version_resolved, started_at=started_at)
+                    await dedup_manager.finalize_report(
+                        groups, duplicates_dir, exact_moved, version_resolved, started_at=started_at, failed_paths=failed_paths
+                    )
                 except OSError as exc:
                     self.logger.warning(f"No se pudo persistir el histórico de deduplicación tras un aborto: {exc}")
 

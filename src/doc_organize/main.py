@@ -153,6 +153,8 @@ async def _resolve_dedup_paths(args: argparse.Namespace) -> tuple[Path, Path]:
         async with _registry(args) as registry:
             project = await registry.get_project(args.project)
         root = Path(project.root_path)
+        if args.duplicates_dir:
+            logger.warning("Se combinó --project con --duplicates-dir; el flag explícito tiene prioridad sobre la ruta derivada del proyecto.")
         duplicates_dir = Path(args.duplicates_dir) if args.duplicates_dir else root / DUPLICATES_FOLDER_NAME
         return duplicates_dir, root / SCAN_FOLDERS_JSON_NAME
 

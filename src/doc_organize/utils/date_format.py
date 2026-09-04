@@ -71,6 +71,12 @@ def format_duration(seconds: float) -> str:
 
     Args:
         seconds: Duración en segundos (p. ej. `ScanRunReport.duration_seconds`).
+            Se trata como `0` si es negativa (AUDIT_CODE, sesión 2026-09-04):
+            `duration_seconds` se calcula con reloj de pared
+            (`datetime.now(UTC)`), no monótono — un ajuste del reloj del
+            sistema hacia atrás (resync NTP) a mitad de una operación larga
+            podría producir una duración negativa; mostrarla tal cual
+            (`"-1m 55s"`) no tiene sentido para el usuario.
 
     Returns:
         Cadena legible: `"2m 5s"`, `"48s"`.
@@ -78,8 +84,10 @@ def format_duration(seconds: float) -> str:
     Example:
         >>> format_duration(125.4)
         '2m 5s'
+        >>> format_duration(-5.0)
+        '0s'
     """
-    total_seconds = round(seconds)
+    total_seconds = max(0, round(seconds))
     minutes, secs = divmod(total_seconds, 60)
     return f"{minutes}m {secs}s" if minutes else f"{secs}s"
 
