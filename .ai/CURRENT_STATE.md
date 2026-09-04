@@ -1,12 +1,20 @@
 # CURRENT STATE — doc_organize
 
-**Generado**: 2026-08-29
-**Fuente**: `.github/prompts/doclink_extractor_plan.md` (versión 3.1, revisión 12) +
-`.ai/DECISIONS_LOG.md` (revisión 13, auditoría de seguridad) + suite de tests real
-**Rama activa**: `develop` — todo el trabajo de Fase 1 + revisión 13 vive sin commitear desde el
-scaffold inicial
-**Versión**: `0.2.0` (`pyproject.toml`/`CHANGELOG.md`) — primera versión con changelog formal;
-`0.1.0` no tuvo entrada retroactiva
+**Generado**: 2026-08-29 · **actualizado**: 2026-09-04
+**Fuente de esta actualización**: `git log`, `pyproject.toml`/`CHANGELOG.md`, y
+re-ejecución en vivo de `ruff`/`mypy`/`pytest`/`mkdocs build --strict` — no una
+promesa (mismo criterio que `.ai/sessions/2026-09-03-historial-escaneo-fecha-docs-offline/TRACEABILITY.md`).
+**Rama activa**: `develop`, al día con lo commiteado (`eef8847` es el HEAD)
+**Versión**: `0.7.0` (`pyproject.toml`/`CHANGELOG.md`)
+
+> **Nota de corrección (2026-09-04)**: este documento llevaba desde 2026-08-29
+> (`v0.2.0`) sin actualizarse — 5 versiones y ~15 sesiones de trabajo de
+> diferencia con el estado real del repositorio. La tabla "Estado de Fase 1",
+> el snapshot de calidad y "Trabajo pendiente" de más abajo describían un
+> estado ya superado. Se han actualizado con datos verificados en vivo hoy;
+> **no** se ha reconstruido a mano el detalle de cada versión intermedia
+> (`0.3.0`–`0.7.0`) — para eso, `CHANGELOG.md` es la fuente completa y ya
+> mantenida, no hace falta duplicarla aquí.
 
 > Reemplaza una versión anterior (fechada 2026-06-05) que describía otra librería (motores de base
 > de datos, `v0.10.0`, migración a "Zenical") — la encarnación previa de este mismo repositorio
@@ -14,50 +22,43 @@ scaffold inicial
 
 ---
 
-## Estado de Fase 1
+## Estado general
 
-| Fase | Contenido | Estado |
-|---|---|---|
-| A–C | Núcleo: escaneo, conversión (Docling), OCR, deduplicación, caché (REQ-001 a REQ-006) | ✅ Completa |
-| C.1 | Gestión de proyectos (REQ-008) | ✅ Completa |
-| D-1 | CLI (`main.py`: `project`, `scan`, `web`) | ✅ Completa |
-| D-2a | Web: esqueleto FastAPI, auth básica, Project Selector, Dashboard | ✅ Completa |
-| §2.7.2 (rev. 8) | Auth multi-usuario/multi-tenant (4 sub-pasos) | ✅ Completa |
-| §2.7.3 (rev. 10) | Folder Selector + escaneo web con WebSocket (2 sub-pasos) | ✅ Completa |
-| §2.7.4 (rev. 11) | Cache Viewer + Export ZIP + Duplicates Resolver (3 sub-pasos) | ✅ Completa |
-| §15 (rev. 12) | AUDIT_PLAN + IMPLEMENT del roadmap restante (docs, CI, benchmark) | ✅ Completa |
-| Rev. 9 | Roles y gestión de usuarios (`Role`, admin/admin por defecto, `/admin/users`) | ✅ Completa |
-| Rev. 13 | Auditoría de seguridad post-rev. 9: `Role.allowed_scan_roots`, cookie `Secure`, rate limiting de `/login` | ✅ Completa |
-| Fase E | Tests de integración adicionales, documentación ampliada | ⬜ Abierta |
+Fase 1 (escaneo + conversión Docling + OCR + deduplicación + caché + CLI + web
+con auth multi-usuario/multi-tenant) está completa desde hace varias
+versiones. Desde `v0.2.0`, cada versión siguiente (`CHANGELOG.md` tiene el
+detalle completo, no reproducido aquí) añadió, entre otras cosas:
 
-**Fuente de verdad detallada** (historial de revisiones, AUDIT_PLAN de cada pieza, decisiones de
-alcance): `.github/prompts/doclink_extractor_plan.md`.
+- Reestructuración de navegación web (pestañas Escanear/Caché/Duplicados/Historial/Errores).
+- Gestión de errores de escaneo agrupados por ejecución + logging a fichero con rotación diaria.
+- Formato de fecha/hora localizado (`Europe/Madrid` por defecto) y duración de ejecuciones.
+- Documentación offline (ZIP + checksums) y guías de instalación de OCR/audio-vídeo por SO.
+- Duración de conversión/descubrimiento por documento + progreso en vivo de deduplicación
+  (WebSocket, mismo patrón que el escaneo).
+- Una ronda de `/maturity-assessment` + `/audit-code` completa (sesiones `2026-09-03/04`):
+  arquitectura, seguridad web (login CSRF, oráculo de `/api/fs/browse`, filtrado de
+  `allowed_scan_roots`), concurrencia real entre WebSocket del mismo proyecto, resiliencia
+  por fichero en deduplicación, `pytest --doctest-modules` verificado y añadido a CI.
+
+**Fuente de verdad detallada por versión**: `CHANGELOG.md` (formato Keep a
+Changelog, bien mantenido). **Historial de sesiones con directrices para
+futuras IAs**: `.ai/sessions/<fecha>[-slug]/TRACEABILITY.md`.
 
 ---
 
-## Calidad actual (verificado, no una promesa)
+## Calidad actual (verificado en vivo, 2026-09-04)
 
 ```
-python -m ruff check src tests           → All checks passed
-python -m mypy src                        → Success: no issues found in 42 source files
-python -m pytest tests/unit -m "not slow" → 233 passed (247 recolectados en total, con @slow)
-python -m build                           → doc_organize-0.2.0.tar.gz + .whl sin error
+python -m ruff check src tests           → All checks passed!
+python -m mypy src                        → Success: no issues found in 52 source files
+python -m pytest -q --no-cov              → 478 passed
+python -m pytest --doctest-modules src    → 26 passed (verificado idempotente, dos ejecuciones)
 mkdocs build --strict                     → exit 0, sin links rotos
 ```
 
-> **Nota (2026-08-29, maturity-assessment)**: re-verificado en vivo. `pytest`/`mkdocs build --strict`
-> siguen en verde tal cual. `ruff check` había pasado a fallar con 26 errores tras un bump de
-> versión de la herramienta (0.15.18 → 0.16.4, reglas nuevas `RUF022`/`RUF059`/`ASYNC230`/`PYI034`
-> no existían cuando se escribió esta tabla) — corregido en esta misma sesión, ver `git log`.
-> `mypy` fallaba por `types-aiofiles` ausente en el entorno local (dependencia de `[dev]` no
-> reinstalada), no por un error de tipos real.
-
-Benchmark real (100 PDFs nativos, sin OCR): **84.6s, 70.9 docs/min, 0 errores** — cumple el NFR
-"< 2 minutos" del PLAN.
-
 ---
 
-## Estructura del código (verificada)
+## Estructura del código (verificada 2026-09-04)
 
 ```
 src/doc_organize/
@@ -66,44 +67,51 @@ src/doc_organize/
 └── scan/, web/, main.py         # Nivel 3
 ```
 
-11 módulos reales. Detalle: `.ai/architecture.md`, `docs/functional/index.md`.
+52 ficheros `.py` en `src/doc_organize/` (11 paquetes + `main.py`/`__main__.py`).
+Excepción documentada a la regla de niveles: `projects/` importa de
+`validators/` (ambos Nivel 2) — ver `.ai/architecture.md` para la
+justificación. Detalle completo: `.ai/architecture.md`, `docs/functional/index.md`.
 
 ---
 
 ## Trabajo pendiente conocido (no bloqueante)
 
-- Confirmar en verde la matriz de CI ampliada a Python 3.10–3.14 (`tests.yml`) — corregida esta
-  sesión, no verificable localmente (este entorno de desarrollo es Python 3.14 únicamente).
-- Pruebas en navegador real de las 6 páginas web — sustituidas por un smoke test contra el servidor
-  real; sigue pendiente una verificación genuina en Chrome/Firefox/Safari.
-- Tokens de API personales por usuario (acceso programático sin sesión de navegador).
-- Dos decisiones de alcance analizadas con opciones pero no implementadas (`§14` del PLAN):
-  validación `AuthStore.tenant_exists()` en `ProjectRegistry`, y anidamiento de rutas de salida en
-  `DocumentConverter` (riesgo de `MAX_PATH` en Windows con carpetas de entrada muy profundas).
-- **(revisión 13)** Cualquier tenant en producción con roles no-admin restringidos debe recibir
-  `allowed_scan_roots` asignadas por un admin tras desplegar `0.2.0` — sin esa asignación, esos
-  roles no pueden iniciar ningún escaneo nuevo (antes sí podían, sin restricción real).
-  Acción de despliegue/operación, no de código.
-- **(revisión 13)** La cookie de sesión solo se marca `Secure` si `request.url.scheme == "https"` en
-  el propio proceso — un despliegue detrás de proxy TLS necesita `ProxyHeadersMiddleware` +
-  `X-Forwarded-Proto` configurados para que esto funcione; no verificable desde este repo.
-- **(revisión 13)** `pytest -m slow` no se ejecutó en la sesión de la auditoría de seguridad (sin
-  cambios en `converter/`/`scan_command.py` que la afecten, riesgo bajo) — pendiente antes de un
-  release real.
-- ~~Rate-limiting en `/login` antes de exponer fuera de loopback~~ — **cerrado en revisión 13**
-  (`LoginRateLimiter`, ver `.ai/DECISIONS_LOG.md`).
+- Migración de los 6 enums de `core/models.py` (`DocumentStatus`,
+  `ConversionStatus`, `DuplicateReason`, `OcrMode`, `ScanEventType`,
+  `DedupEventType`) a `enum.StrEnum` (sugerencia `UP042` de ruff) — diferida
+  deliberadamente (sesión `2026-09-04-audit-code-hotfixes`): cambia el
+  `str()`/f-string de esos enums de forma observable, necesita su propia
+  revisión.
+- `LICENSE`: el nombre en el copyright ("Francisco") no se ha confirmado
+  contra el nombre legal real del autor — pendiente de que el usuario lo
+  confirme antes de tocarlo.
+- `README.md:100`: ejemplo de checksum con una versión de ZIP de docs
+  obsoleta (`0.3.0`) — cosmético, bajo valor, no priorizado.
+- `app.state.active_project_operations` (guarda de concurrencia entre
+  escaneo/deduplicación del mismo proyecto, sesión `2026-09-04`) es un `set`
+  en memoria de un único proceso — no distribuido. Solo relevante si se
+  despliega con más de un worker (`_run_web` no expone `--workers` hoy).
+- Pruebas en navegador real de las páginas web — sustituidas por tests contra
+  el servidor real (`httpx`/`TestClient`); sigue pendiente una verificación
+  genuina en Chrome/Firefox/Safari.
+- Tokens de API personales por usuario (acceso programático sin sesión de
+  navegador) — nunca implementado, sigue fuera de alcance.
+- Bloque de "edge cases de robustez" revisado y aceptado tal cual en la
+  sesión `2026-09-04-cierre-backlog-maturity-audit` (sin guarda de re-chequeo
+  de rol a mitad de una conexión WebSocket ya autenticada, `stat()` síncrono
+  sin `to_thread` en `project_registry.py`/`scanned_folders_store.py`, export
+  ZIP sigue symlinks dentro de `Conversión/`, caché de conversiones ya hechas
+  se pierde — no se corrompe, solo se reprocesa — si `run_streaming()` aborta
+  antes de `cache.save_entries()`, `main.py::_run_deduplicate` no traduce
+  excepciones inesperadas a un mensaje limpio) — cada uno con su
+  justificación propia documentada en esa sesión, no re-evaluados aquí.
 
 ---
 
 ## Próximos pasos
 
-1. ~~`git add`/commit/push del trabajo acumulado (Fase 1 completa + revisión 13 de seguridad)~~ —
-   **hecho**: `git log` confirma los commits `2d71628`/`34d6133`/`83504cc`/`3a21ba0` ya en `develop`.
-   Este punto había quedado desactualizado (nota añadida 2026-08-29, maturity-assessment) —
-   mensaje de referencia seguía en `.ai/sessions/2026-08-29/TRACEABILITY.md` (revisión 13) y
-   `.ai/sessions/2026-08-28/TRACEABILITY.md` (Fase 1).
-2. Fase E: tests de integración adicionales, documentación ampliada.
-3. Cerrar los pendientes de la sección anterior según prioridad real (no la del orden en que se
-   listaron originalmente en el PLAN — ver `§15` para el reordenamiento por severidad).
-4. Antes de exponer cualquier despliegue no-loopback existente a `0.2.0`: asignar
-   `allowed_scan_roots` a sus roles no-admin (revisión 13).
+1. `git push` a `origin/develop` — confirmar con el usuario antes de cada
+   push, nunca automático (ver `CLAUDE.md`/instrucciones de sesión).
+2. Si se retoma alguno de los pendientes de arriba, empezar por los que
+   tienen dueño claro (LICENSE, StrEnum) antes que por los ya aceptados como
+   riesgo conocido.
