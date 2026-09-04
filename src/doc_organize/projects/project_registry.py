@@ -41,13 +41,17 @@ class ProjectRegistry:
         logger (logging.Logger): Logger estructurado de la instancia.
 
     Example:
-        >>> import asyncio
+        >>> import asyncio, tempfile
         >>> from pathlib import Path
         >>> async def main():
-        ...     async with ProjectRegistry() as registry:
-        ...         project = await registry.create_project("Mi Proyecto", Path("/repo/workspaces"))
+        ...     base_location = Path(tempfile.mkdtemp())
+        ...     registry_path = base_location / "projects.json"
+        ...     async with ProjectRegistry(registry_path) as registry:
+        ...         project = await registry.create_project("Mi Proyecto", base_location)
         ...         all_projects = await registry.list_projects()
+        ...         return len(all_projects)
         >>> asyncio.run(main())
+        1
     """
 
     def __init__(self, registry_path: str | Path = _DEFAULT_REGISTRY_PATH) -> None:

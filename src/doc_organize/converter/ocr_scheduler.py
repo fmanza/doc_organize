@@ -30,8 +30,13 @@ class OCRScheduler:
         >>> async def main():
         ...     scheduler = OCRScheduler()
         ...     results = await scheduler.process_with_ocr(candidates, Path("./Conversión"))
-        >>> asyncio.run(main())
+        >>> asyncio.run(main())  # doctest: +SKIP
     """
+    # +SKIP deliberado (AUDIT_CODE, sesión 2026-09-03/04): `process_with_ocr()`
+    # necesita un documento real con OCR real de Docling (carga de modelo
+    # incluida) -- mismo motivo que `DocumentConverter.convert_document()`, ver
+    # su docstring. `test_ocr_scheduler.py` ya cubre esto de verdad, marcado
+    # `@pytest.mark.slow`.
 
     def __init__(self) -> None:
         self.logger = get_logger(__name__)

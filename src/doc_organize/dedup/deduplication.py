@@ -28,9 +28,26 @@ class DeduplicationManager:
         logger (logging.Logger): Logger estructurado de la instancia.
 
     Example:
-        >>> manager = DeduplicationManager()
-        >>> groups = manager.find_duplicates(documents)
-        >>> report = await manager.resolve_duplicates(groups, Path("./duplicados"))
+        >>> import asyncio, tempfile
+        >>> async def main():
+        ...     source_dir = Path(tempfile.mkdtemp())
+        ...     original = source_dir / "a.pdf"
+        ...     copia = source_dir / "a_copy.pdf"
+        ...     original.write_bytes(b"contenido-identico")
+        ...     copia.write_bytes(b"contenido-identico")
+        ...     documents = [
+        ...         DocumentMetadata(full_path=str(original), display_name="a.pdf", extension="pdf",
+        ...             size_bytes=19, modified_time=1.0, sha256_hash="hash-igual"),
+        ...         DocumentMetadata(full_path=str(copia), display_name="a_copy.pdf", extension="pdf",
+        ...             size_bytes=19, modified_time=2.0, sha256_hash="hash-igual"),
+        ...     ]
+        ...     manager = DeduplicationManager()
+        ...     groups = manager.find_duplicates(documents)
+        ...     duplicates_dir = Path(tempfile.mkdtemp())
+        ...     report = await manager.resolve_duplicates(groups, duplicates_dir)
+        ...     return report.total_exact_duplicates
+        >>> asyncio.run(main())
+        1
     """
 
     def __init__(self) -> None:

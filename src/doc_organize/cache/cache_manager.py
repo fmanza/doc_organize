@@ -60,11 +60,15 @@ class CacheManager:
         logger (logging.Logger): Logger estructurado de la instancia.
 
     Example:
-        >>> import asyncio
+        >>> import asyncio, tempfile
+        >>> from pathlib import Path
         >>> async def main():
-        ...     async with CacheManager("./cache.db") as cache:
+        ...     db_path = Path(tempfile.mkdtemp()) / "cache.db"
+        ...     async with CacheManager(db_path) as cache:
         ...         entries = await cache.load_cache()
+        ...     return entries
         >>> asyncio.run(main())
+        {}
     """
 
     def __init__(self, db_path: str | Path = "cache.db") -> None:
@@ -140,7 +144,14 @@ class CacheManager:
             int: Numero de entradas que coinciden.
 
         Example:
-            >>> total = await cache.count_entries("informe")
+            >>> import asyncio, tempfile
+            >>> from pathlib import Path
+            >>> async def main():
+            ...     db_path = Path(tempfile.mkdtemp()) / "cache.db"
+            ...     async with CacheManager(db_path) as cache:
+            ...         return await cache.count_entries("informe")
+            >>> asyncio.run(main())
+            0
         """
         query = "SELECT COUNT(*) FROM cache_entries"
         params: tuple[str, ...] = ()
@@ -168,7 +179,14 @@ class CacheManager:
             list[CacheEntry]: Entradas de la pagina solicitada, ordenadas por `file_path`.
 
         Example:
-            >>> page = await cache.load_cache_page(limit=50, offset=0)
+            >>> import asyncio, tempfile
+            >>> from pathlib import Path
+            >>> async def main():
+            ...     db_path = Path(tempfile.mkdtemp()) / "cache.db"
+            ...     async with CacheManager(db_path) as cache:
+            ...         return await cache.load_cache_page(limit=50, offset=0)
+            >>> asyncio.run(main())
+            []
         """
         query = "SELECT file_path, sha256_hash, timestamp, status, conversion_status, error_message, error_retry_count FROM cache_entries"
         params: list[object] = []

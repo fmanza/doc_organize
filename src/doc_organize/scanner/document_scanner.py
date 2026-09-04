@@ -43,12 +43,16 @@ class DocumentScanner:
         logger (logging.Logger): Logger estructurado de la instancia.
 
     Example:
-        >>> import asyncio
+        >>> import asyncio, tempfile
+        >>> from pathlib import Path
         >>> async def main():
+        ...     docs_dir = Path(tempfile.mkdtemp())
+        ...     (docs_dir / "informe.txt").write_text("contenido de prueba")
         ...     async with DocumentScanner() as scanner:
-        ...         result = await scanner.scan_folders(["/repo/docs"])
-        ...         print(result.summary)
+        ...         result = await scanner.scan_folders([str(docs_dir)])
+        ...         return result.summary
         >>> asyncio.run(main())
+        {'txt': 1}
     """
 
     def __init__(self, max_concurrent_hashes: int = _DEFAULT_MAX_CONCURRENT_HASHES) -> None:
@@ -110,7 +114,7 @@ class DocumentScanner:
         tree = DirectoryTree(
             root_name="scan",
             root_path="",
-            root_node=DirectoryTreeNode(name="scan", type="dir", path="", children=root_nodes),  # pyright: ignore[reportCallIssue]
+            root_node=DirectoryTreeNode(name="scan", type="dir", path="", children=root_nodes),
             total_files=len(documents),
             file_extension_counts=summary,
         )
@@ -130,7 +134,7 @@ class DocumentScanner:
             # (FolderValidator) y este recorrido -- caso extremo; se degrada a un
             # nodo vacio en vez de propagar `None` (AUDIT_CODE, sesion 2026-09-03).
             self.logger.warning(f"La carpeta raíz '{root}' desapareció antes de poder escanearla.")
-            node = DirectoryTreeNode(name=root.name or str(root), type="dir", path=str(root), children=[])  # pyright: ignore[reportCallIssue]
+            node = DirectoryTreeNode(name=root.name or str(root), type="dir", path=str(root), children=[])
         return node, files
 
     def _build_node(
@@ -142,7 +146,7 @@ class DocumentScanner:
         excepción aborte el escaneo completo por un único fichero (AUDIT_CODE,
         sesión 2026-09-03)."""
         if path.is_symlink():
-            return DirectoryTreeNode(name=path.name, type="file", path=str(path))  # pyright: ignore[reportCallIssue]
+            return DirectoryTreeNode(name=path.name, type="file", path=str(path))
 
         if path.is_dir():
             children: list[DirectoryTreeNode] = []
@@ -159,7 +163,7 @@ class DocumentScanner:
                 child = self._build_node(entry, files, allowed_extensions, exclude_dir)
                 if child is not None:
                     children.append(child)
-            return DirectoryTreeNode(name=path.name or str(path), type="dir", path=str(path), children=children)  # pyright: ignore[reportCallIssue]
+            return DirectoryTreeNode(name=path.name or str(path), type="dir", path=str(path), children=children)
 
         try:
             stat = path.stat()

@@ -35,11 +35,15 @@ async def hash_file(file_path: str, chunk_size: int = 65536) -> str:
         IOError: If the file cannot be read.
 
     Example:
-        >>> import asyncio
+        >>> import asyncio, hashlib, tempfile
+        >>> from pathlib import Path
         >>> async def main():
-        ...     hash_val = await hash_file("/path/to/file.pdf")
-        ...     print(hash_val)  # e.g. "abc123def456..."
+        ...     file_path = Path(tempfile.mkdtemp()) / "documento.pdf"
+        ...     file_path.write_bytes(b"contenido")
+        ...     digest = await hash_file(str(file_path))
+        ...     return digest == hashlib.sha256(b"contenido").hexdigest()
         >>> asyncio.run(main())
+        True
     """
     path = Path(file_path)
 

@@ -178,10 +178,19 @@ async def folder_selector(
     dependencies=[Depends(require_project_access)],
 )
 async def list_folder_library(name: str, request: Request) -> list[ScannedFolder]:
-    """Lista la carpeta persistente de carpetas guardadas de `name` (menú Escaneo)."""
+    """Lista la carpeta persistente de carpetas guardadas de `name` (menú Escaneo).
+
+    Filtrada por `allowed_scan_roots` del rol (AUDIT_CODE, sesión 2026-09-03/04):
+    sin esto, un rol restringido con acceso al proyecto pero con raíces de
+    escaneo limitadas podía ver rutas absolutas completas del servidor
+    guardadas por otro usuario/admin fuera de su ámbito permitido — mismo
+    criterio que ya se aplicaba al dar de alta una carpeta (`add_folder_to_library`).
+    """
     async with get_project_registry(request) as registry:
         project = await registry.get_project(name, tenant_id=get_tenant_id(request))
-    return await get_scanned_folders_store().list_folders(project)
+    folders = await get_scanned_folders_store().list_folders(project)
+    allowed_roots = await get_allowed_scan_roots(request)
+    return [folder for folder in folders if paths_within_roots([folder.path], allowed_roots)]
 
 
 @router.post(
@@ -214,12 +223,23 @@ async def add_folder_to_library(name: str, payload: AddFolderRequest, request: R
 async def remove_folder_from_library(name: str, payload: AddFolderRequest, request: Request) -> None:
     """Elimina una carpeta no usada de la lista persistente de `name`.
 
+    Sujeta a la misma restricción `allowed_scan_roots` que `add_folder_to_library`
+    (AUDIT_CODE, sesión 2026-09-03/04): antes un rol restringido podía borrar
+    cualquier entrada de la lista (si no estaba `used`) sin que se le exigiera
+    acceso a esa ruta.
+
     Raises:
-        HTTPException: 404 si la carpeta no está en la lista; 409 si ya se usó
-            en un escaneo (`ScannedFolderInUseError`, mapeada en `web/app.py`).
+        HTTPException: 403 si la ruta queda fuera de `allowed_scan_roots` del
+            rol; 404 si la carpeta no está en la lista; 409 si ya se usó en un
+            escaneo (`ScannedFolderInUseError`, mapeada en `web/app.py`).
     """
     async with get_project_registry(request) as registry:
         project = await registry.get_project(name, tenant_id=get_tenant_id(request))
+
+    allowed_roots = await get_allowed_scan_roots(request)
+    if not paths_within_roots([payload.path], allowed_roots):
+        raise HTTPException(status_code=403, detail="No tienes acceso a esa carpeta.")
+
     await get_scanned_folders_store().remove_folder(project, payload.path)
 
 

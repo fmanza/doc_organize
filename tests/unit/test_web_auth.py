@@ -272,6 +272,67 @@ async def test_non_loopback_write_without_origin_header_succeeds(tmp_path) -> No
     assert response.status_code == 201
 
 
+# ===== Login CSRF: Origin/Referer en POST /login (AUDIT_CODE, sesión 2026-09-03/04) =====
+
+
+@pytest.mark.asyncio
+async def test_login_with_mismatched_origin_returns_403(tmp_path) -> None:
+    """`SameSite=Strict` impide *reenviar* una cookie de sesión existente en petición
+    cross-site, pero no impide que un formulario auto-enviado desde otro origen
+    fije una cookie NUEVA en la respuesta de `POST /login` (login CSRF) — así que
+    esta ruta necesita su propia comprobación Origin/Referer, igual que el resto
+    de escrituras (que solo protegen post-autenticación, no aplican aquí)."""
+    await _provision_user(tmp_path / "auth.db")
+    app = _non_loopback_app(tmp_path)
+    async with _client(app, base_url="http://example.com") as client:
+        response = await client.post(
+            "/login",
+            data={"tenant_id": _TENANT_ID, "username": _USERNAME, "password": _PASSWORD},
+            headers={"Origin": "http://attacker.com"},
+        )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_login_with_matching_origin_succeeds(tmp_path) -> None:
+    await _provision_user(tmp_path / "auth.db")
+    app = _non_loopback_app(tmp_path)
+    async with _client(app, base_url="http://example.com") as client:
+        response = await client.post(
+            "/login",
+            data={"tenant_id": _TENANT_ID, "username": _USERNAME, "password": _PASSWORD},
+            headers={"Origin": "http://example.com"},
+        )
+    assert response.status_code == 303  # redirect tras login correcto
+
+
+@pytest.mark.asyncio
+async def test_login_without_origin_header_succeeds(tmp_path) -> None:
+    # Clientes no-navegador (curl, scripts) no envian Origin; sin cookie de sesion
+    # previa que proteger, no hay nada que un atacante pueda fijar por esta via.
+    await _provision_user(tmp_path / "auth.db")
+    app = _non_loopback_app(tmp_path)
+    async with _client(app) as client:
+        response = await _login(client)
+    assert response.status_code == 303
+
+
+@pytest.mark.asyncio
+async def test_login_csrf_check_does_not_apply_in_loopback_mode(tmp_path) -> None:
+    """En loopback/sin auth nada depende de la sesion fijada por `/login` (la app
+    entera es accesible sin autenticar), asi que la comprobacion Origin no aplica
+    -- mismo criterio que el resto de la app en ese modo."""
+    await _provision_user(tmp_path / "auth.db")
+    app = create_app(registry_path=tmp_path / "projects.json", auth_db_path=tmp_path / "auth.db")
+    async with _client(app, base_url="http://example.com") as client:
+        response = await client.post(
+            "/login",
+            data={"tenant_id": _TENANT_ID, "username": _USERNAME, "password": _PASSWORD},
+            headers={"Origin": "http://attacker.com"},
+        )
+    assert response.status_code == 303
+
+
 @pytest.mark.asyncio
 async def test_non_loopback_bearer_header_alone_no_longer_authenticates(tmp_path) -> None:
     # Revision 8 (SS2.7.2): el bearer compartido se retira. Un header Authorization

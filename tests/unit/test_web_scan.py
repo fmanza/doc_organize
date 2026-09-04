@@ -1294,6 +1294,75 @@ async def test_scan_websocket_non_admin_role_without_allowed_roots_rejects_any_p
 
 
 @pytest.mark.asyncio
+async def test_folder_library_get_filters_out_folders_outside_allowed_roots(tmp_path) -> None:
+    """AUDIT_CODE (sesión 2026-09-03/04): antes `GET .../folders/library` devolvía
+    la lista completa sin filtrar por `allowed_scan_roots` — un rol restringido
+    con acceso al proyecto podía ver rutas absolutas del servidor guardadas por
+    otro usuario/admin fuera de su ámbito permitido. Ahora se filtran, mismo
+    criterio que ya se exigía al dar de alta una carpeta."""
+    auth_db_path = tmp_path / "auth.db"
+    async with AuthStore(auth_db_path) as store:
+        tenant = await store.create_tenant("Acme Corp")
+        allowed_root = tmp_path / "allowed-root"
+        allowed_root.mkdir()
+        role = await store.create_role(tenant.id, "Lector", project_names=["Proyecto Scan"], allowed_scan_roots=[str(allowed_root)])
+        alice = await store.create_user(tenant.id, "alice", "s3cr3t-password", role_id=role.id)
+        session = await store.create_session(alice)
+
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path, tenant_id=tenant.id)
+    security = SecurityConfig(bind_host="0.0.0.0")
+    app = create_app(security=security, registry_path=registry_path, auth_db_path=auth_db_path)
+
+    outside_path = tmp_path / "outside-root"
+    outside_path.mkdir()
+    # Guardadas directamente en el store (no vía API), simulando carpetas dadas
+    # de alta por un admin (u otro rol) antes/fuera de esta restricción.
+    await ScannedFoldersStore().add_folder(project, str(outside_path))
+    await ScannedFoldersStore().add_folder(project, str(allowed_root))
+
+    client = TestClient(app, cookies={SESSION_COOKIE_NAME: session.token})
+    response = client.get(f"/api/projects/{project.name}/folders/library")
+
+    assert response.status_code == 200
+    paths = {entry["path"] for entry in response.json()}
+    assert paths == {str(allowed_root.resolve())}  # la de fuera de ambito no aparece
+
+
+@pytest.mark.asyncio
+async def test_folder_library_delete_rejects_folder_outside_allowed_roots(tmp_path) -> None:
+    """AUDIT_CODE (sesión 2026-09-03/04): antes `DELETE .../folders/library`
+    borraba cualquier entrada no usada sin exigir acceso a esa ruta. Ahora
+    aplica la misma restricción `allowed_scan_roots` que `add_folder_to_library`."""
+    auth_db_path = tmp_path / "auth.db"
+    async with AuthStore(auth_db_path) as store:
+        tenant = await store.create_tenant("Acme Corp")
+        allowed_root = tmp_path / "allowed-root"
+        allowed_root.mkdir()
+        role = await store.create_role(tenant.id, "Lector", project_names=["Proyecto Scan"], allowed_scan_roots=[str(allowed_root)])
+        alice = await store.create_user(tenant.id, "alice", "s3cr3t-password", role_id=role.id)
+        session = await store.create_session(alice)
+
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path, tenant_id=tenant.id)
+    security = SecurityConfig(bind_host="0.0.0.0")
+    app = create_app(security=security, registry_path=registry_path, auth_db_path=auth_db_path)
+
+    outside_path = tmp_path / "outside-root"
+    outside_path.mkdir()
+    await ScannedFoldersStore().add_folder(project, str(outside_path))
+
+    client = TestClient(app, cookies={SESSION_COOKIE_NAME: session.token})
+    response = client.request("DELETE", f"/api/projects/{project.name}/folders/library", json={"path": str(outside_path)})
+
+    assert response.status_code == 403
+    # sigue en la lista (no se llego a borrar) -- comprobado directamente en el
+    # store, ya que el propio GET la filtraria del listado de este rol.
+    remaining = await ScannedFoldersStore().list_folders(project)
+    assert str(outside_path.resolve()) in {folder.path for folder in remaining}
+
+
+@pytest.mark.asyncio
 async def test_scan_websocket_non_loopback_rejects_other_tenants_project(tmp_path) -> None:
     auth_db_path = tmp_path / "auth.db"
     async with AuthStore(auth_db_path) as store:

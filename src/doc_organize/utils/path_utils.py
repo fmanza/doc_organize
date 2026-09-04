@@ -26,8 +26,8 @@ def safe_path_join(base: str | Path, *parts: str) -> Path:
             (por ejemplo, por el uso de "..").
 
     Example:
-        >>> safe_path_join("/repo", "docs", "a.pdf")
-        WindowsPath('/repo/docs/a.pdf')
+        >>> safe_path_join("/repo", "docs", "a.pdf").parts[-3:]  # sin unidad: portable Windows/POSIX
+        ('repo', 'docs', 'a.pdf')
         >>> safe_path_join("/repo", "..", "etc", "passwd")
         Traceback (most recent call last):
             ...

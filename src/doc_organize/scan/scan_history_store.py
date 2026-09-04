@@ -29,7 +29,23 @@ async def append_scan_run(history_path: Path, report: ScanRunReport) -> None:
     contenedora si falta). Mismo patrón que `ScanCommand._persist_error_report`:
     el llamador ya resuelve la ruta completa (p. ej.
     `project_root / SCAN_HISTORY_FOLDER_NAME / SCAN_HISTORY_JSONL_NAME`), esta
-    función solo la escribe."""
+    función solo la escribe.
+
+    Example:
+        >>> import asyncio, tempfile
+        >>> from pathlib import Path
+        >>> async def main():
+        ...     history_path = Path(tempfile.mkdtemp()) / "SCAN_HISTORY.jsonl"
+        ...     report = ScanRunReport(
+        ...         scan_run_id="abc123", started_at="2026-01-01T00:00:00+00:00",
+        ...         finished_at="2026-01-01T00:00:05+00:00", duration_seconds=5.0,
+        ...         total_scanned=3, completed=True,
+        ...     )
+        ...     await append_scan_run(history_path, report)
+        ...     return list_scan_runs(history_path)[0].scan_run_id
+        >>> asyncio.run(main())
+        'abc123'
+    """
     await asyncio.to_thread(history_path.parent.mkdir, parents=True, exist_ok=True)
 
     def _append() -> None:
@@ -44,6 +60,10 @@ def list_scan_runs(history_path: Path) -> list[ScanRunReport]:
     ejecuciones más recientes primero. Mismo criterio de tolerancia a líneas
     corruptas que `web/scan_errors_data.py::load_error_history`: una línea
     inválida se ignora en vez de tumbar la página con un 500.
+
+    Example:
+        >>> list_scan_runs(Path("/ruta/que/no/existe/SCAN_HISTORY.jsonl"))
+        []
     """
     if not history_path.is_file():
         return []

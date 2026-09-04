@@ -161,6 +161,21 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self.auth_db_path = auth_db_path
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        # `POST /login` es la única escritura que ocurre ANTES de tener sesión, así
+        # que queda fuera de la comprobación Origin/Referer de más abajo (esa solo
+        # corre tras autenticar). Sin esto, un formulario auto-enviado desde otro
+        # origen podría fijar en el navegador de la víctima una sesión controlada
+        # por el atacante (login CSRF) — `SameSite=Strict` no lo evita: esa cabecera
+        # impide *reenviar* cookies existentes en petición cross-site, no impide que
+        # se *fije* una cookie nueva vía `Set-Cookie` en la respuesta (AUDIT_CODE,
+        # sesión 2026-09-03/04). Solo aplica cuando la sesión importa de verdad
+        # (`requires_auth`): en loopback/sin auth, `/login` es alcanzable igual pero
+        # nada depende de esa sesión, mismo criterio que el resto de esta app.
+        if requires_auth(self.security) and request.url.path == "/login" and request.method == "POST":
+            origin = request.headers.get("origin") or request.headers.get("referer")
+            if origin is not None and not self._origin_matches_request_host(request, origin):
+                return JSONResponse(status_code=403, content={"detail": "Forbidden: Origin mismatch"})
+
         if not requires_auth(self.security) or request.url.path in _EXEMPT_PATHS:
             return await call_next(request)
 

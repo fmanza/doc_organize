@@ -18,14 +18,14 @@ from doc_organize.projects import ProjectRegistry
 _SAMPLE_TEXT = "Informe de prueba doc_organize.\nDocumento de fixture para tests del CLI."
 
 
-def _make_native_pdf(path: Path) -> None:
+def _make_native_pdf(path: Path, text: str = _SAMPLE_TEXT) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     fig = plt.figure(figsize=(8.27, 11.69))
-    fig.text(0.1, 0.7, _SAMPLE_TEXT, fontsize=14, family="sans-serif")
+    fig.text(0.1, 0.7, text, fontsize=14, family="sans-serif")
     fig.savefig(path, format="pdf")
     plt.close(fig)
 
@@ -344,6 +344,45 @@ async def test_scan_command_second_run_skips_unchanged(tmp_path) -> None:
     assert second.new == 0
     assert second.unchanged == 1
     assert second.converted == 0  # no se reconvierte lo que no cambio
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_scan_command_second_run_reconverts_modified_file(tmp_path) -> None:
+    """Cobertura real faltante detectada en maturity-assessment (sesión
+    2026-09-03/04): ningún test ejercitaba `DocumentStatus.MODIFIED` de extremo a
+    extremo -- solo `new`/`unchanged`. Un fichero cuyo contenido (y por tanto
+    hash) cambia entre dos escaneos debe reclasificarse como `modified` y
+    reconvertirse, no tratarse como `unchanged`."""
+    base = tmp_path / "workspaces"
+    base.mkdir()
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        project = await registry.create_project("Proyecto Modificado", base)
+    root = Path(project.root_path)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    pdf_path = input_dir / "native.pdf"
+    _make_native_pdf(pdf_path)
+
+    run_kwargs = {
+        "paths": [str(input_dir)],
+        "output_dir": root / "Conversión",
+        "cache_db": root / "cache.db",
+        "folders_json": root / "folders.json",
+        "use_ocr": False,
+        "use_gpu": False,
+    }
+
+    first = await ScanCommand().run(**run_kwargs)
+    _make_native_pdf(pdf_path, text="Contenido distinto, para cambiar el hash SHA-256.")
+    second = await ScanCommand().run(**run_kwargs)
+
+    assert first.new == 1
+    assert second.new == 0
+    assert second.modified == 1
+    assert second.unchanged == 0
+    assert second.converted == 1  # se reconvierte por haber cambiado
 
 
 @pytest.mark.slow

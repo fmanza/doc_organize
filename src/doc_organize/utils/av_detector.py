@@ -75,8 +75,8 @@ def detect_av_status() -> AvStatus:
 
     Example:
         >>> status = detect_av_status()
-        >>> status.ready
-        False
+        >>> isinstance(status.ready, bool)  # depende del entorno real (whisper/ffmpeg instalados o no)
+        True
     """
     asr_installed = find_spec("whisper") is not None
     ffmpeg_installed = _is_ffmpeg_available()

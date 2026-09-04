@@ -55,8 +55,15 @@ class DocumentConverter:
         >>> async def main():
         ...     async with DocumentConverter() as converter:
         ...         result = await converter.convert_document(doc, Path("./Conversión"))
-        >>> asyncio.run(main())
+        >>> asyncio.run(main())  # doctest: +SKIP
     """
+    # El Example de arriba se marca +SKIP deliberadamente (AUDIT_CODE, sesión
+    # 2026-09-03/04): `convert_document()` necesita un documento real parseable
+    # por Docling (carga de modelos incluida) para no fallar -- igual que los
+    # tests reales de este módulo, marcados `@pytest.mark.slow` y excluidos de
+    # la matriz rápida de CI. Convertir esto en un ejemplo runnable exigiría la
+    # misma máquina pesada, en cada job de `pytest --doctest-modules`, solo
+    # para un docstring.
 
     def __init__(self) -> None:
         self.logger = get_logger(__name__)
@@ -228,6 +235,10 @@ class DocumentConverter:
     async def _write_outputs(
         self,
         source_doc: DocumentMetadata,
+        # Any: objeto real de Docling (ConversionResult) -- `docling.*` tiene
+        # `follow_imports = "skip"` en mypy (pyproject.toml) por incompatibilidad
+        # de sus stubs (via scipy-stubs) con Python 3.11 (AUDIT_CODE, sesión
+        # 2026-09-03/04).
         docling_result: Any,
         output_dir: Path,
         ocr_required: bool,
@@ -296,6 +307,9 @@ class DocumentConverter:
         candidate_dir.rmdir()
         return None
 
+    # `document: Any` -- objeto real de Docling (DoclingDocument), mismo motivo
+    # que `docling_result: Any` en `_write_outputs` (`follow_imports = "skip"`
+    # para `docling.*`).
     def _build_chunks(self, document: Any, include_picture_descriptions: bool = False) -> list[dict[str, Any]]:
         """Trocea `document` en chunks por seccion, sin geometria (REQ-003).
 
@@ -340,6 +354,8 @@ class DocumentConverter:
                     descriptions.append(annotation.text)
         return descriptions
 
+    # `docling_result: Any` -- mismo motivo que en `_write_outputs`/`_build_chunks`
+    # (objeto real de Docling, `follow_imports = "skip"` para `docling.*`).
     @staticmethod
     def _needs_ocr(docling_result: Any) -> bool:
         """`True` si el documento no tiene capa de texto nativa (`parse_score`

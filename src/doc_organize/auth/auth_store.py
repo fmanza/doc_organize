@@ -182,13 +182,17 @@ class AuthStore:
         logger (logging.Logger): Logger estructurado de la instancia.
 
     Example:
-        >>> import asyncio
+        >>> import asyncio, tempfile
+        >>> from pathlib import Path
         >>> async def main():
-        ...     async with AuthStore("./auth.db") as store:
+        ...     db_path = Path(tempfile.mkdtemp()) / "auth.db"
+        ...     async with AuthStore(db_path) as store:
         ...         tenant = await store.create_tenant("Acme Corp")  # crea admin/admin
         ...         role = await store.create_role(tenant.id, "Lector", project_names=["Proyecto A"])
         ...         user = await store.create_user(tenant.id, "alice", "s3cr3t-password", role_id=role.id)
+        ...         return user.username
         >>> asyncio.run(main())
+        'alice'
     """
 
     def __init__(self, db_path: str | Path = _DEFAULT_AUTH_DB_PATH) -> None:

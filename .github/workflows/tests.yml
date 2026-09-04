@@ -44,6 +44,9 @@ jobs:
     - name: Type check with mypy
       run: python -m mypy src
 
+    - name: Verify docstring examples
+      run: python -m pytest --doctest-modules src --no-cov -q
+
     - name: Run tests
       run: python -m pytest tests/ -v -m "not slow" --cov=src/doc_organize --cov-report=xml
 

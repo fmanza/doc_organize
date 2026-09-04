@@ -42,12 +42,16 @@ class ScannedFoldersStore:
         logger (logging.Logger): Logger estructurado de la instancia.
 
     Example:
-        >>> import asyncio
+        >>> import asyncio, tempfile
         >>> async def main():
+        ...     project = Project(name="Proyecto", root_path=tempfile.mkdtemp(), created_at="2026-01-01T00:00:00+00:00")
+        ...     folder = tempfile.mkdtemp()
         ...     store = ScannedFoldersStore()
-        ...     entry = await store.add_folder(project, "/datos/facturas")
-        ...     await store.remove_folder(project, "/datos/facturas")
+        ...     entry = await store.add_folder(project, folder)
+        ...     await store.remove_folder(project, folder)
+        ...     return entry.used
         >>> asyncio.run(main())
+        False
     """
 
     def __init__(self) -> None:

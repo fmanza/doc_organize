@@ -23,12 +23,18 @@ async def browse_directory(request: Request, path: str | None = None) -> Directo
     podía escribir cualquiera de esas rutas a mano en el formulario de escaneo.
     """
     candidate = Path(path).expanduser().resolve() if path else Path.home().resolve()
-    if not candidate.is_dir():
-        raise HTTPException(status_code=404, detail=f"La carpeta no existe: {candidate}")
 
+    # Autorización ANTES que existencia (AUDIT_CODE, sesión 2026-09-03/04): si el
+    # 404 "no existe" se emitiera antes del 403 "sin acceso", un rol restringido
+    # podría distinguir "existe pero no tengo acceso" de "no existe" para
+    # cualquier ruta absoluta del servidor — un oráculo de existencia de
+    # directorios sin necesidad de tener acceso a ellos.
     allowed_roots = await get_allowed_scan_roots(request)
     if not paths_within_roots([str(candidate)], allowed_roots):
         raise HTTPException(status_code=403, detail="No tienes acceso a esa carpeta.")
+
+    if not candidate.is_dir():
+        raise HTTPException(status_code=404, detail=f"La carpeta no existe: {candidate}")
 
     entries: list[str] = []
     try:

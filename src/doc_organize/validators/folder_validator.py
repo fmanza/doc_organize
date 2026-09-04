@@ -22,12 +22,16 @@ class FolderValidator:
         logger (logging.Logger): Logger estructurado de la instancia.
 
     Example:
+        >>> import tempfile
+        >>> base = Path(tempfile.mkdtemp())
+        >>> nested = base / "docs"
+        >>> _ = nested.mkdir()
         >>> validator = FolderValidator()
-        >>> result = validator.validate_folder_set(["/repo", "/repo/docs"])
+        >>> result = validator.validate_folder_set([str(base), str(nested)])
         >>> result.is_valid
         True
-        >>> result.clean_paths
-        ['/repo']
+        >>> result.clean_paths == [str(base.resolve())]  # la anidada se descarta por redundante
+        True
     """
 
     def __init__(self) -> None:

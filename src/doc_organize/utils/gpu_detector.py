@@ -39,8 +39,8 @@ def detect_gpu_status() -> GpuStatus:
 
     Example:
         >>> status = detect_gpu_status()
-        >>> status.gpu_active
-        False
+        >>> isinstance(status.gpu_active, bool)  # depende del entorno real (torch/CUDA instalados o no)
+        True
     """
     if find_spec("torch") is None:
         return GpuStatus(gpu_support_installed=False, gpu_active=False, instructions=_INSTALL_INSTRUCTIONS)
