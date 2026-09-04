@@ -4,7 +4,7 @@
 **Fuente de esta actualización**: `git log`, `pyproject.toml`/`CHANGELOG.md`, y
 re-ejecución en vivo de `ruff`/`mypy`/`pytest`/`mkdocs build --strict` — no una
 promesa (mismo criterio que `.ai/sessions/2026-09-03-historial-escaneo-fecha-docs-offline/TRACEABILITY.md`).
-**Rama activa**: `develop`, al día con lo commiteado (`eef8847` es el HEAD)
+**Rama activa**: `develop`, al día con lo commiteado (`16094cc` es el HEAD)
 **Versión**: `0.7.0` (`pyproject.toml`/`CHANGELOG.md`)
 
 > **Nota de corrección (2026-09-04)**: este documento llevaba desde 2026-08-29
@@ -39,6 +39,11 @@ detalle completo, no reproducido aquí) añadió, entre otras cosas:
   arquitectura, seguridad web (login CSRF, oráculo de `/api/fs/browse`, filtrado de
   `allowed_scan_roots`), concurrencia real entre WebSocket del mismo proyecto, resiliencia
   por fichero en deduplicación, `pytest --doctest-modules` verificado y añadido a CI.
+- Resolución de diagnósticos de IDE (SonarLint/Pylance) señalados sobre el working
+  tree ya cerrado (sesión `2026-09-04-fixes-sonarlint-pylance`): complejidad
+  cognitiva de `AuthMiddleware.dispatch()` y `DocumentScanner._build_node()`, import
+  privado de Docling, causa raíz de un falso "falta argumento" de pyright en 16
+  campos `Field()` de `core/models.py`, excepción redundante en `av_detector.py`.
 
 **Fuente de verdad detallada por versión**: `CHANGELOG.md` (formato Keep a
 Changelog, bien mantenido). **Historial de sesiones con directrices para

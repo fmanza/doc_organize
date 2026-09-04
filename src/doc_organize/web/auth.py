@@ -161,46 +161,75 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self.auth_db_path = auth_db_path
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        # `POST /login` es la única escritura que ocurre ANTES de tener sesión, así
-        # que queda fuera de la comprobación Origin/Referer de más abajo (esa solo
-        # corre tras autenticar). Sin esto, un formulario auto-enviado desde otro
-        # origen podría fijar en el navegador de la víctima una sesión controlada
-        # por el atacante (login CSRF) — `SameSite=Strict` no lo evita: esa cabecera
-        # impide *reenviar* cookies existentes en petición cross-site, no impide que
-        # se *fije* una cookie nueva vía `Set-Cookie` en la respuesta (AUDIT_CODE,
-        # sesión 2026-09-03/04). Solo aplica cuando la sesión importa de verdad
-        # (`requires_auth`): en loopback/sin auth, `/login` es alcanzable igual pero
-        # nada depende de esa sesión, mismo criterio que el resto de esta app.
-        if requires_auth(self.security) and request.url.path == "/login" and request.method == "POST":
-            origin = request.headers.get("origin") or request.headers.get("referer")
-            if origin is not None and not self._origin_matches_request_host(request, origin):
-                return JSONResponse(status_code=403, content={"detail": "Forbidden: Origin mismatch"})
+        login_csrf_response = self._check_login_csrf(request)
+        if login_csrf_response is not None:
+            return login_csrf_response
 
         if not requires_auth(self.security) or request.url.path in _EXEMPT_PATHS:
             return await call_next(request)
 
         authenticated = await authenticate_session(request.cookies, self.auth_db_path)
         if authenticated is None:
-            if request.url.path.startswith(_PROTECTED_PREFIXES):
-                return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
-            return RedirectResponse("/login", status_code=303)
+            return self._unauthenticated_response(request)
 
+        self._store_session_state(request, authenticated)
+
+        password_change_response = self._check_password_change_required(request, authenticated)
+        if password_change_response is not None:
+            return password_change_response
+
+        write_origin_response = self._check_write_origin(request)
+        if write_origin_response is not None:
+            return write_origin_response
+
+        return await call_next(request)
+
+    def _check_login_csrf(self, request: Request) -> Response | None:
+        # `POST /login` es la única escritura que ocurre ANTES de tener sesión, así
+        # que queda fuera de la comprobación Origin/Referer de `_check_write_origin`
+        # (esa solo corre tras autenticar). Sin esto, un formulario auto-enviado desde
+        # otro origen podría fijar en el navegador de la víctima una sesión controlada
+        # por el atacante (login CSRF) — `SameSite=Strict` no lo evita: esa cabecera
+        # impide *reenviar* cookies existentes en petición cross-site, no impide que
+        # se *fije* una cookie nueva vía `Set-Cookie` en la respuesta (AUDIT_CODE,
+        # sesión 2026-09-03/04). Solo aplica cuando la sesión importa de verdad
+        # (`requires_auth`): en loopback/sin auth, `/login` es alcanzable igual pero
+        # nada depende de esa sesión, mismo criterio que el resto de esta app.
+        if not (requires_auth(self.security) and request.url.path == "/login" and request.method == "POST"):
+            return None
+        return self._check_origin(request)
+
+    @staticmethod
+    def _unauthenticated_response(request: Request) -> Response:
+        if request.url.path.startswith(_PROTECTED_PREFIXES):
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+        return RedirectResponse("/login", status_code=303)
+
+    @staticmethod
+    def _store_session_state(request: Request, authenticated: AuthenticatedSession) -> None:
         request.state.user_id = authenticated.session.user_id
         request.state.tenant_id = authenticated.session.tenant_id
         request.state.role_id = authenticated.role_id
         request.state.is_admin = authenticated.is_admin
 
-        if authenticated.must_change_password and request.url.path not in _PASSWORD_CHANGE_EXEMPT:
-            if request.url.path.startswith(_PROTECTED_PREFIXES):
-                return JSONResponse(status_code=403, content={"detail": "Password change required"})
-            return RedirectResponse("/change-password", status_code=303)
+    @staticmethod
+    def _check_password_change_required(request: Request, authenticated: AuthenticatedSession) -> Response | None:
+        if not authenticated.must_change_password or request.url.path in _PASSWORD_CHANGE_EXEMPT:
+            return None
+        if request.url.path.startswith(_PROTECTED_PREFIXES):
+            return JSONResponse(status_code=403, content={"detail": "Password change required"})
+        return RedirectResponse("/change-password", status_code=303)
 
-        if request.method in _WRITE_METHODS:
-            origin = request.headers.get("origin") or request.headers.get("referer")
-            if origin is not None and not self._origin_matches_request_host(request, origin):
-                return JSONResponse(status_code=403, content={"detail": "Forbidden: Origin mismatch"})
+    def _check_write_origin(self, request: Request) -> Response | None:
+        if request.method not in _WRITE_METHODS:
+            return None
+        return self._check_origin(request)
 
-        return await call_next(request)
+    def _check_origin(self, request: Request) -> Response | None:
+        origin = request.headers.get("origin") or request.headers.get("referer")
+        if origin is not None and not self._origin_matches_request_host(request, origin):
+            return JSONResponse(status_code=403, content={"detail": "Forbidden: Origin mismatch"})
+        return None
 
     @staticmethod
     def _origin_matches_request_host(request: Request, origin: str) -> bool:

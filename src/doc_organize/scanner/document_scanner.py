@@ -147,24 +147,29 @@ class DocumentScanner:
         sesión 2026-09-03)."""
         if path.is_symlink():
             return DirectoryTreeNode(name=path.name, type="file", path=str(path))
-
         if path.is_dir():
-            children: list[DirectoryTreeNode] = []
-            try:
-                entries = sorted(path.iterdir(), key=lambda p: p.name)
-            except OSError as exc:
-                self.logger.warning(f"No se pudo listar '{path}': {exc}")
-                entries = []
-            for entry in entries:
-                if entry.name in IGNORED_NAMES:
-                    continue
-                if exclude_dir is not None and entry == exclude_dir:
-                    continue
-                child = self._build_node(entry, files, allowed_extensions, exclude_dir)
-                if child is not None:
-                    children.append(child)
-            return DirectoryTreeNode(name=path.name or str(path), type="dir", path=str(path), children=children)
+            return self._build_dir_node(path, files, allowed_extensions, exclude_dir)
+        return self._build_file_node(path, files, allowed_extensions)
 
+    def _build_dir_node(
+        self, path: Path, files: list[_DiscoveredFile], allowed_extensions: frozenset[str], exclude_dir: Path | None
+    ) -> DirectoryTreeNode:
+        children: list[DirectoryTreeNode] = []
+        for entry in self._list_dir_entries(path, exclude_dir):
+            child = self._build_node(entry, files, allowed_extensions, exclude_dir)
+            if child is not None:
+                children.append(child)
+        return DirectoryTreeNode(name=path.name or str(path), type="dir", path=str(path), children=children)
+
+    def _list_dir_entries(self, path: Path, exclude_dir: Path | None) -> list[Path]:
+        try:
+            entries = sorted(path.iterdir(), key=lambda p: p.name)
+        except OSError as exc:
+            self.logger.warning(f"No se pudo listar '{path}': {exc}")
+            return []
+        return [entry for entry in entries if entry.name not in IGNORED_NAMES and entry != exclude_dir]
+
+    def _build_file_node(self, path: Path, files: list[_DiscoveredFile], allowed_extensions: frozenset[str]) -> DirectoryTreeNode | None:
         try:
             stat = path.stat()
         except OSError as exc:

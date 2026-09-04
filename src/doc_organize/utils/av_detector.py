@@ -53,7 +53,7 @@ def _is_ffmpeg_available() -> bool:
             check=False,  # No lanzar excepción si el código de salida es distinto de 0
         )
         return True
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+    except (subprocess.TimeoutExpired, OSError):
         return False
 
 

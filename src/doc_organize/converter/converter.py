@@ -17,7 +17,8 @@ from docling.document_converter import DocumentConverter as DoclingConverter, Im
 from docling_core.transforms.chunker.doc_chunk import DocChunk
 from docling_core.transforms.chunker.hierarchical_chunker import HierarchicalChunker
 from docling_core.types.doc.base import ImageRefMode
-from docling_core.types.doc.document import DocItem, PictureDescriptionData, PictureItem
+from docling_core.types.doc.items.node import DocItem
+from docling_core.types.doc.items.picture.picture import PictureDescriptionData, PictureItem
 
 from doc_organize.core.exceptions import ConversionError
 from doc_organize.core.models import ConversionResult, DocumentMetadata
@@ -192,6 +193,8 @@ class DocumentConverter:
                 error=str(exc),
                 ocr_required=False,
                 duration_seconds=time.monotonic() - start,
+                images_dir=None,
+                picture_description_applied=False,
             )
 
         duration = time.monotonic() - start

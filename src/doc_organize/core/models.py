@@ -113,18 +113,18 @@ class ConversionResult(BaseModel):
     """Resultado de convertir un único documento."""
 
     source_path: str = Field(..., description="Ruta al documento de origen")
-    markdown_path: str | None = Field(None, description="Ruta al fichero .md de salida")
-    json_path: str | None = Field(None, description="Ruta al fichero .json de metadatos de salida")
+    markdown_path: str | None = Field(default=None, description="Ruta al fichero .md de salida")
+    json_path: str | None = Field(default=None, description="Ruta al fichero .json de metadatos de salida")
     success: bool = Field(..., description="Si la conversión tuvo éxito")
-    error: str | None = Field(None, description="Mensaje de error si falló")
-    ocr_required: bool = Field(False, description="Si se necesitó OCR (y quedó diferido)")
-    duration_seconds: float = Field(0.0, description="Tiempo empleado en convertir (segundos)")
+    error: str | None = Field(default=None, description="Mensaje de error si falló")
+    ocr_required: bool = Field(default=False, description="Si se necesitó OCR (y quedó diferido)")
+    duration_seconds: float = Field(default=0.0, description="Tiempo empleado en convertir (segundos)")
     images_dir: str | None = Field(
-        None,
+        default=None,
         description="Carpeta con las imágenes extraídas del documento (subcarpeta de 'img' por documento), si `extract_images=True` y el documento generó alguna",
     )
     picture_description_applied: bool = Field(
-        False,
+        default=False,
         description="Si `use_picture_description=True` tuvo efecto real en esta conversión (solo aplica al pipeline PDF/imagen; se ignora en silencio para el resto de formatos)",
     )
 
@@ -152,7 +152,7 @@ class DuplicateGroup(BaseModel):
     canonical_doc: DocumentMetadata = Field(..., description="Documento a conservar (canónico)")
     duplicates: list[DocumentMetadata] = Field(..., description="Documentos a descartar")
     reason: DuplicateReason = Field(..., description="Motivo por el que se agrupan")
-    user_choice: DocumentMetadata | None = Field(None, description="Selección del usuario si sobrescribe la elección por defecto")
+    user_choice: DocumentMetadata | None = Field(default=None, description="Selección del usuario si sobrescribe la elección por defecto")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -192,8 +192,8 @@ class DeduplicationReport(BaseModel):
     duplicates_folder_path: str = Field(..., description="Ruta a la carpeta donde se movieron los duplicados")
     audit_json_path: str = Field(..., description="Ruta al fichero DEDUP_REPORT.json")
     groups: list[DuplicateGroup] = Field(default_factory=list, description="Grupos detallados")
-    started_at: str | None = Field(None, description="Timestamp ISO 8601 de inicio de esta ejecución (None en históricos previos a este campo)")
-    duration_seconds: float | None = Field(None, description="Tiempo total transcurrido entre inicio y fin (None en históricos previos a este campo)")
+    started_at: str | None = Field(default=None, description="Timestamp ISO 8601 de inicio de esta ejecución (None en históricos previos a este campo)")
+    duration_seconds: float | None = Field(default=None, description="Tiempo total transcurrido entre inicio y fin (None en históricos previos a este campo)")
     failed_paths: list[str] = Field(
         default_factory=list,
         description=(
@@ -211,9 +211,9 @@ class CacheEntry(BaseModel):
     sha256_hash: str = Field(..., description="SHA-256 del fichero")
     timestamp: float = Field(..., description="Timestamp Unix de la última actualización de la entrada")
     status: DocumentStatus = Field(..., description="Estado del documento (new/unchanged/modified/deleted)")
-    conversion_status: ConversionStatus | None = Field(None, description="Estado de progreso de la conversión")
-    error_message: str | None = Field(None, description="Mensaje de error de la última conversión fallida")
-    error_retry_count: int = Field(0, description="Fallos consecutivos sin cambios en el fichero (0 si el último intento tuvo éxito)")
+    conversion_status: ConversionStatus | None = Field(default=None, description="Estado de progreso de la conversión")
+    error_message: str | None = Field(default=None, description="Mensaje de error de la última conversión fallida")
+    error_retry_count: int = Field(default=0, description="Fallos consecutivos sin cambios en el fichero (0 si el último intento tuvo éxito)")
 
 
 class ScanErrorEntry(BaseModel):
@@ -223,7 +223,7 @@ class ScanErrorEntry(BaseModel):
     error_message: str = Field(..., description="Mensaje de error capturado")
     error_retry_count: int = Field(..., description="Fallos consecutivos acumulados en este fichero, incluido este")
     capped: bool = Field(
-        False,
+        default=False,
         description="Si el fichero alcanzó MAX_AUTO_ERROR_RETRIES y no se reintentó automáticamente en esta ejecución",
     )
 
@@ -259,10 +259,10 @@ class ScanRunReport(BaseModel):
     total_scanned: int = Field(..., description="Total de documentos escaneados en esta ejecución (0 si no llegó a escanear)")
     completed: bool = Field(..., description="Si el escaneo llegó a emitir el evento COMPLETED, o se interrumpió antes")
     discovery_duration_seconds: float | None = Field(
-        None, description="Tiempo empleado en descubrir/hashear ficheros (None en históricos previos a este campo)"
+        default=None, description="Tiempo empleado en descubrir/hashear ficheros (None en históricos previos a este campo)"
     )
     total_conversion_seconds: float | None = Field(
-        None, description="Suma de la duración de conversión de cada documento procesado, incluido OCR (None en históricos previos a este campo)"
+        default=None, description="Suma de la duración de conversión de cada documento procesado, incluido OCR (None en históricos previos a este campo)"
     )
 
 
@@ -283,7 +283,7 @@ class DirectoryTreeNode(BaseModel):
     name: str = Field(..., description="Nombre del fichero o carpeta")
     type: str = Field(..., description="'file' o 'dir'")
     path: str = Field(..., description="Ruta relativa o absoluta")
-    size_bytes: int | None = Field(None, description="Tamaño del fichero (si type='file')")
+    size_bytes: int | None = Field(default=None, description="Tamaño del fichero (si type='file')")
     children: list["DirectoryTreeNode"] = Field(default_factory=list, description="Nodos hijos (si type='dir')")
 
 
@@ -435,7 +435,7 @@ class ProjectNameValidation(BaseModel):
 
     is_valid: bool = Field(..., description="Si el nombre es válido")
     warnings: list[str] = Field(default_factory=list, description="Motivos por los que se rechazó el nombre, si los hay")
-    normalized_name: str | None = Field(None, description="Nombre normalizado a NFC y sin espacios, si es válido")
+    normalized_name: str | None = Field(default=None, description="Nombre normalizado a NFC y sin espacios, si es válido")
 
 
 # ===== Modelos de configuración =====
@@ -494,7 +494,7 @@ class GpuStatus(BaseModel):
 
     gpu_support_installed: bool = Field(..., description="Si `torch` (extra `ocr-gpu`) está instalado en este entorno")
     gpu_active: bool = Field(..., description="Si hay una GPU CUDA disponible y utilizable ahora mismo")
-    instructions: str | None = Field(None, description="Instrucciones para activar la GPU, si `gpu_active` es `False`")
+    instructions: str | None = Field(default=None, description="Instrucciones para activar la GPU, si `gpu_active` es `False`")
 
 
 class AvStatus(BaseModel):
@@ -510,14 +510,14 @@ class AvStatus(BaseModel):
     asr_installed: bool = Field(..., description="Si el backend de transcripción ASR (extra `av`, Whisper) está instalado")
     ffmpeg_installed: bool = Field(..., description="Si el binario `ffmpeg` está disponible en el PATH del sistema (necesario para vídeo)")
     ready: bool = Field(..., description="Si `asr_installed` y `ffmpeg_installed` son ambos `True`")
-    instructions: str | None = Field(None, description="Qué falta instalar/configurar, específico a lo que falte; `None` si `ready` es `True`")
+    instructions: str | None = Field(default=None, description="Qué falta instalar/configurar, específico a lo que falte; `None` si `ready` es `True`")
 
 
 class DirectoryListing(BaseModel):
     """Resultado de listar el contenido de una carpeta del servidor (explorador de carpetas de escaneo)."""
 
     current_path: str = Field(..., description="Ruta absoluta listada")
-    parent_path: str | None = Field(None, description="Ruta absoluta de la carpeta padre, o `None` si no hay/no es accesible")
+    parent_path: str | None = Field(default=None, description="Ruta absoluta de la carpeta padre, o `None` si no hay/no es accesible")
     entries: list[str] = Field(default_factory=list, description="Nombres de las subcarpetas inmediatas, ordenados alfabéticamente")
 
 
