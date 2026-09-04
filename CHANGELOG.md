@@ -8,6 +8,9 @@ releases publicados antes de esa versión).
 
 ### Fixed
 
+- `src/doc_organize/web/templates/base.html.j2`: la tabla de la pestaña "Historial de ejecuciones"
+  (Escanear) mostraba scroll horizontal — el contenedor `<main>` compartido por toda la app
+  (`max-w-[720px]`) era más estrecho que las 7 columnas de la tabla. Ampliado a `max-w-[920px]`.
 - `pyproject.toml`: el extra `ocr-gpu` instalaba `torch`/`torchvision`/`opencv-python` pero no
   `easyocr` en sí, el paquete que Docling realmente carga para el motor OCR acelerado por GPU —
   `pip install .[ocr-gpu]` seguido de `--use-ocr --use-gpu` fallaba con
