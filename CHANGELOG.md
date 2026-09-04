@@ -6,6 +6,14 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+### Fixed
+
+- `pyproject.toml`: el extra `ocr-gpu` instalaba `torch`/`torchvision`/`opencv-python` pero no
+  `easyocr` en sí, el paquete que Docling realmente carga para el motor OCR acelerado por GPU —
+  `pip install .[ocr-gpu]` seguido de `--use-ocr --use-gpu` fallaba con
+  `EasyOCR is not installed`. Añadido `easyocr>=1.7` al extra (`docs/guides/installation.md` y
+  `.ai/product.md` actualizados para reflejarlo).
+
 ### Added
 
 - `src/doc_organize/web/routes/downloads.py`: nuevo `GET /downloads/projects/{name}/export-preview`

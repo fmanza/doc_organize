@@ -96,7 +96,7 @@ generada desde los docstrings).
 | **aiosqlite** | Backend de `CacheManager` y `AuthStore` |
 | **aiofiles** | I/O async en `hash_file()` |
 | **FastAPI + Uvicorn + Jinja2** | Interfaz web (extra `[web]`, no obligatorio) |
-| **torch/torchvision/opencv-python** | OCR GPU (extra `ocr-gpu`, opcional) |
+| **torch/torchvision/opencv-python/easyocr** | OCR GPU (extra `ocr-gpu`, opcional) |
 | **hashlib.scrypt + secrets** (stdlib) | Autenticación multi-usuario — sin dependencia nueva |
 | **mkdocs + mkdocs-material + mkdocstrings** | Documentación (extra `docs`) |
 

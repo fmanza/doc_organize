@@ -39,7 +39,7 @@ núcleo nunca arrastra estas dependencias.
 pip install doc_organize[web,ocr-gpu]
 ```
 
-Añade `torch`/`torchvision`/`opencv-python` para usar el motor OCR acelerado por
+Añade `torch`/`torchvision`/`opencv-python`/`easyocr` para usar el motor OCR acelerado por
 GPU (EasyOCR) en vez del motor por defecto en CPU (RapidOCR). Es una optimización
 opcional: el OCR funciona igual de correcto sin GPU, solo más lento en documentos
 grandes.

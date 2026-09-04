@@ -78,6 +78,7 @@ ocr-gpu = [
     "torch>=2.0",
     "torchvision>=0.15",
     "opencv-python>=4.8",
+    "easyocr>=1.7",
 ]
 av = [
     "docling[asr]>=2.0.0",
