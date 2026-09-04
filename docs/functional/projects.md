@@ -85,6 +85,32 @@ arriba.
   pueden eliminarse de la lista — una vez usada, queda marcada `used=True` de
   forma permanente, como historial de qué se ha escaneado.
 
+## Explorador de carpeta padre al crear un proyecto
+
+La página principal de proyectos (`/`) reutiliza el mismo explorador de
+carpetas del servidor que "Carpetas guardadas" (botón "Buscar…", vía
+`GET /api/fs/browse`) para elegir la ubicación (carpeta padre) del formulario
+de creación, en vez de escribir la ruta a mano.
+
+## Gestión destructiva de un proyecto (solo admin)
+
+Cada fila de la lista de proyectos ofrece, únicamente a un rol `admin`, tres
+acciones sobre el proyecto completo. Las tres exigen confirmación explícita
+del usuario en una ventana modal que muestra primero el **impacto** (nº de
+ficheros y tamaño total bajo `root_path`, vía `GET /api/projects/{name}/impact`)
+antes de permitir continuar, y las tres se rechazan con `409` si hay un
+escaneo o deduplicación en curso para ese proyecto (mismo bloqueo por
+`(tenant_id, nombre)` que ya usan `scan_websocket`/`deduplicate_websocket`).
+
+| Acción | Efecto | Endpoint | Reversible |
+|---|---|---|---|
+| **Vaciar histórico** | Borra TODO el contenido de `root_path` (caché, historial de escaneo/errores/deduplicación, carpetas guardadas, salida de conversión) y regenera `project.json`. El proyecto sigue registrado, vacío. | `POST /api/projects/{name}/clear-history` | No |
+| **Eliminar proyecto** | Borra la carpeta de trabajo completa y quita el proyecto del registro. La ventana modal exige escribir el nombre exacto del proyecto para confirmar. | `DELETE /api/projects/{name}` | No — no hay papelera |
+| **Mover carpeta raíz** | Mueve `root_path` entero a `<destino>/<nombre>/`, arrastrando todo su contenido (todo vive ya dentro de `root_path`). El destino se elige con el mismo explorador de carpetas del servidor. | `POST /api/projects/{name}/move` | Sí — es solo una reubicación |
+
+Las tres rutas requieren `{"confirm": true}` en el cuerpo de la petición: la
+ventana modal del cliente no es la única barrera contra una acción accidental.
+
 ## Detección de GPU (entorno, no permisos)
 
 La página de Escaneo detecta, en cada carga, si el entorno del servidor tiene

@@ -3,15 +3,27 @@
 {% block content %}
 <h1 class="text-xl font-semibold mb-4">Proyectos</h1>
 
-<form id="create-form" class="my-4 flex gap-2 flex-wrap">
+<form id="create-form" class="my-4 flex gap-2 flex-wrap items-start">
     <label for="name" class="sr-only">Nombre del proyecto</label>
     <input type="text" id="name" placeholder="Nombre del proyecto" required
            class="border border-gray-300 rounded px-2 py-1.5 flex-1 min-w-[200px]">
     <label for="location" class="sr-only">Ubicación (carpeta padre)</label>
     <input type="text" id="location" placeholder="Ubicación (carpeta padre)" required
            class="border border-gray-300 rounded px-2 py-1.5 flex-1 min-w-[200px]">
+    <button type="button" id="location-browse-btn" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Buscar…</button>
     <button type="submit" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Crear proyecto</button>
 </form>
+
+<div id="location-browse-panel" hidden class="my-2 border border-gray-300 rounded p-3 max-w-2xl">
+    <p id="location-browse-current" class="font-mono text-xs mb-2 break-all"></p>
+    <div class="flex gap-2 mb-2 flex-wrap">
+        <button type="button" id="location-browse-up" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 text-sm">&uarr; Subir</button>
+        <button type="button" id="location-browse-use" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-blue-100 hover:bg-blue-200 text-sm">Usar esta carpeta</button>
+        <button type="button" id="location-browse-close" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 text-sm">Cerrar</button>
+    </div>
+    <ul id="location-browse-entries" class="border border-gray-200 rounded divide-y divide-gray-100 max-h-64 overflow-y-auto"></ul>
+    <p id="location-browse-error" class="text-red-700 my-1 min-h-[1.2em] text-sm"></p>
+</div>
 <p id="create-error" class="text-red-700 my-2 min-h-[1.2em]"></p>
 
 {% if total > 0 or q %}
@@ -42,11 +54,14 @@
 </form>
 
 {% if projects %}
+{% set is_admin_state = request.state.is_admin if request.state.is_admin is defined else none %}
+{% set show_actions = is_admin_state is none or is_admin_state %}
 <table class="w-full border-collapse mt-4">
     <thead><tr>
         <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Nombre</th>
         <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Ubicación</th>
         <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Creado</th>
+        {% if show_actions %}<th class="text-left px-2.5 py-1.5 border-b border-gray-300">Acciones</th>{% endif %}
     </tr></thead>
     <tbody>
     {% for project in projects %}
@@ -54,6 +69,15 @@
             <td class="px-2.5 py-1.5 border-b border-gray-300"><a class="text-blue-600 underline" href="/projects/{{ project.name | urlencode }}">{{ project.name | highlight(q) }}</a></td>
             <td class="px-2.5 py-1.5 border-b border-gray-300 text-gray-600 font-mono text-xs">{{ project.root_path | highlight(q) }}</td>
             <td class="px-2.5 py-1.5 border-b border-gray-300">{{ project.created_at | format_datetime }}</td>
+            {% if show_actions %}
+            <td class="px-2.5 py-1.5 border-b border-gray-300">
+                <div class="flex gap-2 flex-wrap">
+                    <button type="button" class="action-clear-history text-amber-700 underline text-sm cursor-pointer" data-name="{{ project.name }}">Vaciar histórico</button>
+                    <button type="button" class="action-move-project text-blue-700 underline text-sm cursor-pointer" data-name="{{ project.name }}">Mover</button>
+                    <button type="button" class="action-delete-project text-red-700 underline text-sm cursor-pointer" data-name="{{ project.name }}">Eliminar</button>
+                </div>
+            </td>
+            {% endif %}
         </tr>
     {% endfor %}
     </tbody>
@@ -79,6 +103,35 @@
 {% else %}
 <p>No hay proyectos todavía.</p>
 {% endif %}
+
+<div id="move-browse-container" hidden>
+    <p class="text-sm mb-1">Carpeta padre de destino:</p>
+    <p id="move-destination-label" class="font-mono text-xs mb-2 break-all text-gray-600">(sin elegir)</p>
+    <button type="button" id="move-browse-btn" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 text-sm mb-2">Buscar…</button>
+    <div id="move-browse-panel" hidden class="border border-gray-300 rounded p-2">
+        <p id="move-browse-current" class="font-mono text-xs mb-2 break-all"></p>
+        <div class="flex gap-2 mb-2 flex-wrap">
+            <button type="button" id="move-browse-up" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 text-sm">&uarr; Subir</button>
+            <button type="button" id="move-browse-use" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-blue-100 hover:bg-blue-200 text-sm">Usar esta carpeta</button>
+            <button type="button" id="move-browse-close" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 text-sm">Cerrar</button>
+        </div>
+        <ul id="move-browse-entries" class="border border-gray-200 rounded divide-y divide-gray-100 max-h-64 overflow-y-auto"></ul>
+        <p id="move-browse-error" class="text-red-700 my-1 min-h-[1.2em] text-sm"></p>
+    </div>
+</div>
+
+<div id="confirm-modal" hidden class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-lg shadow-lg max-w-md w-full p-4">
+        <h2 id="confirm-modal-title" class="text-lg font-semibold mb-2"></h2>
+        <p id="confirm-modal-message" class="text-sm text-gray-700 mb-3 whitespace-pre-line"></p>
+        <div id="confirm-modal-extra" class="mb-3"></div>
+        <p id="confirm-modal-error" class="text-red-700 text-sm mb-2 min-h-[1.2em]"></p>
+        <div class="flex justify-end gap-2">
+            <button type="button" id="confirm-modal-cancel" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Cancelar</button>
+            <button type="button" id="confirm-modal-accept" class="px-3 py-1.5 cursor-pointer border border-red-700 rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed">Confirmar</button>
+        </div>
+    </div>
+</div>
 
 <script>
 document.getElementById("create-form").addEventListener("submit", async (event) => {
@@ -120,5 +173,249 @@ document.getElementById("create-form").addEventListener("submit", async (event) 
         searchInput.setSelectionRange(end, end);
     }
 })();
+
+// --- Explorador de carpetas del servidor (reutilizable: ubicación de creación + destino de "Mover") ---
+
+function apiError(data, fallback) {
+    return (data && data.detail) || fallback;
+}
+
+function createFolderBrowser(ids) {
+    const panel = document.getElementById(ids.panel);
+    const currentEl = document.getElementById(ids.current);
+    const entriesEl = document.getElementById(ids.entries);
+    const errorEl = document.getElementById(ids.error);
+    let state = { current_path: "", parent_path: null };
+
+    async function browseTo(path) {
+        errorEl.textContent = "";
+        const url = path ? "/api/fs/browse?path=" + encodeURIComponent(path) : "/api/fs/browse";
+        const response = await fetch(url);
+        const data = await response.json();
+        if (!response.ok) {
+            errorEl.textContent = apiError(data, "No se pudo explorar esa carpeta.");
+            return;
+        }
+        state = data;
+        currentEl.textContent = data.current_path;
+        entriesEl.innerHTML = "";
+        if (data.entries.length === 0) {
+            const li = document.createElement("li");
+            li.className = "px-2 py-1 text-gray-500 text-sm";
+            li.textContent = "(sin subcarpetas)";
+            entriesEl.appendChild(li);
+        }
+        for (const entryName of data.entries) {
+            const li = document.createElement("li");
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "w-full text-left px-2 py-1 cursor-pointer hover:bg-gray-100 text-sm";
+            btn.textContent = entryName;
+            btn.addEventListener("click", () => {
+                const separator = state.current_path.endsWith("/") || state.current_path.endsWith("\\") ? "" : "/";
+                browseTo(state.current_path + separator + entryName);
+            });
+            li.appendChild(btn);
+            entriesEl.appendChild(li);
+        }
+    }
+
+    document.getElementById(ids.up).addEventListener("click", () => {
+        if (state.parent_path) browseTo(state.parent_path);
+    });
+    document.getElementById(ids.close).addEventListener("click", () => { panel.hidden = true; });
+
+    return {
+        open() { panel.hidden = false; browseTo(null); },
+        close() { panel.hidden = true; },
+        get currentPath() { return state.current_path; },
+    };
+}
+
+const locationBrowser = createFolderBrowser({
+    panel: "location-browse-panel", current: "location-browse-current", up: "location-browse-up",
+    close: "location-browse-close", entries: "location-browse-entries", error: "location-browse-error",
+});
+document.getElementById("location-browse-btn").addEventListener("click", () => locationBrowser.open());
+document.getElementById("location-browse-use").addEventListener("click", () => {
+    document.getElementById("location").value = locationBrowser.currentPath;
+    locationBrowser.close();
+});
+
+// --- Modal de confirmación genérico (Vaciar histórico / Eliminar / Mover) ---
+
+const confirmModal = document.getElementById("confirm-modal");
+const confirmTitle = document.getElementById("confirm-modal-title");
+const confirmMessage = document.getElementById("confirm-modal-message");
+const confirmExtra = document.getElementById("confirm-modal-extra");
+const confirmError = document.getElementById("confirm-modal-error");
+const confirmAccept = document.getElementById("confirm-modal-accept");
+const confirmCancel = document.getElementById("confirm-modal-cancel");
+
+let confirmHandler = null;
+
+function formatBytes(bytes) {
+    if (bytes < 1024) return bytes + " B";
+    const units = ["KB", "MB", "GB", "TB"];
+    let value = bytes;
+    let unitIndex = -1;
+    do {
+        value /= 1024;
+        unitIndex += 1;
+    } while (value >= 1024 && unitIndex < units.length - 1);
+    return value.toFixed(1) + " " + units[unitIndex];
+}
+
+async function fetchImpact(name) {
+    const response = await fetch("/api/projects/" + encodeURIComponent(name) + "/impact");
+    if (!response.ok) return null;
+    return await response.json();
+}
+
+function impactText(impact) {
+    if (!impact) return "No se pudo calcular el impacto.";
+    const base = impact.file_count + " ficheros (" + formatBytes(impact.total_size_bytes) + ")";
+    return impact.has_active_operation ? base + " — hay una operación en curso sobre este proyecto." : base;
+}
+
+function openConfirmModal({ title, message, extraNode, canAccept, onAccept }) {
+    confirmTitle.textContent = title;
+    confirmMessage.textContent = message;
+    confirmError.textContent = "";
+    confirmExtra.innerHTML = "";
+    if (extraNode) confirmExtra.appendChild(extraNode);
+    confirmAccept.disabled = !canAccept;
+    confirmHandler = onAccept;
+    confirmModal.hidden = false;
+}
+
+function closeConfirmModal() {
+    confirmModal.hidden = true;
+    confirmHandler = null;
+}
+
+confirmCancel.addEventListener("click", closeConfirmModal);
+confirmAccept.addEventListener("click", async () => {
+    if (!confirmHandler) return;
+    confirmError.textContent = "";
+    try {
+        await confirmHandler();
+    } catch (err) {
+        confirmError.textContent = err.message || "No se pudo completar la operación.";
+    }
+});
+
+async function postAction(url, method, body) {
+    const response = await fetch(url, {
+        method: method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+        let detail = "No se pudo completar la operación.";
+        try {
+            const data = await response.json();
+            detail = apiError(data, detail);
+        } catch (e) {
+            // respuesta sin cuerpo JSON: se mantiene el mensaje por defecto
+        }
+        throw new Error(detail);
+    }
+}
+
+document.querySelectorAll(".action-clear-history").forEach((button) => {
+    button.addEventListener("click", async () => {
+        const name = button.dataset.name;
+        const impact = await fetchImpact(name);
+        openConfirmModal({
+            title: "Vaciar histórico de «" + name + "»",
+            message: "Se borrará TODO el contenido del proyecto (caché, historial de escaneo, errores, duplicados y salida de conversión). El proyecto seguirá existiendo, vacío. Esta acción no se puede deshacer.\n\nImpacto: " + impactText(impact),
+            canAccept: true,
+            onAccept: async () => {
+                await postAction("/api/projects/" + encodeURIComponent(name) + "/clear-history", "POST", { confirm: true });
+                window.location.reload();
+            },
+        });
+    });
+});
+
+document.querySelectorAll(".action-delete-project").forEach((button) => {
+    button.addEventListener("click", async () => {
+        const name = button.dataset.name;
+        const impact = await fetchImpact(name);
+
+        const wrapper = document.createElement("div");
+        const label = document.createElement("label");
+        label.className = "block text-sm mb-1";
+        label.textContent = 'Escribe "' + name + '" para confirmar:';
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "border border-gray-300 rounded px-2 py-1.5 w-full";
+        wrapper.appendChild(label);
+        wrapper.appendChild(input);
+
+        openConfirmModal({
+            title: "Eliminar «" + name + "» por completo",
+            message: "Se eliminará el proyecto y TODA su carpeta de trabajo en disco. No hay papelera: esta acción es irreversible.\n\nImpacto: " + impactText(impact),
+            extraNode: wrapper,
+            canAccept: false,
+            onAccept: async () => {
+                if (input.value !== name) {
+                    throw new Error("El nombre escrito no coincide.");
+                }
+                await postAction("/api/projects/" + encodeURIComponent(name), "DELETE", { confirm: true });
+                window.location.reload();
+            },
+        });
+        input.addEventListener("input", () => {
+            confirmAccept.disabled = input.value !== name;
+        });
+        input.focus();
+    });
+});
+
+// El picker de destino de "Mover" es un único nodo estático (#move-browse-container),
+// reutilizado en cada clic via appendChild dentro del modal (no se recrea el DOM del
+// explorador por cada proyecto) — misma instancia de createFolderBrowser que la de creación.
+const moveBrowseContainer = document.getElementById("move-browse-container");
+const moveDestinationLabel = document.getElementById("move-destination-label");
+const moveBrowser = createFolderBrowser({
+    panel: "move-browse-panel", current: "move-browse-current", up: "move-browse-up",
+    close: "move-browse-close", entries: "move-browse-entries", error: "move-browse-error",
+});
+document.getElementById("move-browse-btn").addEventListener("click", () => moveBrowser.open());
+let moveDestination = null;
+document.getElementById("move-browse-use").addEventListener("click", () => {
+    moveDestination = moveBrowser.currentPath;
+    moveDestinationLabel.textContent = moveDestination;
+    moveBrowser.close();
+    confirmAccept.disabled = false;
+});
+
+document.querySelectorAll(".action-move-project").forEach((button) => {
+    button.addEventListener("click", async () => {
+        const name = button.dataset.name;
+        const impact = await fetchImpact(name);
+
+        moveDestination = null;
+        moveDestinationLabel.textContent = "(sin elegir)";
+        moveBrowser.close();
+        moveBrowseContainer.hidden = false;
+
+        openConfirmModal({
+            title: "Mover «" + name + "» a otra carpeta",
+            message: "Se moverá toda la carpeta del proyecto (caché, histórico y salida de conversión incluidos) a la carpeta padre que elijas. El proyecto seguirá siendo accesible con el mismo nombre en la nueva ubicación.\n\nImpacto: " + impactText(impact),
+            extraNode: moveBrowseContainer,
+            canAccept: false,
+            onAccept: async () => {
+                if (!moveDestination) {
+                    throw new Error("Elige primero una carpeta de destino.");
+                }
+                await postAction("/api/projects/" + encodeURIComponent(name) + "/move", "POST", { destination_path: moveDestination, confirm: true });
+                window.location.reload();
+            },
+        });
+    });
+});
 </script>
 {% endblock %}

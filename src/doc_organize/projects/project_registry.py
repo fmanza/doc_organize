@@ -166,6 +166,132 @@ class ProjectRegistry:
                 return project
         raise ProjectNotFoundError(f"No existe ningún proyecto llamado '{name}'.")
 
+    async def delete_project(self, name: str, tenant_id: str = "default") -> None:
+        """Elimina `name` del registro y borra su carpeta de trabajo por completo.
+
+        Orden de operaciones (mismo criterio que `create_project`, invertido): se
+        borra primero la carpeta en disco -> si tiene éxito, se quita del registro.
+        Si el borrado físico falla a mitad, el proyecto sigue registrado (y
+        visible) para poder reintentarlo, en vez de desregistrar un proyecto cuya
+        carpeta puede seguir ocupando espacio en disco.
+
+        Args:
+            name: Nombre del proyecto a eliminar.
+            tenant_id: Tenant propietario.
+
+        Raises:
+            ProjectNotFoundError: Si no hay ningún proyecto con ese nombre en `tenant_id`.
+            ProjectError: Si la carpeta del proyecto no se pudo borrar por completo.
+
+        Example:
+            >>> import asyncio, tempfile
+            >>> from pathlib import Path
+            >>> async def main():
+            ...     base_location = Path(tempfile.mkdtemp())
+            ...     async with ProjectRegistry(base_location / "projects.json") as registry:
+            ...         await registry.create_project("Temporal", base_location)
+            ...         await registry.delete_project("Temporal")
+            ...         return await registry.list_projects()
+            >>> asyncio.run(main())
+            []
+        """
+        async with self._lock:
+            projects = await self._load()
+            project = next((p for p in projects if p.name.lower() == name.lower() and p.tenant_id == tenant_id), None)
+            if project is None:
+                raise ProjectNotFoundError(f"No existe ningún proyecto llamado '{name}'.")
+
+            root_path = Path(project.root_path)
+            if root_path.exists():
+                try:
+                    await asyncio.to_thread(shutil.rmtree, root_path)
+                except OSError as exc:
+                    raise ProjectError(f"No se pudo eliminar la carpeta del proyecto '{root_path}': {exc}") from exc
+
+            remaining = [p for p in projects if not (p.name.lower() == name.lower() and p.tenant_id == tenant_id)]
+            await self._save(remaining)
+
+        self.logger.info(f"Proyecto eliminado: '{name}' (tenant '{tenant_id}'), carpeta '{root_path}' borrada")
+
+    async def move_project_root(self, name: str, destination_parent: str | Path, tenant_id: str = "default") -> Project:
+        """Mueve la carpeta raíz de `name` a `<destination_parent>/<name>/`.
+
+        `destination_parent` debe ser una carpeta ya existente (la carpeta padre
+        de destino, elegida por el usuario, no la ruta final) — igual que
+        `base_location` en `create_project`. Usa `shutil.move`, que ya resuelve
+        internamente "rename atómico si es el mismo volumen, si no copiar y
+        borrar el origen" — no hace falta reimplementar esa lógica aquí.
+
+        Si el movimiento físico tiene éxito pero no se puede persistir el
+        registro actualizado, se revierte el movimiento (misma carpeta física de
+        vuelta al origen) antes de propagar el error, para no dejar el registro
+        apuntando a una ruta que ya no coincide con el disco.
+
+        Args:
+            name: Nombre del proyecto a mover.
+            destination_parent: Carpeta padre de destino, ya existente.
+            tenant_id: Tenant propietario.
+
+        Returns:
+            El `Project` actualizado, con el nuevo `root_path`.
+
+        Raises:
+            ProjectNotFoundError: Si no hay ningún proyecto con ese nombre en `tenant_id`.
+            ProjectError: Si `destination_parent` no existe, si el destino ya
+                contiene una carpeta con ese nombre, si la carpeta actual del
+                proyecto no existe, o si el destino es la ubicación actual.
+
+        Example:
+            >>> import asyncio, tempfile
+            >>> from pathlib import Path
+            >>> async def main():
+            ...     base_location = Path(tempfile.mkdtemp())
+            ...     new_location = Path(tempfile.mkdtemp())
+            ...     async with ProjectRegistry(base_location / "projects.json") as registry:
+            ...         await registry.create_project("Movil", base_location)
+            ...         moved = await registry.move_project_root("Movil", new_location)
+            ...         return moved.root_path == str(new_location / "Movil")
+            >>> asyncio.run(main())
+            True
+        """
+        destination_base = Path(destination_parent)
+        if not destination_base.is_dir():
+            raise ProjectError(f"La carpeta de destino no existe o no es una carpeta: {destination_parent}")
+
+        async with self._lock:
+            projects = await self._load()
+            index = next(
+                (i for i, p in enumerate(projects) if p.name.lower() == name.lower() and p.tenant_id == tenant_id),
+                None,
+            )
+            if index is None:
+                raise ProjectNotFoundError(f"No existe ningún proyecto llamado '{name}'.")
+            project = projects[index]
+
+            old_root = Path(project.root_path)
+            new_root = safe_path_join(destination_base, project.name)
+            if new_root == old_root:
+                raise ProjectError("El destino elegido es la ubicación actual del proyecto.")
+            if new_root.exists():
+                raise ProjectError(f"Ya existe una carpeta en el destino: {new_root}")
+            if not old_root.is_dir():
+                raise ProjectError(f"La carpeta actual del proyecto no existe: {old_root}")
+
+            try:
+                await asyncio.to_thread(shutil.move, str(old_root), str(new_root))
+            except OSError as exc:
+                raise ProjectError(f"No se pudo mover la carpeta del proyecto de '{old_root}' a '{new_root}': {exc}") from exc
+            updated = project.model_copy(update={"root_path": str(new_root)})
+            try:
+                projects[index] = updated
+                await self._save(projects)
+            except Exception:
+                await asyncio.to_thread(shutil.move, str(new_root), str(old_root))
+                raise
+
+        self.logger.info(f"Proyecto '{name}' movido de '{old_root}' a '{new_root}' (tenant '{tenant_id}')")
+        return updated
+
     async def _load(self) -> list[Project]:
         if not self.registry_path.exists():
             return []

@@ -4,6 +4,8 @@ import asyncio
 import json
 import shutil
 
+from pathlib import Path
+
 import pytest
 
 from doc_organize.core.exceptions import (
@@ -253,3 +255,135 @@ async def test_get_project_from_other_tenant_raises_not_found(tmp_path) -> None:
         await registry.create_project("Proyecto Acme", base, tenant_id="acme-corp")
         with pytest.raises(ProjectNotFoundError):
             await registry.get_project("Proyecto Acme", tenant_id="globex-inc")
+
+
+# ===== delete_project =====
+
+
+@pytest.mark.asyncio
+async def test_delete_project_removes_folder_and_registry_entry(tmp_path) -> None:
+    base = tmp_path / "workspaces"
+    base.mkdir()
+
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        project = await registry.create_project("Temporal", base)
+        (Path(project.root_path) / "algo.txt").write_text("x", encoding="utf-8")
+
+        await registry.delete_project("Temporal")
+        projects = await registry.list_projects()
+
+    assert projects == []
+    assert not Path(project.root_path).exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_project_raises_when_not_found(tmp_path) -> None:
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        with pytest.raises(ProjectNotFoundError):
+            await registry.delete_project("No Existe")
+
+
+@pytest.mark.asyncio
+async def test_delete_project_keeps_registry_entry_if_folder_removal_fails(tmp_path, monkeypatch) -> None:
+    base = tmp_path / "workspaces"
+    base.mkdir()
+
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        await registry.create_project("Proyecto", base)
+
+        def _boom(path):
+            raise OSError("fallo simulado al borrar la carpeta")
+
+        monkeypatch.setattr(shutil, "rmtree", _boom)
+
+        with pytest.raises(ProjectError):
+            await registry.delete_project("Proyecto")
+
+        monkeypatch.undo()
+        projects = await registry.list_projects()
+
+    # El proyecto sigue registrado: el borrado fisico fallo, no se desregistro a ciegas.
+    assert [p.name for p in projects] == ["Proyecto"]
+
+
+# ===== move_project_root =====
+
+
+@pytest.mark.asyncio
+async def test_move_project_root_moves_folder_and_updates_registry(tmp_path) -> None:
+    base = tmp_path / "workspaces"
+    base.mkdir()
+    destination = tmp_path / "otro-destino"
+    destination.mkdir()
+
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        project = await registry.create_project("Movil", base)
+        (Path(project.root_path) / "cache.db").write_text("x", encoding="utf-8")
+
+        moved = await registry.move_project_root("Movil", destination)
+        found = await registry.get_project("Movil")
+
+    expected_root = destination / "Movil"
+    assert moved.root_path == str(expected_root)
+    assert found.root_path == str(expected_root)
+    assert (expected_root / "cache.db").exists()
+    assert not Path(project.root_path).exists()
+
+
+@pytest.mark.asyncio
+async def test_move_project_root_raises_when_destination_missing(tmp_path) -> None:
+    base = tmp_path / "workspaces"
+    base.mkdir()
+
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        await registry.create_project("Proyecto", base)
+        with pytest.raises(ProjectError):
+            await registry.move_project_root("Proyecto", tmp_path / "no-existe")
+
+
+@pytest.mark.asyncio
+async def test_move_project_root_raises_when_destination_already_has_folder(tmp_path) -> None:
+    base = tmp_path / "workspaces"
+    base.mkdir()
+    destination = tmp_path / "otro-destino"
+    destination.mkdir()
+    (destination / "Proyecto").mkdir()
+
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        await registry.create_project("Proyecto", base)
+        with pytest.raises(ProjectError):
+            await registry.move_project_root("Proyecto", destination)
+
+
+@pytest.mark.asyncio
+async def test_move_project_root_rolls_back_move_on_registry_save_failure(tmp_path, monkeypatch) -> None:
+    base = tmp_path / "workspaces"
+    base.mkdir()
+    destination = tmp_path / "otro-destino"
+    destination.mkdir()
+
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        project = await registry.create_project("Proyecto", base)
+        original_root = Path(project.root_path)
+
+        async def _boom(self, projects):
+            raise RuntimeError("fallo simulado al guardar el registro")
+
+        monkeypatch.setattr(ProjectRegistry, "_save", _boom)
+
+        with pytest.raises(RuntimeError):
+            await registry.move_project_root("Proyecto", destination)
+
+    # La carpeta fisica volvio a su sitio original: el registro nunca se actualizo.
+    assert original_root.is_dir()
+    assert not (destination / "Proyecto").exists()
+
+
+@pytest.mark.asyncio
+async def test_move_project_root_raises_when_not_found(tmp_path) -> None:
+    destination = tmp_path / "otro-destino"
+    destination.mkdir()
+
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        with pytest.raises(ProjectNotFoundError):
+            await registry.move_project_root("No Existe", destination)

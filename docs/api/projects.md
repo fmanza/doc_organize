@@ -180,6 +180,77 @@ class Project:
 - **Rollback automático**: Si creación falla después de crear carpeta, se borra (atomicidad)
 - **Case-insensitive**: Búsqueda por nombre ignora mayúsculas
 
+#### delete_project
+
+Elimina un proyecto por completo: borra `root_path` en disco y quita la entrada del registro.
+
+| Parámetro | Tipo | Descripción |
+|---|---|---|
+| `name` | `str` | Nombre del proyecto a eliminar |
+| `tenant_id` | `str` | ID de tenant |
+
+**Proceso**: borra primero la carpeta en disco (`shutil.rmtree`) y solo si tiene éxito
+quita la entrada del registro — si el borrado físico falla, el proyecto sigue
+registrado para poder reintentarlo.
+
+**Excepciones**:
+- `ProjectNotFoundError` — No existe ese proyecto
+- `ProjectError` — La carpeta no se pudo borrar por completo
+
+---
+
+#### move_project_root
+
+Mueve `root_path` de un proyecto a `<destination_parent>/<name>/`.
+
+| Parámetro | Tipo | Descripción |
+|---|---|---|
+| `name` | `str` | Nombre del proyecto a mover |
+| `destination_parent` | `str \| Path` | Carpeta padre de destino, ya existente |
+| `tenant_id` | `str` | ID de tenant |
+
+| Retorno | Tipo | Descripción |
+|---|---|---|
+| | `Project` | Proyecto actualizado, con el nuevo `root_path` |
+
+**Proceso**: usa `shutil.move` (rename atómico si es el mismo volumen, copiar+borrar si
+no) y, si el movimiento físico tiene éxito pero no se puede persistir el registro
+actualizado, revierte el movimiento antes de propagar el error.
+
+**Excepciones**:
+- `ProjectNotFoundError` — No existe ese proyecto
+- `ProjectError` — Destino inexistente, destino ya ocupado, carpeta actual inexistente, o destino igual al actual
+
+---
+
+## ProjectHistoryCleaner
+
+```python
+class ProjectHistoryCleaner:
+    async def clear(self, project: Project) -> None
+```
+
+Vacía por completo `<project.root_path>` (caché, historial de escaneo/errores/
+deduplicación, carpetas guardadas, salida de conversión) y regenera únicamente
+`project.json`, dejando el proyecto como recién creado. No toca el registro
+(`projects.json`) — a diferencia de `ProjectRegistry.delete_project`, el
+proyecto sigue existiendo con el mismo nombre y ubicación.
+
+**Excepciones**: `ProjectError` si `root_path` no existe o algún elemento no se pudo borrar.
+
+## Rutas HTTP de gestión destructiva (admin)
+
+Todas bajo `/api/projects/{name}`, solo accesibles a un rol `admin`, y todas
+exigen `{"confirm": true}` en el payload y ausencia de una operación en curso
+(`409` si hay un escaneo/deduplicación activo sobre el mismo proyecto):
+
+| Ruta | Método | Descripción |
+|---|---|---|
+| `/impact` | `GET` | `{file_count, total_size_bytes, has_active_operation}` — resumen para la ventana modal de confirmación |
+| `/clear-history` | `POST` | Llama a `ProjectHistoryCleaner.clear()` |
+| `` (raíz) | `DELETE` | Llama a `ProjectRegistry.delete_project()` |
+| `/move` | `POST` | `{destination_path: str, confirm: bool}` → llama a `ProjectRegistry.move_project_root()` |
+
 ## Ejemplos Relacionados
 
 - [Crear y listar proyectos](../examples/projects-registry.md)
