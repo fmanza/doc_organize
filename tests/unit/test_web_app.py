@@ -33,6 +33,20 @@ async def test_project_selector_page_loads(tmp_path) -> None:
     assert "Proyectos" in response.text
 
 
+@pytest.mark.asyncio
+async def test_project_selector_confirm_modal_starts_hidden(tmp_path) -> None:
+    """Regresión: `hidden` + `flex` estáticos en el mismo elemento hacen que Tailwind
+    (CDN) ignore `[hidden]` y el modal se muestre siempre, vacío y bloqueando la página."""
+    app = create_app(registry_path=tmp_path / "projects.json")
+    async with _client(app) as client:
+        response = await client.get("/")
+    assert response.status_code == 200
+    start = response.text.index('<div id="confirm-modal"')
+    modal_tag = response.text[start : response.text.index(">", start) + 1]
+    assert "hidden" in modal_tag
+    assert "flex" not in modal_tag
+
+
 # ===== Buscador y paginación de "Proyectos" (misma funcionalidad que la pestaña Caché) =====
 
 

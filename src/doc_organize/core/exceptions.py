@@ -43,6 +43,10 @@ class ProjectNotFoundError(ProjectError):
     """No hay ningun proyecto registrado con ese nombre."""
 
 
+class ProjectNotScannedError(ProjectError):
+    """El proyecto no tiene un `folders.json` (no se ha ejecutado ningun escaneo todavia)."""
+
+
 class ScannedFolderError(DocOrganizeError):
     """Error base de la lista persistente de carpetas de escaneo de un proyecto."""
 
@@ -98,6 +102,7 @@ __all__ = [
     "ProjectError",
     "ProjectNameError",
     "ProjectNotFoundError",
+    "ProjectNotScannedError",
     "RoleAlreadyExistsError",
     "RoleInUseError",
     "RoleNotFoundError",

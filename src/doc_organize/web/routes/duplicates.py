@@ -9,11 +9,12 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ValidationError
 
 from doc_organize.core.constants import DEDUP_HISTORY_JSONL_NAME, DUPLICATES_FOLDER_NAME, SCAN_FOLDERS_JSON_NAME
+from doc_organize.core.exceptions import ProjectNotScannedError
 from doc_organize.core.models import DeduplicationReport, DuplicateGroup, Project
 from doc_organize.dedup import DeduplicationManager
 from doc_organize.scanner import DocumentScanner
@@ -106,9 +107,8 @@ async def _detect_duplicates(project: Project) -> list[DuplicateGroup]:
 
     paths = await asyncio.to_thread(_read_scanned_paths)
     if paths is None:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Este proyecto todavía no se ha escaneado ni deduplicado nunca (no existe {SCAN_FOLDERS_JSON_NAME}).",
+        raise ProjectNotScannedError(
+            f"Este proyecto todavía no se ha escaneado ni deduplicado nunca (no existe {SCAN_FOLDERS_JSON_NAME})."
         )
 
     async with DocumentScanner() as scanner:
@@ -165,7 +165,17 @@ async def duplicates_resolver_page(name: str, request: Request, tab: str = "reso
     reestructuración de navegación).
     """
     project = await _get_project(request, name)
-    groups = await _detect_duplicates(project)
+    # `ProjectNotScannedError` se captura aquí (a diferencia de `get_duplicates`
+    # y `resolve_duplicates`, que la dejan propagar al handler global de
+    # `web/app.py` -> 409 JSON, pensado para el propio JS de esta página): esta
+    # ruta sirve HTML a una persona, así que en vez del JSON crudo del handler
+    # global se renderiza un estado informativo dentro del layout habitual.
+    never_scanned = False
+    try:
+        groups = await _detect_duplicates(project)
+    except ProjectNotScannedError:
+        never_scanned = True
+        groups = []
     groups_with_keys = [{"key": _group_key(group), "group": group, "members": [group.canonical_doc, *group.duplicates]} for group in groups]
     history = await asyncio.to_thread(_load_dedup_history, project)
     last_dedup_report = history[0] if history else None
@@ -195,6 +205,7 @@ async def duplicates_resolver_page(name: str, request: Request, tab: str = "reso
             "history_entries": history_entries,
             "total_resolved_groups": total_resolved_groups,
             "has_saved_folders": bool(saved_folders),
+            "never_scanned": never_scanned,
             "active_tab": "history" if tab == "history" else "resolve",
         },
     )

@@ -46,7 +46,15 @@
 
 <div id="resolve-results-container">
 <h2 class="text-lg font-medium mt-4 mb-2">Resultado de los duplicados</h2>
-{% if groups %}
+{% if never_scanned %}
+<p class="my-2 px-3 py-2 rounded bg-amber-50 border border-amber-300 text-amber-900 text-sm">
+    Este proyecto todavía no se ha escaneado ni deduplicado nunca: no hay documentos catalogados
+    con los que buscar duplicados. Usa el botón "Buscar duplicados" de arriba (necesita al menos
+    una carpeta guardada) o ve a la pestaña
+    <a class="underline" href="/projects/{{ project.name | urlencode }}/scan">Escanear</a>
+    para escanear el proyecto por primera vez.
+</p>
+{% elif groups %}
 <form id="resolve-form" class="my-4">
     {% for item in groups %}
     <fieldset class="border border-gray-300 rounded p-3 mb-3">
@@ -101,7 +109,7 @@
 </p>
 {% endif %}
 
-{% if not groups and not last_dedup_report %}
+{% if not never_scanned and not groups and not last_dedup_report %}
 <p>No se detectaron duplicados.</p>
 {% endif %}
 

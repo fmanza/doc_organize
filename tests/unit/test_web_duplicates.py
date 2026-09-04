@@ -4,6 +4,7 @@ import json
 import re
 
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 import pytest
@@ -47,6 +48,32 @@ async def test_duplicates_api_409_when_never_scanned(tmp_path) -> None:
         response = await client.get(f"/api/projects/{project.name}/duplicates")
 
     assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_duplicates_page_shows_informative_state_when_never_scanned(tmp_path) -> None:
+    # Antes de esta corrección, un proyecto sin `folders.json` hacía que la
+    # página HTML propagara la misma `HTTPException` que usa la API JSON,
+    # sirviendo el JSON crudo del handler global en vez de una página
+    # informativa (ver web/routes/duplicates.py::_detect_duplicates).
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/duplicates")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "todavía no se ha escaneado ni deduplicado nunca" in response.text
+    assert f"/projects/{quote(project.name)}/scan" in response.text
+    assert "No se detectaron duplicados." not in response.text
+
+    # La API JSON, en cambio, mantiene su 409 sin cambios (la consume el JS de
+    # la propia página, no una persona).
+    async with _client(app) as client:
+        api_response = await client.get(f"/api/projects/{project.name}/duplicates")
+    assert api_response.status_code == 409
 
 
 @pytest.mark.asyncio
