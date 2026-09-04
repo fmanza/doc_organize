@@ -59,6 +59,18 @@ def get_scanned_folders_store() -> ScannedFoldersStore:
     return _scanned_folders_store
 
 
+def project_operation_key(tenant_id: str, project_name: str) -> tuple[str, str]:
+    """Clave case-insensitive (mismo criterio que `ProjectRegistry.get_project`)
+    para identificar un proyecto en `app.state.active_project_operations`.
+
+    Compartida entre `web/routes/scan.py` (escaneo/deduplicación, vía WebSocket) y
+    `web/routes/projects.py` (operaciones de mantenimiento, vía HTTP) — ambos leen y
+    escriben el mismo `app.state.active_project_operations`, así que deben coincidir
+    exactamente para que se bloqueen mutuamente sobre el mismo proyecto.
+    """
+    return (tenant_id, project_name.lower())
+
+
 def get_tenant_id(conn: HTTPConnection) -> str:
     """Resuelve el tenant de esta conexión (revisión 8, §2.7.2).
 
@@ -141,6 +153,7 @@ __all__ = [
     "get_auth_store",
     "get_project_registry",
     "get_tenant_id",
+    "project_operation_key",
     "require_admin",
     "require_project_access",
 ]

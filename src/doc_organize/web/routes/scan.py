@@ -39,6 +39,7 @@ from doc_organize.web.dependencies import (
     get_project_registry,
     get_scanned_folders_store,
     get_tenant_id,
+    project_operation_key,
     require_project_access,
 )
 from doc_organize.web.pagination import DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, Page, paginate
@@ -302,12 +303,6 @@ async def _authorize_project_websocket(websocket: WebSocket, project_name: str) 
         return tenant_id, role.allowed_scan_roots
 
 
-def _project_operation_key(tenant_id: str, project_name: str) -> tuple[str, str]:
-    """Clave case-insensitive (mismo criterio que `ProjectRegistry.get_project`)
-    para identificar un proyecto en `app.state.active_project_operations`."""
-    return (tenant_id, project_name.lower())
-
-
 async def _acquire_project_operation_lock(websocket: WebSocket, tenant_id: str, project_name: str) -> tuple[str, str] | None:
     """Reserva `(tenant_id, project_name)` para esta conexión, para que un
     escaneo y una deduplicación (o dos escaneos) del MISMO proyecto no corran a
@@ -317,7 +312,7 @@ async def _acquire_project_operation_lock(websocket: WebSocket, tenant_id: str, 
     `_release_project_operation_lock`), o `None` si ya había una operación en
     curso para ese proyecto (y ya cerró el websocket con 1008 — el llamador no
     debe hacer nada más)."""
-    key = _project_operation_key(tenant_id, project_name)
+    key = project_operation_key(tenant_id, project_name)
     active = websocket.app.state.active_project_operations
     if key in active:
         await websocket.close(code=1008, reason="Ya hay un escaneo o deduplicación en curso para este proyecto")

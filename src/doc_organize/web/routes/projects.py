@@ -11,7 +11,14 @@ from pydantic import BaseModel
 
 from doc_organize.projects import ProjectHistoryCleaner
 from doc_organize.utils.logging import get_logger
-from doc_organize.web.dependencies import get_auth_store, get_project_registry, get_tenant_id, require_admin, require_project_access
+from doc_organize.web.dependencies import (
+    get_auth_store,
+    get_project_registry,
+    get_tenant_id,
+    project_operation_key,
+    require_admin,
+    require_project_access,
+)
 
 logger = get_logger(__name__)
 
@@ -54,18 +61,10 @@ class MoveProjectRequest(BaseModel):
     confirm: bool = False
 
 
-def _project_operation_key(tenant_id: str, project_name: str) -> tuple[str, str]:
-    """Misma forma de clave que `web/routes/scan.py::_project_operation_key` —
-    ambas leen/escriben el mismo `app.state.active_project_operations`, así que
-    deben coincidir para que un escaneo/deduplicación y una de estas operaciones
-    de mantenimiento sobre el MISMO proyecto se bloqueen mutuamente."""
-    return (tenant_id, project_name.lower())
-
-
 def _acquire_operation_lock(request: Request, tenant_id: str, project_name: str) -> tuple[str, str]:
     """Reserva `(tenant_id, project_name)` para esta petición, o levanta 409 si ya
     hay un escaneo, deduplicación u otra operación de mantenimiento en curso."""
-    key = _project_operation_key(tenant_id, project_name)
+    key = project_operation_key(tenant_id, project_name)
     active = request.app.state.active_project_operations
     if key in active:
         raise HTTPException(status_code=409, detail="Ya hay un escaneo, deduplicación u otra operación en curso para este proyecto.")
@@ -155,7 +154,7 @@ async def get_project_impact(name: str, request: Request) -> ProjectImpactSummar
 
     root = Path(project.root_path)
     file_count, total_size_bytes = await asyncio.to_thread(_compute_impact, root) if root.is_dir() else (0, 0)
-    key = _project_operation_key(tenant_id, name)
+    key = project_operation_key(tenant_id, name)
     has_active_operation = key in request.app.state.active_project_operations
     return ProjectImpactSummary(file_count=file_count, total_size_bytes=total_size_bytes, has_active_operation=has_active_operation)
 
