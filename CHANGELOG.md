@@ -6,6 +6,18 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+### Added
+
+- `src/doc_organize/web/routes/downloads.py`: nuevo `GET /downloads/projects/{name}/export-preview`
+  (`_compute_export_preview()`) — nº de ficheros y tamaño total en bytes que incluiría `export.zip`,
+  sin generarlo; espeja las mismas tres fuentes que `_build_export_zip()` (`Conversión/`,
+  `cache_export.json`, `DEDUP_REPORT.json`).
+- `src/doc_organize/web/templates/_nav_macros.html.j2`: "Descargar export" muestra ahora esa
+  estimación de tamaño/nº de archivos junto al botón (cargada vía `fetch` al `export-preview`) y,
+  si el navegador soporta la File System Access API (`showDirectoryPicker`, Chrome/Edge en contexto
+  seguro), permite elegir la carpeta de destino y escribe el ZIP ahí; en el resto de navegadores
+  cae al comportamiento estándar (carpeta de descargas configurada del navegador).
+
 ## [0.7.0] - 2026-09-03
 
 ### Added

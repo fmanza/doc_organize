@@ -7,6 +7,74 @@
    href="/projects/{{ project.name | urlencode }}/scan">Escanear</a>
 <a class="block px-2 py-1.5 rounded {{ 'bg-gray-200 font-medium' if active == 'scan_errors' else 'hover:bg-gray-100' }}"
    href="/projects/{{ project.name | urlencode }}/scan-errors">Errores de Escaneo</a>
-<a class="block px-2 py-1.5 rounded hover:bg-gray-100" href="/downloads/projects/{{ project.name | urlencode }}/export.zip">Descargar export</a>
+<button type="button" id="export-download-btn"
+        class="block w-full text-left px-2 py-1.5 rounded hover:bg-gray-100 bg-transparent border-0 cursor-pointer"
+        data-export-url="/downloads/projects/{{ project.name | urlencode }}/export.zip"
+        data-preview-url="/downloads/projects/{{ project.name | urlencode }}/export-preview"
+        data-filename="{{ project.name }}-export.zip">
+    Descargar export
+    <span id="export-preview-info" class="block text-xs text-gray-500"></span>
+</button>
 <a class="block px-2 py-1.5 rounded hover:bg-gray-100 mt-2 border-t border-gray-300 pt-2" href="/">&larr; Todos los proyectos</a>
+<script>
+(function () {
+    const btn = document.getElementById("export-download-btn");
+    const info = document.getElementById("export-preview-info");
+    const exportUrl = btn.dataset.exportUrl;
+    const previewUrl = btn.dataset.previewUrl;
+    const filename = btn.dataset.filename;
+
+    function formatSize(bytes) {
+        const units = ["B", "KB", "MB", "GB"];
+        let value = bytes;
+        let unitIndex = 0;
+        while (value >= 1024 && unitIndex < units.length - 1) {
+            value /= 1024;
+            unitIndex += 1;
+        }
+        const decimals = unitIndex === 0 ? 0 : 1;
+        return `${value.toFixed(decimals)} ${units[unitIndex]}`;
+    }
+
+    fetch(previewUrl)
+        .then((response) => (response.ok ? response.json() : null))
+        .then((data) => {
+            if (data) {
+                info.textContent = `≈ ${data.file_count} archivo(s) · ${formatSize(data.total_size_bytes)}`;
+            }
+        })
+        .catch(() => {
+            // Sin preview disponible: el botón sigue funcionando igualmente, solo sin la cifra.
+        });
+
+    async function downloadWithPicker() {
+        let directoryHandle;
+        try {
+            directoryHandle = await window.showDirectoryPicker();
+        } catch (e) {
+            return; // Usuario canceló el selector: no es un error.
+        }
+        const response = await fetch(exportUrl);
+        if (!response.ok) {
+            throw new Error(`Descarga fallida: ${response.status}`);
+        }
+        const blob = await response.blob();
+        const fileHandle = await directoryHandle.getFileHandle(filename, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+    }
+
+    btn.addEventListener("click", () => {
+        if (typeof window.showDirectoryPicker === "function") {
+            downloadWithPicker().catch(() => {
+                // Fallback si falla la escritura vía File System Access API: descarga normal del navegador.
+                window.location.href = exportUrl;
+            });
+        } else {
+            window.location.href = exportUrl;
+        }
+    });
+})();
+</script>
 {% endmacro %}

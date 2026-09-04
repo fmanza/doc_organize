@@ -79,6 +79,57 @@ async def test_export_zip_contains_conversion_and_cache_snapshot(tmp_path) -> No
 
 
 @pytest.mark.asyncio
+async def test_export_preview_404_for_missing_project(tmp_path) -> None:
+    app = create_app(registry_path=tmp_path / "projects.json")
+    async with _client(app) as client:
+        response = await client.get("/downloads/projects/No Existe/export-preview")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_export_preview_matches_actual_zip_contents(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    root = tmp_path / "workspaces" / project.name
+
+    conversion_dir = root / "Conversión" / "docs"
+    conversion_dir.mkdir(parents=True)
+    (conversion_dir / "report.md").write_text("# Informe", encoding="utf-8")
+
+    duplicados_dir = root / "duplicados"
+    duplicados_dir.mkdir(parents=True)
+    (duplicados_dir / "DEDUP_REPORT.json").write_text(json.dumps({"groups": []}), encoding="utf-8")
+
+    cache_db = root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [
+                CacheEntry(
+                    file_path="/repo/docs/report.pdf",
+                    sha256_hash="b" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
+        )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        preview_response = await client.get(f"/downloads/projects/{project.name}/export-preview")
+        zip_response = await client.get(f"/downloads/projects/{project.name}/export.zip")
+
+    assert preview_response.status_code == 200
+    preview = preview_response.json()
+
+    with zipfile.ZipFile(io.BytesIO(zip_response.content)) as zip_file:
+        infos = zip_file.infolist()
+
+    assert preview["file_count"] == len(infos)
+    assert preview["total_size_bytes"] == sum(info.file_size for info in infos)
+
+
+@pytest.mark.asyncio
 async def test_export_zip_includes_dedup_report_when_present(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)

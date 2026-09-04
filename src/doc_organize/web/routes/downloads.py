@@ -82,6 +82,67 @@ def _build_export_zip(project_root: Path, cached_entries: dict[str, CacheEntry])
     return tmp_path
 
 
+def _compute_export_preview(project_root: Path, cached_entries: dict[str, CacheEntry]) -> tuple[int, int]:
+    """Cuenta ficheros y suma bytes de lo que incluiría `_build_export_zip()`, sin
+    construir el ZIP.
+
+    Espeja las mismas tres fuentes que `_build_export_zip()` (`Conversión/`,
+    `cache_export.json`, `DEDUP_REPORT.json`) para que el preview mostrado antes de
+    descargar coincida con el contenido real del export. Síncrono a propósito
+    (stat de disco) — se llama vía `asyncio.to_thread` desde la ruta, mismo patrón
+    que el resto de este módulo.
+    """
+    file_count = 0
+    total_size = 0
+
+    conversion_dir = project_root / "Conversión"
+    if conversion_dir.is_dir():
+        for file_path in conversion_dir.rglob("*"):
+            if file_path.is_file():
+                file_count += 1
+                total_size += file_path.stat().st_size
+
+    snapshot = CacheExportSnapshot(
+        export_timestamp=datetime.now(UTC).isoformat(),
+        total_entries=len(cached_entries),
+        new_files=[e.file_path for e in cached_entries.values() if e.status is DocumentStatus.NEW],
+        modified_files=[e.file_path for e in cached_entries.values() if e.status is DocumentStatus.MODIFIED],
+        unchanged_files=[e.file_path for e in cached_entries.values() if e.status is DocumentStatus.UNCHANGED],
+        entries=list(cached_entries.values()),
+    )
+    file_count += 1
+    total_size += len(snapshot.model_dump_json(indent=2).encode("utf-8"))
+
+    dedup_report = project_root / DUPLICATES_FOLDER_NAME / DEDUP_REPORT_JSON_NAME
+    if dedup_report.is_file():
+        file_count += 1
+        total_size += dedup_report.stat().st_size
+
+    return file_count, total_size
+
+
+@router.get("/downloads/projects/{name}/export-preview", dependencies=[Depends(require_project_access)])
+async def export_project_preview(name: str, request: Request) -> dict[str, int]:
+    """Nº de ficheros y tamaño total (bytes) que incluiría `export.zip`, sin generarlo.
+
+    Pensado para mostrarse junto al enlace de descarga antes de que el usuario
+    pulse: es una instantánea del estado actual del proyecto, no una garantía si
+    el proyecto cambia entre esta llamada y la descarga real.
+    """
+    # ProjectNotFoundError se propaga sin capturar: el handler global de
+    # web/app.py (_EXCEPTION_STATUS_CODES) la traduce a 404.
+    async with get_project_registry(request) as registry:
+        project = await registry.get_project(name, tenant_id=get_tenant_id(request))
+
+    project_root = Path(project.root_path)
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        cached_entries = await cache.load_cache()
+
+    file_count, total_size = await asyncio.to_thread(_compute_export_preview, project_root, cached_entries)
+    return {"file_count": file_count, "total_size_bytes": total_size}
+
+
 @router.get("/downloads/projects/{name}/export.zip", dependencies=[Depends(require_project_access)])
 async def export_project(name: str, request: Request) -> FileResponse:
     """Descarga un ZIP con `Conversión/` + `cache_export.json` + `DEDUP_REPORT.json` (si existe).

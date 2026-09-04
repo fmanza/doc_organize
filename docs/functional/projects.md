@@ -111,6 +111,21 @@ escaneo o deduplicación en curso para ese proyecto (mismo bloqueo por
 Las tres rutas requieren `{"confirm": true}` en el cuerpo de la petición: la
 ventana modal del cliente no es la única barrera contra una acción accidental.
 
+## Descarga de export del proyecto (ZIP)
+
+El enlace "Descargar export" del panel lateral (`GET /downloads/projects/{name}/export.zip`)
+descarga un ZIP con `Conversión/`, `cache_export.json` y `duplicados/DEDUP_REPORT.json` (si existe).
+
+Antes de descargar, el panel muestra una estimación de tamaño y nº de archivos
+(`GET /downloads/projects/{name}/export-preview`), calculada sobre el estado actual del proyecto —
+es informativa: si el proyecto cambia entre la carga de la página y la descarga real, puede no
+coincidir exactamente.
+
+Si el navegador soporta la File System Access API (`showDirectoryPicker`, disponible en Chrome/Edge
+sobre un contexto seguro como `localhost`), el botón abre un selector de carpeta y escribe el ZIP
+ahí directamente. En el resto de navegadores (Firefox, Safari) no hay selector: la descarga sigue
+el comportamiento estándar del navegador (carpeta de descargas configurada).
+
 ## Detección de GPU (entorno, no permisos)
 
 La página de Escaneo detecta, en cada carga, si el entorno del servidor tiene
