@@ -193,12 +193,24 @@ class DeduplicationManager:
     async def _move_to_duplicates(self, source: Path, duplicates_dir: Path, sha256_hash: str) -> None:
         """Mueve `source` replicando su ruta absoluta (salvo la unidad/raiz)
         bajo `duplicates_dir`; si el destino ya existe, se le añade un
-        sufijo con el hash para no sobrescribir nunca en silencio."""
+        sufijo con el hash para no sobrescribir nunca en silencio.
+
+        Si el destino ya sufijado con el hash **también** existe (AUDIT_CODE,
+        sesión 2026-09-03), no se reintenta ni se sobrescribe: `shutil.move` cae
+        a un fallback copy+unlink cuando `os.rename` falla por destino existente
+        y ese fallback sobrescribe sin avisar en Windows — se rechaza
+        explícitamente en vez de arriesgar esa pérdida silenciosa de datos.
+        """
         resolved_source = source.resolve()
         relative_parts = resolved_source.parts[1:] or (resolved_source.name,)
         target = safe_path_join(duplicates_dir, *relative_parts)
         if target.exists():
             target = target.with_name(f"{target.stem}_{sha256_hash[:8]}{target.suffix}")
+            if target.exists():
+                raise FileExistsError(
+                    f"No se pudo mover '{resolved_source}' a duplicados: el destino '{target}' ya existe "
+                    "incluso tras añadir el sufijo de hash (colisión doble)."
+                )
 
         await asyncio.to_thread(target.parent.mkdir, parents=True, exist_ok=True)
         await asyncio.to_thread(shutil.move, str(resolved_source), str(target))

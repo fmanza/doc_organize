@@ -186,3 +186,35 @@ async def test_resolve_duplicates_avoids_overwrite_on_name_collision(tmp_path) -
     assert pre_existing.exists()  # el archivo preexistente no se sobrescribio
     suffixed = pre_existing.with_name(f"{pre_existing.stem}_{'hash-a-collision'[:8]}{pre_existing.suffix}")
     assert suffixed.exists()
+
+
+@pytest.mark.asyncio
+async def test_move_to_duplicates_raises_on_double_collision_instead_of_overwriting(tmp_path) -> None:
+    """AUDIT_CODE (sesión 2026-09-03): si tanto el destino base como el destino
+    ya sufijado con el hash existían, `shutil.move` sobrescribía el segundo en
+    silencio (`os.rename` falla por destino existente, y su fallback copy+unlink
+    no vuelve a comprobar la existencia -- verificado empíricamente en Windows),
+    pese al comentario "nunca sobrescribe". Ahora se rechaza explícitamente en
+    vez de arriesgar esa pérdida silenciosa de datos."""
+    source_dir = tmp_path / "a"
+    source_dir.mkdir()
+    source_file = source_dir / "report.pdf"
+    source_file.write_bytes(b"content-a")
+
+    duplicates_dir = tmp_path / "duplicados"
+    mirrored_parts = source_file.resolve().parts[1:]
+    base_target = duplicates_dir.joinpath(*mirrored_parts)
+    base_target.parent.mkdir(parents=True, exist_ok=True)
+    base_target.write_bytes(b"ya-habia-algo-aqui")
+
+    sha256_hash = "hash-a-collision"
+    suffixed_target = base_target.with_name(f"{base_target.stem}_{sha256_hash[:8]}{base_target.suffix}")
+    suffixed_target.write_bytes(b"y-tambien-en-el-sufijado")
+
+    manager = DeduplicationManager()
+    with pytest.raises(FileExistsError):
+        await manager._move_to_duplicates(source_file, duplicates_dir, sha256_hash)
+
+    assert source_file.exists()  # no se movio ni se borro
+    assert base_target.read_bytes() == b"ya-habia-algo-aqui"  # sin sobrescribir
+    assert suffixed_target.read_bytes() == b"y-tambien-en-el-sufijado"  # sin sobrescribir

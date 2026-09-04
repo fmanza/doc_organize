@@ -11,6 +11,7 @@ from doc_organize.converter import DocumentConverter
 from doc_organize.core.constants import SCAN_HISTORY_FOLDER_NAME, SCAN_HISTORY_JSONL_NAME
 from doc_organize.core.exceptions import DocOrganizeError
 from doc_organize.core.models import AvStatus, ConversionStatus, DedupEventType, ScanEventType
+from doc_organize.dedup import DeduplicationManager
 from doc_organize.main import DeduplicationSummary, ScanCommand, _resolve_dedup_paths, _resolve_scan_paths, build_parser, main
 from doc_organize.projects import ProjectRegistry
 
@@ -561,6 +562,59 @@ async def test_scan_command_deduplicate_no_duplicates_returns_zero(tmp_path) -> 
     assert (root / "duplicados" / "DEDUP_REPORT.json").exists()
     history_lines = (root / "duplicados" / "DEDUP_HISTORY.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(history_lines) == 1
+
+
+@pytest.mark.asyncio
+async def test_deduplicate_streaming_persists_partial_report_on_abort(tmp_path, monkeypatch) -> None:
+    """AUDIT_CODE (sesión 2026-09-03): antes, una excepción a mitad del bucle de
+    grupos abortaba `deduplicate_streaming()` sin persistir nada — los grupos ya
+    movidos con éxito antes del fallo quedaban sin registrar en
+    `DEDUP_REPORT.json`/`DEDUP_HISTORY.jsonl`. Ahora un `finally` best-effort
+    persiste lo conseguido hasta el aborto (mismo criterio que `run_streaming()`
+    para el histórico de escaneo)."""
+    base = tmp_path / "workspaces"
+    base.mkdir()
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        project = await registry.create_project("Proyecto Dedup Parcial", base)
+    root = Path(project.root_path)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "first.pdf").write_bytes(b"primer-duplicado")
+    (input_dir / "first_copy.pdf").write_bytes(b"primer-duplicado")
+    (input_dir / "second.pdf").write_bytes(b"segundo-duplicado")
+    (input_dir / "second_copy.pdf").write_bytes(b"segundo-duplicado")
+
+    original_move_group = DeduplicationManager.move_group
+    call_count = 0
+
+    async def _flaky_move_group(self, group, duplicates_dir):  # noqa: ANN001
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            raise OSError("simulado: fichero bloqueado por otra aplicación")
+        return await original_move_group(self, group, duplicates_dir)
+
+    monkeypatch.setattr(DeduplicationManager, "move_group", _flaky_move_group)
+
+    events = []
+    with pytest.raises(OSError):
+        async for event in ScanCommand().deduplicate_streaming(
+            paths=[str(input_dir)],
+            duplicates_dir=root / "duplicados",
+            folders_json=root / "folders.json",
+        ):
+            events.append(event)
+
+    # El primer grupo se resolvio con exito antes de que el segundo fallara.
+    assert [e.event.value for e in events].count("group_resolved") == 1
+
+    history_path = root / "duplicados" / "DEDUP_HISTORY.jsonl"
+    assert history_path.is_file()
+    lines = [line for line in history_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(lines) == 1
+    report = json.loads(lines[0])
+    assert report["total_exact_duplicates"] == 1  # el grupo movido antes del fallo, registrado
 
 
 # ===== main() end-to-end (usa --registry-path para no tocar ~/.doc_organize/) =====

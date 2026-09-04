@@ -125,11 +125,22 @@ class DocumentScanner:
         """Recorrido sincrono de un arbol de directorios (se ejecuta en un hilo)."""
         files: list[_DiscoveredFile] = []
         node = self._build_node(root, files, allowed_extensions, exclude_dir)
+        if node is None:
+            # Solo ocurre si la propia raiz desaparece entre la validacion previa
+            # (FolderValidator) y este recorrido -- caso extremo; se degrada a un
+            # nodo vacio en vez de propagar `None` (AUDIT_CODE, sesion 2026-09-03).
+            self.logger.warning(f"La carpeta raíz '{root}' desapareció antes de poder escanearla.")
+            node = DirectoryTreeNode(name=root.name or str(root), type="dir", path=str(root), children=[])  # pyright: ignore[reportCallIssue]
         return node, files
 
     def _build_node(
         self, path: Path, files: list[_DiscoveredFile], allowed_extensions: frozenset[str], exclude_dir: Path | None = None
-    ) -> DirectoryTreeNode:
+    ) -> DirectoryTreeNode | None:
+        """Devuelve `None` si `path` desapareció entre `iterdir()` y esta llamada
+        (TOCTOU: fichero borrado/movido por otra app mientras el escaneo está en
+        curso) — el llamador omite ese hijo del árbol en vez de dejar que la
+        excepción aborte el escaneo completo por un único fichero (AUDIT_CODE,
+        sesión 2026-09-03)."""
         if path.is_symlink():
             return DirectoryTreeNode(name=path.name, type="file", path=str(path))  # pyright: ignore[reportCallIssue]
 
@@ -145,10 +156,16 @@ class DocumentScanner:
                     continue
                 if exclude_dir is not None and entry == exclude_dir:
                     continue
-                children.append(self._build_node(entry, files, allowed_extensions, exclude_dir))
+                child = self._build_node(entry, files, allowed_extensions, exclude_dir)
+                if child is not None:
+                    children.append(child)
             return DirectoryTreeNode(name=path.name or str(path), type="dir", path=str(path), children=children)  # pyright: ignore[reportCallIssue]
 
-        stat = path.stat()
+        try:
+            stat = path.stat()
+        except OSError as exc:
+            self.logger.warning(f"No se pudo leer '{path}' (¿se eliminó durante el escaneo?): {exc}")
+            return None
         extension = path.suffix.lower().lstrip(".")
         if extension in allowed_extensions:
             files.append(
@@ -165,9 +182,17 @@ class DocumentScanner:
     async def _hash_all(self, files: list[_DiscoveredFile]) -> list[DocumentMetadata]:
         semaphore = asyncio.Semaphore(self._max_concurrent_hashes)
 
-        async def _hash_one(item: _DiscoveredFile) -> DocumentMetadata:
+        async def _hash_one(item: _DiscoveredFile) -> DocumentMetadata | None:
             async with semaphore:
-                digest = await hash_file(str(item.full_path))
+                try:
+                    digest = await hash_file(str(item.full_path))
+                except OSError as exc:
+                    # TOCTOU: el fichero desapareció (o dejó de ser legible) entre
+                    # el recorrido de directorios y esta fase de hashing -- se omite
+                    # del resultado en vez de abortar TODO el escaneo por un único
+                    # fichero (AUDIT_CODE, sesión 2026-09-03).
+                    self.logger.warning(f"No se pudo calcular el hash de '{item.full_path}' (¿se eliminó durante el escaneo?): {exc}")
+                    return None
             return DocumentMetadata(
                 full_path=str(item.full_path),
                 display_name=item.display_name,
@@ -177,7 +202,8 @@ class DocumentScanner:
                 sha256_hash=digest,
             )
 
-        return list(await asyncio.gather(*(_hash_one(item) for item in files)))
+        results = await asyncio.gather(*(_hash_one(item) for item in files))
+        return [doc for doc in results if doc is not None]
 
 
 __all__ = ["DocumentScanner"]

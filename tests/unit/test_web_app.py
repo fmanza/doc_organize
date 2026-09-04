@@ -1,5 +1,7 @@
 """Tests de la interfaz web (REQ-007, Fase D-2a): app, paginas y autenticacion."""
 
+import asyncio
+
 import httpx
 import pytest
 
@@ -147,6 +149,32 @@ async def test_create_and_list_project_via_api(tmp_path) -> None:
         assert len(projects) == 1
         assert projects[0]["name"] == "Mi Proyecto"
         assert projects[0]["missing"] is False
+
+
+@pytest.mark.asyncio
+async def test_concurrent_project_creation_does_not_lose_either_project(tmp_path) -> None:
+    """AUDIT_CODE (sesión 2026-09-03): `get_project_registry()` creaba antes una
+    instancia (y por tanto un `asyncio.Lock`) nueva por petición, así que el
+    lock no serializaba nada entre dos requests concurrentes -- dos proyectos
+    creados a la vez podían pisarse el `os.replace()` final, perdiendo uno de
+    los dos en silencio (reproducido empíricamente antes del fix). Ahora
+    `create_app()` comparte una única instancia (`app.state.project_registry`)
+    entre todas las peticiones, así que el lock sí protege de verdad."""
+    base = tmp_path / "workspaces"
+    base.mkdir()
+    app = create_app(registry_path=tmp_path / "projects.json")
+
+    async with _client(app) as client:
+        first, second = await asyncio.gather(
+            client.post("/api/projects", json={"name": "Proyecto A", "base_location": str(base)}),
+            client.post("/api/projects", json={"name": "Proyecto B", "base_location": str(base)}),
+        )
+        assert first.status_code == 201
+        assert second.status_code == 201
+
+        list_response = await client.get("/api/projects")
+        names = {project["name"] for project in list_response.json()["projects"]}
+    assert names == {"Proyecto A", "Proyecto B"}
 
 
 @pytest.mark.asyncio

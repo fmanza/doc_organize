@@ -36,6 +36,7 @@ from doc_organize.core.models import (
     DedupEventType,
     DocumentMetadata,
     DocumentStatus,
+    DuplicateGroup,
     ScanErrorEntry,
     ScanErrorReport,
     ScanEvent,
@@ -458,39 +459,63 @@ class ScanCommand:
         operación completa que el usuario percibe al pulsar "Buscar
         duplicados" (escaneo + detección + movimiento), mismo criterio que
         `duration_seconds` en `ScanSummary`/`ScanRunReport` para Escanear.
+
+        El bucle de grupos está envuelto en `try/finally` (AUDIT_CODE, sesión
+        2026-09-03, mismo criterio que `run_streaming()` para el histórico de
+        escaneo): si una excepción real (p. ej. `move_group()` falla al mover un
+        fichero bloqueado) o una desconexión del cliente a mitad de la
+        iteración interrumpen este generador, los grupos ya movidos con éxito
+        hasta ese punto no deben perderse sin dejar rastro — el `finally`
+        persiste igualmente un `DeduplicationReport` (best-effort, nunca
+        enmascara la excepción original) con lo conseguido hasta el aborto.
         """
         started_at = datetime.now(UTC)
-        yield DedupEvent(event=DedupEventType.STARTED, data={})
-
-        clean_paths, warnings = await self._resolve_scan_paths(paths, folders_json)
-
-        async with DocumentScanner() as scanner:
-            scan_result = await scanner.scan_folders(clean_paths)
-
-        dedup_manager = DeduplicationManager()
-        groups = dedup_manager.find_duplicates(scan_result.documents)
-        yield DedupEvent(event=DedupEventType.DUPLICATES_FOUND, data={"groups_found": len(groups), "warnings": warnings})
-
         duplicates_dir = Path(duplicates_dir)
-        await asyncio.to_thread(duplicates_dir.mkdir, parents=True, exist_ok=True)
-
-        total = len(groups)
+        dedup_manager = DeduplicationManager()
+        groups: list[DuplicateGroup] = []
         exact_moved = 0
         version_resolved = 0
-        for index, group in enumerate(groups, start=1):
-            yield DedupEvent(event=DedupEventType.GROUP_STARTED, data={"index": index, "total": total, "reason": group.reason.value})
-            exact, version = await dedup_manager.move_group(group, duplicates_dir)
-            exact_moved += exact
-            version_resolved += version
-            yield DedupEvent(event=DedupEventType.GROUP_RESOLVED, data={"index": index, "total": total, "moved": exact + version})
+        completed_ok = False
+        try:
+            yield DedupEvent(event=DedupEventType.STARTED, data={})
 
-        report = await dedup_manager.finalize_report(groups, duplicates_dir, exact_moved, version_resolved, started_at=started_at)
-        moved = report.total_exact_duplicates + report.total_version_conflicts
-        duration_seconds = report.duration_seconds if report.duration_seconds is not None else 0.0
-        yield DedupEvent(
-            event=DedupEventType.COMPLETED,
-            data={"groups_found": total, "moved": moved, "duration_seconds": duration_seconds, "warnings": warnings},
-        )
+            clean_paths, warnings = await self._resolve_scan_paths(paths, folders_json)
+
+            async with DocumentScanner() as scanner:
+                scan_result = await scanner.scan_folders(clean_paths)
+
+            groups = dedup_manager.find_duplicates(scan_result.documents)
+            yield DedupEvent(event=DedupEventType.DUPLICATES_FOUND, data={"groups_found": len(groups), "warnings": warnings})
+
+            await asyncio.to_thread(duplicates_dir.mkdir, parents=True, exist_ok=True)
+
+            total = len(groups)
+            for index, group in enumerate(groups, start=1):
+                yield DedupEvent(event=DedupEventType.GROUP_STARTED, data={"index": index, "total": total, "reason": group.reason.value})
+                exact, version = await dedup_manager.move_group(group, duplicates_dir)
+                exact_moved += exact
+                version_resolved += version
+                yield DedupEvent(event=DedupEventType.GROUP_RESOLVED, data={"index": index, "total": total, "moved": exact + version})
+
+            report = await dedup_manager.finalize_report(groups, duplicates_dir, exact_moved, version_resolved, started_at=started_at)
+            completed_ok = True
+            moved = report.total_exact_duplicates + report.total_version_conflicts
+            duration_seconds = report.duration_seconds if report.duration_seconds is not None else 0.0
+            yield DedupEvent(
+                event=DedupEventType.COMPLETED,
+                data={"groups_found": total, "moved": moved, "duration_seconds": duration_seconds, "warnings": warnings},
+            )
+        finally:
+            # Solo cubre el camino de aborto: el camino de éxito ya persistió su
+            # DeduplicationReport más arriba. `duplicates_dir.mkdir` se repite
+            # aquí (idempotente) por si el aborto ocurrió antes de la primera
+            # llamada, más arriba en el try.
+            if not completed_ok:
+                try:
+                    await asyncio.to_thread(duplicates_dir.mkdir, parents=True, exist_ok=True)
+                    await dedup_manager.finalize_report(groups, duplicates_dir, exact_moved, version_resolved, started_at=started_at)
+                except OSError as exc:
+                    self.logger.warning(f"No se pudo persistir el histórico de deduplicación tras un aborto: {exc}")
 
     async def _convert_documents(
         self,

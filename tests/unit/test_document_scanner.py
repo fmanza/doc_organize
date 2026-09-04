@@ -2,7 +2,11 @@
 
 import hashlib
 
+from pathlib import Path
+
 import pytest
+
+import doc_organize.scanner.document_scanner as document_scanner_module
 
 from doc_organize.scanner import DocumentScanner
 
@@ -150,3 +154,53 @@ async def test_scan_excludes_output_dir(tmp_path) -> None:
 
     assert result.summary == {"docx": 1}
     assert [doc.display_name for doc in result.documents] == ["documento.docx"]
+
+
+@pytest.mark.asyncio
+async def test_scan_skips_file_that_disappears_before_stat(tmp_path, monkeypatch) -> None:
+    """AUDIT_CODE (sesión 2026-09-03): un fichero borrado entre `iterdir()` y
+    `stat()` (TOCTOU -- fichero temporal de otra app, borrado por el usuario a
+    mitad de un escaneo grande) abortaba antes el escaneo ENTERO con un
+    `OSError` sin capturar. Ahora se omite ese fichero y el resto continúa."""
+    (tmp_path / "vanishes.pdf").write_bytes(b"contenido-a-punto-de-desaparecer")
+    (tmp_path / "survives.pdf").write_bytes(b"contenido-real")
+
+    original_stat = Path.stat
+
+    def _flaky_stat(self: Path, *args: object, **kwargs: object) -> object:
+        if self.name == "vanishes.pdf":
+            raise FileNotFoundError(f"simulado: '{self}' desapareció durante el escaneo")
+        return original_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", _flaky_stat)
+
+    async with DocumentScanner() as scanner:
+        result = await scanner.scan_folders([str(tmp_path)])
+
+    assert result.summary == {"pdf": 1}
+    assert result.documents[0].display_name == "survives.pdf"
+
+
+@pytest.mark.asyncio
+async def test_scan_skips_file_that_disappears_before_hashing(tmp_path, monkeypatch) -> None:
+    """Mismo caso que el anterior (AUDIT_CODE, sesión 2026-09-03), pero la
+    desaparición ocurre en la segunda fase (hashing), no durante el recorrido
+    de directorios -- una ventana aún mayor, ya que el hashing solo empieza
+    tras recorrer TODAS las carpetas seleccionadas."""
+    (tmp_path / "vanishes.pdf").write_bytes(b"contenido-a-punto-de-desaparecer")
+    (tmp_path / "survives.pdf").write_bytes(b"contenido-real")
+
+    original_hash_file = document_scanner_module.hash_file
+
+    async def _flaky_hash_file(file_path: str, *args: object, **kwargs: object) -> str:
+        if Path(file_path).name == "vanishes.pdf":
+            raise FileNotFoundError(f"simulado: '{file_path}' desapareció antes del hashing")
+        return await original_hash_file(file_path, *args, **kwargs)
+
+    monkeypatch.setattr(document_scanner_module, "hash_file", _flaky_hash_file)
+
+    async with DocumentScanner() as scanner:
+        result = await scanner.scan_folders([str(tmp_path)])
+
+    assert result.summary == {"pdf": 1}
+    assert result.documents[0].display_name == "survives.pdf"

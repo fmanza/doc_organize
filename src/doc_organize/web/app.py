@@ -24,6 +24,7 @@ from doc_organize.core.exceptions import (
     UserNotFoundError,
 )
 from doc_organize.core.models import SecurityConfig
+from doc_organize.projects import ProjectRegistry
 from doc_organize.web.auth import AuthMiddleware, LoginRateLimiter
 from doc_organize.web.dependencies import (
     get_auth_store,
@@ -106,7 +107,15 @@ def create_app(
     """
     security = security or SecurityConfig()
     app = FastAPI(title="doc_organize")
-    app.state.registry_path = str(registry_path) if registry_path else None
+    # Instancia única compartida por TODAS las peticiones de esta app (no una
+    # nueva por conexión, ver `web/dependencies.py::get_project_registry`): su
+    # `asyncio.Lock` interno solo serializa escrituras concurrentes a
+    # `projects.json` si todas las peticiones comparten la misma instancia
+    # (AUDIT_CODE, sesión 2026-09-03 — antes cada petición creaba su propio
+    # `ProjectRegistry` con su propio lock inútil, perdiendo en silencio
+    # proyectos creados en paralelo o reventando con un `OSError` crudo al
+    # chocar sobre el mismo fichero temporal).
+    app.state.project_registry = ProjectRegistry(registry_path) if registry_path else ProjectRegistry()
     app.state.auth_db_path = str(auth_db_path) if auth_db_path else None
     # Expuesto en app.state (no solo pasado al middleware): el handler WebSocket de
     # web/routes/scan.py necesita `security` para autenticar a mano (Fase D-2b,

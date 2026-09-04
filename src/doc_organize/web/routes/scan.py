@@ -6,6 +6,7 @@ independiente, Fase D-2c §2.7.4, fusionada aquí en la reestructuración de nav
 """
 
 import asyncio
+import json
 
 from pathlib import Path
 
@@ -301,6 +302,16 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
     try:
         request_payload = await websocket.receive_json()
     except WebSocketDisconnect:
+        return
+    except json.JSONDecodeError:
+        # Payload no-JSON del cliente -- cierre limpio con motivo, mismo patrón
+        # que el resto de esta función ante entrada inválida, en vez de dejar
+        # escapar la excepción cruda (AUDIT_CODE, sesión 2026-09-03).
+        await websocket.close(code=1008, reason="El payload debe ser JSON válido")
+        return
+
+    if not isinstance(request_payload, dict):
+        await websocket.close(code=1008, reason="El payload debe ser un objeto JSON")
         return
 
     # Ya no se acepta `paths` del cliente (antes, selección manual por checkbox):

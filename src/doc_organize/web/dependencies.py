@@ -2,6 +2,8 @@
 Dependencias compartidas de las rutas web (REQ-007, revisión 9 roles y gestión de usuarios).
 """
 
+from typing import cast
+
 from fastapi import HTTPException, Request
 from starlette.requests import HTTPConnection
 
@@ -15,14 +17,20 @@ from doc_organize.projects import ProjectRegistry, ScannedFoldersStore
 
 
 def get_project_registry(conn: HTTPConnection) -> ProjectRegistry:
-    """Devuelve un `ProjectRegistry` para esta conexión.
+    """Devuelve la instancia de `ProjectRegistry` compartida por esta app.
 
-    Permite a los tests inyectar una ruta de registro alternativa vía
-    `app.state.registry_path`, igual que `main.py::_registry()` hace para el CLI —
-    así ninguno de los dos toca `~/.doc_organize/projects.json` en tests.
+    Instancia única, creada una vez en `create_app()` (`app.state.project_registry`)
+    — NO una nueva por conexión: su `asyncio.Lock` interno solo protege
+    escrituras concurrentes a `projects.json` si todas las peticiones lo
+    comparten (AUDIT_CODE, sesión 2026-09-03). Los tests inyectan una ruta de
+    registro alternativa vía `create_app(registry_path=...)`, igual que
+    `main.py::_registry()` hace para el CLI — así ninguno de los dos toca
+    `~/.doc_organize/projects.json` en tests.
     """
-    registry_path = getattr(conn.app.state, "registry_path", None)
-    return ProjectRegistry(registry_path) if registry_path else ProjectRegistry()
+    # `app.state` es un simple namespace dinámico (Starlette `State`), sin tipo
+    # estático -- `cast` documenta el contrato real: `create_app()` siempre fija
+    # `project_registry` antes de servir ninguna petición.
+    return cast(ProjectRegistry, conn.app.state.project_registry)
 
 
 def get_auth_store(conn: HTTPConnection) -> AuthStore:
@@ -36,11 +44,19 @@ def get_auth_store(conn: HTTPConnection) -> AuthStore:
     return AuthStore(auth_db_path) if auth_db_path else AuthStore()
 
 
+#: Instancia única de proceso: a diferencia de `ProjectRegistry`/`AuthStore`,
+#: `ScannedFoldersStore` no tiene ningún parámetro de configuración por app (cada
+#: método recibe el `Project` sobre el que opera, la ruta se deriva de
+#: `project.root_path`) — un singleton de módulo basta para que su
+#: `asyncio.Lock` interno sirva de algo entre peticiones concurrentes (AUDIT_CODE,
+#: sesión 2026-09-03 — antes cada petición creaba su propia instancia con su
+#: propio lock inútil, mismo bug que `ProjectRegistry`).
+_scanned_folders_store = ScannedFoldersStore()
+
+
 def get_scanned_folders_store() -> ScannedFoldersStore:
-    """Devuelve un `ScannedFoldersStore` (sin parámetros: a diferencia de `ProjectRegistry`/`AuthStore`,
-    no tiene una ruta de fichero única inyectable — cada método recibe el `Project` sobre el que opera).
-    """
-    return ScannedFoldersStore()
+    """Devuelve la instancia de `ScannedFoldersStore` compartida por este proceso."""
+    return _scanned_folders_store
 
 
 def get_tenant_id(conn: HTTPConnection) -> str:

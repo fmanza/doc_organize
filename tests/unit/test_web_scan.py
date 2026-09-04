@@ -820,6 +820,38 @@ async def test_scan_websocket_rejects_when_no_saved_folders(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_scan_websocket_rejects_non_json_payload(tmp_path) -> None:
+    """AUDIT_CODE (sesión 2026-09-03): un payload no-JSON lanzaba antes
+    `json.JSONDecodeError` sin capturar en vez de cerrar limpio con `code=1008`,
+    como hace el resto de esta función ante entrada inválida."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    client = TestClient(app)
+    with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect(f"/api/projects/{project.name}/scan") as websocket:
+        websocket.send_text("esto no es json{{{")
+        websocket.receive_json()
+    assert exc_info.value.code == 1008
+
+
+@pytest.mark.asyncio
+async def test_scan_websocket_rejects_non_dict_json_payload(tmp_path) -> None:
+    """Mismo caso que el anterior (AUDIT_CODE, sesión 2026-09-03), pero con JSON
+    válido que no es un objeto (p.ej. una lista) — antes lanzaba `AttributeError`
+    sin capturar al llamar a `.get()` sobre él."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    client = TestClient(app)
+    with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect(f"/api/projects/{project.name}/scan") as websocket:
+        websocket.send_json(["use_ocr", False])
+        websocket.receive_json()
+    assert exc_info.value.code == 1008
+
+
+@pytest.mark.asyncio
 async def test_scan_websocket_scans_all_saved_folders_not_a_subset(tmp_path) -> None:
     """El cliente ya no elige un subconjunto de carpetas por checkbox: cada escaneo
     procesa siempre TODAS las carpetas guardadas en la lista persistente.
