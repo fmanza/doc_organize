@@ -8,6 +8,7 @@ import math
 import shutil
 import time
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Self, cast
 
@@ -58,6 +59,7 @@ class DocumentConverter:
         ...         result = await converter.convert_document(doc, Path("./Conversión"))
         >>> asyncio.run(main())  # doctest: +SKIP
     """
+
     # El Example de arriba se marca +SKIP deliberadamente (AUDIT_CODE, sesión
     # 2026-09-03/04): `convert_document()` necesita un documento real parseable
     # por Docling (carga de modelos incluida) para no fallar -- igual que los
@@ -132,6 +134,7 @@ class DocumentConverter:
         use_gpu: bool = False,
         extract_images: bool = False,
         use_picture_description: bool = False,
+        scan_roots: Sequence[str] = (),
     ) -> ConversionResult:
         """Convierte `source_doc` a Markdown + JSON bajo `output_dir`.
 
@@ -158,6 +161,12 @@ class DocumentConverter:
                 `ConversionResult.picture_description_applied`). Coste real no
                 trivial: descarga del modelo en el primer uso y latencia de
                 inferencia por imagen.
+            scan_roots: Carpetas raiz que el usuario indico al escanear (p.ej.
+                `clean_paths` de `ScanCommand`). Se usan solo para calcular donde
+                cuelga `source_doc.full_path` y replicar esa jerarquia relativa
+                bajo `output_dir` (ver `resolve_output_paths`) -- nunca la ruta
+                absoluta completa del disco de origen. Vacio por defecto: sin
+                ninguna raiz conocida, la salida se aplana a `output_dir/<stem>`.
 
         Returns:
             ConversionResult con las rutas de salida, si tuvo exito, y si el
@@ -177,20 +186,27 @@ class DocumentConverter:
             # que no tiene ese paso, asi que el flag pedido por el llamante no tuvo efecto.
             picture_description_applied = use_picture_description and docling_result.input.format in (InputFormat.PDF, InputFormat.IMAGE)
             markdown_path, json_path, images_dir = await self._write_outputs(
-                source_doc, docling_result, output_dir, ocr_required, extract_images, picture_description_applied
+                source_doc, docling_result, output_dir, ocr_required, extract_images, picture_description_applied, scan_roots
             )
         # Excepcion amplia deliberada: cualquier fallo de conversion o de escritura de
         # salida (incluida la limpieza de img/<stem>/, AUDIT_CODE) se reporta en
         # ConversionResult (success=False), nunca se relanza — un documento bloqueado
         # (fichero en uso, permiso denegado) no debe abortar el resto del batch.
-        except Exception as exc:  # noqa: BLE001
-            self.logger.warning(f"Error convirtiendo '{source_doc.full_path}': {exc}")
+        except Exception as exc:
+            # str(exc) puede ser "" (excepciones sin mensaje, p.ej. algunas fallas
+            # internas de bs4/lxml al parsear HTML grande/patologico) -- sin el
+            # fallback, el documento queda marcado ERROR sin ninguna pista visible
+            # para el usuario (bug real, informe ZAP, sesion 2026-09-05).
+            # exc_info=True para que el traceback completo quede en el log aunque
+            # el mensaje de usuario (`error=`) tenga que recurrir al fallback.
+            error_message = str(exc) or f"{type(exc).__name__} sin mensaje de error"
+            self.logger.warning(f"Error convirtiendo '{source_doc.full_path}': {error_message}", exc_info=True)
             return ConversionResult(
                 source_path=source_doc.full_path,
                 markdown_path=None,
                 json_path=None,
                 success=False,
-                error=str(exc),
+                error=error_message,
                 ocr_required=False,
                 duration_seconds=time.monotonic() - start,
                 images_dir=None,
@@ -212,17 +228,37 @@ class DocumentConverter:
         )
 
     @staticmethod
-    def resolve_output_paths(full_path: str, output_dir: Path) -> tuple[Path, Path]:
+    def resolve_output_paths(full_path: str, output_dir: Path, scan_roots: Sequence[str] = ()) -> tuple[Path, Path]:
         """Deriva `(markdown_path, json_path)` para el fichero fuente `full_path` bajo `output_dir`.
 
         Determinista y basado solo en la ruta del fichero fuente (nunca en su
-        hash): replica la jerarquia de carpetas original bajo `output_dir` y usa
-        el stem del fichero como nombre. Extraido de `_write_outputs` para que
-        el llamante (p.ej. `ScanCommand`, al forzar un rescan) pueda localizar
-        la salida de un documento sin tener que reconvertirlo.
+        hash). Si `full_path` cuelga de alguna de `scan_roots` (las carpetas que
+        el usuario indico al escanear), replica la jerarquia relativa a esa raiz
+        bajo `output_dir` -- nunca la ruta absoluta completa del disco de origen:
+        `output_dir` puede vivir en otra rama del arbol de ficheros (p.ej. una
+        carpeta de exportacion ajena a lo escaneado), y mezclar ahi la ruta
+        absoluta de origen entera generaba una jerarquia duplicada e inexistente
+        en vez de una salida valida (bug real: documento .docx con imagenes,
+        `[Errno 2] No such file or directory`, sesion 2026-09-05). Si ninguna
+        raiz coincide (o no se indica ninguna), usa solo el `stem` del fichero
+        -- una unica carpeta plana bajo `output_dir` -- en vez de reconstruir su
+        ruta absoluta. Extraido de `_write_outputs` para que el llamante (p.ej.
+        `ScanCommand`, al forzar un rescan) pueda localizar la salida de un
+        documento sin tener que reconvertirlo.
         """
-        relative_parts = Path(full_path).resolve().parts[1:]
-        stem = Path(relative_parts[-1]).stem if relative_parts else Path(full_path).stem
+        resolved = Path(full_path).resolve()
+        relative_parts: tuple[str, ...] = ()
+        best_root_depth = -1
+        for root in scan_roots:
+            resolved_root = Path(root).resolve()
+            try:
+                relative = resolved.relative_to(resolved_root)
+            except ValueError:
+                continue
+            if len(resolved_root.parts) > best_root_depth:
+                best_root_depth = len(resolved_root.parts)
+                relative_parts = relative.parts
+        stem = Path(relative_parts[-1]).stem if relative_parts else resolved.stem
         target_dir = output_dir.joinpath(*relative_parts[:-1]) if len(relative_parts) > 1 else output_dir
         return target_dir / f"{stem}.md", target_dir / f"{stem}.json"
 
@@ -247,8 +283,9 @@ class DocumentConverter:
         ocr_required: bool,
         extract_images: bool,
         picture_description_applied: bool,
+        scan_roots: Sequence[str] = (),
     ) -> tuple[Path, Path, Path | None]:
-        markdown_path, json_path = self.resolve_output_paths(source_doc.full_path, output_dir)
+        markdown_path, json_path = self.resolve_output_paths(source_doc.full_path, output_dir, scan_roots)
         await asyncio.to_thread(markdown_path.parent.mkdir, parents=True, exist_ok=True)
 
         images_dir: Path | None = None

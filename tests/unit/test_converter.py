@@ -121,21 +121,85 @@ async def test_convert_document_reports_error_without_raising(tmp_path) -> None:
     assert result.json_path is None
 
 
-def test_resolve_output_paths_mirrors_source_tree_and_is_deterministic(tmp_path) -> None:
-    output_dir = tmp_path / "Conversión"
-    source = tmp_path / "input" / "sub" / "informe.pdf"
+@pytest.mark.asyncio
+async def test_convert_document_error_without_message_gets_fallback_text(monkeypatch, tmp_path) -> None:
+    """Regresion (sesion 2026-09-05): una excepcion sin mensaje (`str(exc) == ""`,
+    p.ej. una falla interna de bs4/lxml al parsear HTML) no debe dejar
+    `ConversionResult.error` vacio -- bug real (informe HTML ZAP terminado en
+    error sin ningun texto visible para el usuario)."""
+    import doc_organize.converter.converter as converter_module
 
-    markdown_path, json_path = DocumentConverter.resolve_output_paths(str(source), output_dir)
-    again_markdown, again_json = DocumentConverter.resolve_output_paths(str(source), output_dir)
+    html_path = tmp_path / "page.html"
+    html_path.write_text("<html><body><p>Texto</p></body></html>", encoding="utf-8")
+    stat = html_path.stat()
+    doc = DocumentMetadata(
+        full_path=str(html_path),
+        display_name=html_path.name,
+        extension="html",
+        size_bytes=stat.st_size,
+        modified_time=stat.st_mtime,
+        sha256_hash="irrelevant",
+    )
+    output_dir = tmp_path / "Conversión"
+
+    def _boom(_docling_result: object) -> bool:
+        raise Exception()  # noqa: TRY002 -- excepcion deliberadamente sin mensaje
+
+    monkeypatch.setattr(converter_module.DocumentConverter, "_needs_ocr", staticmethod(_boom))
+
+    async with DocumentConverter() as converter:
+        result = await converter.convert_document(doc, output_dir)
+
+    assert result.success is False
+    assert result.error
+    assert "sin mensaje" in result.error
+
+
+def test_resolve_output_paths_mirrors_source_tree_relative_to_scan_root(tmp_path) -> None:
+    scan_root = tmp_path / "input"
+    output_dir = tmp_path / "Conversión"
+    source = scan_root / "sub" / "informe.pdf"
+
+    markdown_path, json_path = DocumentConverter.resolve_output_paths(str(source), output_dir, scan_roots=(str(scan_root),))
+    again_markdown, again_json = DocumentConverter.resolve_output_paths(str(source), output_dir, scan_roots=(str(scan_root),))
 
     assert markdown_path == again_markdown
     assert json_path == again_json
     assert markdown_path.name == "informe.md"
     assert json_path.name == "informe.json"
-    # Replica la jerarquia "input/sub" del fuente bajo output_dir (no depende del hash);
-    # se compara solo el sufijo porque el resto del path mide desde la raiz del filesystem.
-    assert str(markdown_path).endswith(str(Path("input") / "sub" / "informe.md"))
+    # Replica la jerarquia "sub" del fuente relativa a `scan_root` (no a la raiz del
+    # filesystem, ni depende del hash) bajo `output_dir`.
+    assert markdown_path == output_dir / "sub" / "informe.md"
     assert markdown_path.is_relative_to(output_dir)
+
+
+def test_resolve_output_paths_does_not_duplicate_absolute_source_tree(tmp_path) -> None:
+    """Regresion (sesion 2026-09-05): un .docx bajo una carpeta escaneada (`scan_root`)
+    convertido a un `output_dir` que vive en OTRA rama del arbol de ficheros no debe
+    arrastrar la ruta absoluta completa de origen bajo `output_dir` -- eso generaba una
+    jerarquia duplicada e inexistente (`[Errno 2] No such file or directory` real al
+    extraer imagenes de un .docx con Docling)."""
+    scan_root = tmp_path / "DOC_ORGANIZE_04"
+    source = scan_root / "Evidencias Auditoría" / "informe.docx"
+    output_dir = tmp_path / "prueba_doc" / "organaize" / "Conversión"
+
+    markdown_path, json_path = DocumentConverter.resolve_output_paths(str(source), output_dir, scan_roots=(str(scan_root),))
+
+    assert markdown_path == output_dir / "Evidencias Auditoría" / "informe.md"
+    assert json_path == output_dir / "Evidencias Auditoría" / "informe.json"
+    # La parte de la ruta relativa a output_dir no debe contener el nombre de la
+    # carpeta raiz de origen (antes se duplicaba: output_dir/DOC_ORGANIZE_04/...).
+    assert scan_root.name not in markdown_path.relative_to(output_dir).parts
+
+
+def test_resolve_output_paths_flattens_when_no_scan_root_matches(tmp_path) -> None:
+    output_dir = tmp_path / "Conversión"
+    source = tmp_path / "outside" / "deep" / "informe.pdf"
+
+    markdown_path, json_path = DocumentConverter.resolve_output_paths(str(source), output_dir)
+
+    assert markdown_path == output_dir / "informe.md"
+    assert json_path == output_dir / "informe.json"
 
 
 def test_resolve_output_paths_namespaces_images_dir_by_stem(tmp_path) -> None:

@@ -20,7 +20,7 @@ import shutil
 import time
 import uuid
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -250,7 +250,7 @@ class ScanCommand:
                 if force:
                     current_paths = {doc.full_path for doc in scan_result.documents}
                     orphaned_paths = set(cached_entries) - current_paths
-                    await self._delete_orphaned_outputs(orphaned_paths, output_dir)
+                    await self._delete_orphaned_outputs(orphaned_paths, output_dir, clean_paths)
                     await cache.clear()
                     cached_entries = {}
                 new_files, modified_files, unchanged_files = cache.get_changes(cached_entries, scan_result.documents)
@@ -313,13 +313,22 @@ class ScanCommand:
                     ocr_candidates,
                     extract_images,
                     use_picture_description,
+                    clean_paths,
                 ):
                     yield event
 
                 if use_ocr:
                     self._collect_stale_ocr_candidates(cached_entries, docs_by_path, already_converting, ocr_candidates)
                     async for event in self._process_ocr(
-                        ocr_candidates, output_dir, use_gpu, entries, cached_entries, summary, extract_images, use_picture_description
+                        ocr_candidates,
+                        output_dir,
+                        use_gpu,
+                        entries,
+                        cached_entries,
+                        summary,
+                        extract_images,
+                        use_picture_description,
+                        clean_paths,
                     ):
                         yield event
 
@@ -410,7 +419,7 @@ class ScanCommand:
         return validation.clean_paths, validation.warnings
 
     @staticmethod
-    async def _delete_orphaned_outputs(orphaned_paths: set[str], output_dir: Path) -> None:
+    async def _delete_orphaned_outputs(orphaned_paths: set[str], output_dir: Path, scan_roots: Sequence[str] = ()) -> None:
         """Borra el `.md`/`.json`/`img/<stem>/` de `orphaned_paths` bajo `output_dir`, si existen.
 
         Usado por "forzar rescan" (`force=True`): `orphaned_paths` son rutas que
@@ -420,9 +429,14 @@ class ScanCommand:
         generarla, quedaría huérfana si no se borra aquí. Incluye `img/<stem>/`
         (AUDIT_CODE): sin esto, la carpeta de imágenes de un documento borrado con
         `extract_images=True` quedaba huérfana para siempre.
+
+        `scan_roots` debe ser el mismo `clean_paths` de esta ejecución (las
+        carpetas raíz vigentes), para que `resolve_output_paths` recalcule la
+        misma ruta relativa que usó `DocumentConverter` al generar la salida
+        original (ver su docstring) — no la ruta absoluta completa del disco.
         """
         for path in orphaned_paths:
-            markdown_path, json_path = DocumentConverter.resolve_output_paths(path, output_dir)
+            markdown_path, json_path = DocumentConverter.resolve_output_paths(path, output_dir, scan_roots)
             for artifact in (markdown_path, json_path):
                 if await asyncio.to_thread(artifact.exists):
                     await asyncio.to_thread(artifact.unlink)
@@ -548,6 +562,7 @@ class ScanCommand:
         ocr_candidates: list[DocumentMetadata],
         extract_images: bool = False,
         use_picture_description: bool = False,
+        scan_roots: Sequence[str] = (),
     ) -> AsyncIterator[ScanEvent]:
         """Convierte cada documento, yieldeando `FILE_STARTED` (antes de convertirlo)
         y `FILE_CONVERTED` (al terminar) por unidad.
@@ -577,7 +592,12 @@ class ScanCommand:
                     data={"path": doc.full_path, "index": index, "total": total},
                 )
                 result = await converter.convert_document(
-                    doc, output_dir, use_ocr=False, extract_images=extract_images, use_picture_description=use_picture_description
+                    doc,
+                    output_dir,
+                    use_ocr=False,
+                    extract_images=extract_images,
+                    use_picture_description=use_picture_description,
+                    scan_roots=scan_roots,
                 )
                 if doc.full_path in new_set:
                     status = DocumentStatus.NEW
@@ -670,12 +690,15 @@ class ScanCommand:
         summary: ScanSummary,
         extract_images: bool = False,
         use_picture_description: bool = False,
+        scan_roots: Sequence[str] = (),
     ) -> AsyncIterator[ScanEvent]:
         """Reprocesa `ocr_candidates` con OCR, yieldeando un `OCR_PROCESSED` por unidad.
 
-        `extract_images`/`use_picture_description` se propagan igual que en la primera
-        pasada (`_convert_documents`): un documento que necesitó OCR no debe perder
-        estas opciones solo por resolverse en esta segunda pasada.
+        `extract_images`/`use_picture_description`/`scan_roots` se propagan igual que en
+        la primera pasada (`_convert_documents`): un documento que necesitó OCR no debe
+        perder estas opciones solo por resolverse en esta segunda pasada -- `scan_roots`
+        en particular debe coincidir para que ambas pasadas calculen la misma ruta de
+        salida para un mismo documento (ver `DocumentConverter.resolve_output_paths`).
 
         Muta `entries`/`summary` in-place, mismo contrato que `_convert_documents`. Un
         `return` temprano en una función `async def` con `yield` es válido: simplemente
@@ -684,7 +707,12 @@ class ScanCommand:
         if not ocr_candidates:
             return
         ocr_results = await OCRScheduler().process_with_ocr(
-            ocr_candidates, output_dir, use_gpu=use_gpu, extract_images=extract_images, use_picture_description=use_picture_description
+            ocr_candidates,
+            output_dir,
+            use_gpu=use_gpu,
+            extract_images=extract_images,
+            use_picture_description=use_picture_description,
+            scan_roots=scan_roots,
         )
         summary.ocr_processed = sum(1 for result in ocr_results if result.success)
         entries_by_path = {entry.file_path: entry for entry in entries}

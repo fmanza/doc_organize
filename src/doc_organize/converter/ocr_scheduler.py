@@ -2,6 +2,7 @@
 Deteccion y procesamiento de OCR en dos fases (REQ-004).
 """
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from doc_organize.converter.converter import DocumentConverter
@@ -48,6 +49,7 @@ class OCRScheduler:
         use_gpu: bool = False,
         extract_images: bool = False,
         use_picture_description: bool = False,
+        scan_roots: Sequence[str] = (),
     ) -> list[ConversionResult]:
         """Reconvierte `docs` con OCR activado y escribe los resultados en `output_dir`.
 
@@ -55,7 +57,10 @@ class OCRScheduler:
         `DocumentConverter.convert_document()` (mismo significado que en la
         primera pasada, ver `ScanCommand._convert_documents`): un documento que
         solo se resuelve en esta segunda pasada (porque necesitaba OCR) no debe
-        quedarse sin imagenes/descripciones solo por haber requerido OCR.
+        quedarse sin imagenes/descripciones solo por haber requerido OCR. Mismo
+        motivo para `scan_roots`: debe ser el mismo usado en la primera pasada
+        para que ambas calculen la misma ruta de salida (`resolve_output_paths`)
+        para un mismo documento.
 
         Nota de IMPLEMENT: `output_dir` se añadió a este método porque
         `DocumentConverter.convert_document()` lo necesita para saber dónde
@@ -72,6 +77,7 @@ class OCRScheduler:
                     use_gpu=use_gpu,
                     extract_images=extract_images,
                     use_picture_description=use_picture_description,
+                    scan_roots=scan_roots,
                 )
                 results.append(result)
 

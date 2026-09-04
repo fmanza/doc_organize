@@ -9,12 +9,12 @@ classDiagram
     class DocumentConverter {
         -logger: Logger
         -converter_pool: dict
-        +convert_document(source: DocumentMetadata, output_dir: Path, use_ocr: bool, use_gpu: bool, extract_images: bool, use_picture_description: bool) ConversionResult
+        +convert_document(source: DocumentMetadata, output_dir: Path, use_ocr: bool, use_gpu: bool, extract_images: bool, use_picture_description: bool, scan_roots: Sequence[str]) ConversionResult
     }
     
     class OCRScheduler {
         -converter: DocumentConverter
-        +process_with_ocr(docs: list[DocumentMetadata], output_dir: Path, use_gpu: bool, extract_images: bool, use_picture_description: bool) list[ConversionResult]
+        +process_with_ocr(docs: list[DocumentMetadata], output_dir: Path, use_gpu: bool, extract_images: bool, use_picture_description: bool, scan_roots: Sequence[str]) list[ConversionResult]
     }
     
     class ConversionResult {
@@ -49,7 +49,8 @@ class DocumentConverter:
         use_ocr: bool = False,
         use_gpu: bool = False,
         extract_images: bool = False,
-        use_picture_description: bool = False
+        use_picture_description: bool = False,
+        scan_roots: Sequence[str] = ()
     ) -> ConversionResult
 ```
 
@@ -63,6 +64,7 @@ Context manager para conversión de documentos.
 | `use_gpu` | `bool` | Usar GPU para OCR (requiere CUDA) |
 | `extract_images` | `bool` | Extrae imágenes embebidas a `img/<stem>/` junto al `.md` y las referencia (`ImageRefMode.REFERENCED`) en vez del placeholder por defecto. Solo tiene efecto real en documentos PDF/imagen |
 | `use_picture_description` | `bool` | Genera descripción textual de cada imagen (modelo local `smolvlm_picture_description`) en el `.json`. Solo tiene efecto en documentos PDF/imagen (`StandardPdfPipeline`); se ignora sin error en el resto de formatos |
+| `scan_roots` | `Sequence[str]` | Carpetas raíz indicadas por el usuario al escanear. Si `source_doc.full_path` cuelga de alguna, `output_dir` replica esa jerarquía relativa a la raíz (no la ruta absoluta completa del disco de origen). Vacío por defecto: sin ninguna raíz conocida, la salida se aplana a `output_dir/<stem>` |
 
 | Retorno | Tipo | Descripción |
 |---|---|---|
@@ -91,7 +93,8 @@ class OCRScheduler:
         output_dir: Path,
         use_gpu: bool = False,
         extract_images: bool = False,
-        use_picture_description: bool = False
+        use_picture_description: bool = False,
+        scan_roots: Sequence[str] = ()
     ) -> list[ConversionResult]
 ```
 
@@ -104,6 +107,7 @@ Reconvierte batch de documentos con OCR.
 | `use_gpu` | `bool` | Usar GPU (EasyOCR + CUDA) |
 | `extract_images` | `bool` | Igual que en `convert_document`; propagado desde la primera pasada para que un documento con OCR no pierda esta opción |
 | `use_picture_description` | `bool` | Igual que en `convert_document`, propagado desde la primera pasada |
+| `scan_roots` | `Sequence[str]` | Igual que en `convert_document`; debe coincidir con la primera pasada para que ambas calculen la misma ruta de salida para un mismo documento |
 
 | Retorno | Tipo | Descripción |
 |---|---|---|
@@ -158,6 +162,8 @@ class ConversionResult:
 - **`InputFormat.IMAGE`**: configurado explícitamente con las mismas opciones que `InputFormat.PDF` (`StandardPdfPipeline`) — sin esto, docling aplicaba sus valores por defecto (`do_ocr=True`) a imágenes sueltas, ignorando `use_ocr`
 - **`extract_images`**: usa `DoclingDocument.save_as_markdown(artifacts_dir=..., image_mode=ImageRefMode.REFERENCED)` con un `artifacts_dir` relativo `img/<stem>` (namespaced por documento, para que dos documentos en el mismo `output_dir` no compartan imágenes); si el documento no genera ninguna imagen, la carpeta vacía se borra y `images_dir` queda `None`
 - **`use_picture_description`**: solo tiene efecto si el documento resuelve a `InputFormat.PDF`/`InputFormat.IMAGE` (`StandardPdfPipeline`); el resto de formatos usan `SimplePipeline`, que no tiene ese paso — se acepta el flag sin error pero `picture_description_applied` queda en `False`
+- **`scan_roots` / `resolve_output_paths`**: la ruta de salida se calcula relativa a la raíz de escaneo que contiene al documento, nunca replicando la ruta absoluta completa del disco de origen bajo `output_dir` — si ninguna raíz coincide, se aplana a `output_dir/<stem>`. Sin esto, un `output_dir` ubicado en otra rama del árbol de ficheros que la raíz escaneada podía generar una jerarquía duplicada e inexistente al escribir (p.ej. imágenes extraídas de un `.docx`)
+- **Mensaje de error vacío**: si la excepción capturada en `convert_document()` no lleva mensaje (`str(exc) == ""`), `ConversionResult.error` usa un texto de respaldo (`"{TipoDeExcepcion} sin mensaje de error"`) en vez de quedar en blanco; el traceback completo igualmente se registra en el log (`exc_info=True`)
 
 ## Ejemplos Relacionados
 
