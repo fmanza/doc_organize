@@ -56,6 +56,8 @@ dist_verify/
 *.tmp
 *.bak
 *.log
+*.log.*
+logs/
 .tox/
 
 # Claude Code local configuration (do not commit)
