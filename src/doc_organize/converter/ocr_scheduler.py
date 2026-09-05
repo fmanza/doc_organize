@@ -2,7 +2,7 @@
 Deteccion y procesamiento de OCR en dos fases (REQ-004).
 """
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 
 from doc_organize.converter.converter import DocumentConverter
@@ -50,6 +50,7 @@ class OCRScheduler:
         extract_images: bool = False,
         use_picture_description: bool = False,
         scan_roots: Sequence[str] = (),
+        progress_callback: Callable[[DocumentMetadata, int, int], Awaitable[None]] | None = None,
     ) -> list[ConversionResult]:
         """Reconvierte `docs` con OCR activado y escribe los resultados en `output_dir`.
 
@@ -66,10 +67,20 @@ class OCRScheduler:
         `DocumentConverter.convert_document()` lo necesita para saber dónde
         escribir la salida; el pseudocódigo original del plan (§2.4) no lo
         incluía.
+
+        Args:
+            progress_callback: si se indica, se invoca `await progress_callback(doc,
+                index, total)` (índice 1-based) justo antes de reconvertir cada
+                documento. Permite a quien orquesta el batch (`ScanCommand._process_ocr`)
+                informar progreso en vivo sin que este método conozca `ScanEvent`/
+                WebSocket -- mantiene la capa de OCR agnóstica del transporte de eventos.
         """
         results: list[ConversionResult] = []
+        total = len(docs)
         async with DocumentConverter() as converter:
-            for doc in docs:
+            for index, doc in enumerate(docs, start=1):
+                if progress_callback is not None:
+                    await progress_callback(doc, index, total)
                 result = await converter.convert_document(
                     doc,
                     output_dir,

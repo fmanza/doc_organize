@@ -15,12 +15,13 @@ operación separada que el usuario ejecuta antes de escanear.
 """
 
 import asyncio
+import contextlib
 import json
 import shutil
 import time
 import uuid
 
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -680,6 +681,78 @@ class ScanCommand:
             ):
                 ocr_candidates.append(docs_by_path[entry.file_path])
 
+    @staticmethod
+    async def _stream_ocr_batch(
+        ocr_candidates: list[DocumentMetadata],
+        output_dir: Path,
+        use_gpu: bool,
+        extract_images: bool,
+        use_picture_description: bool,
+        scan_roots: Sequence[str],
+    ) -> AsyncGenerator[ScanEvent | list[ConversionResult]]:
+        """Ejecuta `OCRScheduler.process_with_ocr()` en paralelo, yieldeando un
+        `OCR_FILE_STARTED` según arranca cada documento y terminando con la lista de
+        `ConversionResult` del batch completo como último elemento yieldeado.
+
+        `process_with_ocr()` es una única llamada bloqueante que procesa todo el batch
+        de un tirón (a diferencia de `_convert_documents`, que yieldea entre documento y
+        documento porque itera ella misma) -- para poder yieldear progreso en vivo
+        mientras ese `await` sigue en curso, se lanza como una `asyncio.Task` en
+        paralelo cuyo `progress_callback` empuja eventos a una cola que este generador
+        va drenando en orden FIFO. La propia tarea empuja al final el resultado (o la
+        excepción, para no dejar la cola esperando para siempre si `process_with_ocr`
+        falla) como último elemento -- así se garantiza que todo el progreso ya se
+        yiendeó antes de que el llamador lea el resultado final. Si este generador se
+        cierra antes de que la tarea termine (p. ej. el cliente WebSocket se desconecta
+        a mitad del OCR), el `finally` cancela la tarea -- deja de esperarla y de
+        consumir sus eventos -- en vez de dejarla huérfana enviando progreso que ya
+        nadie escucha. Ojo: esto NO interrumpe el documento que `DocumentConverter`
+        esté procesando en ese instante -- `convert_document()` delega el parseo real
+        a un hilo (`asyncio.to_thread`, ver `converter.py`), y ese hilo sigue corriendo
+        en segundo plano hasta terminar por su cuenta aunque cancelemos la `Task` que
+        lo esperaba; mismo comportamiento que ya tenía el `await` bloqueante original.
+        """
+        progress_queue: asyncio.Queue[ScanEvent | list[ConversionResult] | Exception] = asyncio.Queue()
+
+        async def _on_progress(doc: DocumentMetadata, index: int, total: int) -> None:
+            await progress_queue.put(
+                ScanEvent(event=ScanEventType.OCR_FILE_STARTED, data={"path": doc.full_path, "index": index, "total": total})
+            )
+
+        async def _run_batch() -> None:
+            try:
+                batch_results = await OCRScheduler().process_with_ocr(
+                    ocr_candidates,
+                    output_dir,
+                    use_gpu=use_gpu,
+                    extract_images=extract_images,
+                    use_picture_description=use_picture_description,
+                    scan_roots=scan_roots,
+                    progress_callback=_on_progress,
+                )
+            except Exception as exc:  # reenviado tal cual al consumidor de la cola; `asyncio.CancelledError`
+                # (BaseException, no Exception) se deja propagar sin capturar aquí a propósito: si esta tarea se
+                # cancela desde `_stream_ocr_batch` (cliente desconectado a mitad de OCR), debe completarse como
+                # "cancelada" de verdad, no como "terminada con éxito y un CancelledError metido en la cola".
+                await progress_queue.put(exc)
+                return
+            await progress_queue.put(batch_results)
+
+        task = asyncio.create_task(_run_batch())
+        try:
+            while True:
+                item = await progress_queue.get()
+                if isinstance(item, Exception):
+                    raise item
+                yield item
+                if not isinstance(item, ScanEvent):
+                    return
+        finally:
+            if not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
     async def _process_ocr(
         self,
         ocr_candidates: list[DocumentMetadata],
@@ -692,7 +765,8 @@ class ScanCommand:
         use_picture_description: bool = False,
         scan_roots: Sequence[str] = (),
     ) -> AsyncIterator[ScanEvent]:
-        """Reprocesa `ocr_candidates` con OCR, yieldeando un `OCR_PROCESSED` por unidad.
+        """Reprocesa `ocr_candidates` con OCR, yieldeando `OCR_STARTED`, un
+        `OCR_FILE_STARTED`/`OCR_PROCESSED` por unidad, en ese orden relativo.
 
         `extract_images`/`use_picture_description`/`scan_roots` se propagan igual que en
         la primera pasada (`_convert_documents`): un documento que necesitó OCR no debe
@@ -703,17 +777,29 @@ class ScanCommand:
         Muta `entries`/`summary` in-place, mismo contrato que `_convert_documents`. Un
         `return` temprano en una función `async def` con `yield` es válido: simplemente
         termina el generador sin producir nada, no hace falta un generador vacío aparte.
+
+        El progreso en vivo del batch (`OCR_FILE_STARTED`) lo produce `_stream_ocr_batch`
+        -- ver su docstring para el porqué de la tarea+cola detrás.
         """
         if not ocr_candidates:
             return
-        ocr_results = await OCRScheduler().process_with_ocr(
-            ocr_candidates,
-            output_dir,
-            use_gpu=use_gpu,
-            extract_images=extract_images,
-            use_picture_description=use_picture_description,
-            scan_roots=scan_roots,
-        )
+        total = len(ocr_candidates)
+        yield ScanEvent(event=ScanEventType.OCR_STARTED, data={"to_process": total})
+
+        ocr_results: list[ConversionResult] = []
+        # `aclosing` (no un `async for` a secas): si este generador se cierra a mitad
+        # de consumo (cliente WebSocket desconectado), garantiza que se llame a
+        # `_stream_ocr_batch.aclose()` -- y por tanto su `finally` cancele la tarea de
+        # OCR en curso -- en vez de dejarlo a merced del recolector de basura.
+        async with contextlib.aclosing(
+            self._stream_ocr_batch(ocr_candidates, output_dir, use_gpu, extract_images, use_picture_description, scan_roots)
+        ) as ocr_stream:
+            async for item in ocr_stream:
+                if isinstance(item, ScanEvent):
+                    yield item
+                else:
+                    ocr_results = item
+
         summary.ocr_processed = sum(1 for result in ocr_results if result.success)
         entries_by_path = {entry.file_path: entry for entry in entries}
         for doc, result in zip(ocr_candidates, ocr_results, strict=True):

@@ -105,6 +105,11 @@
     <progress id="scan-file-progress-bar" class="w-full h-2" max="1" value="0"></progress>
 </div>
 
+<div id="scan-ocr-progress" class="my-3" hidden>
+    <p id="scan-ocr-progress-text" class="text-sm text-gray-700 mb-1"></p>
+    <progress id="scan-ocr-progress-bar" class="w-full h-2" max="1" value="0"></progress>
+</div>
+
 <p class="text-sm text-gray-600 my-2">
     Última ejecución:
     {% if last_scan_run %}
@@ -354,7 +359,7 @@ const submitBtn = document.getElementById("scan-submit-btn");
 const progressBox = document.getElementById("progress");
 const errorEl = document.getElementById("scan-error");
 
-const RUNNING_EVENTS = new Set(["scanned", "file_started", "file_converted", "ocr_processed"]);
+const RUNNING_EVENTS = new Set(["scanned", "file_started", "file_converted", "ocr_started", "ocr_file_started", "ocr_processed"]);
 
 // --- Modal de confirmación para "Forzar rescan completo" (sustituye a window.confirm) ---
 
@@ -442,6 +447,54 @@ function handleScanCompletedFileProgress() {
     const total = Number(fileProgressBar.max);
     fileProgressBar.value = total;
     fileProgressText.textContent = "Completado: " + total + " fichero(s) procesado(s).";
+}
+
+// --- Progreso en vivo de OCR (segunda pasada, solo si "use_ocr" esta activo y
+// hay ficheros candidatos) ---
+
+const ocrProgressContainer = document.getElementById("scan-ocr-progress");
+const ocrProgressText = document.getElementById("scan-ocr-progress-text");
+const ocrProgressBar = document.getElementById("scan-ocr-progress-bar");
+// Mismo motivo que `scanHasFilesToProcess`: distingue "se ve porque hay OCR en
+// curso" de "no deberia verse" -- aqui la barra solo aparece si llega `ocr_started`
+// (nunca se emite con to_process=0, a diferencia de `scanned`).
+let scanHasOcrToProcess = false;
+
+function resetOcrProgress() {
+    ocrProgressContainer.hidden = true;
+    ocrProgressText.textContent = "";
+    ocrProgressBar.max = 1;
+    ocrProgressBar.value = 0;
+    scanHasOcrToProcess = false;
+}
+
+function handleOcrStartedEvent(data) {
+    // `to_process` = candidatos a OCR de esta ejecucion (ver scan_command.py,
+    // ScanEventType.OCR_STARTED) -- este evento solo se emite si hay al menos uno.
+    scanHasOcrToProcess = true;
+    ocrProgressContainer.hidden = false;
+    ocrProgressBar.max = data.to_process;
+    ocrProgressBar.value = 0;
+    ocrProgressText.textContent = "Preparando OCR de " + data.to_process + " fichero(s)…";
+}
+
+function handleOcrFileStartedEvent(data) {
+    ocrProgressContainer.hidden = false;
+    ocrProgressBar.max = data.total;
+    ocrProgressBar.value = data.index - 1;
+    ocrProgressText.textContent = "Procesando OCR " + data.index + "/" + data.total + ": " + data.path;
+}
+
+function handleOcrProcessedEvent() {
+    if (!scanHasOcrToProcess) return;
+    ocrProgressBar.value = Math.min(Number(ocrProgressBar.value) + 1, Number(ocrProgressBar.max));
+}
+
+function handleScanCompletedOcrProgress() {
+    if (!scanHasOcrToProcess) return;
+    const total = Number(ocrProgressBar.max);
+    ocrProgressBar.value = total;
+    ocrProgressText.textContent = "OCR completado: " + total + " fichero(s) procesado(s).";
 }
 
 // --- Semáforo de estado (Inicio / Ejecución / Finalización / Error) ---
@@ -550,6 +603,7 @@ form.addEventListener("submit", async (submitEvent) => {
     progressBox.value = "";
     resetSemaforo();
     resetFileProgress();
+    resetOcrProgress();
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(
@@ -578,11 +632,18 @@ form.addEventListener("submit", async (submitEvent) => {
             handleFileStartedEvent(scanEvent.data);
         } else if (scanEvent.event === "file_converted") {
             handleFileConvertedEvent(scanEvent.data);
+        } else if (scanEvent.event === "ocr_started") {
+            handleOcrStartedEvent(scanEvent.data);
+        } else if (scanEvent.event === "ocr_file_started") {
+            handleOcrFileStartedEvent(scanEvent.data);
+        } else if (scanEvent.event === "ocr_processed") {
+            handleOcrProcessedEvent();
         }
         if (scanEvent.event === "completed") {
             scanFinished = true;
             setSemaforo(SCAN_PHASE.COMPLETED);
             handleScanCompletedFileProgress();
+            handleScanCompletedOcrProgress();
             const durationLabel = formatDurationClientSide(scanEvent.data.duration_seconds || 0);
             const discoveryLabel = formatDurationClientSide(scanEvent.data.discovery_duration_seconds || 0);
             const conversionLabel = formatDurationClientSide(scanEvent.data.total_conversion_seconds || 0);

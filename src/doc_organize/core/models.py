@@ -63,6 +63,8 @@ class ScanEventType(str, Enum):
     SCANNED = "scanned"
     FILE_STARTED = "file_started"
     FILE_CONVERTED = "file_converted"
+    OCR_STARTED = "ocr_started"
+    OCR_FILE_STARTED = "ocr_file_started"
     OCR_PROCESSED = "ocr_processed"
     COMPLETED = "completed"
 

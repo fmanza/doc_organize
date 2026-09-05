@@ -45,6 +45,19 @@ releases publicados antes de esa versión).
   si el navegador soporta la File System Access API (`showDirectoryPicker`, Chrome/Edge en contexto
   seguro), permite elegir la carpeta de destino y escribe el ZIP ahí; en el resto de navegadores
   cae al comportamiento estándar (carpeta de descargas configurada del navegador).
+- `src/doc_organize/core/models.py`: nuevos `ScanEventType.OCR_STARTED`/`OCR_FILE_STARTED`.
+- `src/doc_organize/converter/ocr_scheduler.py`: `OCRScheduler.process_with_ocr()` gana un
+  parámetro opcional `progress_callback` (no rompe compatibilidad — `None` por defecto), invocado
+  justo antes de reconvertir cada documento con su índice/total.
+- `src/doc_organize/scan/scan_command.py`: la segunda pasada de OCR informa ahora progreso en vivo
+  en vez de todo de golpe al terminar el batch completo. Nuevo `_stream_ocr_batch()` lanza
+  `OCRScheduler.process_with_ocr()` en una tarea paralela y retransmite `OCR_FILE_STARTED` por una
+  cola según avanza cada documento; `_process_ocr()` emite `OCR_STARTED` (con el total de
+  candidatos) antes de arrancar el batch.
+- `src/doc_organize/web/templates/folder_selector.html.j2`: la pestaña "Escanear" muestra ahora una
+  segunda barra de progreso (`#scan-ocr-progress`) dedicada a los ficheros en curso de OCR, análoga
+  a la barra de conversión general ya existente — visible solo cuando hay candidatos a OCR en esta
+  ejecución.
 
 ## [0.7.0] - 2026-09-03
 

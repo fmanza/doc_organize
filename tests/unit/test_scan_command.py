@@ -4,14 +4,16 @@ El resto de `ScanCommand` se cubre de extremo a extremo vía `test_web_scan.py`
 (orquesta escaneo real + Docling), pero esta función es pura — no necesita eso.
 """
 
+import asyncio
+
 import pytest
 
 import doc_organize.scan.scan_command as scan_command_module
 
-from doc_organize.converter import DocumentConverter
+from doc_organize.converter import DocumentConverter, OCRScheduler
 from doc_organize.core.constants import MAX_AUTO_ERROR_RETRIES
-from doc_organize.core.models import CacheEntry, ConversionStatus, DocumentMetadata, DocumentStatus, ScanErrorEntry
-from doc_organize.scan import ScanCommand
+from doc_organize.core.models import CacheEntry, ConversionResult, ConversionStatus, DocumentMetadata, DocumentStatus, ScanErrorEntry
+from doc_organize.scan import ScanCommand, ScanSummary
 from doc_organize.scan.scan_history_store import list_scan_runs
 from doc_organize.scanner import DocumentScanner
 
@@ -294,3 +296,151 @@ async def test_run_streaming_completes_even_if_persisting_error_report_fails(tmp
 
     assert events[-1].event.value == "completed"
     assert any("No se pudo persistir el histórico de errores de escaneo" in record.message for record in caplog.records)
+
+
+# ===== Progreso en vivo de OCR (`OCR_STARTED`/`OCR_FILE_STARTED`): nueva barra de
+# progreso dedicada a la segunda pasada de OCR, análoga a la de conversión general
+# pero en vivo, ya que `OCRScheduler.process_with_ocr` procesa el batch de un
+# tirón (PLAN/AUDIT_PLAN de esta sesión) =====
+
+
+@pytest.mark.asyncio
+async def test_process_ocr_yields_nothing_when_no_candidates(tmp_path) -> None:
+    """Sin candidatos a OCR, `_process_ocr` no debe emitir ningún evento -- ni
+    siquiera `OCR_STARTED` -- para que el cliente no muestre una barra OCR vacía
+    cuando `use_ocr=True` pero nada necesitaba OCR en este escaneo."""
+    summary = ScanSummary()
+
+    events = [event async for event in ScanCommand()._process_ocr([], tmp_path, False, [], {}, summary)]
+
+    assert events == []
+    assert summary.ocr_processed == 0
+
+
+@pytest.mark.asyncio
+async def test_process_ocr_emits_started_and_file_started_events_in_order(tmp_path, monkeypatch) -> None:
+    """`_process_ocr` debe yieldear `OCR_STARTED` (con el total) antes de arrancar
+    el batch, y un `OCR_FILE_STARTED` por documento según el propio
+    `OCRScheduler.process_with_ocr` invoca su `progress_callback` -- antes de esta
+    sesión, el único progreso de OCR visible para el cliente era `OCR_PROCESSED`,
+    emitido de golpe tras terminar el batch completo."""
+
+    async def _fake_process_with_ocr(
+        self,
+        docs,
+        output_dir,
+        use_gpu=False,
+        extract_images=False,
+        use_picture_description=False,
+        scan_roots=(),
+        progress_callback=None,
+    ):
+        results = []
+        for index, doc in enumerate(docs, start=1):
+            if progress_callback is not None:
+                await progress_callback(doc, index, len(docs))
+            results.append(ConversionResult(source_path=doc.full_path, success=True))
+        return results
+
+    monkeypatch.setattr(OCRScheduler, "process_with_ocr", _fake_process_with_ocr)
+
+    docs = [_doc("/repo/a.pdf"), _doc("/repo/b.pdf")]
+    summary = ScanSummary()
+
+    events = [event async for event in ScanCommand()._process_ocr(docs, tmp_path, False, [], {}, summary)]
+
+    assert [event.event.value for event in events] == [
+        "ocr_started",
+        "ocr_file_started",
+        "ocr_file_started",
+        "ocr_processed",
+        "ocr_processed",
+    ]
+    assert events[0].data == {"to_process": 2}
+    assert events[1].data == {"path": "/repo/a.pdf", "index": 1, "total": 2}
+    assert events[2].data == {"path": "/repo/b.pdf", "index": 2, "total": 2}
+    assert summary.ocr_processed == 2
+
+
+@pytest.mark.asyncio
+async def test_process_ocr_propagates_exception_raised_by_scheduler(tmp_path, monkeypatch) -> None:
+    """Si `OCRScheduler.process_with_ocr` lanza una excepción real, debe seguir
+    propagándose al llamador de `_process_ocr` (mismo contrato que antes de
+    introducir la tarea+cola de progreso en vivo) en vez de quedar silenciada o
+    dejar el generador esperando para siempre a que la cola reciba el resultado
+    final."""
+
+    async def _fake_process_with_ocr_that_fails(
+        self,
+        docs,
+        output_dir,
+        use_gpu=False,
+        extract_images=False,
+        use_picture_description=False,
+        scan_roots=(),
+        progress_callback=None,
+    ):
+        if progress_callback is not None:
+            await progress_callback(docs[0], 1, len(docs))
+        raise RuntimeError("fallo simulado de OCR")
+
+    monkeypatch.setattr(OCRScheduler, "process_with_ocr", _fake_process_with_ocr_that_fails)
+
+    docs = [_doc("/repo/a.pdf")]
+    summary = ScanSummary()
+
+    events = []
+    with pytest.raises(RuntimeError, match="fallo simulado de OCR"):
+        async for event in ScanCommand()._process_ocr(docs, tmp_path, False, [], {}, summary):
+            events.append(event)
+
+    assert [event.event.value for event in events] == ["ocr_started", "ocr_file_started"]
+
+
+@pytest.mark.asyncio
+async def test_stream_ocr_batch_cancels_background_task_when_closed_early(tmp_path, monkeypatch) -> None:
+    """Si el generador de progreso OCR se cierra antes de que el batch termine
+    (p. ej. el cliente WebSocket se desconecta a mitad de OCR), la tarea en
+    segundo plano debe cancelarse -- si no, seguiría "procesando OCR" sin que
+    nadie escuche sus eventos (AUDIT_PLAN, riesgo técnico de la tarea+cola que
+    reemplaza el `await` bloqueante original de `OCRScheduler.process_with_ocr`)."""
+    resumed_after_cancel: list[str] = []
+
+    async def _fake_process_with_ocr_that_hangs(
+        self,
+        docs,
+        output_dir,
+        use_gpu=False,
+        extract_images=False,
+        use_picture_description=False,
+        scan_roots=(),
+        progress_callback=None,
+    ):
+        if progress_callback is not None:
+            await progress_callback(docs[0], 1, len(docs))
+        await asyncio.sleep(10)
+        resumed_after_cancel.append("no deberia llegar aqui")
+        return [ConversionResult(source_path=d.full_path, success=True) for d in docs]
+
+    monkeypatch.setattr(OCRScheduler, "process_with_ocr", _fake_process_with_ocr_that_hangs)
+
+    created_tasks: list[asyncio.Task] = []
+    real_create_task = asyncio.create_task
+
+    def _tracking_create_task(coro, **kwargs):
+        task = real_create_task(coro, **kwargs)
+        created_tasks.append(task)
+        return task
+
+    monkeypatch.setattr(asyncio, "create_task", _tracking_create_task)
+
+    docs = [_doc("/repo/a.pdf"), _doc("/repo/b.pdf")]
+    ocr_stream = ScanCommand._stream_ocr_batch(docs, tmp_path, False, False, False, ())
+    first_event = await ocr_stream.__anext__()
+    assert first_event.data["index"] == 1
+
+    await asyncio.wait_for(ocr_stream.aclose(), timeout=2)
+
+    assert len(created_tasks) == 1
+    assert created_tasks[0].cancelled()
+    assert resumed_after_cancel == []
