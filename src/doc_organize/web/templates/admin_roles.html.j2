@@ -1,4 +1,5 @@
 {% extends "base.html.j2" %}
+{% from "_folder_browser_macros.html.j2" import folder_browser_button, folder_browser_panel %}
 {% block title %}doc_organize — Roles{% endblock %}
 {% block content %}
 <p><a class="text-blue-600 underline" href="/">&larr; Proyectos</a></p>
@@ -30,18 +31,9 @@
             <input type="text" id="role-scan-root-path" placeholder="Ruta de la carpeta"
                    class="border border-gray-300 rounded px-2 py-1.5 flex-1 min-w-[240px]">
             <button type="button" id="role-scan-root-add-btn" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Guardar carpeta</button>
-            <button type="button" id="role-scan-root-browse-btn" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Buscar…</button>
+            {{ folder_browser_button("role-scan-root-browse") }}
         </div>
-        <div id="role-scan-root-browse-panel" hidden class="my-2 border border-gray-300 rounded p-3">
-            <p id="role-scan-root-browse-current" class="font-mono text-xs mb-2 break-all"></p>
-            <div class="flex gap-2 mb-2 flex-wrap">
-                <button type="button" id="role-scan-root-browse-up" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 text-sm">&uarr; Subir</button>
-                <button type="button" id="role-scan-root-browse-use" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-blue-100 hover:bg-blue-200 text-sm">Usar esta carpeta</button>
-                <button type="button" id="role-scan-root-browse-close" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 text-sm">Cerrar</button>
-            </div>
-            <ul id="role-scan-root-browse-entries" class="border border-gray-200 rounded divide-y divide-gray-100 max-h-64 overflow-y-auto"></ul>
-            <p id="role-scan-root-browse-error" class="text-red-700 my-1 min-h-[1.2em] text-sm"></p>
-        </div>
+        {{ folder_browser_panel("role-scan-root-browse") }}
     </fieldset>
     <button type="submit" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Crear rol</button>
 </form>
@@ -68,20 +60,8 @@
     </tbody>
 </table>
 
+{% include "_shared_scripts.html.j2" %}
 <script>
-async function postJson(url, method, body) {
-    const response = await fetch(url, {
-        method: method,
-        headers: { "Content-Type": "application/json" },
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-    if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.detail || `Error ${response.status}`);
-    }
-    return response.status === 204 ? null : response.json();
-}
-
 const roleIsAdminCheckbox = document.getElementById("role-is-admin");
 const roleProjectsFieldset = document.getElementById("role-projects-fieldset");
 const roleScanRootsFieldset = document.getElementById("role-scan-roots-fieldset");
@@ -141,64 +121,11 @@ document.getElementById("role-scan-root-add-btn").addEventListener("click", () =
     input.value = "";
 });
 
-// --- Explorador de carpetas del servidor ("Buscar…"), mismo patrón que "Carpetas guardadas" ---
+// --- Explorador de carpetas del servidor ("Buscar…"): al elegir una carpeta,
+// se añade a la lista en memoria (mismo patrón que "Carpetas guardadas", pero
+// sin persistir de inmediato porque el rol todavía no existe) ---
 
-const browsePanel = document.getElementById("role-scan-root-browse-panel");
-const browseCurrent = document.getElementById("role-scan-root-browse-current");
-const browseEntries = document.getElementById("role-scan-root-browse-entries");
-const browseError = document.getElementById("role-scan-root-browse-error");
-let browseState = { current_path: "", parent_path: null };
-
-function apiError(data, fallback) {
-    return (data && data.detail) || fallback;
-}
-
-async function browseTo(path) {
-    browseError.textContent = "";
-    const url = path ? "/api/fs/browse?path=" + encodeURIComponent(path) : "/api/fs/browse";
-    const response = await fetch(url);
-    const data = await response.json();
-    if (!response.ok) {
-        browseError.textContent = apiError(data, "No se pudo explorar esa carpeta.");
-        return;
-    }
-    browseState = data;
-    browseCurrent.textContent = data.current_path;
-    browseEntries.innerHTML = "";
-    if (data.entries.length === 0) {
-        const li = document.createElement("li");
-        li.className = "px-2 py-1 text-gray-500 text-sm";
-        li.textContent = "(sin subcarpetas)";
-        browseEntries.appendChild(li);
-    }
-    for (const entryName of data.entries) {
-        const li = document.createElement("li");
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "w-full text-left px-2 py-1 cursor-pointer hover:bg-gray-100 text-sm";
-        btn.textContent = entryName;
-        btn.addEventListener("click", () => {
-            const separator = data.current_path.endsWith("/") || data.current_path.endsWith("\\") ? "" : "/";
-            browseTo(data.current_path + separator + entryName);
-        });
-        li.appendChild(btn);
-        browseEntries.appendChild(li);
-    }
-}
-
-document.getElementById("role-scan-root-browse-btn").addEventListener("click", () => {
-    browsePanel.hidden = false;
-    browseTo(null);
-});
-document.getElementById("role-scan-root-browse-close").addEventListener("click", () => {
-    browsePanel.hidden = true;
-});
-document.getElementById("role-scan-root-browse-up").addEventListener("click", () => {
-    if (browseState.parent_path) browseTo(browseState.parent_path);
-});
-document.getElementById("role-scan-root-browse-use").addEventListener("click", () => {
-    addScanRoot(browseState.current_path);
-});
+initFolderBrowser("role-scan-root-browse", (path) => addScanRoot(path));
 
 document.getElementById("create-role-form").addEventListener("submit", async (event) => {
     event.preventDefault();

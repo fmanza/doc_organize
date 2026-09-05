@@ -1,0 +1,105 @@
+<script>
+async function postJson(url, method, body) {
+    const response = await fetch(url, {
+        method: method,
+        headers: { "Content-Type": "application/json" },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || `Error ${response.status}`);
+    }
+    return response.status === 204 ? null : response.json();
+}
+
+function apiError(data, fallback) {
+    return (data && data.detail) || fallback;
+}
+
+// Explorador de carpetas del servidor ("Buscar…"), compartido por cualquier página
+// que necesite elegir una carpeta del sistema de archivos del servidor (Carpetas
+// guardadas de un proyecto, Raíces de escaneo permitidas de un rol, ubicación al
+// crear un proyecto, destino al mover uno...). `idPrefix` namespacea los ids del
+// markup emitido por las macros de `_folder_browser_macros.html.j2`;
+// `onSelect(path, close)` es lo único que varía entre páginas: persistir de
+// inmediato (Carpetas guardadas), añadir a una lista en memoria (Raíces de
+// escaneo) o escribir en un campo y cerrar el panel (ubicación/destino) —
+// initFolderBrowser() no sabe ni le importa cuál de las tres hace. `close()` deja
+// en manos de quien llama decidir si el panel se cierra tras seleccionar (los dos
+// primeros casos deliberadamente NO llaman a `close()`, para poder añadir varias
+// carpetas seguidas sin reabrir "Buscar…"). Si `onSelect` lanza un `Error`, su
+// `message` se muestra en el propio panel (mismo sitio que los errores de
+// navegación) en vez de perderse o tener que exponer el `<p>` de error a quien
+// llama.
+function initFolderBrowser(idPrefix, onSelect) {
+    const browseBtn = document.getElementById(idPrefix + "-btn");
+    const browsePanel = document.getElementById(idPrefix + "-panel");
+    const browseCurrent = document.getElementById(idPrefix + "-current");
+    const browseEntries = document.getElementById(idPrefix + "-entries");
+    const browseError = document.getElementById(idPrefix + "-error");
+    let browseState = { current_path: "", parent_path: null };
+    // Token de la navegación más reciente: si el usuario pide dos carpetas seguidas
+    // antes de que la primera responda, la respuesta que llegue tarde se descarta en
+    // vez de pisar la vista con datos obsoletos (las respuestas HTTP no llegan
+    // necesariamente en el mismo orden en que se pidieron).
+    let browseRequestId = 0;
+
+    async function browseTo(path) {
+        const requestId = ++browseRequestId;
+        browseError.textContent = "";
+        const url = path ? "/api/fs/browse?path=" + encodeURIComponent(path) : "/api/fs/browse";
+        const response = await fetch(url);
+        const data = await response.json();
+        if (requestId !== browseRequestId) return; // navegación obsoleta: ya se pidió otra carpeta después
+        if (!response.ok) {
+            browseError.textContent = apiError(data, "No se pudo explorar esa carpeta.");
+            return;
+        }
+        browseState = data;
+        browseCurrent.textContent = data.current_path;
+        browseEntries.innerHTML = "";
+        if (data.entries.length === 0) {
+            const li = document.createElement("li");
+            li.className = "px-2 py-1 text-gray-500 text-sm";
+            li.textContent = "(sin subcarpetas)";
+            browseEntries.appendChild(li);
+        }
+        for (const entryName of data.entries) {
+            const li = document.createElement("li");
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "w-full text-left px-2 py-1 cursor-pointer hover:bg-gray-100 text-sm";
+            btn.textContent = entryName;
+            btn.addEventListener("click", () => {
+                const separator = data.current_path.endsWith("/") || data.current_path.endsWith("\\") ? "" : "/";
+                browseTo(data.current_path + separator + entryName);
+            });
+            li.appendChild(btn);
+            browseEntries.appendChild(li);
+        }
+    }
+
+    browseBtn.addEventListener("click", () => {
+        browsePanel.hidden = false;
+        browseTo(null);
+    });
+    document.getElementById(idPrefix + "-close").addEventListener("click", () => {
+        browsePanel.hidden = true;
+    });
+    document.getElementById(idPrefix + "-up").addEventListener("click", () => {
+        if (browseState.parent_path) browseTo(browseState.parent_path);
+    });
+    const useButton = document.getElementById(idPrefix + "-use");
+    useButton.addEventListener("click", async () => {
+        browseError.textContent = "";
+        useButton.disabled = true;
+        try {
+            await onSelect(browseState.current_path, () => { browsePanel.hidden = true; });
+        } catch (err) {
+            browseError.textContent = err.message;
+        } finally {
+            useButton.disabled = false;
+        }
+    });
+}
+</script>

@@ -33,6 +33,11 @@ releases publicados antes de esa versión).
   `pip install .[ocr-gpu]` seguido de `--use-ocr --use-gpu` fallaba con
   `EasyOCR is not installed`. Añadido `easyocr>=1.7` al extra (`docs/guides/installation.md` y
   `.ai/product.md` actualizados para reflejarlo).
+- `src/doc_organize/web/templates/_shared_scripts.html.j2`: el explorador de carpetas del servidor
+  ("Buscar…") no protegía contra respuestas de red desordenadas (navegar rápido por subcarpetas
+  podía dejar la vista con datos de una carpeta distinta a la mostrada) ni contra doble clic en
+  "Usar esta carpeta" durante una petición en curso. Añadido token de generación de petición y
+  deshabilitado temporal del botón mientras se resuelve `onSelect`.
 
 ### Added
 
@@ -69,6 +74,18 @@ releases publicados antes de esa versión).
   `<textarea>` de texto libre a una lista gestionada con "Guardar carpeta" (ruta manual) y
   "Buscar…" (explorador de carpetas del servidor, reutilizando `GET /api/fs/browse`), con botón
   "Eliminar" por entrada.
+
+### Changed
+
+- `src/doc_organize/web/templates/dashboard.html.j2`, `admin_roles.html.j2`, `admin_users.html.j2`,
+  `project_selector.html.j2`: el helper `postJson`/`apiError` y el panel "explorador de carpetas
+  del servidor" (antes duplicados inline en cada plantilla, incluyendo una implementación
+  independiente en `project_selector.html.j2` con `createFolderBrowser()`) se extraen a
+  `_shared_scripts.html.j2` (JS, `initFolderBrowser(idPrefix, onSelect)`) y
+  `_folder_browser_macros.html.j2` (macros Jinja, `class_override` opcional para preservar las
+  clases Tailwind propias de "Mover"/"ubicación al crear proyecto"); sin cambio de comportamiento
+  observable — incluida la diferencia real de cerrar o no el panel tras seleccionar (resuelta con
+  un segundo argumento `close()` que cada página invoca o ignora según su flujo).
 
 ## [0.7.0] - 2026-09-03
 

@@ -1,0 +1,16 @@
+{% macro folder_browser_button(id_prefix, label="Buscar…", class_override=none) %}
+<button type="button" id="{{ id_prefix }}-btn" class="{{ class_override or 'px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200' }}">{{ label }}</button>
+{% endmacro %}
+
+{% macro folder_browser_panel(id_prefix, class_override=none) %}
+<div id="{{ id_prefix }}-panel" hidden class="{{ class_override or 'my-2 border border-gray-300 rounded p-3' }}">
+    <p id="{{ id_prefix }}-current" class="font-mono text-xs mb-2 break-all"></p>
+    <div class="flex gap-2 mb-2 flex-wrap">
+        <button type="button" id="{{ id_prefix }}-up" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 text-sm">&uarr; Subir</button>
+        <button type="button" id="{{ id_prefix }}-use" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-blue-100 hover:bg-blue-200 text-sm">Usar esta carpeta</button>
+        <button type="button" id="{{ id_prefix }}-close" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 text-sm">Cerrar</button>
+    </div>
+    <ul id="{{ id_prefix }}-entries" class="border border-gray-200 rounded divide-y divide-gray-100 max-h-64 overflow-y-auto"></ul>
+    <p id="{{ id_prefix }}-error" class="text-red-700 my-1 min-h-[1.2em] text-sm"></p>
+</div>
+{% endmacro %}

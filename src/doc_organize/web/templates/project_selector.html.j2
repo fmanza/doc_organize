@@ -1,4 +1,5 @@
 {% extends "base.html.j2" %}
+{% from "_folder_browser_macros.html.j2" import folder_browser_button, folder_browser_panel %}
 {% block title %}doc_organize — Proyectos{% endblock %}
 {% block content %}
 <h1 class="text-xl font-semibold mb-4">Proyectos</h1>
@@ -10,20 +11,11 @@
     <label for="location" class="sr-only">Ubicación (carpeta padre)</label>
     <input type="text" id="location" placeholder="Ubicación (carpeta padre)" required
            class="border border-gray-300 rounded px-2 py-1.5 flex-1 min-w-[200px]">
-    <button type="button" id="location-browse-btn" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Buscar…</button>
+    {{ folder_browser_button("location-browse") }}
     <button type="submit" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Crear proyecto</button>
 </form>
 
-<div id="location-browse-panel" hidden class="my-2 border border-gray-300 rounded p-3 max-w-2xl">
-    <p id="location-browse-current" class="font-mono text-xs mb-2 break-all"></p>
-    <div class="flex gap-2 mb-2 flex-wrap">
-        <button type="button" id="location-browse-up" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 text-sm">&uarr; Subir</button>
-        <button type="button" id="location-browse-use" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-blue-100 hover:bg-blue-200 text-sm">Usar esta carpeta</button>
-        <button type="button" id="location-browse-close" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 text-sm">Cerrar</button>
-    </div>
-    <ul id="location-browse-entries" class="border border-gray-200 rounded divide-y divide-gray-100 max-h-64 overflow-y-auto"></ul>
-    <p id="location-browse-error" class="text-red-700 my-1 min-h-[1.2em] text-sm"></p>
-</div>
+{{ folder_browser_panel("location-browse", class_override="my-2 border border-gray-300 rounded p-3 max-w-2xl") }}
 <p id="create-error" class="text-red-700 my-2 min-h-[1.2em]"></p>
 
 {% if total > 0 or q %}
@@ -107,17 +99,8 @@
 <div id="move-browse-container" hidden>
     <p class="text-sm mb-1">Carpeta padre de destino:</p>
     <p id="move-destination-label" class="font-mono text-xs mb-2 break-all text-gray-600">(sin elegir)</p>
-    <button type="button" id="move-browse-btn" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 text-sm mb-2">Buscar…</button>
-    <div id="move-browse-panel" hidden class="border border-gray-300 rounded p-2">
-        <p id="move-browse-current" class="font-mono text-xs mb-2 break-all"></p>
-        <div class="flex gap-2 mb-2 flex-wrap">
-            <button type="button" id="move-browse-up" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 text-sm">&uarr; Subir</button>
-            <button type="button" id="move-browse-use" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-blue-100 hover:bg-blue-200 text-sm">Usar esta carpeta</button>
-            <button type="button" id="move-browse-close" class="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 text-sm">Cerrar</button>
-        </div>
-        <ul id="move-browse-entries" class="border border-gray-200 rounded divide-y divide-gray-100 max-h-64 overflow-y-auto"></ul>
-        <p id="move-browse-error" class="text-red-700 my-1 min-h-[1.2em] text-sm"></p>
-    </div>
+    {{ folder_browser_button("move-browse", class_override="px-2 py-1 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 text-sm mb-2") }}
+    {{ folder_browser_panel("move-browse", class_override="border border-gray-300 rounded p-2") }}
 </div>
 
 <div id="confirm-modal" hidden class="fixed inset-0 bg-black/50 items-center justify-center z-50 p-4">
@@ -133,6 +116,7 @@
     </div>
 </div>
 
+{% include "_shared_scripts.html.j2" %}
 <script>
 document.getElementById("create-form").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -174,72 +158,11 @@ document.getElementById("create-form").addEventListener("submit", async (event) 
     }
 })();
 
-// --- Explorador de carpetas del servidor (reutilizable: ubicación de creación + destino de "Mover") ---
+// --- Explorador de carpetas del servidor (compartido, ver _shared_scripts.html.j2) ---
 
-function apiError(data, fallback) {
-    return (data && data.detail) || fallback;
-}
-
-function createFolderBrowser(ids) {
-    const panel = document.getElementById(ids.panel);
-    const currentEl = document.getElementById(ids.current);
-    const entriesEl = document.getElementById(ids.entries);
-    const errorEl = document.getElementById(ids.error);
-    let state = { current_path: "", parent_path: null };
-
-    async function browseTo(path) {
-        errorEl.textContent = "";
-        const url = path ? "/api/fs/browse?path=" + encodeURIComponent(path) : "/api/fs/browse";
-        const response = await fetch(url);
-        const data = await response.json();
-        if (!response.ok) {
-            errorEl.textContent = apiError(data, "No se pudo explorar esa carpeta.");
-            return;
-        }
-        state = data;
-        currentEl.textContent = data.current_path;
-        entriesEl.innerHTML = "";
-        if (data.entries.length === 0) {
-            const li = document.createElement("li");
-            li.className = "px-2 py-1 text-gray-500 text-sm";
-            li.textContent = "(sin subcarpetas)";
-            entriesEl.appendChild(li);
-        }
-        for (const entryName of data.entries) {
-            const li = document.createElement("li");
-            const btn = document.createElement("button");
-            btn.type = "button";
-            btn.className = "w-full text-left px-2 py-1 cursor-pointer hover:bg-gray-100 text-sm";
-            btn.textContent = entryName;
-            btn.addEventListener("click", () => {
-                const separator = state.current_path.endsWith("/") || state.current_path.endsWith("\\") ? "" : "/";
-                browseTo(state.current_path + separator + entryName);
-            });
-            li.appendChild(btn);
-            entriesEl.appendChild(li);
-        }
-    }
-
-    document.getElementById(ids.up).addEventListener("click", () => {
-        if (state.parent_path) browseTo(state.parent_path);
-    });
-    document.getElementById(ids.close).addEventListener("click", () => { panel.hidden = true; });
-
-    return {
-        open() { panel.hidden = false; browseTo(null); },
-        close() { panel.hidden = true; },
-        get currentPath() { return state.current_path; },
-    };
-}
-
-const locationBrowser = createFolderBrowser({
-    panel: "location-browse-panel", current: "location-browse-current", up: "location-browse-up",
-    close: "location-browse-close", entries: "location-browse-entries", error: "location-browse-error",
-});
-document.getElementById("location-browse-btn").addEventListener("click", () => locationBrowser.open());
-document.getElementById("location-browse-use").addEventListener("click", () => {
-    document.getElementById("location").value = locationBrowser.currentPath;
-    locationBrowser.close();
+initFolderBrowser("location-browse", (path, close) => {
+    document.getElementById("location").value = path;
+    close();
 });
 
 // --- Modal de confirmación genérico (Vaciar histórico / Eliminar / Mover) ---
@@ -378,19 +301,14 @@ document.querySelectorAll(".action-delete-project").forEach((button) => {
 
 // El picker de destino de "Mover" es un único nodo estático (#move-browse-container),
 // reutilizado en cada clic via appendChild dentro del modal (no se recrea el DOM del
-// explorador por cada proyecto) — misma instancia de createFolderBrowser que la de creación.
+// explorador por cada proyecto) — mismo initFolderBrowser() que el de creación.
 const moveBrowseContainer = document.getElementById("move-browse-container");
 const moveDestinationLabel = document.getElementById("move-destination-label");
-const moveBrowser = createFolderBrowser({
-    panel: "move-browse-panel", current: "move-browse-current", up: "move-browse-up",
-    close: "move-browse-close", entries: "move-browse-entries", error: "move-browse-error",
-});
-document.getElementById("move-browse-btn").addEventListener("click", () => moveBrowser.open());
 let moveDestination = null;
-document.getElementById("move-browse-use").addEventListener("click", () => {
-    moveDestination = moveBrowser.currentPath;
-    moveDestinationLabel.textContent = moveDestination;
-    moveBrowser.close();
+initFolderBrowser("move-browse", (path, close) => {
+    moveDestination = path;
+    moveDestinationLabel.textContent = path;
+    close();
     confirmAccept.disabled = false;
 });
 
@@ -401,7 +319,7 @@ document.querySelectorAll(".action-move-project").forEach((button) => {
 
         moveDestination = null;
         moveDestinationLabel.textContent = "(sin elegir)";
-        moveBrowser.close();
+        document.getElementById("move-browse-panel").hidden = true;
         moveBrowseContainer.hidden = false;
 
         openConfirmModal({
