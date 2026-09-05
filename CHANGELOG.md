@@ -8,6 +8,23 @@ releases publicados antes de esa versión).
 
 ### Fixed
 
+- `src/doc_organize/converter/converter.py`: dos fallos reales de conversión sin diagnóstico útil.
+  Un `.docx`/`.html` cuyo `output_dir` vivía fuera del árbol escaneado terminaba con
+  `[Errno 2] No such file or directory` al extraer imágenes (la ruta de salida arrastraba la
+  jerarquía absoluta completa del disco de origen en vez de una relativa a la carpeta escaneada) y
+  una excepción sin mensaje dejaba el documento en `ERROR` sin ninguna pista visible.
+  `resolve_output_paths()` calcula ahora la ruta relativa a `scan_roots` (las carpetas indicadas al
+  escanear), y `convert_document()` usa un mensaje de respaldo cuando `str(exc)` está vacío.
+- `src/doc_organize/converter/converter.py`: dos causas adicionales del mismo tipo de fallo,
+  encontradas al reprocesar los ficheros reales que motivaron el fix anterior. Un `MemoryError` (sin
+  mensaje propio, por diseño de Python) al convertir un HTML muy grande (~60 MB, informe OWASP ZAP)
+  seguía sin dar ninguna pista útil — ahora se reporta el tamaño del documento en el mensaje. Un
+  fichero cuyo nombre termina en espacio antes de la extensión (p. ej. `"Anti SPAM correo Virtual
+  Desk .docx"`) generaba una carpeta `img/<stem>/` sin ese espacio final (Windows lo normaliza al
+  crearla, como último componente de la ruta) pero luego se referenciaba con el espacio al escribir
+  una imagen dentro (ya como componente intermedio, sin normalizar), produciendo
+  `[Errno 2] No such file or directory` — `resolve_output_paths()` ahora sanea con `rstrip(" .")`
+  cada segmento de la ruta mirroreada (carpetas intermedias y nombre final).
 - `src/doc_organize/web/templates/base.html.j2`: la tabla de la pestaña "Historial de ejecuciones"
   (Escanear) mostraba scroll horizontal — el contenedor `<main>` compartido por toda la app
   (`max-w-[720px]`) era más estrecho que las 7 columnas de la tabla. Ampliado a `max-w-[920px]`.

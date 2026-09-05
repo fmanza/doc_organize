@@ -155,6 +155,40 @@ async def test_convert_document_error_without_message_gets_fallback_text(monkeyp
     assert "sin mensaje" in result.error
 
 
+@pytest.mark.asyncio
+async def test_convert_document_memory_error_reports_size_in_message(monkeypatch, tmp_path) -> None:
+    """Regresion (sesion 2026-09-05): un `MemoryError` (sin mensaje propio, por
+    diseno de Python) real al convertir un informe HTML de ~60 MB (OWASP ZAP) debe
+    reportar el tamano del documento como pista, no el fallback generico."""
+    import doc_organize.converter.converter as converter_module
+
+    html_path = tmp_path / "page.html"
+    html_path.write_text("<html><body><p>Texto</p></body></html>", encoding="utf-8")
+    stat = html_path.stat()
+    doc = DocumentMetadata(
+        full_path=str(html_path),
+        display_name=html_path.name,
+        extension="html",
+        size_bytes=63_386_397,  # tamano real del informe ZAP que disparo el bug
+        modified_time=stat.st_mtime,
+        sha256_hash="irrelevant",
+    )
+    output_dir = tmp_path / "Conversión"
+
+    def _boom(_docling_result: object) -> bool:
+        raise MemoryError()
+
+    monkeypatch.setattr(converter_module.DocumentConverter, "_needs_ocr", staticmethod(_boom))
+
+    async with DocumentConverter() as converter:
+        result = await converter.convert_document(doc, output_dir)
+
+    assert result.success is False
+    assert result.error
+    assert "60.4 MB" in result.error
+    assert "Memoria insuficiente" in result.error
+
+
 def test_resolve_output_paths_mirrors_source_tree_relative_to_scan_root(tmp_path) -> None:
     scan_root = tmp_path / "input"
     output_dir = tmp_path / "Conversión"
@@ -200,6 +234,37 @@ def test_resolve_output_paths_flattens_when_no_scan_root_matches(tmp_path) -> No
 
     assert markdown_path == output_dir / "informe.md"
     assert json_path == output_dir / "informe.json"
+
+
+def test_resolve_output_paths_strips_trailing_space_from_stem(tmp_path) -> None:
+    """Regresion (sesion 2026-09-05): un fichero cuyo nombre termina en espacio antes
+    de la extension (`"Anti SPAM correo Virtual Desk .docx"`, real) no debe dejar ese
+    espacio en el `stem` -- Windows lo quita al CREAR `img/<stem>/` (ultimo componente
+    en ese momento) pero no al REFERENCIARLO luego como componente intermedio al
+    escribir una imagen dentro, produciendo `[Errno 2] No such file or directory`."""
+    scan_root = tmp_path / "DOC_ORGANIZE_04"
+    source = scan_root / "Evidencias Auditoría" / "Anti SPAM correo Virtual Desk .docx"
+    output_dir = tmp_path / "prueba_doc" / "organaize" / "Conversión"
+
+    markdown_path, json_path = DocumentConverter.resolve_output_paths(str(source), output_dir, scan_roots=(str(scan_root),))
+
+    assert markdown_path.stem == "Anti SPAM correo Virtual Desk"
+    assert not markdown_path.stem.endswith(" ")
+    images_dir = DocumentConverter.resolve_images_dir(markdown_path)
+    assert not images_dir.name.endswith(" ")
+
+
+def test_resolve_output_paths_strips_trailing_space_from_intermediate_folder(tmp_path) -> None:
+    """Mismo bug que el stem, pero en una carpeta intermedia del origen (no solo en
+    el nombre de fichero final) -- debe sanearse igual en cualquier nivel de la
+    jerarquia mirroreada."""
+    scan_root = tmp_path / "input"
+    source = scan_root / "Carpeta con espacio " / "informe.pdf"
+    output_dir = tmp_path / "Conversión"
+
+    markdown_path, _json_path = DocumentConverter.resolve_output_paths(str(source), output_dir, scan_roots=(str(scan_root),))
+
+    assert markdown_path == output_dir / "Carpeta con espacio" / "informe.md"
 
 
 def test_resolve_output_paths_namespaces_images_dir_by_stem(tmp_path) -> None:

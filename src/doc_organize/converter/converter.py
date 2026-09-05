@@ -199,7 +199,16 @@ class DocumentConverter:
             # para el usuario (bug real, informe ZAP, sesion 2026-09-05).
             # exc_info=True para que el traceback completo quede en el log aunque
             # el mensaje de usuario (`error=`) tenga que recurrir al fallback.
-            error_message = str(exc) or f"{type(exc).__name__} sin mensaje de error"
+            if isinstance(exc, MemoryError):
+                # MemoryError nunca lleva mensaje propio -- se muestra el tamano del
+                # documento (correlacion, no causa cierta: tambien puede deberse a
+                # presion de memoria del sistema en ese instante) como pista util en
+                # vez del fallback generico (bug real: informe ZAP de ~60 MB, sesion
+                # 2026-09-05).
+                size_mb = source_doc.size_bytes / 1_048_576
+                error_message = f"Memoria insuficiente durante la conversion (documento de {size_mb:.1f} MB)"
+            else:
+                error_message = str(exc) or f"{type(exc).__name__} sin mensaje de error"
             self.logger.warning(f"Error convirtiendo '{source_doc.full_path}': {error_message}", exc_info=True)
             return ConversionResult(
                 source_path=source_doc.full_path,
@@ -245,6 +254,17 @@ class DocumentConverter:
         ruta absoluta. Extraido de `_write_outputs` para que el llamante (p.ej.
         `ScanCommand`, al forzar un rescan) pueda localizar la salida de un
         documento sin tener que reconvertirlo.
+
+        Cada segmento (carpetas intermedias y `stem` final) se sanea con
+        `rstrip(" .")`: Windows normaliza (quita) espacios/puntos finales de un
+        componente SOLO cuando es el ultimo de la ruta que se le pasa a una
+        llamada de API -- al crear `img/<stem>/` (donde `stem` SI es el ultimo
+        componente) el espacio final desaparecia del directorio real en disco,
+        pero al escribir luego un fichero dentro (`img/<stem>/imagen.png`,
+        donde `stem` pasa a ser un componente intermedio) no se normalizaba y
+        Windows buscaba un directorio con el espacio que nunca existio
+        (`[Errno 2] No such file or directory`, bug real: `.docx` con nombre
+        terminado en espacio, sesion 2026-09-05).
         """
         resolved = Path(full_path).resolve()
         relative_parts: tuple[str, ...] = ()
@@ -259,7 +279,9 @@ class DocumentConverter:
                 best_root_depth = len(resolved_root.parts)
                 relative_parts = relative.parts
         stem = Path(relative_parts[-1]).stem if relative_parts else resolved.stem
-        target_dir = output_dir.joinpath(*relative_parts[:-1]) if len(relative_parts) > 1 else output_dir
+        stem = stem.rstrip(" .")
+        dir_parts = [part.rstrip(" .") for part in relative_parts[:-1]]
+        target_dir = output_dir.joinpath(*dir_parts) if dir_parts else output_dir
         return target_dir / f"{stem}.md", target_dir / f"{stem}.json"
 
     @staticmethod
