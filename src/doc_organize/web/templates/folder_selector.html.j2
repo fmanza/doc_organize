@@ -253,6 +253,17 @@
 
 </div>
 
+<div id="force-confirm-modal" hidden class="fixed inset-0 bg-black/50 items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-lg shadow-lg max-w-md w-full p-4">
+        <h2 class="text-lg font-semibold mb-2">Forzar rescan completo</h2>
+        <p class="text-sm text-gray-700 mb-3 whitespace-pre-line">Esto vaciará la caché y reconvertirá TODOS los documentos, aunque no hayan cambiado. ¿Continuar?</p>
+        <div class="flex justify-end gap-2">
+            <button type="button" id="force-confirm-modal-cancel" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Cancelar</button>
+            <button type="button" id="force-confirm-modal-accept" class="px-3 py-1.5 cursor-pointer border border-red-700 rounded bg-red-600 text-white hover:bg-red-700">Continuar</button>
+        </div>
+    </div>
+</div>
+
 <script>
 const projectName = {{ project.name | tojson }};
 const libraryBaseUrl = "/api/projects/" + encodeURIComponent(projectName) + "/folders/library";
@@ -344,6 +355,34 @@ const progressBox = document.getElementById("progress");
 const errorEl = document.getElementById("scan-error");
 
 const RUNNING_EVENTS = new Set(["scanned", "file_started", "file_converted", "ocr_processed"]);
+
+// --- Modal de confirmación para "Forzar rescan completo" (sustituye a window.confirm) ---
+
+const forceConfirmModal = document.getElementById("force-confirm-modal");
+const forceConfirmAccept = document.getElementById("force-confirm-modal-accept");
+const forceConfirmCancel = document.getElementById("force-confirm-modal-cancel");
+
+function openForceRescanConfirm() {
+    return new Promise((resolve) => {
+        function onAccept() { cleanup(true); }
+        function onCancel() { cleanup(false); }
+        function cleanup(result) {
+            forceConfirmModal.hidden = true;
+            forceConfirmModal.classList.remove("flex");
+            forceConfirmAccept.removeEventListener("click", onAccept);
+            forceConfirmCancel.removeEventListener("click", onCancel);
+            resolve(result);
+        }
+        forceConfirmAccept.addEventListener("click", onAccept);
+        forceConfirmCancel.addEventListener("click", onCancel);
+        forceConfirmModal.hidden = false;
+        forceConfirmModal.classList.add("flex");
+        // Foco en "Cancelar", no en la acción destructiva: una pulsación de
+        // Intro/Espacio accidental justo tras abrirse el modal no debe disparar
+        // el vaciado de caché.
+        forceConfirmCancel.focus();
+    });
+}
 
 // --- Progreso en vivo (total de ficheros a procesar + cual se esta procesando) ---
 
@@ -491,8 +530,16 @@ form.addEventListener("submit", async (submitEvent) => {
     const extract_images = document.getElementById("extract_images").checked;
     const use_picture_description = document.getElementById("use_picture_description").checked;
 
-    if (force && !window.confirm("Esto vaciará la caché y reconvertirá TODOS los documentos, aunque no hayan cambiado. ¿Continuar?")) {
-        return;
+    if (force) {
+        // Deshabilitar el botón ANTES de esperar la confirmación: así, si el usuario
+        // hace un segundo submit mientras el modal está abierto, el guard de arriba
+        // (`if (submitBtn.disabled) return;`) lo descarta en vez de abrir un segundo modal.
+        submitBtn.disabled = true;
+        const confirmed = await openForceRescanConfirm();
+        if (!confirmed) {
+            submitBtn.disabled = false;
+            return;
+        }
     }
 
     // Bloqueo síncrono, ANTES de abrir el WebSocket: lockCacheTab() (llamada en
