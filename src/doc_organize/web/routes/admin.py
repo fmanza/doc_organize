@@ -67,6 +67,7 @@ class CreateUserRequest(BaseModel):
     username: str
     password: str
     role_id: str
+    must_change_password: bool = False
 
 
 class UpdateUserRequest(BaseModel):
@@ -95,19 +96,31 @@ def _user_response(user: User) -> UserResponse:
     )
 
 
+@router.get("/admin/roles", response_class=HTMLResponse)
+async def admin_roles_page(request: Request) -> HTMLResponse:
+    tenant_id = get_tenant_id(request)
+    async with get_auth_store(request) as store:
+        roles = await store.list_roles(tenant_id)
+    async with get_project_registry(request) as registry:
+        projects = await registry.list_projects(tenant_id=tenant_id)
+    return _templates.TemplateResponse(
+        request,
+        "admin_roles.html.j2",
+        {"roles": roles, "projects": projects},
+    )
+
+
 @router.get("/admin/users", response_class=HTMLResponse)
 async def admin_users_page(request: Request) -> HTMLResponse:
     tenant_id = get_tenant_id(request)
     async with get_auth_store(request) as store:
         users = await store.list_users(tenant_id)
         roles = await store.list_roles(tenant_id)
-    async with get_project_registry(request) as registry:
-        projects = await registry.list_projects(tenant_id=tenant_id)
     roles_by_id = {role.id: role for role in roles}
     return _templates.TemplateResponse(
         request,
         "admin_users.html.j2",
-        {"users": users, "roles": roles, "roles_by_id": roles_by_id, "projects": projects},
+        {"users": users, "roles": roles, "roles_by_id": roles_by_id},
     )
 
 
@@ -188,7 +201,13 @@ async def create_user(payload: CreateUserRequest, request: Request) -> UserRespo
     """
     try:
         async with get_auth_store(request) as store:
-            user = await store.create_user(get_tenant_id(request), payload.username, payload.password, role_id=payload.role_id)
+            user = await store.create_user(
+                get_tenant_id(request),
+                payload.username,
+                payload.password,
+                role_id=payload.role_id,
+                must_change_password=payload.must_change_password,
+            )
     except RoleNotFoundError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _user_response(user)

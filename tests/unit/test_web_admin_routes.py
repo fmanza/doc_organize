@@ -163,18 +163,48 @@ async def test_admin_users_page_loads_for_admin(tmp_path) -> None:
     await _create_tenant(tmp_path)
     app = _non_loopback_app(tmp_path)
     async with _client(app) as client:
-        await _login_admin(client)
-        await client.post(
-            "/change-password",
-            data={
-                "current_password": DEFAULT_ADMIN_PASSWORD,
-                "new_password": "nueva-admin-pw",
-                "confirm_password": "nueva-admin-pw",
-            },
-        )
+        await _login_admin_and_change_password(client)
         response = await client.get("/admin/users")
     assert response.status_code == 200
     assert "admin" in response.text
+    assert "Crear rol" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_admin_roles_page_loads_for_admin_with_projects(tmp_path) -> None:
+    await _create_tenant(tmp_path)
+    app = _non_loopback_app(tmp_path)
+    async with _client(app) as client:
+        await _login_admin_and_change_password(client)
+        await client.post("/api/projects", json={"name": "Proyecto A", "base_location": str(tmp_path)})
+        response = await client.get("/admin/roles")
+    assert response.status_code == 200
+    assert "Crear rol" in response.text
+    assert "Proyecto A" in response.text
+    assert "Crear usuario" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_create_user_with_must_change_password_checkbox(tmp_path) -> None:
+    await _create_tenant(tmp_path)
+    app = _non_loopback_app(tmp_path)
+    async with _client(app) as client:
+        await _login_admin_and_change_password(client)
+        role = (await client.post("/api/roles", json={"name": "Lector", "is_admin": False, "project_names": []})).json()
+
+        forced = await client.post(
+            "/api/users",
+            json={"username": "dave", "password": "s3cr3t-password", "role_id": role["id"], "must_change_password": True},
+        )
+        assert forced.status_code == 201
+        assert forced.json()["must_change_password"] is True
+
+        not_forced = await client.post(
+            "/api/users",
+            json={"username": "erin", "password": "s3cr3t-password", "role_id": role["id"]},
+        )
+        assert not_forced.status_code == 201
+        assert not_forced.json()["must_change_password"] is False
 
 
 async def _login_admin_and_change_password(client: httpx.AsyncClient) -> None:

@@ -58,6 +58,17 @@ releases publicados antes de esa versión).
   segunda barra de progreso (`#scan-ocr-progress`) dedicada a los ficheros en curso de OCR, análoga
   a la barra de conversión general ya existente — visible solo cuando hay candidatos a OCR en esta
   ejecución.
+- `src/doc_organize/web/routes/admin.py`: la gestión de roles y usuarios pasa de una única página
+  combinada (`GET /admin/users`) a dos páginas independientes — `GET /admin/roles` (nueva) y
+  `GET /admin/users` — cada una con su propia entrada de menú, agrupadas bajo un apartado "Admin" en
+  el sidebar (`base.html.j2`).
+- `src/doc_organize/web/routes/admin.py`: `POST /api/users` acepta ahora
+  `must_change_password: bool = False`; expuesto como checkbox "Debe cambiar contraseña" en
+  `admin_users.html.j2` (antes solo alcanzable programáticamente, sin UI).
+- `src/doc_organize/web/templates/admin_roles.html.j2`: "Raíces de escaneo permitidas" pasa de un
+  `<textarea>` de texto libre a una lista gestionada con "Guardar carpeta" (ruta manual) y
+  "Buscar…" (explorador de carpetas del servidor, reutilizando `GET /api/fs/browse`), con botón
+  "Eliminar" por entrada.
 
 ## [0.7.0] - 2026-09-03
 

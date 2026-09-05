@@ -1,55 +1,8 @@
 {% extends "base.html.j2" %}
-{% block title %}doc_organize — Gestión de usuarios{% endblock %}
+{% block title %}doc_organize — Usuarios{% endblock %}
 {% block content %}
 <p><a class="text-blue-600 underline" href="/">&larr; Proyectos</a></p>
-<h1 class="text-xl font-semibold mb-4">Roles</h1>
-
-<form id="create-role-form" class="my-4 flex gap-2 flex-wrap items-start">
-    <label for="role-name" class="sr-only">Nombre del rol</label>
-    <input type="text" id="role-name" placeholder="Nombre del rol" required
-           class="border border-gray-300 rounded px-2 py-1.5 flex-1 min-w-[200px]">
-    <label class="flex items-center gap-1"><input type="checkbox" id="role-is-admin"> Admin (ve todos los proyectos)</label>
-    <fieldset id="role-projects-fieldset" class="border border-gray-300 rounded p-3 w-full">
-        <legend class="sr-only">Proyectos permitidos</legend>
-        {% if projects %}
-        {% for project in projects %}
-        <label class="flex items-center gap-1 py-0.5"><input type="checkbox" class="role-project-checkbox" value="{{ project.name }}"> {{ project.name }}</label>
-        {% endfor %}
-        {% else %}
-        <span>No hay proyectos todavía.</span>
-        {% endif %}
-    </fieldset>
-    <fieldset id="role-scan-roots-fieldset" class="border border-gray-300 rounded p-3 w-full">
-        <legend class="sr-only">Raíces de escaneo permitidas</legend>
-        <label for="role-scan-roots">Raíces de escaneo permitidas (una ruta por línea; vacío = no puede escanear carpetas externas)</label>
-        <textarea id="role-scan-roots" rows="3" placeholder="C:\ruta\permitida" class="w-full border border-gray-300 rounded px-2 py-1.5 mt-1"></textarea>
-    </fieldset>
-    <button type="submit" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Crear rol</button>
-</form>
-<p id="role-error" class="text-red-700 my-2 min-h-[1.2em]"></p>
-
-<table class="w-full border-collapse mt-4">
-    <thead><tr>
-        <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Nombre</th>
-        <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Admin</th>
-        <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Proyectos</th>
-        <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Raíces de escaneo</th>
-        <th class="text-left px-2.5 py-1.5 border-b border-gray-300"></th>
-    </tr></thead>
-    <tbody>
-    {% for role in roles %}
-        <tr data-role-id="{{ role.id }}">
-            <td class="px-2.5 py-1.5 border-b border-gray-300">{{ role.name }}</td>
-            <td class="px-2.5 py-1.5 border-b border-gray-300">{{ "Sí" if role.is_admin else "No" }}</td>
-            <td class="px-2.5 py-1.5 border-b border-gray-300">{{ role.project_names | join(", ") if role.project_names else "—" }}</td>
-            <td class="px-2.5 py-1.5 border-b border-gray-300">{{ role.allowed_scan_roots | join(", ") if role.allowed_scan_roots else "—" }}</td>
-            <td class="px-2.5 py-1.5 border-b border-gray-300"><button type="button" class="delete-role text-red-700 hover:underline bg-transparent border-0 cursor-pointer p-0" data-role-id="{{ role.id }}">Eliminar</button></td>
-        </tr>
-    {% endfor %}
-    </tbody>
-</table>
-
-<h1 class="text-xl font-semibold mb-4 mt-8">Usuarios</h1>
+<h1 class="text-xl font-semibold mb-4">Usuarios</h1>
 
 <form id="create-user-form" class="my-4 flex gap-2 flex-wrap items-center">
     <label for="user-username" class="sr-only">Usuario</label>
@@ -64,6 +17,7 @@
         <option value="{{ role.id }}">{{ role.name }}</option>
         {% endfor %}
     </select>
+    <label class="flex items-center gap-1"><input type="checkbox" id="user-must-change-password"> Debe cambiar contraseña</label>
     <button type="submit" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Crear usuario</button>
 </form>
 <p id="user-error" class="text-red-700 my-2 min-h-[1.2em]"></p>
@@ -101,63 +55,18 @@ async function postJson(url, method, body) {
     return response.status === 204 ? null : response.json();
 }
 
-const roleIsAdminCheckbox = document.getElementById("role-is-admin");
-const roleProjectsFieldset = document.getElementById("role-projects-fieldset");
-const roleScanRootsTextarea = document.getElementById("role-scan-roots");
-
-function syncRoleProjectsFieldset() {
-    const disabled = roleIsAdminCheckbox.checked;
-    roleProjectsFieldset.querySelectorAll(".role-project-checkbox").forEach((checkbox) => {
-        checkbox.disabled = disabled;
-        if (disabled) checkbox.checked = false;
-    });
-    roleScanRootsTextarea.disabled = disabled;
-    if (disabled) roleScanRootsTextarea.value = "";
-}
-roleIsAdminCheckbox.addEventListener("change", syncRoleProjectsFieldset);
-syncRoleProjectsFieldset();
-
-document.getElementById("create-role-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const name = document.getElementById("role-name").value;
-    const is_admin = roleIsAdminCheckbox.checked;
-    const project_names = Array.from(roleProjectsFieldset.querySelectorAll(".role-project-checkbox:checked")).map(
-        (checkbox) => checkbox.value
-    );
-    const allowed_scan_roots = roleScanRootsTextarea.value
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0);
-    try {
-        await postJson("/api/roles", "POST", { name, is_admin, project_names, allowed_scan_roots });
-        window.location.reload();
-    } catch (err) {
-        document.getElementById("role-error").textContent = err.message;
-    }
-});
-
 document.getElementById("create-user-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const username = document.getElementById("user-username").value;
     const password = document.getElementById("user-password").value;
     const role_id = document.getElementById("user-role").value;
+    const must_change_password = document.getElementById("user-must-change-password").checked;
     try {
-        await postJson("/api/users", "POST", { username, password, role_id });
+        await postJson("/api/users", "POST", { username, password, role_id, must_change_password });
         window.location.reload();
     } catch (err) {
         document.getElementById("user-error").textContent = err.message;
     }
-});
-
-document.querySelectorAll(".delete-role").forEach((button) => {
-    button.addEventListener("click", async () => {
-        try {
-            await postJson(`/api/roles/${button.dataset.roleId}`, "DELETE");
-            window.location.reload();
-        } catch (err) {
-            document.getElementById("role-error").textContent = err.message;
-        }
-    });
 });
 
 document.querySelectorAll(".delete-user").forEach((button) => {

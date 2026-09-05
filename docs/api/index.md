@@ -88,6 +88,28 @@ por el handler WebSocket de escaneo. Gestión de roles/usuarios: `/api/roles` y
 `/api/users` (`web/routes/admin.py`), protegidas por `require_admin` a nivel de
 router — ningún endpoint nuevo puede olvidarse de exigirlo.
 
+`Role.allowed_scan_roots` es un control distinto de `project_names`: no rige el
+acceso a proyectos ya existentes, sino qué rutas del sistema de archivos puede
+explorar/escanear un rol para crear un proyecto nuevo (`GET /api/fs/browse` y el
+WebSocket de escaneo aplican la misma restricción vía
+`get_allowed_scan_roots()`). Un rol `is_admin` nunca tiene lista propia — bypasa
+la restricción por completo.
+
+Las páginas HTML de administración están separadas: `GET /admin/roles`
+(`admin_roles.html.j2`) y `GET /admin/users` (`admin_users.html.j2`), cada una
+con su propia entrada de menú agrupada bajo "Admin" en el sidebar
+(`base.html.j2`). En `/admin/roles`, las raíces de escaneo permitidas se
+construyen como una lista (botones "Guardar carpeta" y "Buscar…" — este último
+reutiliza `GET /api/fs/browse` — más "Eliminar" por entrada) en vez de un campo
+de texto libre; el array resultante se envía tal cual en
+`POST /api/roles`/`PATCH /api/roles/{id}` (`allowed_scan_roots: list[str]`, sin
+cambios de contrato).
+
+`POST /api/users` acepta `must_change_password: bool = False`: si se marca,
+el usuario debe cambiar su contraseña en su primer login (`AuthMiddleware`),
+igual que el usuario `admin` de bootstrap o tras un reseteo de contraseña vía
+`PATCH /api/users/{id}`.
+
 ## Referencia
 
 Generada desde los docstrings del código (Google-style).
