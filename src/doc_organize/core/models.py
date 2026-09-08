@@ -84,6 +84,13 @@ class DedupEventType(str, Enum):
     COMPLETED = "completed"
 
 
+class UsageSourceName(str, Enum):
+    """Fuente que produjo un `UsageSnapshot` (monitorización de uso/coste de IA, fase 2)."""
+
+    LITELLM = "litellm"
+    GITHUB_COPILOT = "github_copilot"
+
+
 # ===== Modelos Pydantic (API / serialización JSON) =====
 
 
@@ -523,6 +530,61 @@ class DirectoryListing(BaseModel):
     entries: list[str] = Field(default_factory=list, description="Nombres de las subcarpetas inmediatas, ordenados alfabéticamente")
 
 
+# ===== Modelos de monitorización de uso/coste de IA (fase 2, `doc_organize.ai`) =====
+
+
+class UsageLineItem(BaseModel):
+    """Una línea de consumo dentro de un `UsageSnapshot`.
+
+    Normaliza tanto `usageItems[]` de la API de Billing Usage de GitHub
+    (`quantity`, `unitType`, `netAmount`) como la respuesta de spend de un
+    LiteLLM Proxy, para que ambas fuentes se listen de forma uniforme.
+    """
+
+    date: str = Field(..., description="Fecha (ISO 8601) de la línea de consumo")
+    product: str = Field(..., description="Producto facturado, p.ej. 'copilot' o 'anthropic'")
+    sku: str | None = Field(default=None, description="SKU/identificador de tarifa, si la fuente lo reporta")
+    quantity: float = Field(..., description="Cantidad consumida (tokens, requests o premium requests, según `unit_type`)")
+    unit_type: str = Field(..., description="Unidad de `quantity`, p.ej. 'tokens', 'requests', 'premium_requests', 'usd'")
+    cost_usd: float | None = Field(default=None, description="Coste en USD, o `None` si la fuente no lo reporta (p.ej. Copilot Pro sin overage)")
+
+
+class UsageSnapshot(BaseModel):
+    """Resultado normalizado de consultar una fuente de uso/coste de IA (`doc_organize.ai`)."""
+
+    source: UsageSourceName = Field(..., description="Fuente que produjo este snapshot")
+    period_start: str = Field(..., description="Inicio del periodo consultado (ISO 8601, fecha)")
+    period_end: str = Field(..., description="Fin del periodo consultado (ISO 8601, fecha)")
+    items: list[UsageLineItem] = Field(default_factory=list, description="Líneas de consumo del periodo")
+    raw: dict[str, Any] = Field(default_factory=dict, description="Payload original de la fuente, sin transformar, para depuración")
+
+
+class LiteLLMUsageConfig(BaseModel):
+    """Configuración de acceso a un LiteLLM Proxy externo para consultar spend/uso.
+
+    Ningún campo se lee del entorno aquí (DIP: el llamador decide su origen) —
+    usa `litellm_usage_config_from_env()` (`doc_organize.ai`) para resolver
+    `DOC_ORGANIZE_LITELLM_BASE_URL`/`DOC_ORGANIZE_LITELLM_VIRTUAL_KEY` explícitamente.
+    """
+
+    base_url: str = Field(..., description="URL base del LiteLLM Proxy, p.ej. 'https://litellm.example.com'")
+    virtual_key: str = Field(..., description="Virtual key del proxy: se usa como Bearer de autenticación y, por defecto, como key consultada en `get_usage()`")
+    timeout_s: float = Field(default=30.0, description="Timeout de las peticiones HTTP, en segundos")
+
+
+class GitHubCopilotUsageConfig(BaseModel):
+    """Configuración de acceso a la API de Billing Usage de GitHub para Copilot Pro.
+
+    Igual criterio que `LiteLLMUsageConfig`: usa
+    `github_copilot_usage_config_from_env()` (`doc_organize.ai`) para resolver
+    `DOC_ORGANIZE_GITHUB_USERNAME`/`DOC_ORGANIZE_GITHUB_PAT` explícitamente.
+    """
+
+    username: str = Field(..., description="Usuario personal de GitHub cuyo consumo de Copilot se consulta")
+    personal_access_token: str = Field(..., description="PAT con permiso de lectura de facturación personal (scope exacto sin confirmar, ver AUDIT_PLAN)")
+    timeout_s: float = Field(default=30.0, description="Timeout de las peticiones HTTP, en segundos")
+
+
 __all__ = [
     "AvStatus",
     "CacheConfig",
@@ -541,7 +603,9 @@ __all__ = [
     "DocumentStatus",
     "DuplicateGroup",
     "DuplicateReason",
+    "GitHubCopilotUsageConfig",
     "GpuStatus",
+    "LiteLLMUsageConfig",
     "OcrMode",
     "Project",
     "ProjectNameValidation",
@@ -556,6 +620,9 @@ __all__ = [
     "SecurityConfig",
     "Session",
     "Tenant",
+    "UsageLineItem",
+    "UsageSnapshot",
+    "UsageSourceName",
     "User",
     "ValidationResult",
 ]

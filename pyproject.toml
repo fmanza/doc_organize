@@ -83,6 +83,9 @@ ocr-gpu = [
 av = [
     "docling[asr]>=2.0.0",
 ]
+ai = [
+    "httpx>=0.24",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

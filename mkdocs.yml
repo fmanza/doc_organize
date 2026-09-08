@@ -26,6 +26,7 @@ nav:
       - Deduplicación: functional/dedup.md
       - Cache: functional/cache.md
       - Projects: functional/projects.md
+      - Monitorización de uso IA: functional/ai_usage_monitoring.md
   - API:
       - Descripción general: api/index.md
       - Validadores: api/validators.md
@@ -34,6 +35,7 @@ nav:
       - Deduplicación: api/dedup.md
       - Cache: api/cache.md
       - Projects: api/projects.md
+      - Monitorización de uso IA: api/ai_usage_monitoring.md
   - Ejemplos:
       - Validadores: examples/validators-scan.md
       - Scanner: examples/scanner-scan.md

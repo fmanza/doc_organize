@@ -91,6 +91,18 @@ class RoleInUseError(AuthError):
     """El rol no se puede eliminar: lo usan usuarios, o es el ultimo rol admin del tenant."""
 
 
+class UsageSourceError(DocOrganizeError):
+    """Error base para los clientes de monitorizacion de uso/coste de IA (`doc_organize.ai`, fase 2)."""
+
+
+class UsageSourceAuthError(UsageSourceError):
+    """La fuente de uso rechazo la credencial (API key/PAT invalida o sin permiso)."""
+
+
+class UsageSourceConnectionError(UsageSourceError):
+    """Error de red o timeout al consultar una fuente de uso/coste de IA."""
+
+
 __all__ = [
     "AuthError",
     "CacheError",
@@ -111,6 +123,9 @@ __all__ = [
     "ScannedFolderNotFoundError",
     "TenantAlreadyExistsError",
     "TenantNotFoundError",
+    "UsageSourceAuthError",
+    "UsageSourceConnectionError",
+    "UsageSourceError",
     "UserAlreadyExistsError",
     "UserNotFoundError",
 ]

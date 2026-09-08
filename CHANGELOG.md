@@ -74,6 +74,17 @@ releases publicados antes de esa versión).
   `<textarea>` de texto libre a una lista gestionada con "Guardar carpeta" (ruta manual) y
   "Buscar…" (explorador de carpetas del servidor, reutilizando `GET /api/fs/browse`), con botón
   "Eliminar" por entrada.
+- `src/doc_organize/ai/` (extra `ai`, nuevo — fase 2): monitorización de uso/coste de IA
+  multi-fuente, sin funcionalidad de inferencia/proxying. `LiteLLMUsageClient.get_usage()` consulta
+  el spend de una virtual key de un LiteLLM Proxy externo (`GET /key/info`);
+  `GitHubCopilotUsageClient.get_usage()` consulta el consumo de "premium requests" de un plan
+  Copilot Pro individual vía la API oficial de Billing Usage de GitHub
+  (`GET /users/{username}/settings/billing/premium_request/usage`, sin tocar el endpoint interno de
+  completions de Copilot). Ambos devuelven `UsageSnapshot`/`UsageLineItem`
+  (`src/doc_organize/core/models.py`) y cumplen el protocolo estructural `UsageSource`
+  (`src/doc_organize/ai/usage_source.py`) sin herencia compartida. Nuevas excepciones
+  `UsageSourceError`/`UsageSourceAuthError`/`UsageSourceConnectionError`
+  (`src/doc_organize/core/exceptions.py`).
 
 ### Changed
 
