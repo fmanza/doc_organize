@@ -14,9 +14,13 @@ el uso de IA, primero hay que poder verlo.
 
 ✅ Consultar spend acumulado de una virtual key de LiteLLM Proxy (Anthropic)  
 ✅ Consultar consumo de "premium requests" de un plan Copilot Pro individual  
-❌ No enruta ni intercepta llamadas de inferencia (`chat/completions`) — sin
-consumidor real todavía, queda fuera de alcance (ver PLAN/AUDIT_PLAN de la sesión
-2026-09-07)  
+❌ `LiteLLMUsageClient`/`GitHubCopilotUsageClient` (este documento) no enrutan ni
+interceptan llamadas de inferencia — son solo lectura de uso/coste. El paquete
+`doc_organize.ai` sí ganó un consumidor real de `chat/completions` después
+(`DomainClassificationClient`, Sub-fase B de la organización documental por
+dominios — ver [Organización documental](context.md)), pero es un cliente
+aparte con su propia config (`LiteLLMClassificationConfig`), no una ampliación
+de los clientes de este documento  
 ❌ No calcula presupuestos ni bloquea acceso — solo lectura
 
 ## Precondiciones

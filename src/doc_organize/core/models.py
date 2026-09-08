@@ -91,6 +91,13 @@ class UsageSourceName(str, Enum):
     GITHUB_COPILOT = "github_copilot"
 
 
+class DomainStatus(str, Enum):
+    """Estado de un `Domain` dentro del contexto de un proyecto (organización documental)."""
+
+    DRAFT = "borrador"
+    CONFIRMED = "confirmado"
+
+
 # ===== Modelos Pydantic (API / serialización JSON) =====
 
 
@@ -201,8 +208,12 @@ class DeduplicationReport(BaseModel):
     duplicates_folder_path: str = Field(..., description="Ruta a la carpeta donde se movieron los duplicados")
     audit_json_path: str = Field(..., description="Ruta al fichero DEDUP_REPORT.json")
     groups: list[DuplicateGroup] = Field(default_factory=list, description="Grupos detallados")
-    started_at: str | None = Field(default=None, description="Timestamp ISO 8601 de inicio de esta ejecución (None en históricos previos a este campo)")
-    duration_seconds: float | None = Field(default=None, description="Tiempo total transcurrido entre inicio y fin (None en históricos previos a este campo)")
+    started_at: str | None = Field(
+        default=None, description="Timestamp ISO 8601 de inicio de esta ejecución (None en históricos previos a este campo)"
+    )
+    duration_seconds: float | None = Field(
+        default=None, description="Tiempo total transcurrido entre inicio y fin (None en históricos previos a este campo)"
+    )
     failed_paths: list[str] = Field(
         default_factory=list,
         description=(
@@ -271,7 +282,8 @@ class ScanRunReport(BaseModel):
         default=None, description="Tiempo empleado en descubrir/hashear ficheros (None en históricos previos a este campo)"
     )
     total_conversion_seconds: float | None = Field(
-        default=None, description="Suma de la duración de conversión de cada documento procesado, incluido OCR (None en históricos previos a este campo)"
+        default=None,
+        description="Suma de la duración de conversión de cada documento procesado, incluido OCR (None en históricos previos a este campo)",
     )
 
 
@@ -369,6 +381,7 @@ class Project(BaseModel):
 
 
 _ISO_TIMESTAMP_DESC = "Timestamp ISO 8601 de creación"
+_HTTP_TIMEOUT_DESC = "Timeout de las peticiones HTTP, en segundos"
 
 
 class Tenant(BaseModel):
@@ -519,7 +532,9 @@ class AvStatus(BaseModel):
     asr_installed: bool = Field(..., description="Si el backend de transcripción ASR (extra `av`, Whisper) está instalado")
     ffmpeg_installed: bool = Field(..., description="Si el binario `ffmpeg` está disponible en el PATH del sistema (necesario para vídeo)")
     ready: bool = Field(..., description="Si `asr_installed` y `ffmpeg_installed` son ambos `True`")
-    instructions: str | None = Field(default=None, description="Qué falta instalar/configurar, específico a lo que falte; `None` si `ready` es `True`")
+    instructions: str | None = Field(
+        default=None, description="Qué falta instalar/configurar, específico a lo que falte; `None` si `ready` es `True`"
+    )
 
 
 class DirectoryListing(BaseModel):
@@ -568,8 +583,10 @@ class LiteLLMUsageConfig(BaseModel):
     """
 
     base_url: str = Field(..., description="URL base del LiteLLM Proxy, p.ej. 'https://litellm.example.com'")
-    virtual_key: str = Field(..., description="Virtual key del proxy: se usa como Bearer de autenticación y, por defecto, como key consultada en `get_usage()`")
-    timeout_s: float = Field(default=30.0, description="Timeout de las peticiones HTTP, en segundos")
+    virtual_key: str = Field(
+        ..., description="Virtual key del proxy: se usa como Bearer de autenticación y, por defecto, como key consultada en `get_usage()`"
+    )
+    timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
 
 
 class GitHubCopilotUsageConfig(BaseModel):
@@ -581,8 +598,87 @@ class GitHubCopilotUsageConfig(BaseModel):
     """
 
     username: str = Field(..., description="Usuario personal de GitHub cuyo consumo de Copilot se consulta")
-    personal_access_token: str = Field(..., description="PAT con permiso de lectura de facturación personal (scope exacto sin confirmar, ver AUDIT_PLAN)")
-    timeout_s: float = Field(default=30.0, description="Timeout de las peticiones HTTP, en segundos")
+    personal_access_token: str = Field(
+        ..., description="PAT con permiso de lectura de facturación personal (scope exacto sin confirmar, ver AUDIT_PLAN)"
+    )
+    timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
+
+
+# ===== Modelos de contexto y dominios (organización documental, `doc_organize.context`) =====
+
+
+class DomainDocument(BaseModel):
+    """Un documento clasificado dentro de un `Domain` (Sub-fase A o B, ver `.ai/sessions/2026-09-08-organizacion-documental-contextos/00_REQUEST.md` §2.4-§2.5)."""
+
+    source_path: str = Field(..., description="Ruta del documento original")
+    markdown_path: str = Field(..., description="Ruta del `.md` generado por `converter/`")
+    json_path: str = Field(..., description="Ruta del `.json` generado por `converter/` (fuente de la clasificación, §2.4)")
+    title: str = Field(..., description="Título del documento")
+    document_type: str = Field(..., description="Tipo de documento dentro del dominio (extensión original, en minúsculas, sin punto)")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Score de confianza de la clasificación, 0-1")
+    classified_by: str = Field(default="rules", description="'rules' (Sub-fase A) o 'ai' (Sub-fase B) según qué clasificó el documento")
+
+
+class Domain(BaseModel):
+    """Un dominio documental dentro del `Context` de un proyecto."""
+
+    slug: str = Field(..., description="Identificador corto del dominio (kebab-case)")
+    name: str = Field(..., description="Nombre legible del dominio")
+    description: str | None = Field(default=None, description="Descripción del dominio, o `None` si no se ha rellenado todavía")
+    status: DomainStatus = Field(default=DomainStatus.DRAFT, description="Estado del dominio")
+    predefined: bool = Field(default=False, description="Si el dominio fue predefinido por el usuario (catálogo) o descubierto automáticamente")
+    documents: list[DomainDocument] = Field(default_factory=list, description="Documentos clasificados en este dominio")
+
+
+class Context(BaseModel):
+    """Contexto de organización documental de un proyecto: configuración de clasificación + dominios.
+
+    Persistido por `ContextRegistry` en `<project.root_path>/context.json` (metadatos +
+    resumen de dominios) más `<project.root_path>/domains/<slug>/{DOMAIN.md,index.json}`
+    por dominio (ver §3 del `00_REQUEST.md` de la sesión que originó este modelo).
+    """
+
+    project_name: str = Field(..., description="Nombre del proyecto propietario de este contexto")
+    tenant_id: str = Field(default="default", description="Tenant propietario, igual que `Project.tenant_id`")
+    output_folder_name: str = Field(default="organizado", description="Nombre de la carpeta de salida reorganizada, relativa a `root_path`")
+    ai_classification_enabled: bool = Field(default=False, description="Si la Sub-fase B (IA) está activa para este proyecto — opt-in explícito")
+    ai_fallback_threshold: float = Field(default=0.5, description="Score mínimo (Sub-fase A) por debajo del cual se intenta la Sub-fase B")
+    ai_classification_model: str | None = Field(
+        default=None, description="Alias de modelo del LiteLLM Proxy a usar en la Sub-fase B, o `None` para el valor por defecto"
+    )
+    domains: list[Domain] = Field(default_factory=list, description="Dominios detectados/confirmados")
+    unclassified_documents: list[str] = Field(
+        default_factory=list,
+        description="`source_path` de documentos sin clasificar (score insuficiente, artefactos incompletos, o IA deshabilitada)",
+    )
+    reorganized: bool = Field(
+        default=False,
+        description="Si `Reorganizer.reorganize()` terminó con éxito para esta versión del contexto — `False` si nunca se intentó o si falló a medias (ver `web/routes/context.py::build_context`, AUDIT_CODE sesión 2026-09-08)",
+    )
+    mkdocs_generated: bool = Field(default=False, description="Si `MkDocsGenerator.generate()` terminó con éxito para esta versión del contexto")
+    created_at: str = Field(..., description="Timestamp ISO 8601 de creación del contexto")
+    updated_at: str = Field(..., description="Timestamp ISO 8601 de la última reconstrucción del contexto")
+
+
+class DomainClassificationResult(BaseModel):
+    """Resultado de clasificar un documento por IA (Sub-fase B, `DomainClassificationClient`)."""
+
+    domain: str | None = Field(default=None, description="Slug del dominio elegido del catálogo, o `None` si no encaja en ninguno")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Confianza reportada por el modelo, 0-1")
+    reasoning: str | None = Field(default=None, description="Justificación breve devuelta por el modelo, si la reporta")
+
+
+class LiteLLMClassificationConfig(BaseModel):
+    """Configuración de acceso al LiteLLM Proxy para `DomainClassificationClient` (Sub-fase B).
+
+    Config propia, no comparte campos ni credenciales con `LiteLLMUsageConfig` (ISP —
+    ver §2.5 de `00_REQUEST.md`) aunque en despliegue pueda apuntar a la misma URL de proxy.
+    """
+
+    base_url: str = Field(..., description="URL base del LiteLLM Proxy")
+    virtual_key: str = Field(..., description="Virtual key con permiso de `chat/completions` para clasificación")
+    model: str = Field(default="claude-classifier", description="Alias de modelo configurado en el proxy para clasificar")
+    timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
 
 
 __all__ = [
@@ -590,6 +686,7 @@ __all__ = [
     "CacheConfig",
     "CacheEntry",
     "CacheExportSnapshot",
+    "Context",
     "ConversionResult",
     "ConversionStatus",
     "DedupEvent",
@@ -599,12 +696,17 @@ __all__ = [
     "DirectoryTree",
     "DirectoryTreeNode",
     "DoclingConfig",
+    "Domain",
+    "DomainClassificationResult",
+    "DomainDocument",
+    "DomainStatus",
     "DocumentMetadata",
     "DocumentStatus",
     "DuplicateGroup",
     "DuplicateReason",
     "GitHubCopilotUsageConfig",
     "GpuStatus",
+    "LiteLLMClassificationConfig",
     "LiteLLMUsageConfig",
     "OcrMode",
     "Project",

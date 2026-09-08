@@ -85,6 +85,32 @@ releases publicados antes de esa versión).
   (`src/doc_organize/ai/usage_source.py`) sin herencia compartida. Nuevas excepciones
   `UsageSourceError`/`UsageSourceAuthError`/`UsageSourceConnectionError`
   (`src/doc_organize/core/exceptions.py`).
+- `src/doc_organize/context/` (paquete nuevo, extra `context`): organización documental por
+  dominios. `ContextBuilder.build()` clasifica los documentos ya convertidos de un proyecto en dos
+  sub-fases — `DomainClassifier` (Sub-fase A, reglas sobre `chunks`/`title` del `.json` de
+  conversión, catálogo predefinido o descubrimiento por carpeta) y, opt-in vía
+  `ai_classification_enabled`, un fallback por IA (Sub-fase B, `DomainClassificationClient` en
+  `src/doc_organize/ai/`) que solo elige entre el catálogo ya confirmado por la Sub-fase A —
+  ninguna de las dos inventa un dominio nuevo. `Reorganizer.reorganize()` copia original + `.md` +
+  `.json` de cada documento clasificado a `<output_folder_name>/<dominio>/<tipo>/<stem>/` (nunca
+  mueve, limpia copias huérfanas de dominios/documentos ya no vigentes en cada reconstrucción, y
+  valida todos los artefactos antes de tocar disco para no destruir una reconstrucción anterior si
+  falla a mitad). `MkDocsGenerator.generate()` escribe `mkdocs.yml` + `index.md` usando
+  `organizado/` como `docs_dir` directamente. `ContextRegistry` persiste `context.json` +
+  `domains/<slug>/{DOMAIN.md,index.json}` (mismo patrón que `ProjectRegistry`), preservando el
+  texto editado a mano en `DOMAIN.md` entre reconstrucciones.
+- `src/doc_organize/ai/domain_classification_client.py`: `DomainClassificationClient` (Sub-fase B)
+  + `litellm_classification_config_from_env()` — habla `chat/completions` de un LiteLLM Proxy
+  (config propia `LiteLLMClassificationConfig`, no comparte credenciales con `LiteLLMUsageConfig`);
+  el dominio devuelto siempre se valida contra el catálogo antes de propagarlo. Nuevas excepciones
+  `DomainClassificationError`/`AuthError`/`ConnectionError`.
+- `src/doc_organize/web/routes/context.py`: `GET /projects/{name}/context` (página),
+  `POST`/`GET /api/projects/{name}/context` (construir/ver) — rechaza con `409` si hay otra
+  operación en curso para el proyecto, con `400` si se activa la IA sin
+  `DOC_ORGANIZE_LITELLM_CLASSIFICATION_BASE_URL`/`_VIRTUAL_KEY` configuradas.
+- `deploy/litellm/{docker-compose.yml,config.yaml.example,.env.example}` + guía
+  [`docs/guides/litellm_proxy_setup.md`](docs/guides/litellm_proxy_setup.md): despliegue local del
+  LiteLLM Proxy que requiere la Sub-fase B (proxy + Postgres, virtual key dedicada).
 
 ### Changed
 

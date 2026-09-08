@@ -10,6 +10,9 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from doc_organize.core.exceptions import (
     AuthError,
+    ContextError,
+    ContextNotFoundError,
+    DomainNotFoundError,
     InvalidPathError,
     ProjectAlreadyExistsError,
     ProjectError,
@@ -39,6 +42,7 @@ from doc_organize.web.routes.admin import router as admin_router
 from doc_organize.web.routes.auth import router as auth_router
 from doc_organize.web.routes.cache import router as cache_router
 from doc_organize.web.routes.change_password import router as change_password_router
+from doc_organize.web.routes.context import router as context_router
 from doc_organize.web.routes.downloads import router as downloads_router
 from doc_organize.web.routes.duplicates import router as duplicates_router
 from doc_organize.web.routes.filesystem import router as filesystem_router
@@ -77,6 +81,9 @@ _EXCEPTION_STATUS_CODES: dict[type[Exception], int] = {
     InvalidPathError: 422,
     ScannedFolderNotFoundError: 404,
     ScannedFolderInUseError: 409,
+    ContextNotFoundError: 404,
+    DomainNotFoundError: 404,
+    ContextError: 400,
 }
 
 
@@ -148,6 +155,7 @@ def create_app(
     app.include_router(cache_router)
     app.include_router(downloads_router)
     app.include_router(duplicates_router)
+    app.include_router(context_router)
 
     templates = create_templates(_TEMPLATES_DIR)
 

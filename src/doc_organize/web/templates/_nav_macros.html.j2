@@ -7,6 +7,8 @@
    href="/projects/{{ project.name | urlencode }}/scan">Escanear</a>
 <a class="block px-2 py-1.5 rounded {{ 'bg-gray-200 font-medium' if active == 'scan_errors' else 'hover:bg-gray-100' }}"
    href="/projects/{{ project.name | urlencode }}/scan-errors">Errores de Escaneo</a>
+<a class="block px-2 py-1.5 rounded {{ 'bg-gray-200 font-medium' if active == 'context' else 'hover:bg-gray-100' }}"
+   href="/projects/{{ project.name | urlencode }}/context">Contexto</a>
 <button type="button" id="export-download-btn"
         class="block w-full text-left px-2 py-1.5 rounded hover:bg-gray-100 bg-transparent border-0 cursor-pointer"
         data-export-url="/downloads/projects/{{ project.name | urlencode }}/export.zip"

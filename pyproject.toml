@@ -52,6 +52,7 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.0",
     "types-aiofiles>=23.0",
+    "types-PyYAML>=6.0",
     "black>=23.0",
     # Web dependencies for type checking and testing (have native type hints)
     "fastapi>=0.100",
@@ -85,6 +86,9 @@ av = [
 ]
 ai = [
     "httpx>=0.24",
+]
+context = [
+    "pyyaml>=6.0",
 ]
 
 [tool.setuptools]

@@ -1,0 +1,19 @@
+# Copiar a config.yaml (en esta misma carpeta) y adaptar model_list a tu
+# proveedor real. Nunca versionar el config.yaml real si llega a contener
+# claves en claro — usa siempre "os.environ/VAR" para referenciar credenciales,
+# como en el ejemplo de abajo.
+
+model_list:
+  # Alias que doc_organize usa por defecto para clasificar dominios (Sub-fase
+  # B) — coincide con LiteLLMClassificationConfig.model / la variable de
+  # entorno opcional DOC_ORGANIZE_LITELLM_CLASSIFICATION_MODEL si se define.
+  - model_name: claude-classifier
+    litellm_params:
+      # Modelo económico, suficiente para clasificar un documento entre un
+      # catálogo cerrado de dominios — ajusta a lo que tengas contratado.
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL

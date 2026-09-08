@@ -1,0 +1,78 @@
+{% extends "base.html.j2" %}
+{% from "_nav_macros.html.j2" import project_nav %}
+{% block title %}doc_organize — Contexto: {{ project.name }}{% endblock %}
+{% block sidebar_items %}{{ project_nav(project, "context") }}{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-4">Contexto: {{ project.name }}</h1>
+<p class="text-sm text-gray-600 mb-4">
+    Clasifica los documentos ya convertidos de este proyecto en dominios, los copia a
+    <code>{{ context.output_folder_name if context else "organizado" }}/</code> y genera un sitio MkDocs navegable.
+</p>
+
+<label class="flex items-center gap-2 mb-3 text-sm">
+    <input type="checkbox" id="ai-classification-toggle" {% if context and context.ai_classification_enabled %}checked{% endif %}>
+    Clasificación asistida por IA (Sub-fase B) para lo que las reglas dejen sin clasificar — requiere un LiteLLM Proxy
+    configurado (<a href="/docs/guides/litellm_proxy_setup/" class="underline">ver guía</a>).
+</label>
+
+<button type="button" id="build-context-btn" class="px-3 py-1.5 mb-4 border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 cursor-pointer">
+    {{ "Reconstruir contexto" if context else "Construir contexto" }}
+</button>
+<p id="build-context-error" class="text-red-700 my-2 min-h-[1.2em]"></p>
+
+{% if context and not context.reorganized %}
+<p class="text-sm text-red-700 mb-3">⚠ La última construcción no terminó de copiar los documentos a <code>{{ context.output_folder_name }}/</code> — reconstruye el contexto.</p>
+{% elif context and not context.mkdocs_generated %}
+<p class="text-sm text-red-700 mb-3">⚠ La última construcción no terminó de generar el sitio MkDocs — reconstruye el contexto.</p>
+{% endif %}
+
+{% if context and context.domains %}
+<div class="overflow-x-auto">
+<table class="w-full text-sm border-collapse">
+    <thead>
+        <tr class="text-left text-gray-600 border-b border-gray-300">
+            <th class="py-1 pr-2">Dominio</th>
+            <th class="py-1 pr-2">Estado</th>
+            <th class="py-1 pr-2 text-right">Documentos</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for domain in context.domains %}
+        <tr class="border-t border-gray-200">
+            <td class="py-1 pr-2">{{ domain.name }}</td>
+            <td class="py-1 pr-2">{{ "Confirmado" if domain.status == "confirmado" else "Borrador" }}</td>
+            <td class="py-1 pr-2 text-right">{{ domain.documents | length }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% if context.unclassified_documents %}
+<p class="text-sm text-amber-700 mt-3">{{ context.unclassified_documents | length }} documento(s) sin clasificar (por debajo del umbral de confianza).</p>
+{% endif %}
+{% elif context %}
+<p class="text-gray-500">No se detectó ningún dominio en el último build.</p>
+{% else %}
+<p class="text-gray-500">Todavía no se ha construido el contexto de este proyecto.</p>
+{% endif %}
+
+<script>
+const projectName = {{ project.name | tojson }};
+document.getElementById("build-context-btn").addEventListener("click", async () => {
+    const errorEl = document.getElementById("build-context-error");
+    errorEl.textContent = "";
+    const aiEnabled = document.getElementById("ai-classification-toggle").checked;
+    const response = await fetch("/api/projects/" + encodeURIComponent(projectName) + "/context", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ai_classification_enabled: aiEnabled }),
+    });
+    if (response.ok) {
+        window.location.reload();
+    } else {
+        const data = await response.json();
+        errorEl.textContent = (data && data.detail) || "No se pudo construir el contexto.";
+    }
+});
+</script>
+{% endblock %}

@@ -103,12 +103,55 @@ class UsageSourceConnectionError(UsageSourceError):
     """Error de red o timeout al consultar una fuente de uso/coste de IA."""
 
 
+class ContextError(DocOrganizeError):
+    """Error base para la gestion de contexto/dominios de un proyecto (organizacion documental)."""
+
+
+class ContextNotFoundError(ContextError):
+    """El proyecto no tiene contexto construido todavia (falta `context.json`)."""
+
+
+class DomainNotFoundError(ContextError):
+    """No hay ningun dominio con ese slug en el contexto del proyecto."""
+
+
+class IncompleteConversionArtifactsError(ContextError):
+    """Un documento no tiene los tres artefactos completos (original + .md + .json).
+
+    Reservada para el paso de copia fisica a `<output_folder_name>/` (Level 2 de la
+    sesion `.ai/sessions/2026-09-08-organizacion-documental-contextos/`): copiar un
+    documento incompleto SI es un error a levantar (no hay que reintentar a medias).
+    `DomainClassifier` (Level 1), en cambio, NO la lanza: un artefacto incompleto
+    durante la clasificacion simplemente mueve el documento a "sin clasificar" sin
+    interrumpir el resto del lote (ver `domain_classifier.py::read_conversion_json`).
+    """
+
+
+class DomainClassificationError(DocOrganizeError):
+    """Error base del cliente de clasificacion de dominios por IA (`doc_organize.ai`, Sub-fase B)."""
+
+
+class DomainClassificationAuthError(DomainClassificationError):
+    """El LiteLLM Proxy rechazo la virtual key de clasificacion (credencial invalida o sin permiso)."""
+
+
+class DomainClassificationConnectionError(DomainClassificationError):
+    """Error de red o timeout consultando el LiteLLM Proxy para clasificar un documento."""
+
+
 __all__ = [
     "AuthError",
     "CacheError",
+    "ContextError",
+    "ContextNotFoundError",
     "ConversionError",
     "DocOrganizeError",
     "DocumentError",
+    "DomainClassificationAuthError",
+    "DomainClassificationConnectionError",
+    "DomainClassificationError",
+    "DomainNotFoundError",
+    "IncompleteConversionArtifactsError",
     "InvalidPathError",
     "ProjectAlreadyExistsError",
     "ProjectError",

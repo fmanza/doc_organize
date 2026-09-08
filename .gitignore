@@ -69,3 +69,10 @@ site/
 # Documentación histórica (no usada en la doc publicada)
 doc_old/
 .claude/settings.json
+
+# Secretos locales: nunca versionar un .env real, solo los .env.example (gap de
+# seguridad real detectado y cerrado aquí — AUDIT del prompt de la sesión
+# .ai/sessions/2026-09-08-organizacion-documental-contextos/, 2026-09-08).
+.env
+deploy/litellm/.env
+deploy/litellm/config.yaml
