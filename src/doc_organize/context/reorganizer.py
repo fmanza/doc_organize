@@ -119,6 +119,17 @@ class Reorganizer:
         if domain_dir.is_dir():
             await asyncio.to_thread(shutil.rmtree, domain_dir)
 
+    async def delete_output(self, project: Project, context: Context) -> None:
+        """Borra `<project.root_path>/<context.output_folder_name>/` por completo, si existe.
+
+        Usado al eliminar el contexto de un proyecto (ver `web/routes/context.py`)
+        para volver al estado anterior a la primera construcción — sin esto, la
+        copia física quedaría huérfana en disco tras borrar `context.json`.
+        """
+        output_root = Path(project.root_path) / context.output_folder_name
+        if await asyncio.to_thread(output_root.is_dir):
+            await asyncio.to_thread(shutil.rmtree, output_root)
+
     async def _copy_document(self, output_root: Path, domain_slug: str, document: DomainDocument) -> None:
         source = Path(document.source_path)
         markdown = Path(document.markdown_path)

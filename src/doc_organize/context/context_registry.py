@@ -80,6 +80,18 @@ class ContextRegistry:
         async with self._lock:
             await self._save(project, context)
 
+    async def delete_context(self, project: Project) -> None:
+        """Borra `context.json` + `domains/` de `project`, si existen.
+
+        Idempotente (no falla si ya no hay nada que borrar) — igual criterio que
+        una operación DELETE HTTP, ver `web/routes/context.py::delete_context_endpoint`.
+        """
+        async with self._lock:
+            await asyncio.to_thread(self._context_path(project).unlink, missing_ok=True)
+            domains_root = Path(project.root_path) / _DOMAINS_DIR_NAME
+            if await asyncio.to_thread(domains_root.is_dir):
+                await asyncio.to_thread(shutil.rmtree, domains_root)
+
     async def get_domain(self, project: Project, slug: str) -> Domain:
         """Devuelve el dominio `slug` del contexto de `project`.
 

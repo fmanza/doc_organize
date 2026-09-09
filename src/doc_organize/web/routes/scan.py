@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from doc_organize.cache import CacheManager
 from doc_organize.core.constants import (
+    CONVERSION_FOLDER_NAME,
     DEFAULT_CACHE_DB_NAME,
     DUPLICATES_FOLDER_NAME,
     SCAN_ERRORS_FOLDER_NAME,
@@ -394,7 +395,7 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
         try:
             async for event in ScanCommand().run_streaming(
                 paths=paths,
-                output_dir=root / "Conversión",
+                output_dir=root / CONVERSION_FOLDER_NAME,
                 cache_db=root / "cache.db",
                 folders_json=root / SCAN_FOLDERS_JSON_NAME,
                 use_ocr=use_ocr,

@@ -91,6 +91,16 @@ MAX_AUTO_ERROR_RETRIES = 3
 #: `web/routes/duplicates.py` para re-escanear sin pedir las carpetas de nuevo).
 SCAN_FOLDERS_JSON_NAME = "folders.json"
 
+#: Carpeta donde `DocumentConverter` escribe el `.md`/`.json` de cada documento
+#: convertido, dentro de la raíz del proyecto (`main.py`, `web/routes/scan.py`,
+#: `web/routes/downloads.py`, y `web/routes/context.py::_gather_converted_documents`
+#: para reconstruir `ConversionResult` a partir de `cache.db`). Antes repetida como
+#: literal en cada uno de esos ficheros, sin nada que garantizara que no divergieran
+#: (AUDIT_CODE, sesión 2026-09-10 — el nombre también forma parte del denylist de
+#: `web/routes/context.py::_RESERVED_OUTPUT_FOLDER_NAMES`, para que `output_folder_name`
+#: no pueda coincidir con ella).
+CONVERSION_FOLDER_NAME = "Conversión"
+
 #: Carpeta donde `DeduplicationManager.resolve_duplicates`/`finalize_report` mueve
 #: los documentos descartados de cada proyecto, y donde escribe
 #: `DEDUP_REPORT_JSON_NAME`/`DEDUP_HISTORY_JSONL_NAME` (releídos por
@@ -194,6 +204,7 @@ DEFAULT_ADMIN_PASSWORD = "admin"
 
 __all__ = [
     "AV_SUPPORTED_EXTENSIONS",
+    "CONVERSION_FOLDER_NAME",
     "DEFAULT_ADMIN_PASSWORD",
     "DEFAULT_ADMIN_ROLE_NAME",
     "DEFAULT_ADMIN_USERNAME",

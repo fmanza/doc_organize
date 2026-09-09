@@ -656,6 +656,10 @@ class Context(BaseModel):
         description="Si `Reorganizer.reorganize()` terminó con éxito para esta versión del contexto — `False` si nunca se intentó o si falló a medias (ver `web/routes/context.py::build_context`, AUDIT_CODE sesión 2026-09-08)",
     )
     mkdocs_generated: bool = Field(default=False, description="Si `MkDocsGenerator.generate()` terminó con éxito para esta versión del contexto")
+    mkdocs_site_built: bool = Field(
+        default=False,
+        description="Si `mkdocs build` se ejecutó con éxito sobre el `mkdocs.yml` generado — `False` si mkdocs no está instalado o el build falló",
+    )
     created_at: str = Field(..., description="Timestamp ISO 8601 de creación del contexto")
     updated_at: str = Field(..., description="Timestamp ISO 8601 de la última reconstrucción del contexto")
 

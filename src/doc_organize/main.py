@@ -11,6 +11,7 @@ from pathlib import Path
 
 from doc_organize.auth import AuthStore
 from doc_organize.core.constants import (
+    CONVERSION_FOLDER_NAME,
     DEFAULT_CACHE_DB_NAME,
     DUPLICATES_FOLDER_NAME,
     SCAN_ERRORS_FOLDER_NAME,
@@ -131,7 +132,7 @@ async def _resolve_scan_paths(args: argparse.Namespace) -> tuple[Path, Path, Pat
         root = Path(project.root_path)
         if explicit_any:
             logger.warning("Se combinó --project con flags explícitos; los flags explícitos tienen prioridad sobre las rutas derivadas del proyecto.")
-        output_dir = Path(args.output_dir) if args.output_dir else root / "Conversión"
+        output_dir = Path(args.output_dir) if args.output_dir else root / CONVERSION_FOLDER_NAME
         cache_db = Path(args.cache_file) if args.cache_file else root / DEFAULT_CACHE_DB_NAME
         return output_dir, cache_db, root / SCAN_FOLDERS_JSON_NAME
 

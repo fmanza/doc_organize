@@ -3,6 +3,8 @@ Generación de la configuración MkDocs del sitio de un proyecto.
 """
 
 import asyncio
+import shutil
+import subprocess
 
 from pathlib import Path
 from typing import Any
@@ -17,6 +19,7 @@ logger = get_logger(__name__)
 
 _INDEX_MD_NAME = "index.md"
 _MKDOCS_YML_NAME = "mkdocs.yml"
+_SITE_DIR_NAME = "site"
 
 
 class MkDocsGenerator:
@@ -27,9 +30,14 @@ class MkDocsGenerator:
     cuarta copia: original -> `converter/` -> `organizado/` -> aquí). Nav
     generado agrupando por dominio; cada entrada apunta al `.md` ya copiado.
 
-    Requiere el extra `doc_organize[context]` (`pyyaml`). No ejecuta
-    `mkdocs build`: solo escribe la configuración — construir el sitio de verdad
-    (con MkDocs instalado aparte) es responsabilidad del usuario.
+    Requiere el extra `doc_organize[context]` (`pyyaml`). Tras escribir la
+    configuración, intenta además `mkdocs build` (subprocess) hacia `site/` para
+    dejar un sitio ya navegable en disco — `mkdocs` no es una dependencia dura de
+    este extra (solo vive en el extra `docs`, para la documentación de la propia
+    librería), así que si no está instalado en el entorno simplemente se deja
+    escrito `mkdocs.yml` (igual que antes) y `Context.mkdocs_site_built` queda en
+    `False`: nunca un `ImportError`/excepción críptica por una dependencia
+    opcional que falta.
 
     Attributes:
         logger (logging.Logger): Logger estructurado de la instancia.
@@ -38,11 +46,15 @@ class MkDocsGenerator:
     def __init__(self) -> None:
         self.logger = logger
 
-    async def generate(self, project: Project, context: Context) -> Path:
-        """Escribe `mkdocs.yml` (raíz del proyecto) + `<output_folder_name>/index.md`.
+    async def generate(self, project: Project, context: Context) -> tuple[Path, bool]:
+        """Escribe `mkdocs.yml` (raíz del proyecto) + `<output_folder_name>/index.md`,
+        y ejecuta `mkdocs build` si `mkdocs` está disponible en el entorno.
 
         Returns:
-            Ruta al `mkdocs.yml` generado.
+            `(mkdocs_yml_path, site_built)` — `site_built` es `False` si `mkdocs`
+            no está instalado o si `mkdocs build` termina con error (el fallo se
+            loguea pero no se propaga: `mkdocs.yml` + la copia ya reorganizada
+            siguen siendo útiles aunque el build del sitio falle).
         """
         output_root = Path(project.root_path) / context.output_folder_name
         await asyncio.to_thread(output_root.mkdir, parents=True, exist_ok=True)
@@ -52,7 +64,9 @@ class MkDocsGenerator:
         config = self._build_config(project, context)
         content = yaml.safe_dump(config, allow_unicode=True, sort_keys=False)
         await asyncio.to_thread(mkdocs_yml_path.write_text, content, encoding="utf-8")
-        return mkdocs_yml_path
+
+        site_built = await self._build_site(project, mkdocs_yml_path)
+        return mkdocs_yml_path, site_built
 
     def _build_config(self, project: Project, context: Context) -> dict[str, Any]:
         nav: list[Any] = [{"Inicio": _INDEX_MD_NAME}]
@@ -63,8 +77,42 @@ class MkDocsGenerator:
         return {
             "site_name": f"{project.name} — Documentación organizada",
             "docs_dir": context.output_folder_name,
+            "site_dir": _SITE_DIR_NAME,
             "nav": nav,
         }
+
+    async def _build_site(self, project: Project, mkdocs_yml_path: Path) -> bool:
+        mkdocs_bin = await asyncio.to_thread(shutil.which, "mkdocs")
+        if mkdocs_bin is None:
+            self.logger.warning(f"mkdocs no está instalado en este entorno (extra 'docs') — '{mkdocs_yml_path}' escrito, pero sin sitio navegable en disco.")
+            return False
+
+        result = await asyncio.to_thread(
+            subprocess.run,
+            [mkdocs_bin, "build", "--clean", "-f", str(mkdocs_yml_path)],
+            cwd=project.root_path,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if result.returncode != 0:
+            self.logger.warning(f"'mkdocs build' falló para '{project.name}' (código {result.returncode}): {result.stderr.strip()}")
+            return False
+        return True
+
+    async def delete_site(self, project: Project) -> None:
+        """Borra `mkdocs.yml` y `site/` de `project.root_path`, si existen.
+
+        Usado al eliminar el contexto de un proyecto para volver al estado
+        anterior a la primera construcción (ver `web/routes/context.py`).
+        """
+        mkdocs_yml_path = Path(project.root_path) / _MKDOCS_YML_NAME
+        site_dir = Path(project.root_path) / _SITE_DIR_NAME
+        await asyncio.to_thread(mkdocs_yml_path.unlink, missing_ok=True)
+        if await asyncio.to_thread(site_dir.is_dir):
+            await asyncio.to_thread(shutil.rmtree, site_dir)
 
     @staticmethod
     def _relative_doc_path(domain: Domain, document: DomainDocument) -> str:

@@ -185,11 +185,12 @@ def test_resolve_document_slug_parts_uses_document_type_and_markdown_stem():
 
 
 @pytest.mark.asyncio
-async def test_reorganizer_destination_matches_mkdocs_generator_nav_path(tmp_path):
+async def test_reorganizer_destination_matches_mkdocs_generator_nav_path(tmp_path, monkeypatch):
     """`Reorganizer` (destino real en disco) y `MkDocsGenerator` (ruta en el `nav`
     de `mkdocs.yml`) deben coincidir para el mismo documento — antes cada uno
     calculaba la misma fórmula por separado, sin nada que lo garantizara
     (AUDIT_CODE, sesión 2026-09-09)."""
+    monkeypatch.setattr("doc_organize.context.mkdocs_generator.shutil.which", lambda _name: None)
     project = _make_project(tmp_path)
     document = DomainDocument(
         source_path=str(_write_file(tmp_path, "informe.pdf", b"X")),
@@ -211,3 +212,32 @@ async def test_reorganizer_destination_matches_mkdocs_generator_nav_path(tmp_pat
 
     disk_path = output_root / nav_relative_path
     assert disk_path.is_file()
+
+
+@pytest.mark.asyncio
+async def test_delete_output_removes_the_output_folder(tmp_path):
+    project = _make_project(tmp_path)
+    document = DomainDocument(
+        source_path=str(_write_file(tmp_path, "a.pdf", b"A")),
+        markdown_path=str(_write_file(tmp_path, "a.md", b"# A")),
+        json_path=str(_write_file(tmp_path, "a.json", b"{}")),
+        title="A",
+        document_type="pdf",
+        confidence=0.9,
+    )
+    context = _make_context(project, [Domain(slug="calidad", name="Calidad", documents=[document])])
+    reorganizer = Reorganizer()
+    output_root = await reorganizer.reorganize(project, context)
+    assert output_root.is_dir()
+
+    await reorganizer.delete_output(project, context)
+
+    assert not output_root.exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_output_is_idempotent_when_nothing_to_delete(tmp_path):
+    project = _make_project(tmp_path)
+    context = _make_context(project, [])
+
+    await Reorganizer().delete_output(project, context)  # no debe lanzar

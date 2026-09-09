@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
 from doc_organize.cache import CacheManager
-from doc_organize.core.constants import DEDUP_REPORT_JSON_NAME, DEFAULT_CACHE_DB_NAME, DUPLICATES_FOLDER_NAME
+from doc_organize.core.constants import CONVERSION_FOLDER_NAME, DEDUP_REPORT_JSON_NAME, DEFAULT_CACHE_DB_NAME, DUPLICATES_FOLDER_NAME
 from doc_organize.core.models import CacheEntry, CacheExportSnapshot, DocumentStatus, ScanErrorReport
 from doc_organize.web.dependencies import get_project_registry, get_tenant_id, require_project_access
 
@@ -67,7 +67,7 @@ def _build_export_zip(project_root: Path, cached_entries: dict[str, CacheEntry])
     os.close(fd)
     tmp_path = Path(tmp_path_str)
 
-    conversion_dir = project_root / "Conversión"
+    conversion_dir = project_root / CONVERSION_FOLDER_NAME
     dedup_report = project_root / DUPLICATES_FOLDER_NAME / DEDUP_REPORT_JSON_NAME
 
     with zipfile.ZipFile(tmp_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zip_file:
@@ -95,7 +95,7 @@ def _compute_export_preview(project_root: Path, cached_entries: dict[str, CacheE
     file_count = 0
     total_size = 0
 
-    conversion_dir = project_root / "Conversión"
+    conversion_dir = project_root / CONVERSION_FOLDER_NAME
     if conversion_dir.is_dir():
         for file_path in conversion_dir.rglob("*"):
             if file_path.is_file():

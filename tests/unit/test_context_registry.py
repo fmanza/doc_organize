@@ -103,6 +103,29 @@ async def test_rebuild_removes_stale_domain_dirs_not_in_new_context(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_delete_context_removes_context_json_and_domains_dir(tmp_path):
+    project = _make_project(tmp_path)
+    registry = ContextRegistry()
+    await registry.save_context(project, _make_context(project, [Domain(slug="calidad", name="Calidad")]))
+    assert (tmp_path / "context.json").exists()
+    assert (tmp_path / "domains" / "calidad").is_dir()
+
+    await registry.delete_context(project)
+
+    assert not (tmp_path / "context.json").exists()
+    assert not (tmp_path / "domains").exists()
+    with pytest.raises(ContextNotFoundError):
+        await registry.load_context(project)
+
+
+@pytest.mark.asyncio
+async def test_delete_context_is_idempotent_when_nothing_to_delete(tmp_path):
+    project = _make_project(tmp_path)
+
+    await ContextRegistry().delete_context(project)  # no debe lanzar
+
+
+@pytest.mark.asyncio
 async def test_load_wraps_schema_mismatch_in_context_json_as_context_error(tmp_path):
     project = _make_project(tmp_path)
     (tmp_path / "context.json").write_text(json.dumps({"project_name": "Demo", "domains": []}), encoding="utf-8")

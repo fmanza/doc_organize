@@ -68,6 +68,7 @@ class ContextBuilder:
         threshold: float = _DEFAULT_THRESHOLD,
         ai_classification_enabled: bool = False,
         ai_classification_client: DomainClassificationClient | None = None,
+        output_folder_name: str = "organizado",
     ) -> Context:
         """Clasifica `documents` (Sub-fase A + B opcional) y persiste el contexto de `project`.
 
@@ -83,6 +84,10 @@ class ContextBuilder:
             ai_classification_client: Cliente ya configurado para la Sub-fase B. Si
                 `ai_classification_enabled=True` pero no se pasa cliente, la Sub-fase B
                 simplemente no se ejecuta (los documentos quedan sin clasificar).
+            output_folder_name: Nombre de la carpeta de salida reorganizada, relativa
+                a `root_path` — solo tiene efecto en la primera construcción de un
+                proyecto; `web/routes/context.py` reutiliza el valor ya persistido en
+                reconstrucciones posteriores (el campo queda fijo tras la primera vez).
 
         Returns:
             El `Context` construido y ya persistido vía `self.registry`.
@@ -110,6 +115,7 @@ class ContextBuilder:
         context = Context(
             project_name=project.name,
             tenant_id=project.tenant_id,
+            output_folder_name=output_folder_name,
             ai_classification_enabled=ai_classification_enabled,
             ai_fallback_threshold=threshold,
             domains=domains,

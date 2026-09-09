@@ -46,6 +46,26 @@ async def test_build_persists_discovered_domains(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_build_uses_default_output_folder_name_when_not_given(tmp_path):
+    project = _make_project(tmp_path)
+    document = _make_document(tmp_path, "Ciberseguridad", "informe", "Informe")
+
+    context = await ContextBuilder().build(project, [document])
+
+    assert context.output_folder_name == "organizado"
+
+
+@pytest.mark.asyncio
+async def test_build_uses_given_output_folder_name(tmp_path):
+    project = _make_project(tmp_path)
+    document = _make_document(tmp_path, "Ciberseguridad", "informe", "Informe")
+
+    context = await ContextBuilder().build(project, [document], output_folder_name="docs_publicados")
+
+    assert context.output_folder_name == "docs_publicados"
+
+
+@pytest.mark.asyncio
 async def test_build_tracks_unclassified_documents_outside_catalog(tmp_path):
     project = _make_project(tmp_path)
     document = _make_document(tmp_path, "varios", "receta", "Receta de cocina")

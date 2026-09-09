@@ -6,24 +6,66 @@
 <h1 class="text-xl font-semibold mb-4">Contexto: {{ project.name }}</h1>
 <p class="text-sm text-gray-600 mb-4">
     Clasifica los documentos ya convertidos de este proyecto en dominios, los copia a
-    <code>{{ context.output_folder_name if context else "organizado" }}/</code> y genera un sitio MkDocs navegable.
+    <code>{{ context.output_folder_name if context else default_output_folder_name }}/</code> y genera un sitio MkDocs navegable.
 </p>
+
+{% if context %}
+<p class="text-sm mb-3">
+    Carpeta de salida: <code>{{ context.output_folder_name }}/</code>
+    — fija mientras exista este contexto; para usar otra, elimínalo primero (abajo).
+</p>
+{% else %}
+<label class="block mb-3 text-sm">
+    Carpeta de salida (solo se puede elegir ahora; una vez construido el contexto queda fija):
+    <input type="text" id="output-folder-name-input" value="{{ default_output_folder_name }}"
+           class="block mt-1 px-2 py-1 border border-gray-300 rounded font-mono text-xs w-64">
+</label>
+{% endif %}
 
 <label class="flex items-center gap-2 mb-3 text-sm">
     <input type="checkbox" id="ai-classification-toggle" {% if context and context.ai_classification_enabled %}checked{% endif %}>
-    Clasificación asistida por IA (Sub-fase B) para lo que las reglas dejen sin clasificar — requiere un LiteLLM Proxy
-    configurado (<a href="/docs/guides/litellm_proxy_setup/" class="underline">ver guía</a>).
+    Clasificación asistida por IA (Sub-fase B) para lo que las reglas dejen sin clasificar.
 </label>
+{% if litellm_configured %}
+<p class="text-sm text-green-700 mb-3">✓ LiteLLM Proxy configurado para clasificación por IA.</p>
+{% else %}
+<p class="text-sm text-amber-700 mb-3">
+    ⚠ LiteLLM Proxy no configurado — la clasificación por IA (Sub-fase B) no funcionará hasta configurarlo
+    (<a href="/docs/guides/litellm_proxy_setup/" class="underline">ver guía</a>).
+</p>
+{% endif %}
 
-<button type="button" id="build-context-btn" class="px-3 py-1.5 mb-4 border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 cursor-pointer">
+<div class="flex items-center gap-2 mb-4">
+<button type="button" id="build-context-btn" class="px-3 py-1.5 border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 cursor-pointer">
     {{ "Reconstruir contexto" if context else "Construir contexto" }}
 </button>
+{% if context %}
+<button type="button" id="delete-context-btn" class="px-3 py-1.5 border border-red-300 rounded bg-red-50 text-red-700 hover:bg-red-100 cursor-pointer">
+    Eliminar contexto
+</button>
+{% endif %}
+</div>
 <p id="build-context-error" class="text-red-700 my-2 min-h-[1.2em]"></p>
+
+{% if context %}
+<div id="delete-context-confirm" hidden class="mb-4 p-3 border border-red-300 rounded bg-red-50 text-sm">
+    <p class="mb-2">
+        ¿Eliminar el contexto de este proyecto? Se borrará <code>{{ context.output_folder_name }}/</code>,
+        el sitio MkDocs generado y la clasificación por dominios. Esta acción no se puede deshacer.
+    </p>
+    <div class="flex gap-2">
+        <button type="button" id="delete-context-confirm-btn" class="px-2 py-1 border border-red-400 rounded bg-red-600 text-white hover:bg-red-700 cursor-pointer text-sm">Sí, eliminar</button>
+        <button type="button" id="delete-context-cancel-btn" class="px-2 py-1 border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 cursor-pointer text-sm">Cancelar</button>
+    </div>
+</div>
+{% endif %}
 
 {% if context and not context.reorganized %}
 <p class="text-sm text-red-700 mb-3">⚠ La última construcción no terminó de copiar los documentos a <code>{{ context.output_folder_name }}/</code> — reconstruye el contexto.</p>
 {% elif context and not context.mkdocs_generated %}
 <p class="text-sm text-red-700 mb-3">⚠ La última construcción no terminó de generar el sitio MkDocs — reconstruye el contexto.</p>
+{% elif context and not context.mkdocs_site_built %}
+<p class="text-sm text-amber-700 mb-3">⚠ <code>mkdocs.yml</code> generado, pero no se pudo construir el sitio navegable (¿está <code>mkdocs</code> instalado? extra <code>doc_organize[docs]</code>) — revisa los logs del servidor.</p>
 {% endif %}
 
 {% if context and context.domains %}
@@ -58,14 +100,21 @@
 
 <script>
 const projectName = {{ project.name | tojson }};
+const contextUrl = "/api/projects/" + encodeURIComponent(projectName) + "/context";
+
 document.getElementById("build-context-btn").addEventListener("click", async () => {
     const errorEl = document.getElementById("build-context-error");
     errorEl.textContent = "";
     const aiEnabled = document.getElementById("ai-classification-toggle").checked;
-    const response = await fetch("/api/projects/" + encodeURIComponent(projectName) + "/context", {
+    const outputFolderInput = document.getElementById("output-folder-name-input");
+    const body = { ai_classification_enabled: aiEnabled };
+    if (outputFolderInput) {
+        body.output_folder_name = outputFolderInput.value;
+    }
+    const response = await fetch(contextUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ai_classification_enabled: aiEnabled }),
+        body: JSON.stringify(body),
     });
     if (response.ok) {
         window.location.reload();
@@ -74,5 +123,31 @@ document.getElementById("build-context-btn").addEventListener("click", async () 
         errorEl.textContent = (data && data.detail) || "No se pudo construir el contexto.";
     }
 });
+
+const deleteContextBtn = document.getElementById("delete-context-btn");
+if (deleteContextBtn) {
+    const confirmPanel = document.getElementById("delete-context-confirm");
+    deleteContextBtn.addEventListener("click", () => {
+        confirmPanel.hidden = false;
+    });
+    document.getElementById("delete-context-cancel-btn").addEventListener("click", () => {
+        confirmPanel.hidden = true;
+    });
+    document.getElementById("delete-context-confirm-btn").addEventListener("click", async () => {
+        const errorEl = document.getElementById("build-context-error");
+        errorEl.textContent = "";
+        const response = await fetch(contextUrl, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ confirm: true }),
+        });
+        if (response.ok) {
+            window.location.reload();
+        } else {
+            const data = await response.json();
+            errorEl.textContent = (data && data.detail) || "No se pudo eliminar el contexto.";
+        }
+    });
+}
 </script>
 {% endblock %}

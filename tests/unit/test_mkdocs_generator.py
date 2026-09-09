@@ -1,4 +1,6 @@
-"""Tests de MkDocsGenerator (config mkdocs.yml + index.md)."""
+"""Tests de MkDocsGenerator (config mkdocs.yml + index.md + build del sitio)."""
+
+import subprocess
 
 from datetime import UTC, datetime
 
@@ -18,8 +20,16 @@ def _make_context(project: Project, domains: list[Domain]) -> Context:
     return Context(project_name=project.name, domains=domains, created_at=now, updated_at=now)
 
 
+def _disable_mkdocs_build(monkeypatch) -> None:
+    """Los tests de config/index no necesitan invocar `mkdocs build` de verdad
+    (lento, y depende de que `mkdocs` esté instalado en el entorno) — se cubre
+    aparte en los tests dedicados a `_build_site`."""
+    monkeypatch.setattr("doc_organize.context.mkdocs_generator.shutil.which", lambda _name: None)
+
+
 @pytest.mark.asyncio
-async def test_generate_writes_valid_yaml_with_nav_grouped_by_domain(tmp_path):
+async def test_generate_writes_valid_yaml_with_nav_grouped_by_domain(tmp_path, monkeypatch):
+    _disable_mkdocs_build(monkeypatch)
     project = _make_project(tmp_path)
     document = DomainDocument(
         source_path="/docs/x.pdf",
@@ -31,16 +41,19 @@ async def test_generate_writes_valid_yaml_with_nav_grouped_by_domain(tmp_path):
     )
     context = _make_context(project, [Domain(slug="calidad", name="Calidad", documents=[document])])
 
-    mkdocs_yml_path = await MkDocsGenerator().generate(project, context)
+    mkdocs_yml_path, site_built = await MkDocsGenerator().generate(project, context)
 
     config = yaml.safe_load(mkdocs_yml_path.read_text(encoding="utf-8"))
     assert config["docs_dir"] == "organizado"
+    assert config["site_dir"] == "site"
     assert config["nav"][0] == {"Inicio": "index.md"}
     assert config["nav"][1] == {"Calidad": [{"Informe X": "calidad/pdf/x/x.md"}]}
+    assert site_built is False
 
 
 @pytest.mark.asyncio
-async def test_generate_writes_index_md_listing_domains(tmp_path):
+async def test_generate_writes_index_md_listing_domains(tmp_path, monkeypatch):
+    _disable_mkdocs_build(monkeypatch)
     project = _make_project(tmp_path)
     context = _make_context(project, [Domain(slug="calidad", name="Calidad")])
 
@@ -51,11 +64,77 @@ async def test_generate_writes_index_md_listing_domains(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_generate_handles_empty_context_without_crashing(tmp_path):
+async def test_generate_handles_empty_context_without_crashing(tmp_path, monkeypatch):
+    _disable_mkdocs_build(monkeypatch)
     project = _make_project(tmp_path)
     context = _make_context(project, [])
 
-    mkdocs_yml_path = await MkDocsGenerator().generate(project, context)
+    mkdocs_yml_path, _site_built = await MkDocsGenerator().generate(project, context)
 
     config = yaml.safe_load(mkdocs_yml_path.read_text(encoding="utf-8"))
     assert config["nav"] == [{"Inicio": "index.md"}]
+
+
+@pytest.mark.asyncio
+async def test_generate_returns_site_built_false_when_mkdocs_not_installed(tmp_path, monkeypatch):
+    monkeypatch.setattr("doc_organize.context.mkdocs_generator.shutil.which", lambda _name: None)
+    project = _make_project(tmp_path)
+    context = _make_context(project, [])
+
+    _mkdocs_yml_path, site_built = await MkDocsGenerator().generate(project, context)
+
+    assert site_built is False
+    assert not (tmp_path / "site").exists()
+
+
+@pytest.mark.asyncio
+async def test_generate_returns_site_built_true_when_mkdocs_build_succeeds(tmp_path, monkeypatch):
+    monkeypatch.setattr("doc_organize.context.mkdocs_generator.shutil.which", lambda _name: "/usr/bin/mkdocs")
+    monkeypatch.setattr(
+        "doc_organize.context.mkdocs_generator.subprocess.run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+    project = _make_project(tmp_path)
+    context = _make_context(project, [])
+
+    _mkdocs_yml_path, site_built = await MkDocsGenerator().generate(project, context)
+
+    assert site_built is True
+
+
+@pytest.mark.asyncio
+async def test_generate_returns_site_built_false_when_mkdocs_build_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr("doc_organize.context.mkdocs_generator.shutil.which", lambda _name: "/usr/bin/mkdocs")
+    monkeypatch.setattr(
+        "doc_organize.context.mkdocs_generator.subprocess.run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="boom"),
+    )
+    project = _make_project(tmp_path)
+    context = _make_context(project, [])
+
+    _mkdocs_yml_path, site_built = await MkDocsGenerator().generate(project, context)
+
+    assert site_built is False
+
+
+@pytest.mark.asyncio
+async def test_delete_site_removes_mkdocs_yml_and_site_dir(tmp_path, monkeypatch):
+    _disable_mkdocs_build(monkeypatch)
+    project = _make_project(tmp_path)
+    context = _make_context(project, [])
+    generator = MkDocsGenerator()
+    await generator.generate(project, context)
+    (tmp_path / "site").mkdir()
+    (tmp_path / "site" / "index.html").write_text("<html></html>", encoding="utf-8")
+
+    await generator.delete_site(project)
+
+    assert not (tmp_path / "mkdocs.yml").exists()
+    assert not (tmp_path / "site").exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_site_is_idempotent_when_nothing_to_delete(tmp_path):
+    project = _make_project(tmp_path)
+
+    await MkDocsGenerator().delete_site(project)  # no debe lanzar
