@@ -11,6 +11,11 @@ copiar cada documento (original + `.md` + `.json`) a
 `<output_folder_name>/<dominio>/<tipo>/<stem>/` y generar la configuración de un
 sitio [MkDocs](https://www.mkdocs.org/) que lo navegue.
 
+Opcionalmente, si el proyecto tiene un **manifiesto de taxonomía**
+(`taxonomy_manifest.md`, ver más abajo), la clasificación pasa a ser de **2 ejes**
+(dominio + tipo de material de origen) y `<tipo>` deja de ser la extensión del
+fichero para ser ese tipo de material semántico.
+
 ## Precondiciones
 
 - El proyecto tiene documentos ya convertidos con éxito (`cache.db` con entradas
@@ -47,6 +52,45 @@ sequenceDiagram
     API-->>Usuario: dominios, sin_clasificar, reorganized, mkdocs_generated
 ```
 
+## Manifiesto de Taxonomía (opcional, 2 ejes)
+
+Un proyecto puede declarar `<project.root_path>/taxonomy_manifest.md` para dirigir
+la clasificación con un catálogo propio de **dominios** y **tipos de material de
+origen** (p. ej. Normativa, Procedimiento, Política, Evidencia — inspirado en la
+organización documental de un SGI). El fichero combina front matter YAML (la parte
+que lee la aplicación) con prosa Markdown libre (descripción, tablas, diagramas —
+solo para lectura humana, nunca se parsea):
+
+```yaml
+---
+domains:
+  - slug: ciberseguridad
+    name: Ciberseguridad
+    description: Normas de seguridad de la información
+    keywords: [iso27001, ens]
+material_types:
+  - slug: normativa
+    name: Normativa
+  - slug: procedimiento
+    name: Procedimiento
+---
+
+# Taxonomía del SGI
+
+Prosa libre — descripción, tablas, diagramas Mermaid, lo que ayude a quien lo mantenga.
+```
+
+Si el fichero existe, `POST .../context` lo carga automáticamente (no hace falta
+activar nada en el formulario) y clasifica cada documento en los dos ejes, por
+reglas — mismo criterio de puntuación que el modo de un eje (palabras del slug
+encontradas en título+contenido, con bonus si la carpeta contenedora coincide). La
+copia física y el sitio MkDocs reflejan el segundo eje:
+`<output_folder_name>/<dominio>/<tipo-de-material>/<stem>/`, y el nav de
+`mkdocs.yml` se agrupa `dominio > tipo de material > documentos`.
+
+Si no existe `taxonomy_manifest.md`, todo el comportamiento (clasificación de un
+eje, `<tipo>`=extensión, nav plano por dominio) queda exactamente igual que antes.
+
 ## Visualizar el Sitio Generado
 
 `GET /projects/{name}/context/site/` sirve el sitio MkDocs ya construido
@@ -69,6 +113,8 @@ cualquier proyecto sin acoplarse a la construcción de ningún otro.
 | **Reconstrucción limpia** | Cada `POST` reconstruye desde cero: dominios/documentos ya no vigentes se eliminan de `context.json` y de `organizado/`, sin copias huérfanas |
 | **Estado honesto ante fallo parcial** | Si la reorganización o la generación de MkDocs fallan a mitad, `context.json` persiste `reorganized`/`mkdocs_generated=false` — nunca se reporta éxito falso |
 | **Una operación a la vez** | `POST /api/projects/{name}/context` se rechaza con `409` si hay un escaneo, deduplicación u otra construcción de contexto en curso para el mismo proyecto |
+| **Manifiesto y catálogo simple son excluyentes** | Un proyecto con `taxonomy_manifest.md` no puede combinar `candidate_domains` en la misma petición — `400` explícito, nunca precedencia silenciosa |
+| **Modo manifiesto nunca excluye por completo** | Con manifiesto activo, un documento con los tres artefactos completos siempre se reorganiza — si un eje (dominio o tipo de material) no alcanza el umbral, se le asigna el slug `sin-clasificar` en ese eje en vez de dejarlo fuera |
 
 ## Límites y Restricciones
 
@@ -90,6 +136,12 @@ cualquier proyecto sin acoplarse a la construcción de ningún otro.
   instrucción al modelo.
 - **Fallo de red/autenticación con el proxy** durante la Sub-fase B: el
   documento afectado queda sin clasificar; no interrumpe el resto del lote.
+- **`taxonomy_manifest.md` con front matter inválido** (no empieza/cierra con
+  `---`, YAML roto, o catálogo `domains`/`material_types` vacío o ausente):
+  `POST` devuelve `400` con el motivo exacto, no un error genérico.
+- **Sub-fase B (IA) con manifiesto activo**: sin efecto en este ciclo — la
+  clasificación de 2 ejes es solo por reglas; `ai_classification_enabled` se
+  ignora mientras haya `taxonomy_manifest.md`.
 
 ## Criterios de Aceptación
 

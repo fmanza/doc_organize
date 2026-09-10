@@ -9,7 +9,7 @@ import pytest
 
 from doc_organize.context.context_builder import ContextBuilder
 from doc_organize.core.exceptions import DomainClassificationError
-from doc_organize.core.models import ConversionResult, DomainClassificationResult, Project
+from doc_organize.core.models import ConversionResult, DomainClassificationResult, Project, TaxonomyCatalogEntry, TaxonomyManifest
 
 
 def _make_project(tmp_path) -> Project:
@@ -220,3 +220,103 @@ async def test_ai_fallback_skips_when_no_catalog_available_at_all(tmp_path):
     assert context.domains == []
     assert context.unclassified_documents == [document.source_path]
     assert ai_client.calls == []
+
+
+def _make_manifest(domain_slugs: list[str], material_slugs: list[str]) -> TaxonomyManifest:
+    return TaxonomyManifest(
+        domains=[TaxonomyCatalogEntry(slug=slug, name=slug.title()) for slug in domain_slugs],
+        material_types=[TaxonomyCatalogEntry(slug=slug, name=slug.title()) for slug in material_slugs],
+    )
+
+
+@pytest.mark.asyncio
+async def test_build_with_manifest_classifies_both_axes_by_rules(tmp_path):
+    project = _make_project(tmp_path)
+    document = _make_document(tmp_path, "Ciberseguridad", "politica", "Política de seguridad normativa ISO 27001")
+    manifest = _make_manifest(["ciberseguridad", "calidad"], ["normativa", "procedimiento"])
+
+    context = await ContextBuilder().build(project, [document], taxonomy_manifest=manifest, threshold=0.1)
+
+    assert context.taxonomy_manifest_used is True
+    assert context.domains[0].slug == "ciberseguridad"
+    assert context.domains[0].documents[0].material_type == "normativa"
+    assert context.unclassified_documents == []
+
+
+@pytest.mark.asyncio
+async def test_build_with_manifest_places_document_under_placeholder_instead_of_excluding_it(tmp_path):
+    """A diferencia del modo sin manifiesto (test_build_tracks_unclassified_documents_outside_catalog),
+    con manifiesto activo un documento que no encaja en ningún dominio/tipo del catálogo
+    SIGUE reorganizándose, bajo el slug placeholder 'sin-clasificar' en el eje que falló —
+    nunca se excluye por completo mientras tenga los tres artefactos completos."""
+    project = _make_project(tmp_path)
+    document = _make_document(tmp_path, "varios", "receta", "Receta de cocina con ingredientes y horno")
+    manifest = _make_manifest(["ciberseguridad", "calidad"], ["normativa", "procedimiento"])
+
+    context = await ContextBuilder().build(project, [document], taxonomy_manifest=manifest, threshold=0.5)
+
+    assert context.unclassified_documents == []
+    assert len(context.domains) == 1
+    assert context.domains[0].slug == "sin-clasificar"
+    assert context.domains[0].documents[0].material_type == "sin-clasificar"
+
+
+@pytest.mark.asyncio
+async def test_build_with_manifest_still_excludes_documents_with_incomplete_artifacts(tmp_path):
+    project = _make_project(tmp_path)
+    document = _make_document(tmp_path, "varios", "roto", "Roto")
+    Path(document.json_path).unlink()
+    manifest = _make_manifest(["calidad"], ["normativa"])
+
+    context = await ContextBuilder().build(project, [document], taxonomy_manifest=manifest)
+
+    assert context.domains == []
+    assert context.unclassified_documents == [document.source_path]
+
+
+@pytest.mark.asyncio
+async def test_build_with_manifest_excludes_failed_conversion_before_reading_json(tmp_path):
+    """Mismo criterio que `test_incomplete_artifacts_go_to_unclassified_not_raised`
+    (modo sin manifiesto) aplicado al camino de 2 ejes: un `ConversionResult` marcado
+    `success=False` (o sin `markdown_path`/`json_path`) ni siquiera intenta leer el
+    `.json` — va directo a `unclassified_documents`."""
+    project = _make_project(tmp_path)
+    document = ConversionResult(source_path=str(tmp_path / "roto.pdf"), markdown_path=None, json_path=None, success=False, error="conversión fallida")
+    manifest = _make_manifest(["calidad"], ["normativa"])
+
+    context = await ContextBuilder().build(project, [document], taxonomy_manifest=manifest)
+
+    assert context.domains == []
+    assert context.unclassified_documents == [document.source_path]
+
+
+@pytest.mark.asyncio
+async def test_build_without_manifest_keeps_material_type_unset(tmp_path):
+    project = _make_project(tmp_path)
+    document = _make_document(tmp_path, "Ciberseguridad", "informe", "Informe")
+
+    context = await ContextBuilder().build(project, [document])
+
+    assert context.taxonomy_manifest_used is False
+    assert context.domains[0].documents[0].material_type is None
+
+
+@pytest.mark.asyncio
+async def test_build_with_manifest_uses_catalog_entry_keywords_for_scoring(tmp_path):
+    """`TaxonomyCatalogEntry.keywords` debe sumar a la puntuación además del propio
+    slug — sin esto, un documento que solo menciona las keywords declaradas (nunca la
+    palabra exacta del slug) queda sin clasificar en ese eje (AUDIT_CODE). El texto no
+    contiene "ciberseguridad" ni "normativa" (las palabras de los slugs) en absoluto —
+    solo clasifica gracias a `keywords=["ens"]`/`["controles"]`.
+    """
+    project = _make_project(tmp_path)
+    document = _make_document(tmp_path, "varios", "informe", "Informe sobre ENS y controles de acceso")
+    manifest = TaxonomyManifest(
+        domains=[TaxonomyCatalogEntry(slug="ciberseguridad", name="Ciberseguridad", keywords=["ENS"])],
+        material_types=[TaxonomyCatalogEntry(slug="normativa", name="Normativa", keywords=["controles"])],
+    )
+
+    context = await ContextBuilder().build(project, [document], taxonomy_manifest=manifest, threshold=0.5)
+
+    assert context.domains[0].slug == "ciberseguridad"
+    assert context.domains[0].documents[0].material_type == "normativa"

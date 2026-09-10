@@ -328,7 +328,15 @@ async def test_build_context_accepts_custom_output_folder_name_on_first_build(tm
     cache_db = project_root / DEFAULT_CACHE_DB_NAME
     async with CacheManager(cache_db) as cache:
         await cache.save_entries(
-            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
         )
 
     app = create_app(registry_path=registry_path)
@@ -353,7 +361,9 @@ async def test_build_context_rejects_path_traversal_in_output_folder_name(tmp_pa
     assert response.status_code == 400
 
 
-@pytest.mark.parametrize("reserved_name", ["Conversión", "conversión", "domains", "DOMAINS", "site", "duplicados", "historial_escaneo", "errores_escaneo"])
+@pytest.mark.parametrize(
+    "reserved_name", ["Conversión", "conversión", "domains", "DOMAINS", "site", "duplicados", "historial_escaneo", "errores_escaneo"]
+)
 @pytest.mark.asyncio
 async def test_build_context_rejects_output_folder_name_reserved_by_another_subsystem(tmp_path, reserved_name) -> None:
     """Sin este rechazo, elegir "Conversión"/"domains" como `output_folder_name`
@@ -383,7 +393,15 @@ async def test_build_context_ignores_output_folder_name_change_on_rebuild(tmp_pa
     cache_db = project_root / DEFAULT_CACHE_DB_NAME
     async with CacheManager(cache_db) as cache:
         await cache.save_entries(
-            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
         )
 
     app = create_app(registry_path=registry_path)
@@ -408,7 +426,15 @@ async def test_delete_context_requires_explicit_confirmation(tmp_path) -> None:
     cache_db = project_root / DEFAULT_CACHE_DB_NAME
     async with CacheManager(cache_db) as cache:
         await cache.save_entries(
-            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
         )
     app = create_app(registry_path=registry_path)
     async with _client(app) as client:
@@ -442,7 +468,15 @@ async def test_delete_context_removes_everything_and_allows_choosing_a_new_folde
     cache_db = project_root / DEFAULT_CACHE_DB_NAME
     async with CacheManager(cache_db) as cache:
         await cache.save_entries(
-            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
         )
     app = create_app(registry_path=registry_path)
     async with _client(app) as client:
@@ -532,7 +566,15 @@ async def test_ai_toggle_is_unchecked_and_disabled_if_litellm_becomes_unconfigur
     cache_db = project_root / DEFAULT_CACHE_DB_NAME
     async with CacheManager(cache_db) as cache:
         await cache.save_entries(
-            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
         )
     app = create_app(registry_path=registry_path)
     async with _client(app) as client:
@@ -574,7 +616,15 @@ async def test_context_build_websocket_reports_progress_and_completes(tmp_path) 
     cache_db = project_root / DEFAULT_CACHE_DB_NAME
     async with CacheManager(cache_db) as cache:
         await cache.save_entries(
-            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
         )
     app = create_app(registry_path=registry_path)
     client = TestClient(app)
@@ -603,7 +653,15 @@ async def test_context_build_websocket_accepts_custom_output_folder_name(tmp_pat
     cache_db = project_root / DEFAULT_CACHE_DB_NAME
     async with CacheManager(cache_db) as cache:
         await cache.save_entries(
-            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
         )
     app = create_app(registry_path=registry_path)
     client = TestClient(app)
@@ -665,7 +723,15 @@ async def test_context_build_websocket_releases_lock_after_completion_allowing_n
     cache_db = project_root / DEFAULT_CACHE_DB_NAME
     async with CacheManager(cache_db) as cache:
         await cache.save_entries(
-            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
         )
     app = create_app(registry_path=registry_path)
     client = TestClient(app)
@@ -699,7 +765,15 @@ async def test_context_delete_websocket_removes_everything_and_reports_progress(
     cache_db = project_root / DEFAULT_CACHE_DB_NAME
     async with CacheManager(cache_db) as cache:
         await cache.save_entries(
-            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
         )
     app = create_app(registry_path=registry_path)
     client = TestClient(app)
@@ -734,7 +808,15 @@ async def test_context_delete_websocket_requires_explicit_confirmation(tmp_path)
     cache_db = project_root / DEFAULT_CACHE_DB_NAME
     async with CacheManager(cache_db) as cache:
         await cache.save_entries(
-            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
         )
     app = create_app(registry_path=registry_path)
     client = TestClient(app)
@@ -786,7 +868,15 @@ async def test_context_site_index_redirects_to_trailing_slash(tmp_path) -> None:
     cache_db = project_root / DEFAULT_CACHE_DB_NAME
     async with CacheManager(cache_db) as cache:
         await cache.save_entries(
-            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
         )
     app = create_app(registry_path=registry_path)
     async with _client(app) as client:
@@ -806,7 +896,15 @@ async def test_context_site_index_serves_built_index_html(tmp_path) -> None:
     cache_db = project_root / DEFAULT_CACHE_DB_NAME
     async with CacheManager(cache_db) as cache:
         await cache.save_entries(
-            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
         )
     app = create_app(registry_path=registry_path)
     async with _client(app) as client:
@@ -826,7 +924,15 @@ async def test_context_site_asset_redirects_directory_without_trailing_slash(tmp
     cache_db = project_root / DEFAULT_CACHE_DB_NAME
     async with CacheManager(cache_db) as cache:
         await cache.save_entries(
-            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
         )
     app = create_app(registry_path=registry_path)
     async with _client(app) as client:
@@ -846,7 +952,15 @@ async def test_context_site_asset_serves_domain_page(tmp_path) -> None:
     cache_db = project_root / DEFAULT_CACHE_DB_NAME
     async with CacheManager(cache_db) as cache:
         await cache.save_entries(
-            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
         )
     app = create_app(registry_path=registry_path)
     async with _client(app) as client:
@@ -896,7 +1010,15 @@ async def test_context_site_rejects_path_traversal_outside_site_dir(tmp_path) ->
     cache_db = project_root / DEFAULT_CACHE_DB_NAME
     async with CacheManager(cache_db) as cache:
         await cache.save_entries(
-            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
         )
     app = create_app(registry_path=registry_path)
     async with _client(app) as client:
@@ -928,7 +1050,15 @@ async def test_context_page_links_to_site_when_built(tmp_path) -> None:
     cache_db = project_root / DEFAULT_CACHE_DB_NAME
     async with CacheManager(cache_db) as cache:
         await cache.save_entries(
-            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
         )
     app = create_app(registry_path=registry_path)
     async with _client(app) as client:
@@ -938,3 +1068,90 @@ async def test_context_page_links_to_site_when_built(tmp_path) -> None:
     assert response.status_code == 200
     assert f"/projects/{quote(project.name)}/context/site/" in response.text
     assert "ver documentación generada" in response.text
+
+
+_VALID_TAXONOMY_MANIFEST = """---
+domains:
+  - slug: ciberseguridad
+    name: Ciberseguridad
+material_types:
+  - slug: normativa
+    name: Normativa
+---
+
+Prosa libre, no se parsea.
+"""
+
+
+@pytest.mark.asyncio
+async def test_build_context_uses_taxonomy_manifest_when_present(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    file_path = _seed_converted_document(project_root, "politica", "Política de seguridad normativa")
+    (project_root / "taxonomy_manifest.md").write_text(_VALID_TAXONOMY_MANIFEST, encoding="utf-8")
+
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
+        )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.post(f"/api/projects/{project.name}/context", json={"threshold": 0.1})
+
+    assert response.status_code == 200
+    assert (project_root / "organizado" / "ciberseguridad" / "normativa" / "politica").is_dir()
+
+
+@pytest.mark.asyncio
+async def test_build_context_rejects_manifest_combined_with_candidate_domains(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    file_path = _seed_converted_document(project_root, "politica", "Política")
+    (project_root / "taxonomy_manifest.md").write_text(_VALID_TAXONOMY_MANIFEST, encoding="utf-8")
+
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
+        )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.post(f"/api/projects/{project.name}/context", json={"candidate_domains": ["calidad"]})
+
+    assert response.status_code == 400
+    assert "taxonomy_manifest.md" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_build_context_reports_invalid_manifest_front_matter_as_400(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    (project_root / "taxonomy_manifest.md").write_text("# Sin front matter\n", encoding="utf-8")
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.post(f"/api/projects/{project.name}/context")
+
+    assert response.status_code == 400

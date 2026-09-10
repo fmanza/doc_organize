@@ -71,9 +71,9 @@ class MkDocsGenerator:
     def _build_config(self, project: Project, context: Context) -> dict[str, Any]:
         nav: list[Any] = [{"Inicio": _INDEX_MD_NAME}]
         for domain in context.domains:
-            entries = [{document.title: self._relative_doc_path(domain, document)} for document in domain.documents]
-            if entries:
-                nav.append({domain.name: entries})
+            domain_nav = self._build_domain_nav(domain, context.taxonomy_manifest_used)
+            if domain_nav:
+                nav.append({domain.name: domain_nav})
         return {
             "site_name": f"{project.name} — Documentación organizada",
             "docs_dir": context.output_folder_name,
@@ -81,10 +81,31 @@ class MkDocsGenerator:
             "nav": nav,
         }
 
+    def _build_domain_nav(self, domain: Domain, taxonomy_manifest_used: bool) -> list[Any]:
+        """Nav de un dominio: lista plana de documentos (modo sin manifiesto), o agrupada
+        por `material_type` dentro del dominio cuando `taxonomy_manifest_used` — mismo
+        criterio de profundidad `dominio > tipo de material > documentos` que la carpeta
+        física (`Reorganizer`, vía `resolve_document_slug_parts`)."""
+        if not taxonomy_manifest_used:
+            return [{document.title: self._relative_doc_path(domain, document)} for document in domain.documents]
+
+        by_material_type: dict[str, list[DomainDocument]] = {}
+        for document in domain.documents:
+            material_type = document.material_type or "sin-clasificar"
+            by_material_type.setdefault(material_type, []).append(document)
+
+        nav: list[Any] = []
+        for material_type, docs in by_material_type.items():
+            entries = [{document.title: self._relative_doc_path(domain, document)} for document in docs]
+            nav.append({material_type.replace("-", " ").title(): entries})
+        return nav
+
     async def _build_site(self, project: Project, mkdocs_yml_path: Path) -> bool:
         mkdocs_bin = await asyncio.to_thread(shutil.which, "mkdocs")
         if mkdocs_bin is None:
-            self.logger.warning(f"mkdocs no está instalado en este entorno (extra 'docs') — '{mkdocs_yml_path}' escrito, pero sin sitio navegable en disco.")
+            self.logger.warning(
+                f"mkdocs no está instalado en este entorno (extra 'docs') — '{mkdocs_yml_path}' escrito, pero sin sitio navegable en disco."
+            )
             return False
 
         result = await asyncio.to_thread(

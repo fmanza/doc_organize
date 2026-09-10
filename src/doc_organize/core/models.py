@@ -668,6 +668,13 @@ class DomainDocument(BaseModel):
     )
     title: str = Field(..., description="Título del documento")
     document_type: str = Field(..., description="Tipo de documento dentro del dominio (extensión original, en minúsculas, sin punto)")
+    material_type: str | None = Field(
+        default=None,
+        description=(
+            "Slug del tipo de material de origen (segundo eje de clasificación, catálogo de "
+            "`TaxonomyManifest.material_types`), o `None` en modo sin manifiesto de taxonomía"
+        ),
+    )
     confidence: float = Field(..., ge=0.0, le=1.0, description="Score de confianza de la clasificación, 0-1")
     classified_by: str = Field(default="rules", description="'rules' (Sub-fase A) o 'ai' (Sub-fase B) según qué clasificó el documento")
 
@@ -713,6 +720,15 @@ class Context(BaseModel):
         default=False,
         description="Si `mkdocs build` se ejecutó con éxito sobre el `mkdocs.yml` generado — `False` si mkdocs no está instalado o el build falló",
     )
+    taxonomy_manifest_used: bool = Field(
+        default=False,
+        description=(
+            "Si esta construcción usó un manifiesto de taxonomía (`taxonomy_manifest.md`, "
+            "clasificación de 2 ejes: dominio + tipo de material) en vez de `candidate_domains`/"
+            "descubrimiento (1 eje) — determina si `Reorganizer`/`MkDocsGenerator` agrupan también "
+            "por `DomainDocument.material_type`"
+        ),
+    )
     created_at: str = Field(..., description="Timestamp ISO 8601 de creación del contexto")
     updated_at: str = Field(..., description="Timestamp ISO 8601 de la última reconstrucción del contexto")
 
@@ -723,6 +739,40 @@ class DomainClassificationResult(BaseModel):
     domain: str | None = Field(default=None, description="Slug del dominio elegido del catálogo, o `None` si no encaja en ninguno")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Confianza reportada por el modelo, 0-1")
     reasoning: str | None = Field(default=None, description="Justificación breve devuelta por el modelo, si la reporta")
+
+
+class TaxonomyCatalogEntry(BaseModel):
+    """Una entrada del catálogo de un `TaxonomyManifest` (un dominio o un tipo de material de origen)."""
+
+    slug: str = Field(..., min_length=1, description="Identificador corto (se sanea a kebab-case antes de usarse como segmento de carpeta)")
+    name: str = Field(..., min_length=1, description="Nombre legible")
+    description: str | None = Field(default=None, description="Descripción de la entrada, o `None` si no se rellenó")
+    keywords: list[str] = Field(default_factory=list, description="Palabras clave adicionales para la puntuación por reglas, además de `slug`")
+
+
+class TaxonomyManifest(BaseModel):
+    """Manifiesto de taxonomía documental de un proyecto: catálogos de dominios y de tipos de material de origen.
+
+    Se lee del front matter YAML de `<project.root_path>/taxonomy_manifest.md` (ver
+    `doc_organize.context.taxonomy_manifest.load_taxonomy_manifest`) — el cuerpo Markdown
+    del fichero (prosa, tablas, diagramas) es de lectura humana y no se parsea. Cuando un
+    proyecto tiene manifiesto, `ContextBuilder` clasifica cada documento en dos ejes
+    (dominio + tipo de material) en vez del único eje de dominio del modo sin manifiesto.
+
+    Attributes:
+        domains (list[TaxonomyCatalogEntry]): Catálogo cerrado de dominios normativos.
+        material_types (list[TaxonomyCatalogEntry]): Catálogo cerrado de tipos de material de origen.
+
+    Example:
+        >>> TaxonomyManifest(
+        ...     domains=[TaxonomyCatalogEntry(slug="ciberseguridad", name="Ciberseguridad")],
+        ...     material_types=[TaxonomyCatalogEntry(slug="normativa", name="Normativa")],
+        ... ).domains[0].slug
+        'ciberseguridad'
+    """
+
+    domains: list[TaxonomyCatalogEntry] = Field(..., min_length=1, description="Catálogo cerrado de dominios normativos")
+    material_types: list[TaxonomyCatalogEntry] = Field(..., min_length=1, description="Catálogo cerrado de tipos de material de origen")
 
 
 class LiteLLMClassificationConfig(BaseModel):
@@ -782,6 +832,8 @@ __all__ = [
     "ScannedFolder",
     "SecurityConfig",
     "Session",
+    "TaxonomyCatalogEntry",
+    "TaxonomyManifest",
     "Tenant",
     "UsageLineItem",
     "UsageSnapshot",

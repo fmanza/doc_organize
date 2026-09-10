@@ -242,6 +242,46 @@ def test_resolve_document_slug_parts_uses_document_type_and_markdown_stem():
     assert stem == "informe"
 
 
+def test_resolve_document_slug_parts_prefers_material_type_over_extension_when_set():
+    """Modo manifiesto de taxonomía: `material_type` (tipo de material de origen) sustituye
+    a la extensión como segmento de carpeta — el modo sin manifiesto (`material_type=None`,
+    test anterior) queda con el comportamiento idéntico al de antes de esta sesión."""
+    document = DomainDocument(
+        source_path="/docs/x.pdf",
+        markdown_path="/out/informe.md",
+        json_path="/out/informe.json",
+        title="X",
+        document_type="pdf",
+        material_type="normativa",
+        confidence=0.9,
+    )
+
+    tipo, stem = resolve_document_slug_parts(document)
+
+    assert tipo == "normativa"
+    assert stem == "informe"
+
+
+@pytest.mark.asyncio
+async def test_reorganize_uses_material_type_as_folder_segment_when_set(tmp_path):
+    project = _make_project(tmp_path)
+    document = DomainDocument(
+        source_path=str(_write_file(tmp_path, "politica.pdf", b"X")),
+        markdown_path=str(_write_file(tmp_path, "politica.md", b"# X")),
+        json_path=str(_write_file(tmp_path, "politica.json", b"{}")),
+        title="Política",
+        document_type="pdf",
+        material_type="normativa",
+        confidence=0.9,
+    )
+    context = _make_context(project, [Domain(slug="ciberseguridad", name="Ciberseguridad", documents=[document])])
+
+    output_root = await Reorganizer().reorganize(project, context)
+
+    assert (output_root / "ciberseguridad" / "normativa" / "politica" / "politica.pdf").is_file()
+    assert not (output_root / "ciberseguridad" / "pdf").exists()
+
+
 @pytest.mark.asyncio
 async def test_reorganizer_destination_matches_mkdocs_generator_nav_path(tmp_path, monkeypatch):
     """`Reorganizer` (destino real en disco) y `MkDocsGenerator` (ruta en el `nav`

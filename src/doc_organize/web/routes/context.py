@@ -16,7 +16,7 @@ from pydantic import BaseModel, ValidationError
 
 from doc_organize.ai import DomainClassificationClient, litellm_classification_config_from_env
 from doc_organize.cache import CacheManager
-from doc_organize.context import ContextBuilder, ContextRegistry, MkDocsGenerator, Reorganizer
+from doc_organize.context import ContextBuilder, ContextRegistry, MkDocsGenerator, Reorganizer, load_taxonomy_manifest
 from doc_organize.converter import DocumentConverter
 from doc_organize.core.constants import (
     CONVERSION_FOLDER_NAME,
@@ -25,7 +25,7 @@ from doc_organize.core.constants import (
     SCAN_ERRORS_FOLDER_NAME,
     SCAN_HISTORY_FOLDER_NAME,
 )
-from doc_organize.core.exceptions import ContextNotFoundError, ProjectNotFoundError
+from doc_organize.core.exceptions import ContextNotFoundError, ProjectNotFoundError, TaxonomyManifestError
 from doc_organize.core.models import (
     Context,
     ContextBuildEvent,
@@ -35,6 +35,7 @@ from doc_organize.core.models import (
     ConversionResult,
     ConversionStatus,
     Project,
+    TaxonomyManifest,
 )
 from doc_organize.utils.logging import get_logger
 from doc_organize.web.dependencies import (
@@ -171,6 +172,29 @@ async def _load_existing_context_or_none(project: Project) -> Context | None:
         return None
 
 
+async def _load_taxonomy_manifest_or_400(project: Project, candidate_domains: list[str] | None) -> TaxonomyManifest | None:
+    """Carga `taxonomy_manifest.md` de `project`, si existe, validando que no llegue junto
+    a `candidate_domains` en la misma petición — ambos son catálogos de dominio distintos
+    (manifiesto: 2 ejes; `candidate_domains`: 1 eje) y no hay una regla de precedencia
+    implícita razonable entre ellos, así que se rechaza explícito en vez de elegir uno en
+    silencio (mismo criterio que `_resolve_output_folder_name` para nombres reservados).
+
+    Raises:
+        HTTPException: 400 si el fichero existe pero su front matter es inválido
+            (`TaxonomyManifestError`), o si además llega `candidate_domains` no vacío.
+    """
+    try:
+        manifest = await load_taxonomy_manifest(project)
+    except TaxonomyManifestError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if manifest is not None and candidate_domains:
+        raise HTTPException(
+            status_code=400,
+            detail="El proyecto tiene un manifiesto de taxonomía (taxonomy_manifest.md) — no se puede combinar con 'candidate_domains' en la misma petición.",
+        )
+    return manifest
+
+
 def _resolve_output_folder_name(existing_context: Context | None, requested: str | None) -> str:
     """`output_folder_name` solo es elegible en la primera construcción de un
     proyecto (`existing_context is None`): una vez hay un contexto, el nombre
@@ -281,6 +305,7 @@ async def build_context(name: str, request: Request, payload: BuildContextReques
         documents = await _gather_converted_documents(project)
         existing_context = await _load_existing_context_or_none(project)
         output_folder_name = _resolve_output_folder_name(existing_context, payload.output_folder_name)
+        taxonomy_manifest = await _load_taxonomy_manifest_or_400(project, payload.candidate_domains)
 
         async with _optional_ai_client(payload.ai_classification_enabled) as ai_client:
             context = await _context_builder.build(
@@ -291,6 +316,7 @@ async def build_context(name: str, request: Request, payload: BuildContextReques
                 ai_classification_enabled=payload.ai_classification_enabled,
                 ai_classification_client=ai_client,
                 output_folder_name=output_folder_name,
+                taxonomy_manifest=taxonomy_manifest,
             )
         try:
             await _reorganizer.reorganize(project, context)
@@ -398,6 +424,7 @@ async def context_build_websocket(name: str, websocket: WebSocket) -> None:
             documents = await _gather_converted_documents(project)
             existing_context = await _load_existing_context_or_none(project)
             output_folder_name = _resolve_output_folder_name(existing_context, payload.output_folder_name)
+            taxonomy_manifest = await _load_taxonomy_manifest_or_400(project, payload.candidate_domains)
         except HTTPException as exc:
             await websocket.close(code=1008, reason=str(exc.detail))
             return
@@ -434,6 +461,7 @@ async def context_build_websocket(name: str, websocket: WebSocket) -> None:
                     ai_classification_client=ai_client,
                     output_folder_name=output_folder_name,
                     on_ai_progress=on_ai_progress,
+                    taxonomy_manifest=taxonomy_manifest,
                 )
                 total_documents = sum(len(domain.documents) for domain in context.domains)
                 await websocket.send_json(

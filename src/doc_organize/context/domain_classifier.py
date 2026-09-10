@@ -186,34 +186,142 @@ class DomainClassifier:
 
         return classified, unclassified
 
-    def _best_domain(self, document: ConversionResult, chunks_text: str, title: str | None) -> tuple[str | None, float]:
+    def _best_domain(
+        self, document: ConversionResult, chunks_text: str, title: str | None, extra_keywords: dict[str, list[str]] | None = None
+    ) -> tuple[str | None, float]:
         folder_slug = self._slugify(Path(document.source_path).parent.name)
 
         if self.candidate_domains:
-            return self._best_from_catalog(folder_slug, chunks_text, title)
+            return self._best_from_catalog(folder_slug, chunks_text, title, extra_keywords=extra_keywords)
         return (folder_slug, 1.0) if folder_slug else (None, 0.0)
 
-    def _best_from_catalog(self, folder_slug: str, chunks_text: str, title: str | None) -> tuple[str | None, float]:
+    def _best_from_catalog(
+        self, folder_slug: str, chunks_text: str, title: str | None, extra_keywords: dict[str, list[str]] | None = None
+    ) -> tuple[str | None, float]:
         haystack = f"{title or ''} {chunks_text}".lower()
-        best_slug: str | None = None
-        best_score = 0.0
+        return score_catalog(self.candidate_domains or [], haystack, folder_slug, extra_keywords=extra_keywords)
 
-        for slug in self.candidate_domains or []:
-            keywords = slug.replace("-", " ").split()
-            if not keywords:
-                continue
-            hits = sum(1 for keyword in keywords if keyword in haystack)
-            score = hits / len(keywords)
-            if slug == folder_slug:
-                score = min(1.0, score + _PATH_SIGNAL_BONUS)
-            if score > best_score:
-                best_slug, best_score = slug, score
+    def score_domain(
+        self, document: ConversionResult, chunks_text: str, title: str | None, *, extra_keywords: dict[str, list[str]] | None = None
+    ) -> tuple[str | None, float]:
+        """Puntúa `document` contra `self.candidate_domains` (envoltorio público de `_best_domain`).
 
-        return best_slug, best_score
+        Reutilizado por `ContextBuilder._classify_with_manifest` (clasificación de 2 ejes,
+        manifiesto de taxonomía) para no depender de un método "privado" de esta clase —
+        mismo criterio de puntuación que usa `classify()` internamente, sin duplicarlo.
+
+        Args:
+            extra_keywords: Mapa slug saneado -> palabras clave adicionales del manifiesto
+                (`TaxonomyCatalogEntry.keywords`), sumadas a las derivadas del propio slug
+                para ese candidato. `None` (default, usado por `classify()` internamente)
+                puntúa solo por las palabras del slug, igual que siempre.
+        """
+        return self._best_domain(document, chunks_text, title, extra_keywords=extra_keywords)
 
     @staticmethod
     def _slugify(name: str) -> str:
         return "-".join(_WORD_RE.findall(name.lower()))
 
 
-__all__ = ["DomainClassifier", "read_conversion_json", "resolve_title_and_type"]
+def score_catalog(
+    catalog: list[str], haystack: str, folder_slug: str, extra_keywords: dict[str, list[str]] | None = None
+) -> tuple[str | None, float]:
+    """Puntúa cada slug de `catalog` contra `haystack` (título+chunks en minúsculas), con
+    bonus si coincide con `folder_slug` (señal secundaria de ruta, §2.4 del `00_REQUEST.md`
+    original).
+
+    Extraída de `DomainClassifier._best_from_catalog` para que `MaterialTypeClassifier`
+    (segundo eje de clasificación, manifiesto de taxonomía) reutilice el mismo criterio de
+    puntuación sin duplicar la fórmula — mismo motivo que llevó a compartir
+    `resolve_document_slug_parts` entre `Reorganizer`/`MkDocsGenerator` (AUDIT_CODE, sesión
+    2026-09-09).
+
+    Args:
+        extra_keywords: Mapa slug -> palabras clave adicionales (p. ej.
+            `TaxonomyCatalogEntry.keywords` de un manifiesto de taxonomía), sumadas a las
+            derivadas del propio slug para ese candidato antes de puntuar. `None` (default)
+            puntúa solo por las palabras del slug — comportamiento sin cambios para
+            `DomainClassifier._best_from_catalog` (AUDIT_CODE, sesión de manifiesto de
+            taxonomía: antes de esto, `keywords` del manifiesto se leía pero nunca se usaba).
+
+    Returns:
+        `(slug, score)` del mejor candidato de `catalog`, o `(None, 0.0)` si `catalog` está
+        vacío o ninguna palabra de ningún slug (ni sus `extra_keywords`) aparece en `haystack`.
+    """
+    best_slug: str | None = None
+    best_score = 0.0
+
+    for slug in catalog:
+        keywords = slug.replace("-", " ").split()
+        if extra_keywords:
+            keywords = keywords + [keyword.lower() for keyword in extra_keywords.get(slug, []) if keyword]
+        if not keywords:
+            continue
+        hits = sum(1 for keyword in keywords if keyword in haystack)
+        score = hits / len(keywords)
+        if slug == folder_slug:
+            score = min(1.0, score + _PATH_SIGNAL_BONUS)
+        if score > best_score:
+            best_slug, best_score = slug, score
+
+    return best_slug, best_score
+
+
+class MaterialTypeClassifier:
+    """Clasifica documentos por tipo de material de origen (segundo eje, manifiesto de taxonomía).
+
+    Mismo algoritmo de puntuación que `DomainClassifier` en modo catálogo (`score_catalog`),
+    aplicado al catálogo `material_types` de un `TaxonomyManifest` — nunca inventa un tipo
+    fuera de ese catálogo. A diferencia de `DomainClassifier`, no tiene modo "descubrimiento":
+    un manifiesto siempre declara su catálogo de tipos de material explícitamente.
+
+    Attributes:
+        material_types (list[str]): Catálogo de slugs de tipo de material permitidos (saneados).
+        threshold (float): Score mínimo (0-1) para clasificar; por debajo, `classify_text()` devuelve `None`.
+        logger (logging.Logger): Logger estructurado de la instancia.
+
+    Example:
+        >>> classifier = MaterialTypeClassifier(["normativa", "procedimiento"])
+        >>> slug, score = classifier.classify_text(title="Política de calidad", chunks_text="normativa ISO 9001 vigente")
+        >>> slug
+        'normativa'
+    """
+
+    def __init__(self, material_types: list[str], threshold: float = _DEFAULT_THRESHOLD) -> None:
+        self.material_types = self._normalize(material_types)
+        self.threshold = threshold
+        self.logger = logger
+
+    def classify_text(self, *, title: str | None, chunks_text: str, extra_keywords: dict[str, list[str]] | None = None) -> tuple[str | None, float]:
+        """Puntúa `title`/`chunks_text` contra `self.material_types`.
+
+        Args:
+            extra_keywords: Mapa slug saneado -> palabras clave adicionales del manifiesto
+                (`TaxonomyCatalogEntry.keywords`), ver `domain_classifier.score_catalog()`.
+
+        Returns:
+            `(slug, score)` — `slug` es `None` si el mejor score queda por debajo de
+            `self.threshold` (el llamador decide qué hacer: en `ContextBuilder`, se asigna
+            el placeholder `sin-clasificar` en vez de excluir el documento).
+        """
+        haystack = f"{title or ''} {chunks_text}".lower()
+        slug, score = score_catalog(self.material_types, haystack, folder_slug="", extra_keywords=extra_keywords)
+        return (slug, score) if slug is not None and score >= self.threshold else (None, score)
+
+    @staticmethod
+    def _normalize(material_types: list[str]) -> list[str]:
+        # Mismo saneado que `DomainClassifier._normalize_candidate_domains`: un slug de tipo
+        # de material también acaba como segmento de carpeta física
+        # (`reorganizer.py::resolve_document_slug_parts`), así que necesita la misma
+        # protección contra segmentos maliciosos (p. ej. "../otro-sitio").
+        seen: set[str] = set()
+        normalized: list[str] = []
+        for raw in material_types:
+            slug = DomainClassifier._slugify(raw)
+            if slug and slug not in seen:
+                seen.add(slug)
+                normalized.append(slug)
+        return normalized
+
+
+__all__ = ["DomainClassifier", "MaterialTypeClassifier", "read_conversion_json", "resolve_title_and_type", "score_catalog"]

@@ -7,12 +7,21 @@ from datetime import UTC, datetime
 
 from doc_organize.ai import DomainClassificationClient
 from doc_organize.context.context_registry import ContextRegistry
-from doc_organize.context.domain_classifier import DomainClassifier, read_conversion_json, resolve_title_and_type
+from doc_organize.context.domain_classifier import DomainClassifier, MaterialTypeClassifier, read_conversion_json, resolve_title_and_type
 from doc_organize.core.exceptions import DomainClassificationError
-from doc_organize.core.models import Context, ConversionResult, Domain, DomainDocument, DomainStatus, Project
+from doc_organize.core.models import Context, ConversionResult, Domain, DomainDocument, DomainStatus, Project, TaxonomyManifest
 from doc_organize.utils.logging import get_logger
 
 _DEFAULT_THRESHOLD = 0.5
+
+_UNCLASSIFIED_SLUG = "sin-clasificar"
+"""Slug placeholder para un eje (dominio o tipo de material) que no alcanza `threshold`
+cuando hay un manifiesto de taxonomía activo — el documento se reorganiza igual bajo este
+slug en el eje afectado, en vez de excluirse por completo (`unclassified_documents` sigue
+reservado a documentos con artefactos incompletos, ver `_classify_with_manifest`). Al
+tratarse como un slug de dominio/tipo más, `Reorganizer`/`MkDocsGenerator` no necesitan
+lógica especial: `"sin-clasificar".replace("-", " ").title()` ya da un nombre legible
+("Sin Clasificar") igual que cualquier otro slug."""
 
 
 class ContextBuilder:
@@ -71,18 +80,29 @@ class ContextBuilder:
         ai_classification_client: DomainClassificationClient | None = None,
         output_folder_name: str = "organizado",
         on_ai_progress: Callable[[int, int, str], Awaitable[None]] | None = None,
+        taxonomy_manifest: TaxonomyManifest | None = None,
     ) -> Context:
-        """Clasifica `documents` (Sub-fase A + B opcional) y persiste el contexto de `project`.
+        """Clasifica `documents` y persiste el contexto de `project`.
+
+        Sin `taxonomy_manifest` (default): comportamiento sin cambios — Sub-fase A
+        (`DomainClassifier`, un eje) + Sub-fase B opcional (IA, fallback). Con
+        `taxonomy_manifest`: clasificación de 2 ejes (dominio + tipo de material de
+        origen) vía `_classify_with_manifest`, solo por reglas en este ciclo — la
+        Sub-fase B combinada de 2 ejes queda fuera de alcance (ver PLAN de la sesión de
+        manifiesto de taxonomía); `ai_classification_enabled`/`ai_classification_client`
+        se ignoran cuando hay manifiesto.
 
         Args:
             project: Proyecto propietario del contexto.
             documents: Documentos ya convertidos (`converter/`) a clasificar.
             candidate_domains: Catálogo de dominios permitidos, o `None` para descubrirlos
-                del contenido escaneado (ver `DomainClassifier`).
+                del contenido escaneado (ver `DomainClassifier`). Ignorado si se da
+                `taxonomy_manifest` (su catálogo de dominios manda).
             threshold: Score mínimo de la Sub-fase A antes de considerar un documento
-                candidato a la Sub-fase B (o "sin clasificar" si la B está desactivada).
+                candidato a la Sub-fase B (o "sin clasificar"/placeholder según el modo).
             ai_classification_enabled: Activa la Sub-fase B — opt-in explícito, se
-                persiste en `Context.ai_classification_enabled`.
+                persiste en `Context.ai_classification_enabled`. Sin efecto si hay
+                `taxonomy_manifest` (ver arriba).
             ai_classification_client: Cliente ya configurado para la Sub-fase B. Si
                 `ai_classification_enabled=True` pero no se pasa cliente, la Sub-fase B
                 simplemente no se ejecuta (los documentos quedan sin clasificar).
@@ -96,24 +116,31 @@ class ContextBuilder:
                 para retransmitir progreso en tiempo real (semáforo). `None` (default)
                 no tiene efecto ninguno: los llamadores existentes no cambian de
                 comportamiento.
+            taxonomy_manifest: Manifiesto de taxonomía del proyecto (ver
+                `doc_organize.context.taxonomy_manifest.load_taxonomy_manifest`), o `None`
+                (default) para el modo de un eje sin cambios.
 
         Returns:
             El `Context` construido y ya persistido vía `self.registry`.
         """
-        classifier = DomainClassifier(candidate_domains=candidate_domains, threshold=threshold)
-        classified, unclassified = await classifier.classify(documents)
+        if taxonomy_manifest is not None:
+            classified, unclassified = await self._classify_with_manifest(documents, taxonomy_manifest, threshold)
+        else:
+            classifier = DomainClassifier(candidate_domains=candidate_domains, threshold=threshold)
+            classified, unclassified = await classifier.classify(documents)
 
-        if ai_classification_enabled and ai_classification_client is not None and unclassified:
-            classified, unclassified = await self._classify_with_ai(
-                ai_classification_client, classified, unclassified, classifier.candidate_domains, on_progress=on_ai_progress
-            )
+            if ai_classification_enabled and ai_classification_client is not None and unclassified:
+                classified, unclassified = await self._classify_with_ai(
+                    ai_classification_client, classified, unclassified, classifier.candidate_domains, on_progress=on_ai_progress
+                )
 
+        has_predefined_catalog = bool(candidate_domains) or taxonomy_manifest is not None
         domains = [
             Domain(
                 slug=slug,
                 name=slug.replace("-", " ").title(),
-                status=DomainStatus.CONFIRMED if candidate_domains else DomainStatus.DRAFT,
-                predefined=bool(candidate_domains),
+                status=DomainStatus.CONFIRMED if has_predefined_catalog else DomainStatus.DRAFT,
+                predefined=has_predefined_catalog,
                 documents=domain_documents,
             )
             for slug, domain_documents in classified.items()
@@ -128,12 +155,78 @@ class ContextBuilder:
             ai_fallback_threshold=threshold,
             domains=domains,
             unclassified_documents=[document.source_path for document in unclassified],
+            taxonomy_manifest_used=taxonomy_manifest is not None,
             created_at=now,
             updated_at=now,
         )
         await self.registry.save_context(project, context)
         self.logger.info(f"Contexto construido para '{project.name}': {len(domains)} dominio(s), {len(unclassified)} documento(s) sin clasificar")
         return context
+
+    async def _classify_with_manifest(
+        self, documents: list[ConversionResult], manifest: TaxonomyManifest, threshold: float
+    ) -> tuple[dict[str, list[DomainDocument]], list[ConversionResult]]:
+        """Clasifica `documents` en 2 ejes (dominio + tipo de material) usando `manifest`.
+
+        A diferencia del modo de un eje (`DomainClassifier.classify()`), un documento con
+        los tres artefactos completos SIEMPRE se reorganiza aquí: si un eje no alcanza
+        `threshold`, se le asigna el slug placeholder `_UNCLASSIFIED_SLUG` en ese eje en vez
+        de excluir el documento por completo — decisión de negocio explícita de esta
+        sesión (manifiesto de taxonomía). Solo un documento con algún artefacto incompleto
+        (falta original/`.md`/`.json`) queda en `unclassified_documents`, igual criterio que
+        el modo de un eje. Solo reglas (Sub-fase A): la Sub-fase B combinada de 2 ejes queda
+        fuera de alcance de este ciclo.
+        """
+        domain_slugs = [entry.slug for entry in manifest.domains]
+        material_slugs = [entry.slug for entry in manifest.material_types]
+        domain_classifier = DomainClassifier(candidate_domains=domain_slugs, threshold=threshold)
+        material_classifier = MaterialTypeClassifier(material_slugs, threshold=threshold)
+
+        # `entry.slug` saneado (no el original tal cual) porque es la clave por la que
+        # `score_catalog()` busca en `extra_keywords` — debe coincidir con los slugs ya
+        # saneados en `domain_classifier.candidate_domains`/`material_classifier.material_types`
+        # (AUDIT_CODE: antes de esto, `TaxonomyCatalogEntry.keywords` se leía del manifiesto
+        # pero no se usaba nunca en la puntuación).
+        domain_keywords = {DomainClassifier._slugify(entry.slug): entry.keywords for entry in manifest.domains if entry.keywords}
+        material_keywords = {DomainClassifier._slugify(entry.slug): entry.keywords for entry in manifest.material_types if entry.keywords}
+
+        classified: dict[str, list[DomainDocument]] = {}
+        unclassified: list[ConversionResult] = []
+
+        for document in documents:
+            if not document.success or not document.markdown_path or not document.json_path:
+                unclassified.append(document)
+                continue
+            chunks_result = await read_conversion_json(document.json_path)
+            if chunks_result is None:
+                unclassified.append(document)
+                continue
+            chunks_text, title = chunks_result
+
+            domain_slug, domain_score = domain_classifier.score_domain(document, chunks_text, title, extra_keywords=domain_keywords)
+            if domain_slug is None or domain_score < threshold:
+                domain_slug = _UNCLASSIFIED_SLUG
+
+            material_slug, _material_score = material_classifier.classify_text(title=title, chunks_text=chunks_text, extra_keywords=material_keywords)
+            if material_slug is None:
+                material_slug = _UNCLASSIFIED_SLUG
+
+            resolved_title, document_type = resolve_title_and_type(document, title)
+            classified.setdefault(domain_slug, []).append(
+                DomainDocument(
+                    source_path=document.source_path,
+                    markdown_path=document.markdown_path,
+                    json_path=document.json_path,
+                    images_dir=document.images_dir,
+                    title=resolved_title,
+                    document_type=document_type,
+                    material_type=material_slug,
+                    confidence=domain_score,
+                    classified_by="rules",
+                )
+            )
+
+        return classified, unclassified
 
     async def _classify_with_ai(
         self,

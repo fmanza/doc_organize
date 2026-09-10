@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from doc_organize.context.domain_classifier import DomainClassifier, resolve_title_and_type
+from doc_organize.context.domain_classifier import DomainClassifier, MaterialTypeClassifier, resolve_title_and_type, score_catalog
 from doc_organize.core.models import ConversionResult
 
 
@@ -158,3 +158,46 @@ def test_resolve_title_and_type_prefers_the_given_title_over_the_fallback():
 
     assert title == "Título real"
     assert document_type == "pdf"
+
+
+def test_material_type_classifier_matches_by_keywords():
+    classifier = MaterialTypeClassifier(["normativa", "procedimiento"], threshold=0.5)
+
+    slug, score = classifier.classify_text(title="Política de calidad", chunks_text="normativa ISO 9001 vigente")
+
+    assert slug == "normativa"
+    assert score >= 0.5
+
+
+def test_material_type_classifier_returns_none_below_threshold():
+    classifier = MaterialTypeClassifier(["normativa", "procedimiento"], threshold=0.5)
+
+    slug, score = classifier.classify_text(title="Receta de cocina", chunks_text="ingredientes y horno")
+
+    assert slug is None
+    assert score == 0.0
+
+
+def test_material_type_classifier_sanitizes_slugs_like_domain_classifier():
+    classifier = MaterialTypeClassifier(["Normativa", "normativa!!", "  normativa  "])
+
+    assert classifier.material_types == ["normativa"]
+
+
+def test_material_type_classifier_extra_keywords_contribute_to_the_score():
+    """Sin `extra_keywords`, un texto que nunca menciona la palabra del slug ("normativa")
+    no clasifica; con `extra_keywords={"normativa": ["ens"]}`, sí."""
+    classifier = MaterialTypeClassifier(["normativa"], threshold=0.5)
+
+    without_keywords = classifier.classify_text(title=None, chunks_text="controles de acceso ENS")
+    with_keywords = classifier.classify_text(title=None, chunks_text="controles de acceso ENS", extra_keywords={"normativa": ["ens"]})
+
+    assert without_keywords == (None, 0.0)
+    assert with_keywords == ("normativa", 0.5)
+
+
+def test_score_catalog_extra_keywords_use_the_sanitized_slug_as_key():
+    slug, score = score_catalog(["ciberseguridad"], "informe sobre ens", folder_slug="", extra_keywords={"ciberseguridad": ["ENS"]})
+
+    assert slug == "ciberseguridad"
+    assert score == 0.5

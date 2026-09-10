@@ -6,6 +6,33 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+### Added
+
+- `src/doc_organize/context/taxonomy_manifest.py` (nuevo): `load_taxonomy_manifest()` lee
+  `<project.root_path>/taxonomy_manifest.md` (front matter YAML, cuerpo Markdown libre para
+  lectura humana) y lo valida como `TaxonomyManifest` (`core/models.py`, nuevo, junto con
+  `TaxonomyCatalogEntry`) — catálogo cerrado de dominios + tipos de material de origen. Cada
+  entrada puede llevar `keywords` opcionales que suman a la puntuación de ese candidato,
+  además de las palabras derivadas de su propio `slug`.
+- `src/doc_organize/context/domain_classifier.py`: nueva clase `MaterialTypeClassifier`
+  (segundo eje de clasificación, solo por reglas) y función `score_catalog()` (extraída de
+  `DomainClassifier._best_from_catalog` para reutilizar la misma puntuación en ambos ejes,
+  sin cambiar su comportamiento), con soporte para `extra_keywords` por slug
+  (`TaxonomyCatalogEntry.keywords`). `DomainClassifier` gana el método público `score_domain()`.
+- `src/doc_organize/context/context_builder.py`: `ContextBuilder.build()` acepta
+  `taxonomy_manifest: TaxonomyManifest | None` — con manifiesto, clasifica cada documento en
+  2 ejes (dominio + tipo de material); un documento con los tres artefactos completos siempre
+  se reorganiza, con el slug placeholder `sin-clasificar` en el eje que no alcance el umbral,
+  en vez de excluirse (`unclassified_documents` sigue reservado a artefactos incompletos). Sin
+  manifiesto, comportamiento idéntico al de antes de esta sesión. La Sub-fase B (IA) queda sin
+  efecto en modo manifiesto en este ciclo — diferida a una sesión futura.
+- `src/doc_organize/context/reorganizer.py`/`mkdocs_generator.py`: la carpeta de tipo
+  (`<dominio>/<tipo>/<stem>/` y el nav de `mkdocs.yml`) usa `DomainDocument.material_type`
+  cuando está definido, o la extensión como hasta ahora.
+- `src/doc_organize/web/routes/context.py`: `POST /api/projects/{name}/context` (REST y
+  WebSocket) carga `taxonomy_manifest.md` automáticamente si existe; lo combina con
+  `candidate_domains` en la misma petición devuelve `400` explícito.
+
 ## [0.8.0] - 2026-09-10
 
 ### Fixed

@@ -115,6 +115,10 @@ class DomainNotFoundError(ContextError):
     """No hay ningun dominio con ese slug en el contexto del proyecto."""
 
 
+class TaxonomyManifestError(ContextError):
+    """`taxonomy_manifest.md` existe pero su front matter falta, no es YAML válido, o no cumple el schema de `TaxonomyManifest`."""
+
+
 class IncompleteConversionArtifactsError(ContextError):
     """Un documento no tiene los tres artefactos completos (original + .md + .json).
 
@@ -164,6 +168,7 @@ __all__ = [
     "ScannedFolderError",
     "ScannedFolderInUseError",
     "ScannedFolderNotFoundError",
+    "TaxonomyManifestError",
     "TenantAlreadyExistsError",
     "TenantNotFoundError",
     "UsageSourceAuthError",

@@ -52,6 +52,42 @@ async def test_generate_writes_valid_yaml_with_nav_grouped_by_domain(tmp_path, m
 
 
 @pytest.mark.asyncio
+async def test_generate_groups_nav_by_material_type_when_taxonomy_manifest_used(tmp_path, monkeypatch):
+    _disable_mkdocs_build(monkeypatch)
+    project = _make_project(tmp_path)
+    normativa_doc = DomainDocument(
+        source_path="/docs/a.pdf",
+        markdown_path="/out/a.md",
+        json_path="/out/a.json",
+        title="Norma A",
+        document_type="pdf",
+        material_type="normativa",
+        confidence=0.9,
+    )
+    procedimiento_doc = DomainDocument(
+        source_path="/docs/b.pdf",
+        markdown_path="/out/b.md",
+        json_path="/out/b.json",
+        title="Proc B",
+        document_type="pdf",
+        material_type="procedimiento",
+        confidence=0.9,
+    )
+    context = _make_context(project, [Domain(slug="calidad", name="Calidad", documents=[normativa_doc, procedimiento_doc])])
+    context.taxonomy_manifest_used = True
+
+    mkdocs_yml_path, _site_built = await MkDocsGenerator().generate(project, context)
+
+    config = yaml.safe_load(mkdocs_yml_path.read_text(encoding="utf-8"))
+    assert config["nav"][1] == {
+        "Calidad": [
+            {"Normativa": [{"Norma A": "calidad/normativa/a/a.md"}]},
+            {"Procedimiento": [{"Proc B": "calidad/procedimiento/b/b.md"}]},
+        ]
+    }
+
+
+@pytest.mark.asyncio
 async def test_generate_writes_index_md_listing_domains(tmp_path, monkeypatch):
     _disable_mkdocs_build(monkeypatch)
     project = _make_project(tmp_path)

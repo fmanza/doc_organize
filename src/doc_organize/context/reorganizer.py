@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 
 
 def resolve_document_slug_parts(document: DomainDocument) -> tuple[str, str]:
-    """`(document_type, stem)`: determina la carpeta de un documento clasificado
+    """`(tipo, stem)`: determina la carpeta de un documento clasificado
     bajo `<output_folder_name>/<dominio>/<tipo>/<stem>/`.
 
     Compartida entre `Reorganizer` (ruta real en disco) y `MkDocsGenerator` (ruta
@@ -24,9 +24,16 @@ def resolve_document_slug_parts(document: DomainDocument) -> tuple[str, str]:
     `Path`, que en Windows usaría `\\`) — antes cada uno repetía
     `Path(document.markdown_path).stem` por su cuenta, sin nada que garantizara
     que no divergieran (AUDIT_CODE, sesión 2026-09-09).
+
+    `tipo` es `document.material_type` (tipo de material de origen del manifiesto de
+    taxonomía) cuando está definido, o `document.document_type` (extensión) en el modo
+    sin manifiesto — mismo campo `tipo` de siempre, solo cambia qué lo resuelve, así que
+    el modo sin manifiesto (`material_type=None`) queda con el comportamiento idéntico
+    al de antes de esta sesión.
     """
     stem = Path(document.markdown_path).stem
-    return document.document_type, stem
+    tipo = document.material_type if document.material_type is not None else document.document_type
+    return tipo, stem
 
 
 class Reorganizer:
