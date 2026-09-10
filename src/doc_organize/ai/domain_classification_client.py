@@ -19,6 +19,7 @@ from typing import Any, Self
 
 import httpx
 
+from doc_organize.auth import InstanceSecretsStore
 from doc_organize.core.exceptions import DomainClassificationAuthError, DomainClassificationConnectionError, DomainClassificationError
 from doc_organize.core.models import DomainClassificationResult, LiteLLMClassificationConfig
 from doc_organize.utils.logging import get_logger
@@ -61,6 +62,34 @@ def litellm_classification_config_from_env() -> LiteLLMClassificationConfig:
     if not base_url or not virtual_key:
         raise ValueError(f"Definir {_ENV_VAR_BASE_URL} y {_ENV_VAR_VIRTUAL_KEY} para usar litellm_classification_config_from_env().")
     model = os.environ.get(_ENV_VAR_MODEL)
+    return LiteLLMClassificationConfig(base_url=base_url, virtual_key=virtual_key, **({"model": model} if model else {}))
+
+
+async def litellm_classification_config_from_store_or_env(store: InstanceSecretsStore) -> LiteLLMClassificationConfig:
+    """Construye `LiteLLMClassificationConfig` con precedencia `store` (panel de
+    configuración IA) > `DOC_ORGANIZE_LITELLM_CLASSIFICATION_*` del entorno.
+
+    Complementa a `litellm_classification_config_from_env()` (sin modificarla, ni
+    cambiar su comportamiento para quien ya la usa) — pensada para las rutas web,
+    que sí tienen un `InstanceSecretsStore` disponible (ver
+    `web/dependencies.py::get_instance_secrets_store`). Nunca rompe un despliegue
+    que solo usa `.env`: si no hay ninguna fila guardada para una clave, cae al
+    valor del entorno exactamente igual que la versión `_from_env`.
+
+    Returns:
+        Config lista para `DomainClassificationClient`.
+
+    Raises:
+        ValueError: Si, tras aplicar la precedencia, falta `base_url` o `virtual_key`.
+
+    Example:
+        >>> config = await litellm_classification_config_from_store_or_env(store)  # doctest: +SKIP
+    """
+    base_url = await store.get(_ENV_VAR_BASE_URL.lower()) or os.environ.get(_ENV_VAR_BASE_URL)
+    virtual_key = await store.get(_ENV_VAR_VIRTUAL_KEY.lower()) or os.environ.get(_ENV_VAR_VIRTUAL_KEY)
+    if not base_url or not virtual_key:
+        raise ValueError(f"Definir {_ENV_VAR_BASE_URL} y {_ENV_VAR_VIRTUAL_KEY} (panel de configuración IA o entorno) para clasificar por IA.")
+    model = await store.get(_ENV_VAR_MODEL.lower()) or os.environ.get(_ENV_VAR_MODEL)
     return LiteLLMClassificationConfig(base_url=base_url, virtual_key=virtual_key, **({"model": model} if model else {}))
 
 
@@ -137,9 +166,7 @@ class DomainClassificationClient:
             return DomainClassificationResult(domain=None, confidence=0.0, reasoning="Sin catálogo de dominios candidatos.")
 
         user_prompt = (
-            f"Dominios candidatos: {', '.join(candidate_domains)}\n"
-            f"Título: {title or '(sin título)'}\n"
-            f"Contenido: {chunks_text[:_MAX_CONTENT_CHARS]}"
+            f"Dominios candidatos: {', '.join(candidate_domains)}\nTítulo: {title or '(sin título)'}\nContenido: {chunks_text[:_MAX_CONTENT_CHARS]}"
         )
         try:
             response = await self._client.post(
@@ -199,4 +226,4 @@ class DomainClassificationClient:
         return DomainClassificationResult(domain=domain, confidence=confidence, reasoning=reasoning if isinstance(reasoning, str) else None)
 
 
-__all__ = ["DomainClassificationClient", "litellm_classification_config_from_env"]
+__all__ = ["DomainClassificationClient", "litellm_classification_config_from_env", "litellm_classification_config_from_store_or_env"]

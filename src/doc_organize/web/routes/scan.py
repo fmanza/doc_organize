@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from doc_organize.cache import CacheManager
 from doc_organize.core.constants import (
+    AV_SUPPORTED_EXTENSIONS,
     CONVERSION_FOLDER_NAME,
     DEFAULT_CACHE_DB_NAME,
     DUPLICATES_FOLDER_NAME,
@@ -24,6 +25,7 @@ from doc_organize.core.constants import (
     SCAN_FOLDERS_JSON_NAME,
     SCAN_HISTORY_FOLDER_NAME,
     SCAN_HISTORY_JSONL_NAME,
+    SUPPORTED_EXTENSIONS,
 )
 from doc_organize.core.models import Project, ScanEventType, ScannedFolder, ScanRunReport
 from doc_organize.scan import ScanCommand, list_scan_runs
@@ -170,6 +172,8 @@ async def folder_selector(
             "cache_page_size_options": PAGE_SIZE_OPTIONS,
             "cache_range_start": cache_page.range_start,
             "cache_range_end": cache_page.range_end,
+            "supported_extensions": sorted(SUPPORTED_EXTENSIONS),
+            "av_supported_extensions": sorted(AV_SUPPORTED_EXTENSIONS),
         },
     )
 

@@ -18,10 +18,11 @@ from doc_organize.ai import (
     DomainClassificationClient,
     TaxonomyClassificationClient,
     TaxonomyManifestDraftClient,
-    litellm_classification_config_from_env,
-    litellm_taxonomy_classification_config_from_env,
-    litellm_taxonomy_manifest_draft_config_from_env,
+    litellm_classification_config_from_store_or_env,
+    litellm_taxonomy_classification_config_from_store_or_env,
+    litellm_taxonomy_manifest_draft_config_from_store_or_env,
 )
+from doc_organize.auth import InstanceSecretsStore
 from doc_organize.cache import CacheManager
 from doc_organize.context import (
     ContextBuilder,
@@ -31,6 +32,7 @@ from doc_organize.context import (
     TaxonomyTemplateRegistry,
     load_taxonomy_manifest,
     render_taxonomy_manifest_markdown,
+    save_taxonomy_manifest,
     select_document_sample,
 )
 from doc_organize.converter import DocumentConverter
@@ -56,19 +58,23 @@ from doc_organize.core.models import (
     ConversionResult,
     ConversionStatus,
     Project,
+    TaxonomyCatalogEntry,
     TaxonomyManifest,
     TaxonomyTemplateSummary,
 )
 from doc_organize.utils.logging import get_logger
+from doc_organize.web.ai_settings_config import get_family, is_family_configured
 from doc_organize.web.dependencies import (
     acquire_project_operation_lock,
     authorize_project_websocket,
+    get_instance_secrets_store,
     get_project_registry,
     get_scanned_folders_store,
     get_taxonomy_template_registry,
     get_tenant_id,
     project_operation_key,
     release_project_operation_lock,
+    require_admin,
     require_project_access,
     resolve_ws_project,
 )
@@ -166,6 +172,28 @@ class TaxonomyManifestDraftResponse(BaseModel):
     total_document_count: int
 
 
+class SaveTaxonomyManifestRequest(BaseModel):
+    manifest_markdown: str
+    """Contenido completo del fichero (front matter YAML + prosa), normalmente partiendo del
+    texto que devolvió `draft_taxonomy_manifest`, revisado/editado por el usuario."""
+
+
+class SaveTaxonomyManifestResponse(BaseModel):
+    manifest: TaxonomyManifest
+
+
+class TaxonomyTemplateSaveRequest(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    domains: list[TaxonomyCatalogEntry] = Field(min_length=1)
+    material_types: list[TaxonomyCatalogEntry] = Field(min_length=1)
+
+
+class TaxonomyTemplateResponse(BaseModel):
+    name: str
+    manifest: TaxonomyManifest
+
+
 def _acquire_operation_lock(request: Request, tenant_id: str, project_name: str) -> tuple[str, str]:
     """Reserva `(tenant_id, project_name)` para esta petición, o levanta 409 si ya
     hay un escaneo, deduplicación u otra operación en curso para este proyecto.
@@ -193,30 +221,32 @@ def _release_operation_lock(request: Request, key: tuple[str, str]) -> None:
 
 @asynccontextmanager
 async def _optional_ai_client(
-    enabled: bool, taxonomy_manifest: TaxonomyManifest | None
+    enabled: bool, taxonomy_manifest: TaxonomyManifest | None, secrets_store: InstanceSecretsStore
 ) -> AsyncIterator[tuple[DomainClassificationClient | None, TaxonomyClassificationClient | None]]:
     """`(None, None)` si la Sub-fase B no está activa. Si lo está, construye
     `TaxonomyClassificationClient` (2 ejes, llamada combinada) cuando hay
     `taxonomy_manifest`, o `DomainClassificationClient` (1 eje) si no -- nunca
     los dos a la vez, el llamador solo usa el que corresponda a su modo. Cierra
-    el cliente construido al salir. Config de LiteLLM sin definir en el entorno
-    (`litellm_classification_config_from_env()`/`litellm_taxonomy_classification_config_from_env()`
-    según el caso) se traduce en 400, no en un 500 críptico — el usuario activó
-    el toggle de IA, pero el proxy de clasificación correspondiente no está
+    el cliente construido al salir. Config resuelta con precedencia `secrets_store`
+    (panel `/admin/configuracion-ia`) > `DOC_ORGANIZE_LITELLM_*` del entorno (ver
+    `litellm_classification_config_from_store_or_env()`/
+    `litellm_taxonomy_classification_config_from_store_or_env()` según el caso);
+    sin ninguna de las dos se traduce en 400, no en un 500 críptico — el usuario
+    activó el toggle de IA, pero el proxy de clasificación correspondiente no está
     configurado todavía (ver `docs/guides/litellm_proxy_setup.md`)."""
     if not enabled:
         yield None, None
         return
     if taxonomy_manifest is not None:
         try:
-            taxonomy_config = litellm_taxonomy_classification_config_from_env()
+            taxonomy_config = await litellm_taxonomy_classification_config_from_store_or_env(secrets_store)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         async with TaxonomyClassificationClient(taxonomy_config) as taxonomy_client:
             yield None, taxonomy_client
         return
     try:
-        config = litellm_classification_config_from_env()
+        config = await litellm_classification_config_from_store_or_env(secrets_store)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     async with DomainClassificationClient(config) as client:
@@ -392,6 +422,127 @@ async def list_taxonomy_templates(request: Request) -> TaxonomyTemplateListRespo
     return TaxonomyTemplateListResponse(templates=await template_registry.list_templates())
 
 
+@router.get("/api/taxonomy-templates/{template_name}", response_model=TaxonomyTemplateResponse)
+async def get_taxonomy_template(template_name: str, request: Request) -> TaxonomyTemplateResponse:
+    """Contenido completo (catálogos + título/descripción) de la plantilla `template_name`.
+
+    A diferencia de `list_taxonomy_templates` (solo `TaxonomyTemplateSummary`, sin catálogos),
+    usado por `/admin/plantillas-taxonomia` para prefijar el formulario de edición.
+
+    Raises:
+        HTTPException: 404 si no existe ninguna plantilla con ese nombre.
+    """
+    template_registry = get_taxonomy_template_registry(request)
+    try:
+        manifest = await template_registry.load_template(template_name)
+    except TaxonomyTemplateError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return TaxonomyTemplateResponse(name=template_name, manifest=manifest)
+
+
+@router.put(
+    "/api/taxonomy-templates/{template_name}",
+    response_model=TaxonomyTemplateResponse,
+    dependencies=[Depends(require_admin)],
+)
+async def save_taxonomy_template(template_name: str, payload: TaxonomyTemplateSaveRequest, request: Request) -> TaxonomyTemplateResponse:
+    """Crea (o sobrescribe) la plantilla `template_name` en la biblioteca de usuario -- admin-only,
+    igual criterio que `/admin/roles`/`/admin/users` (config de instancia, no de un proyecto).
+
+    `PUT` en vez de `POST`+`PUT` separados: la semántica de "crear o reemplazar por identificador
+    en la URL" es la misma operación de fichero (`TaxonomyTemplateRegistry.save_template` siempre
+    sobrescribe), así que un único endpoint idempotente cubre ambos casos sin distinguir 201 de 200
+    -- no hay ninguna diferencia de comportamiento entre "crear" y "editar" aquí.
+
+    Raises:
+        HTTPException: 400 si `template_name` no es un slug válido (solo minúsculas, dígitos y
+            guiones).
+    """
+    template_registry = get_taxonomy_template_registry(request)
+    manifest = TaxonomyManifest(title=payload.title, description=payload.description, domains=payload.domains, material_types=payload.material_types)
+    try:
+        await template_registry.save_template(template_name, manifest)
+    except TaxonomyTemplateError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return TaxonomyTemplateResponse(name=template_name, manifest=manifest)
+
+
+@router.delete(
+    "/api/taxonomy-templates/{template_name}",
+    status_code=204,
+    dependencies=[Depends(require_admin)],
+)
+async def delete_taxonomy_template(template_name: str, payload: ConfirmedActionRequest, request: Request) -> None:
+    """Elimina la plantilla de usuario `template_name` -- admin-only.
+
+    Nunca borra una plantilla empaquetada (`TaxonomyTemplateRegistry.delete_template` solo toca
+    `templates_dir`, ver su docstring) -- si `template_name` solo existe como empaquetada, se
+    levanta 404 igual que "no existe", nunca se confunde con éxito.
+
+    Operación irreversible -- requiere confirmación explícita (`confirm: true`), mismo criterio
+    que `delete_context_endpoint`.
+
+    Raises:
+        HTTPException: 400 si `confirm` no es `true`; 404 si no existe ninguna plantilla de
+            usuario con ese nombre.
+    """
+    if not payload.confirm:
+        raise HTTPException(status_code=400, detail="Se requiere confirmación explícita para eliminar la plantilla.")
+    template_registry = get_taxonomy_template_registry(request)
+    try:
+        await template_registry.delete_template(template_name)
+    except TaxonomyTemplateError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/admin/plantillas-taxonomia", response_class=HTMLResponse, dependencies=[Depends(require_admin)])
+async def taxonomy_templates_admin_page(request: Request) -> HTMLResponse:
+    """Biblioteca de plantillas de taxonomía (crear/editar/borrar) -- admin-only, config de
+    instancia (no de un proyecto concreto), mismo criterio que `/admin/roles`/`/admin/users`."""
+    template_registry = get_taxonomy_template_registry(request)
+    templates_list = await template_registry.list_templates()
+    return _templates.TemplateResponse(
+        request,
+        "taxonomy_templates_admin.html.j2",
+        {"templates": [template.model_dump() for template in templates_list]},
+    )
+
+
+@router.put(
+    "/api/projects/{name}/context/taxonomy-manifest",
+    response_model=SaveTaxonomyManifestResponse,
+    dependencies=[Depends(require_project_access)],
+)
+async def save_taxonomy_manifest_endpoint(name: str, payload: SaveTaxonomyManifestRequest, request: Request) -> SaveTaxonomyManifestResponse:
+    """Guarda `payload.manifest_markdown` como `<project.root_path>/taxonomy_manifest.md`.
+
+    Cierra el hueco que documentaba `draft_taxonomy_manifest`: hasta ahora, el borrador
+    generado por IA se devolvía como texto pero nada lo persistía -- "confirmar" era una acción
+    manual (copiar el texto y crear el fichero a mano fuera de la aplicación).
+
+    Bloquea con `_acquire_operation_lock` (a diferencia de `draft_taxonomy_manifest`, de solo
+    lectura): escribe de verdad en `project.root_path`, así que no puede solaparse con un
+    escaneo/deduplicación/build de contexto en curso que esté leyendo el mismo fichero
+    (`_load_taxonomy_manifest_or_400`).
+
+    Raises:
+        HTTPException: 400 si `manifest_markdown` no empieza con el delimitador de front matter,
+            no lo cierra, el YAML no es válido, o no cumple el schema de `TaxonomyManifest`;
+            409 si hay otra operación en curso para el proyecto.
+    """
+    tenant_id = get_tenant_id(request)
+    key = _acquire_operation_lock(request, tenant_id, name)
+    try:
+        project = await _get_project(request, name)
+        try:
+            manifest = await save_taxonomy_manifest(project, payload.manifest_markdown)
+        except TaxonomyManifestError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return SaveTaxonomyManifestResponse(manifest=manifest)
+    finally:
+        _release_operation_lock(request, key)
+
+
 @router.post(
     "/api/projects/{name}/context/taxonomy-manifest-draft",
     response_model=TaxonomyManifestDraftResponse,
@@ -403,11 +554,11 @@ async def draft_taxonomy_manifest(name: str, request: Request, payload: Taxonomy
 
     Distinto de `POST .../context` con `ai_classification_enabled=True` (Sub-fase B): aquella
     elige DENTRO de un catálogo de dominios ya confirmado por el usuario; este endpoint propone el
-    catálogo mismo. Nunca lo persiste ni lo aplica — no existe hoy ningún endpoint que escriba
-    `taxonomy_manifest.md` por el usuario, así que "confirmar" el borrador es siempre una acción
-    manual (revisar/editar `manifest`/`manifest_markdown` y guardarlo a mano). Por eso mismo es de
-    solo lectura: sin `_acquire_operation_lock` (igual que `GET .../context`/
-    `GET /api/taxonomy-templates`), no toca `context.json` ni ninguna carpeta del proyecto.
+    catálogo mismo. Nunca lo persiste ni lo aplica por sí solo -- el usuario revisa/edita
+    `manifest`/`manifest_markdown` y lo confirma con `PUT .../context/taxonomy-manifest`
+    (`save_taxonomy_manifest_endpoint`). Por eso mismo este endpoint es de solo lectura: sin
+    `_acquire_operation_lock` (igual que `GET .../context`/`GET /api/taxonomy-templates`), no toca
+    `context.json` ni ninguna carpeta del proyecto.
 
     Raises:
         HTTPException: 400 si el proyecto no tiene documentos convertidos todavía (o ninguno con
@@ -432,10 +583,11 @@ async def draft_taxonomy_manifest(name: str, request: Request, payload: Taxonomy
             detail="Ninguno de los documentos convertidos tiene un .json de conversión legible -- no se puede generar un borrador de taxonomía.",
         )
 
-    try:
-        config = litellm_taxonomy_manifest_draft_config_from_env()
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    async with get_instance_secrets_store(request) as secrets_store:
+        try:
+            config = await litellm_taxonomy_manifest_draft_config_from_store_or_env(secrets_store)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
         async with TaxonomyManifestDraftClient(config) as client:
@@ -486,19 +638,20 @@ async def build_context(name: str, request: Request, payload: BuildContextReques
             project, payload.candidate_domains, payload.taxonomy_template_name, template_registry
         )
 
-        async with _optional_ai_client(payload.ai_classification_enabled, taxonomy_manifest) as (ai_client, taxonomy_client):
-            context = await _context_builder.build(
-                project,
-                documents,
-                candidate_domains=payload.candidate_domains,
-                threshold=payload.threshold,
-                ai_classification_enabled=payload.ai_classification_enabled,
-                ai_classification_client=ai_client,
-                output_folder_name=output_folder_name,
-                taxonomy_manifest=taxonomy_manifest,
-                taxonomy_classification_client=taxonomy_client,
-                taxonomy_template_name=payload.taxonomy_template_name if taxonomy_manifest is not None else None,
-            )
+        async with get_instance_secrets_store(request) as secrets_store:
+            async with _optional_ai_client(payload.ai_classification_enabled, taxonomy_manifest, secrets_store) as (ai_client, taxonomy_client):
+                context = await _context_builder.build(
+                    project,
+                    documents,
+                    candidate_domains=payload.candidate_domains,
+                    threshold=payload.threshold,
+                    ai_classification_enabled=payload.ai_classification_enabled,
+                    ai_classification_client=ai_client,
+                    output_folder_name=output_folder_name,
+                    taxonomy_manifest=taxonomy_manifest,
+                    taxonomy_classification_client=taxonomy_client,
+                    taxonomy_template_name=payload.taxonomy_template_name if taxonomy_manifest is not None else None,
+                )
         try:
             await _reorganizer.reorganize(project, context)
             context.reorganized = True
@@ -627,7 +780,10 @@ async def context_build_websocket(name: str, websocket: WebSocket) -> None:
 
         context: Context | None = None
         try:
-            async with _optional_ai_client(payload.ai_classification_enabled, taxonomy_manifest) as (ai_client, taxonomy_client):
+            async with (
+                get_instance_secrets_store(websocket) as secrets_store,
+                _optional_ai_client(payload.ai_classification_enabled, taxonomy_manifest, secrets_store) as (ai_client, taxonomy_client),
+            ):
                 # `_optional_ai_client` resuelve la config de LiteLLM (y puede lanzar
                 # `HTTPException`) ANTES de emitir "started" -- evita que el semáforo
                 # llegue a mostrar "iniciando..." para acto seguido cerrarse en error.
@@ -647,16 +803,21 @@ async def context_build_websocket(name: str, websocket: WebSocket) -> None:
                     taxonomy_classification_client=taxonomy_client,
                     taxonomy_template_name=payload.taxonomy_template_name if taxonomy_manifest is not None else None,
                 )
-                total_documents = sum(len(domain.documents) for domain in context.domains)
-                await websocket.send_json(
-                    ContextBuildEvent(event=ContextBuildEventType.REORGANIZE_STARTED, data={"total": total_documents}).model_dump(mode="json")
-                )
-                await _reorganizer.reorganize(project, context, on_document_copied=on_document_copied)
-                context.reorganized = True
-                await websocket.send_json(ContextBuildEvent(event=ContextBuildEventType.MKDOCS_STARTED, data={}).model_dump(mode="json"))
-                _, site_built = await _mkdocs_generator.generate(project, context)
-                context.mkdocs_generated = True
-                context.mkdocs_site_built = site_built
+            # Fuera de `_optional_ai_client`/`get_instance_secrets_store` a propósito
+            # (AUDIT_CODE, sesión 2026-09-11): ni el cliente HTTP de IA ni la conexión a
+            # `auth.db` hacen falta durante la copia física/generación de MkDocs, que
+            # puede tardar bastante más que la clasificación -- antes se retenían ambos
+            # recursos abiertos durante toda la construcción sin ningún beneficio.
+            total_documents = sum(len(domain.documents) for domain in context.domains)
+            await websocket.send_json(
+                ContextBuildEvent(event=ContextBuildEventType.REORGANIZE_STARTED, data={"total": total_documents}).model_dump(mode="json")
+            )
+            await _reorganizer.reorganize(project, context, on_document_copied=on_document_copied)
+            context.reorganized = True
+            await websocket.send_json(ContextBuildEvent(event=ContextBuildEventType.MKDOCS_STARTED, data={}).model_dump(mode="json"))
+            _, site_built = await _mkdocs_generator.generate(project, context)
+            context.mkdocs_generated = True
+            context.mkdocs_site_built = site_built
         except HTTPException as exc:
             await websocket.close(code=1008, reason=str(exc.detail))
             return
@@ -737,28 +898,6 @@ async def context_delete_websocket(name: str, websocket: WebSocket) -> None:
         release_project_operation_lock(websocket, operation_key)
 
 
-def _is_litellm_classification_configured() -> bool:
-    # Solo lee variables de entorno (sin red) — mismo chequeo que hace
-    # `_optional_ai_client` al construir el contexto, pero aquí solo para
-    # informar en la UI si el proxy de clasificación está listo o no.
-    try:
-        litellm_classification_config_from_env()
-    except ValueError:
-        return False
-    return True
-
-
-def _is_litellm_taxonomy_classification_configured() -> bool:
-    # Mismo chequeo que `_is_litellm_classification_configured()`, pero contra las
-    # env vars propias de `TaxonomyClassificationClient` (2 ejes) — el proyecto con
-    # manifiesto activo usa ese proxy en vez del de 1 eje (ver `_optional_ai_client`).
-    try:
-        litellm_taxonomy_classification_config_from_env()
-    except ValueError:
-        return False
-    return True
-
-
 @router.get("/projects/{name}/context", response_class=HTMLResponse, dependencies=[Depends(require_project_access)])
 async def context_page(name: str, request: Request) -> HTMLResponse:
     project = await _get_project(request, name)
@@ -771,9 +910,17 @@ async def context_page(name: str, request: Request) -> HTMLResponse:
         # detectar el problema. `build_context`/`context_build_websocket` sí lo
         # rechazan con 400 explícito al intentar construir (`_load_taxonomy_manifest_or_400`).
         taxonomy_manifest = None
-    litellm_configured = (
-        _is_litellm_taxonomy_classification_configured() if taxonomy_manifest is not None else _is_litellm_classification_configured()
-    )
+    # Chequeo de estado (sin red, solo lectura de store+entorno) -- mismo criterio de
+    # precedencia que usará `_optional_ai_client` al construir el contexto de verdad
+    # (panel `/admin/configuracion-ia` > `DOC_ORGANIZE_LITELLM_*` del entorno).
+    async with get_instance_secrets_store(request) as secrets_store:
+        family_key = "litellm_taxonomy_classification" if taxonomy_manifest is not None else "litellm_classification"
+        family = get_family(family_key)
+        assert family is not None  # las 2 claves de arriba son literales fijos, siempre resuelven
+        litellm_configured = await is_family_configured(family, secrets_store)
+        manifest_draft_family = get_family("litellm_taxonomy_manifest_draft")
+        assert manifest_draft_family is not None
+        litellm_manifest_draft_configured = await is_family_configured(manifest_draft_family, secrets_store)
     template_registry = get_taxonomy_template_registry(request)
     taxonomy_templates = await template_registry.list_templates()
     return _templates.TemplateResponse(
@@ -783,6 +930,7 @@ async def context_page(name: str, request: Request) -> HTMLResponse:
             "project": project,
             "context": context,
             "litellm_configured": litellm_configured,
+            "litellm_manifest_draft_configured": litellm_manifest_draft_configured,
             "default_output_folder_name": _DEFAULT_OUTPUT_FOLDER_NAME,
             "taxonomy_templates": taxonomy_templates,
             "has_local_taxonomy_manifest": taxonomy_manifest is not None,

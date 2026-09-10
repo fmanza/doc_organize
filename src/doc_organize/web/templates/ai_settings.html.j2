@@ -1,0 +1,120 @@
+{% extends "base.html.j2" %}
+{% from "_example_modal_macros.html.j2" import example_modal_html, example_modal_script %}
+{% block title %}doc_organize — Configuración IA{% endblock %}
+{% block content %}
+<p><a class="text-blue-600 underline" href="/">&larr; Proyectos</a></p>
+<h1 class="text-xl font-semibold mb-2">Configuración IA</h1>
+<p class="text-sm text-gray-600 mb-4">
+    Credenciales y alias de modelo de las 5 familias de IA de doc_organize. Complementa a
+    <code>.env</code> — un valor guardado aquí tiene prioridad; si no guardas nada, se sigue
+    usando la variable de entorno correspondiente (si está definida).
+</p>
+
+{% if not encryption_configured %}
+<p class="text-sm text-amber-700 mb-4 p-3 border border-amber-300 rounded bg-amber-50">
+    ⚠ Cifrado no disponible: define <code>DOC_ORGANIZE_SECRETS_KEY</code> en el entorno del
+    servidor para poder guardar aquí las credenciales (<em>virtual key</em>/PAT). Los campos que
+    no son credenciales (alias de modelo, URL del proxy) se pueden guardar igualmente.
+</p>
+{% endif %}
+
+{% for family in families %}
+<section class="border border-gray-200 rounded p-4 mb-4">
+    <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold">{{ family.label }}</h2>
+        {% if family.configured %}
+        <span class="text-sm text-green-700">✓ Configurado</span>
+        {% else %}
+        <span class="text-sm text-amber-700">⚠ No configurado</span>
+        {% endif %}
+    </div>
+    <form class="ai-settings-form space-y-2" data-family-key="{{ family.key }}">
+        {% for field in family.fields %}
+        <div class="flex items-center gap-2">
+            <label class="w-28 text-sm shrink-0 font-mono" for="ai-{{ family.key }}-{{ field.name }}">
+                {{ field.name }}{% if field.required %} *{% endif %}
+            </label>
+            {% if field.is_secret %}
+            <input type="password" id="ai-{{ family.key }}-{{ field.name }}" data-field="{{ field.name }}" data-secret="1"
+                   placeholder="{% if field.masked_hint %}guardado ({{ field.masked_hint }}) — deja en blanco para no cambiar{% else %}sin configurar{% endif %}"
+                   class="border border-gray-300 rounded px-2 py-1 flex-1 text-sm font-mono" autocomplete="off">
+            {% if field.configured_via != 'none' %}
+            <button type="button" class="ai-settings-clear-btn text-red-700 hover:underline bg-transparent border-0 cursor-pointer text-xs whitespace-nowrap"
+                    data-family="{{ family.key }}" data-field="{{ field.name }}">Borrar</button>
+            {% endif %}
+            {% else %}
+            <input type="text" id="ai-{{ family.key }}-{{ field.name }}" data-field="{{ field.name }}"
+                   value="{{ field.value or '' }}" class="border border-gray-300 rounded px-2 py-1 flex-1 text-sm font-mono">
+            {% endif %}
+            <span class="text-xs text-gray-500 w-14 shrink-0 text-right">
+                {{ {"store": "guardado", "env": ".env", "none": ""}[field.configured_via] }}
+            </span>
+        </div>
+        {% endfor %}
+        <div class="flex items-center gap-3 mt-2">
+            <button type="submit" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 text-sm">Guardar</button>
+            <button type="button" class="ai-settings-help-btn text-blue-600 underline text-sm bg-transparent border-0 cursor-pointer" data-family="{{ family.key }}">Ver líneas .env equivalentes</button>
+            <span class="ai-settings-error text-red-700 text-sm min-h-[1.2em]"></span>
+        </div>
+    </form>
+</section>
+{% endfor %}
+
+{{ example_modal_html("ai-settings-example-modal") }}
+
+<script>
+const familiesData = {{ families | tojson }};
+const familiesByKey = Object.fromEntries(familiesData.map((family) => [family.key, family]));
+
+document.querySelectorAll(".ai-settings-form").forEach((form) => {
+    const familyKey = form.dataset.familyKey;
+    const errorEl = form.querySelector(".ai-settings-error");
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        errorEl.textContent = "";
+        const fields = {};
+        form.querySelectorAll("[data-field]").forEach((input) => {
+            if (input.dataset.secret && !input.value) return; // secreto vacío -> no tocar
+            fields[input.dataset.field] = input.value;
+        });
+        try {
+            await postJson(`/api/admin/ai-settings/${familyKey}`, "PUT", { fields });
+            window.location.reload();
+        } catch (err) {
+            errorEl.textContent = err.message;
+        }
+    });
+});
+
+document.querySelectorAll(".ai-settings-clear-btn").forEach((button) => {
+    button.addEventListener("click", async () => {
+        const form = button.closest(".ai-settings-form");
+        const errorEl = form.querySelector(".ai-settings-error");
+        errorEl.textContent = "";
+        try {
+            await postJson(`/api/admin/ai-settings/${button.dataset.family}`, "PUT", { fields: { [button.dataset.field]: null } });
+            window.location.reload();
+        } catch (err) {
+            errorEl.textContent = err.message;
+        }
+    });
+});
+
+{{ example_modal_script("ai-settings-example-modal", "aiSettingsExampleModal", "openAiSettingsExample") }}
+
+document.querySelectorAll(".ai-settings-help-btn").forEach((button) => {
+    button.addEventListener("click", () => {
+        const family = familiesByKey[button.dataset.family];
+        const lines = family.fields.map((field) => `${field.env_var_name}=`).join("\n");
+        openAiSettingsExample(
+            `${family.label} — líneas .env equivalentes`,
+            "# Copia estas líneas en tu .env si prefieres configurar por entorno en vez de\n" +
+            "# guardar aquí (ambas vías son equivalentes; un valor guardado aquí tiene\n" +
+            "# prioridad sobre el que pongas en .env):\n\n" + lines
+        );
+    });
+});
+</script>
+
+{% include "_shared_scripts.html.j2" %}
+{% endblock %}

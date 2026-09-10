@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
+from doc_organize.core.constants import ROLE_NAME_MAX_LENGTH, USERNAME_MAX_LENGTH
 from doc_organize.core.exceptions import RoleNotFoundError
 from doc_organize.core.models import Role, User
 from doc_organize.web.dependencies import get_auth_store, get_project_registry, get_tenant_id, require_admin
@@ -106,7 +107,7 @@ async def admin_roles_page(request: Request) -> HTMLResponse:
     return _templates.TemplateResponse(
         request,
         "admin_roles.html.j2",
-        {"roles": roles, "projects": projects},
+        {"roles": roles, "projects": projects, "role_name_max_length": ROLE_NAME_MAX_LENGTH},
     )
 
 
@@ -120,7 +121,7 @@ async def admin_users_page(request: Request) -> HTMLResponse:
     return _templates.TemplateResponse(
         request,
         "admin_users.html.j2",
-        {"users": users, "roles": roles, "roles_by_id": roles_by_id},
+        {"users": users, "roles": roles, "roles_by_id": roles_by_id, "username_max_length": USERNAME_MAX_LENGTH},
     )
 
 

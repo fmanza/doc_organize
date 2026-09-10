@@ -122,6 +122,14 @@ class RoleInUseError(AuthError):
     """El rol no se puede eliminar: lo usan usuarios, o es el ultimo rol admin del tenant."""
 
 
+class SecretsCipherError(AuthError):
+    """Error cifrando/descifrando un secreto de `InstanceSecretsStore` (clave inválida, o no coincide con la usada para guardarlo)."""
+
+
+class SecretsEncryptionNotConfiguredError(SecretsCipherError):
+    """`DOC_ORGANIZE_SECRETS_KEY` no está definida -- no se puede cifrar ni descifrar ningún secreto."""
+
+
 class UsageSourceError(DocOrganizeError):
     """Error base para los clientes de monitorizacion de uso/coste de IA (`doc_organize.ai`, fase 2)."""
 
@@ -236,6 +244,8 @@ __all__ = [
     "ScannedFolderError",
     "ScannedFolderInUseError",
     "ScannedFolderNotFoundError",
+    "SecretsCipherError",
+    "SecretsEncryptionNotConfiguredError",
     "TaxonomyClassificationAuthError",
     "TaxonomyClassificationConnectionError",
     "TaxonomyClassificationError",

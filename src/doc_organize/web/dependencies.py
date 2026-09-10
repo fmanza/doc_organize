@@ -7,7 +7,7 @@ from typing import cast
 from fastapi import HTTPException, Request, WebSocket
 from starlette.requests import HTTPConnection
 
-from doc_organize.auth import AuthStore
+from doc_organize.auth import AuthStore, InstanceSecretsStore
 from doc_organize.context import TaxonomyTemplateRegistry
 from doc_organize.core.exceptions import ProjectNotFoundError
 from doc_organize.core.models import Project
@@ -51,6 +51,19 @@ def get_auth_store(conn: HTTPConnection) -> AuthStore:
     """
     auth_db_path = getattr(conn.app.state, "auth_db_path", None)
     return AuthStore(auth_db_path) if auth_db_path else AuthStore()
+
+
+def get_instance_secrets_store(conn: HTTPConnection) -> InstanceSecretsStore:
+    """Devuelve un `InstanceSecretsStore` para esta conexión (panel de configuración IA).
+
+    Mismo patrón que `get_auth_store`: comparte el mismo fichero `auth.db` (y el
+    mismo `app.state.auth_db_path` inyectable en tests) pero con su propia tabla y
+    ciclo de vida de conexión -- SRP, igual criterio que separa las distintas
+    `LiteLLM*Config` aunque compartan infraestructura (ver `AUDIT_PLAN` de la sesión
+    que añadió este módulo).
+    """
+    auth_db_path = getattr(conn.app.state, "auth_db_path", None)
+    return InstanceSecretsStore(auth_db_path) if auth_db_path else InstanceSecretsStore()
 
 
 def get_taxonomy_template_registry(conn: HTTPConnection) -> TaxonomyTemplateRegistry:
@@ -280,6 +293,7 @@ __all__ = [
     "authorize_project_websocket",
     "get_allowed_scan_roots",
     "get_auth_store",
+    "get_instance_secrets_store",
     "get_project_registry",
     "get_taxonomy_template_registry",
     "get_tenant_id",

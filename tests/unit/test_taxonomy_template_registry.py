@@ -4,6 +4,7 @@ import pytest
 
 from doc_organize.context.taxonomy_template_registry import TaxonomyTemplateRegistry
 from doc_organize.core.exceptions import TaxonomyTemplateError
+from doc_organize.core.models import TaxonomyCatalogEntry, TaxonomyManifest
 
 _USER_TEMPLATE = """---
 title: Plantilla de Usuario
@@ -131,3 +132,87 @@ async def test_load_template_rejects_malformed_front_matter(tmp_path):
 
     with pytest.raises(TaxonomyTemplateError, match="delimitador"):
         await registry.load_template("rota")
+
+
+def _manifest(title: str | None = None) -> TaxonomyManifest:
+    return TaxonomyManifest(
+        title=title,
+        domains=[TaxonomyCatalogEntry(slug="dominio-nuevo", name="Dominio Nuevo")],
+        material_types=[TaxonomyCatalogEntry(slug="registro", name="Registro")],
+    )
+
+
+@pytest.mark.asyncio
+async def test_save_template_creates_a_new_user_template(tmp_path):
+    registry = TaxonomyTemplateRegistry(tmp_path)
+
+    await registry.save_template("plantilla-nueva", _manifest(title="Nueva"))
+
+    manifest = await registry.load_template("plantilla-nueva")
+    assert manifest.title == "Nueva"
+    assert [entry.slug for entry in manifest.domains] == ["dominio-nuevo"]
+    assert (tmp_path / "plantilla-nueva.md").is_file()
+
+
+@pytest.mark.asyncio
+async def test_save_template_overwrites_an_existing_user_template(tmp_path):
+    registry = TaxonomyTemplateRegistry(tmp_path)
+    await registry.save_template("plantilla", _manifest(title="Version 1"))
+
+    await registry.save_template("plantilla", _manifest(title="Version 2"))
+
+    manifest = await registry.load_template("plantilla")
+    assert manifest.title == "Version 2"
+
+
+@pytest.mark.asyncio
+async def test_save_template_rejects_invalid_name(tmp_path):
+    registry = TaxonomyTemplateRegistry(tmp_path)
+
+    with pytest.raises(TaxonomyTemplateError, match="no es un nombre de plantilla válido"):
+        await registry.save_template("Nombre Invalido", _manifest())
+
+    assert not (tmp_path / "Nombre Invalido.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_save_template_creates_templates_dir_if_missing(tmp_path):
+    templates_dir = tmp_path / "no-existe-todavia"
+    registry = TaxonomyTemplateRegistry(templates_dir)
+
+    await registry.save_template("plantilla", _manifest())
+
+    assert (templates_dir / "plantilla.md").is_file()
+
+
+@pytest.mark.asyncio
+async def test_delete_template_removes_a_user_template(tmp_path):
+    registry = TaxonomyTemplateRegistry(tmp_path)
+    await registry.save_template("plantilla", _manifest())
+
+    await registry.delete_template("plantilla")
+
+    with pytest.raises(TaxonomyTemplateError):
+        await registry.load_template("plantilla")
+
+
+@pytest.mark.asyncio
+async def test_delete_template_raises_for_unknown_user_template(tmp_path):
+    registry = TaxonomyTemplateRegistry(tmp_path)
+
+    with pytest.raises(TaxonomyTemplateError, match="No existe ninguna plantilla de usuario"):
+        await registry.delete_template("no-existe")
+
+
+@pytest.mark.asyncio
+async def test_delete_template_never_deletes_a_builtin_template(tmp_path):
+    """Borrar un nombre que solo existe como empaquetada (nunca hay override de
+    usuario) debe fallar igual que "no existe" -- nunca tocar `_BUILTIN_TEMPLATES_DIR`."""
+    registry = TaxonomyTemplateRegistry(tmp_path)
+
+    with pytest.raises(TaxonomyTemplateError, match="No existe ninguna plantilla de usuario"):
+        await registry.delete_template("calidad")
+
+    # La empaquetada sigue intacta y cargable.
+    manifest = await registry.load_template("calidad")
+    assert manifest.title == "Calidad"

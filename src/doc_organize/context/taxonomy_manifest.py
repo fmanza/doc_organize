@@ -3,6 +3,7 @@ Manifiesto de taxonomía documental por proyecto: dominios + tipos de material d
 """
 
 import asyncio
+import os
 
 from pathlib import Path
 
@@ -62,6 +63,49 @@ async def load_taxonomy_manifest(project: Project) -> TaxonomyManifest | None:
     manifest = _parse_front_matter(front_matter, manifest_path)
     logger.info(
         f"Manifiesto de taxonomía cargado de '{manifest_path}': {len(manifest.domains)} dominio(s), {len(manifest.material_types)} tipo(s) de material"
+    )
+    return manifest
+
+
+async def save_taxonomy_manifest(project: Project, raw_markdown: str) -> TaxonomyManifest:
+    """Guarda `raw_markdown` como `<project.root_path>/taxonomy_manifest.md`, tras validarlo.
+
+    Usado por `web/routes/context.py::save_taxonomy_manifest_endpoint` para persistir el
+    borrador que el usuario revisó/editó (`draft_taxonomy_manifest` genera el texto vía
+    `render_taxonomy_manifest_markdown`, pero nunca lo escribía a disco -- ver el docstring de
+    esa función). Valida ANTES de escribir, con los mismos `_extract_front_matter`/
+    `_parse_front_matter` que usa `load_taxonomy_manifest()`, para no dejar nunca en disco un
+    fichero que la propia app no podría releer.
+
+    Escritura atómica (fichero temporal + `os.replace`, mismo patrón que
+    `ContextRegistry._write_text_atomic`, duplicado aquí -- política "prohibido
+    refactorizar"): una construcción de contexto concurrente que esté leyendo el fichero
+    (`_load_taxonomy_manifest_or_400`) nunca ve un `taxonomy_manifest.md` a medio escribir.
+
+    Args:
+        project: Proyecto cuyo `root_path` recibe el fichero.
+        raw_markdown: Contenido completo del fichero (front matter YAML + prosa), tal
+            cual lo edita el usuario -- normalmente partiendo del texto que devolvió
+            `draft_taxonomy_manifest`.
+
+    Returns:
+        El `TaxonomyManifest` ya validado (para que el llamador pueda responder sin
+        releer el fichero).
+
+    Raises:
+        TaxonomyManifestError: `raw_markdown` no empieza con el delimitador de front
+            matter, no lo cierra, el YAML no es válido, o no cumple el schema de
+            `TaxonomyManifest`.
+    """
+    manifest_path = Path(project.root_path) / MANIFEST_FILE_NAME
+    front_matter = _extract_front_matter(raw_markdown, manifest_path)
+    manifest = _parse_front_matter(front_matter, manifest_path)
+
+    tmp_path = manifest_path.with_suffix(".tmp")
+    await asyncio.to_thread(tmp_path.write_text, raw_markdown, encoding="utf-8")
+    await asyncio.to_thread(os.replace, tmp_path, manifest_path)
+    logger.info(
+        f"Manifiesto de taxonomía guardado en '{manifest_path}': {len(manifest.domains)} dominio(s), {len(manifest.material_types)} tipo(s) de material"
     )
     return manifest
 
@@ -151,4 +195,4 @@ def render_taxonomy_manifest_markdown(
     )
 
 
-__all__ = ["MANIFEST_FILE_NAME", "load_taxonomy_manifest", "render_taxonomy_manifest_markdown"]
+__all__ = ["MANIFEST_FILE_NAME", "load_taxonomy_manifest", "render_taxonomy_manifest_markdown", "save_taxonomy_manifest"]

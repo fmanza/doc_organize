@@ -78,6 +78,13 @@ La respuesta incluye `"key": "sk-..."` — esa es la virtual key.
 
 ## 4. Configurar doc_organize
 
+**AÑADIDO (2026-09-11)**: alternativa a editar `.env` a mano — el panel
+`/admin/configuracion-ia` de la propia aplicación permite guardar estas mismas
+variables desde la web (persistidas cifradas en reposo), sin reiniciar el
+proceso. Ver [Configuración de IA y plantillas](../functional/ai_settings.md).
+Ambas vías son equivalentes y pueden combinarse; lo que sigue documenta la vía
+por `.env`, siempre disponible.
+
 En el entorno donde corre `python -m doc_organize web` (o en tu `.env` de la raíz
 del proyecto, ver `.env.example`):
 
@@ -107,6 +114,18 @@ DOC_ORGANIZE_LITELLM_TAXONOMY_CLASSIFICATION_MODEL=claude-classifier   # opciona
 Un proyecto sin manifiesto solo necesita las variables de 1 eje; uno con
 manifiesto solo necesita las de 2 ejes — no hace falta definir ambos juegos a la
 vez salvo que el mismo despliegue de doc_organize sirva proyectos de los dos tipos.
+
+**AÑADIDO (auditoría de parametrización, 2026-09-10)**: esta guía no mencionaba
+las variables del endpoint `POST /api/projects/{name}/context/taxonomy-manifest-draft`
+(botón "Proponer con IA" al crear un `taxonomy_manifest.md` nuevo) — quedó sin
+actualizar al añadirse ese endpoint. Config propia (ISP, mismo criterio que
+separa las dos configs de arriba):
+
+```bash
+DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_BASE_URL=http://localhost:4000
+DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_VIRTUAL_KEY=sk-...   # genera otra virtual key en el paso 3
+DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_MODEL=claude-classifier   # opcional, es el valor por defecto
+```
 
 Requiere el extra `doc_organize[context]` instalado (`pip install
 doc_organize[context]`) para `pyyaml` (generación de `mkdocs.yml`) — el cliente

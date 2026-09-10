@@ -84,7 +84,7 @@ async def _build_context_with_fake_site(client: httpx.AsyncClient, project: Proj
 
 @pytest.mark.asyncio
 async def test_context_page_404_for_missing_project(tmp_path) -> None:
-    app = create_app(registry_path=tmp_path / "projects.json")
+    app = create_app(registry_path=tmp_path / "projects.json", auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         response = await client.get("/projects/No Existe/context")
     assert response.status_code == 404
@@ -94,7 +94,7 @@ async def test_context_page_404_for_missing_project(tmp_path) -> None:
 async def test_context_page_empty_state(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
 
     async with _client(app) as client:
         response = await client.get(f"/projects/{project.name}/context")
@@ -127,7 +127,7 @@ material_types:
 async def test_get_context_api_404_before_build(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
 
     async with _client(app) as client:
         response = await client.get(f"/api/projects/{project.name}/context")
@@ -149,7 +149,7 @@ async def test_draft_taxonomy_manifest_400_without_any_converted_document(tmp_pa
     monkeypatch.setenv("DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_VIRTUAL_KEY", "sk-test")
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
 
     async with _client(app) as client:
         response = await client.post(f"/api/projects/{project.name}/context/taxonomy-manifest-draft")
@@ -180,7 +180,7 @@ async def test_draft_taxonomy_manifest_400_when_no_document_has_a_readable_json(
                 )
             ]
         )
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
 
     async with _client(app) as client:
         response = await client.post(f"/api/projects/{project.name}/context/taxonomy-manifest-draft")
@@ -210,7 +210,7 @@ async def test_draft_taxonomy_manifest_400_when_litellm_draft_proxy_not_configur
                 )
             ]
         )
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
 
     async with _client(app) as client:
         response = await client.post(f"/api/projects/{project.name}/context/taxonomy-manifest-draft")
@@ -221,12 +221,142 @@ async def test_draft_taxonomy_manifest_400_when_litellm_draft_proxy_not_configur
 
 @pytest.mark.asyncio
 async def test_draft_taxonomy_manifest_404_for_missing_project(tmp_path) -> None:
-    app = create_app(registry_path=tmp_path / "projects.json")
+    app = create_app(registry_path=tmp_path / "projects.json", auth_db_path=tmp_path / "auth.db")
 
     async with _client(app) as client:
         response = await client.post("/api/projects/No Existe/context/taxonomy-manifest-draft")
 
     assert response.status_code == 404
+
+
+_VALID_MANIFEST_MARKDOWN = """---
+domains:
+  - slug: calidad
+    name: Calidad
+material_types:
+  - slug: procedimiento
+    name: Procedimiento
+---
+
+# prueba
+"""
+
+
+@pytest.mark.asyncio
+async def test_save_taxonomy_manifest_writes_file_and_returns_parsed_manifest(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
+
+    async with _client(app) as client:
+        response = await client.put(f"/api/projects/{project.name}/context/taxonomy-manifest", json={"manifest_markdown": _VALID_MANIFEST_MARKDOWN})
+
+    assert response.status_code == 200
+    assert response.json()["manifest"]["domains"][0]["slug"] == "calidad"
+    manifest_path = project_root / "taxonomy_manifest.md"
+    assert manifest_path.read_text(encoding="utf-8") == _VALID_MANIFEST_MARKDOWN
+
+
+@pytest.mark.asyncio
+async def test_save_taxonomy_manifest_rejects_invalid_markdown(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
+
+    async with _client(app) as client:
+        response = await client.put(f"/api/projects/{project.name}/context/taxonomy-manifest", json={"manifest_markdown": "no front matter"})
+
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_save_taxonomy_manifest_404_for_missing_project(tmp_path) -> None:
+    app = create_app(registry_path=tmp_path / "projects.json", auth_db_path=tmp_path / "auth.db")
+
+    async with _client(app) as client:
+        response = await client.put("/api/projects/No Existe/context/taxonomy-manifest", json={"manifest_markdown": _VALID_MANIFEST_MARKDOWN})
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_taxonomy_template_crud_roundtrip(tmp_path) -> None:
+    app = create_app(registry_path=tmp_path / "projects.json", auth_db_path=tmp_path / "auth.db", templates_path=tmp_path / "templates")
+    payload = {
+        "title": "Mi plantilla",
+        "description": "De prueba",
+        "domains": [{"slug": "a", "name": "A"}],
+        "material_types": [{"slug": "b", "name": "B"}],
+    }
+
+    async with _client(app) as client:
+        put_response = await client.put("/api/taxonomy-templates/mi-plantilla", json=payload)
+        assert put_response.status_code == 200
+        assert put_response.json()["manifest"]["title"] == "Mi plantilla"
+
+        get_response = await client.get("/api/taxonomy-templates/mi-plantilla")
+        assert get_response.status_code == 200
+        assert get_response.json()["manifest"]["domains"][0]["slug"] == "a"
+
+        list_response = await client.get("/api/taxonomy-templates")
+        assert "mi-plantilla" in [t["name"] for t in list_response.json()["templates"]]
+
+        delete_response = await client.request("DELETE", "/api/taxonomy-templates/mi-plantilla", json={"confirm": True})
+        assert delete_response.status_code == 204
+
+        get_after_delete = await client.get("/api/taxonomy-templates/mi-plantilla")
+        assert get_after_delete.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_save_taxonomy_template_rejects_invalid_name(tmp_path) -> None:
+    app = create_app(registry_path=tmp_path / "projects.json", auth_db_path=tmp_path / "auth.db", templates_path=tmp_path / "templates")
+
+    async with _client(app) as client:
+        response = await client.put(
+            "/api/taxonomy-templates/Invalid Name",
+            json={"domains": [{"slug": "a", "name": "A"}], "material_types": [{"slug": "b", "name": "B"}]},
+        )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_delete_taxonomy_template_requires_confirmation(tmp_path) -> None:
+    app = create_app(registry_path=tmp_path / "projects.json", auth_db_path=tmp_path / "auth.db", templates_path=tmp_path / "templates")
+
+    async with _client(app) as client:
+        await client.put(
+            "/api/taxonomy-templates/mi-plantilla",
+            json={"domains": [{"slug": "a", "name": "A"}], "material_types": [{"slug": "b", "name": "B"}]},
+        )
+        response = await client.request("DELETE", "/api/taxonomy-templates/mi-plantilla", json={"confirm": False})
+
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_delete_taxonomy_template_404_for_builtin_only_name(tmp_path) -> None:
+    """Nunca borra una plantilla empaquetada (`calidad`/`sgi-iso27001`) -- sin override de
+    usuario, se trata como "no existe" igual que cualquier otro nombre desconocido."""
+    app = create_app(registry_path=tmp_path / "projects.json", auth_db_path=tmp_path / "auth.db", templates_path=tmp_path / "templates")
+
+    async with _client(app) as client:
+        response = await client.request("DELETE", "/api/taxonomy-templates/calidad", json={"confirm": True})
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_taxonomy_templates_admin_page_renders(tmp_path) -> None:
+    app = create_app(registry_path=tmp_path / "projects.json", auth_db_path=tmp_path / "auth.db", templates_path=tmp_path / "templates")
+
+    async with _client(app) as client:
+        response = await client.get("/admin/plantillas-taxonomia")
+
+    assert response.status_code == 200
+    assert "sgi-iso27001" in response.text
 
 
 @pytest.mark.asyncio
@@ -250,7 +380,7 @@ async def test_build_context_classifies_reorganizes_and_generates_mkdocs(tmp_pat
             ]
         )
 
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         response = await client.post(f"/api/projects/{project.name}/context")
 
@@ -298,7 +428,7 @@ async def test_build_context_copies_extracted_images(tmp_path) -> None:
             ]
         )
 
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         response = await client.post(f"/api/projects/{project.name}/context")
 
@@ -336,7 +466,7 @@ async def test_build_context_partial_failure_persists_honest_state(tmp_path) -> 
     # clasificar nada (AUDIT_CODE, sesión 2026-09-09, fix 3).
     (project_root / "Conversión" / "informe.md").unlink()
 
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         response = await client.post(f"/api/projects/{project.name}/context")
     assert response.status_code == 400
@@ -354,7 +484,7 @@ async def test_build_context_partial_failure_persists_honest_state(tmp_path) -> 
 async def test_build_context_rejected_while_operation_in_progress(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     app.state.active_project_operations.add(("default", project.name.lower()))
 
     async with _client(app) as client:
@@ -369,7 +499,7 @@ async def test_build_context_with_ai_enabled_but_no_proxy_configured_returns_400
     monkeypatch.delenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_VIRTUAL_KEY", raising=False)
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
 
     async with _client(app) as client:
         response = await client.post(f"/api/projects/{project.name}/context", json={"ai_classification_enabled": True})
@@ -408,7 +538,7 @@ async def test_build_context_skips_cache_entries_whose_original_no_longer_exists
             ]
         )
 
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         response = await client.post(f"/api/projects/{project.name}/context")
 
@@ -425,7 +555,7 @@ async def test_context_page_tenant_isolation(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path, tenant_id="acme-corp")
 
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         response = await client.get(f"/projects/{project.name}/context")
 
@@ -455,7 +585,7 @@ async def test_context_page_hides_taxonomy_manifest_status_without_manifest(tmp_
             ]
         )
 
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         build_response = await client.post(f"/api/projects/{project.name}/context")
         assert build_response.status_code == 200
@@ -494,7 +624,7 @@ async def test_context_page_shows_taxonomy_manifest_status_and_material_type_det
             ]
         )
 
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         build_response = await client.post(f"/api/projects/{project.name}/context", json={"threshold": 0.1})
         assert build_response.status_code == 200
@@ -530,7 +660,7 @@ async def test_build_context_accepts_custom_output_folder_name_on_first_build(tm
             ]
         )
 
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         response = await client.post(f"/api/projects/{project.name}/context", json={"output_folder_name": "docs_publicados"})
 
@@ -544,7 +674,7 @@ async def test_build_context_accepts_custom_output_folder_name_on_first_build(tm
 async def test_build_context_rejects_path_traversal_in_output_folder_name(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
 
     async with _client(app) as client:
         response = await client.post(f"/api/projects/{project.name}/context", json={"output_folder_name": "../fuera"})
@@ -564,7 +694,7 @@ async def test_build_context_rejects_output_folder_name_reserved_by_another_subs
     proyecto, si coincide con "Conversión") — AUDIT_CODE, sesión 2026-09-10."""
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
 
     async with _client(app) as client:
         response = await client.post(f"/api/projects/{project.name}/context", json={"output_folder_name": reserved_name})
@@ -595,7 +725,7 @@ async def test_build_context_ignores_output_folder_name_change_on_rebuild(tmp_pa
             ]
         )
 
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         first = await client.post(f"/api/projects/{project.name}/context", json={"output_folder_name": "primera"})
     assert first.json()["output_folder_name"] == "primera"
@@ -627,7 +757,7 @@ async def test_delete_context_requires_explicit_confirmation(tmp_path) -> None:
                 )
             ]
         )
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         await client.post(f"/api/projects/{project.name}/context")
 
@@ -642,7 +772,7 @@ async def test_delete_context_requires_explicit_confirmation(tmp_path) -> None:
 async def test_delete_context_404_when_nothing_built(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
 
     async with _client(app) as client:
         response = await client.request("DELETE", f"/api/projects/{project.name}/context", json={"confirm": True})
@@ -669,7 +799,7 @@ async def test_delete_context_removes_everything_and_allows_choosing_a_new_folde
                 )
             ]
         )
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         await client.post(f"/api/projects/{project.name}/context", json={"output_folder_name": "primera"})
     assert (project_root / "primera").exists()
@@ -698,7 +828,7 @@ async def test_delete_context_removes_everything_and_allows_choosing_a_new_folde
 async def test_delete_context_rejected_while_operation_in_progress(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     app.state.active_project_operations.add(("default", project.name.lower()))
 
     async with _client(app) as client:
@@ -713,7 +843,7 @@ async def test_context_page_shows_litellm_not_configured_warning(tmp_path, monke
     monkeypatch.delenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_VIRTUAL_KEY", raising=False)
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
 
     async with _client(app) as client:
         response = await client.get(f"/projects/{project.name}/context")
@@ -730,7 +860,7 @@ async def test_context_page_shows_litellm_configured_confirmation(tmp_path, monk
     monkeypatch.setenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_VIRTUAL_KEY", "sk-test")
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
 
     async with _client(app) as client:
         response = await client.get(f"/projects/{project.name}/context")
@@ -755,7 +885,7 @@ async def test_context_page_with_manifest_checks_taxonomy_proxy_config_not_the_1
     project = await _create_project(tmp_path, registry_path)
     project_root = tmp_path / "workspaces" / project.name
     (project_root / "taxonomy_manifest.md").write_text(_VALID_TAXONOMY_MANIFEST, encoding="utf-8")
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
 
     async with _client(app) as client:
         response = await client.get(f"/projects/{project.name}/context")
@@ -800,7 +930,7 @@ async def test_ai_toggle_is_unchecked_and_disabled_if_litellm_becomes_unconfigur
                 )
             ]
         )
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         build_response = await client.post(f"/api/projects/{project.name}/context", json={"ai_classification_enabled": True})
     assert build_response.status_code == 200
@@ -850,7 +980,7 @@ async def test_context_build_websocket_reports_progress_and_completes(tmp_path) 
                 )
             ]
         )
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     client = TestClient(app)
 
     events = _run_context_build_websocket(client, project.name)
@@ -887,7 +1017,7 @@ async def test_context_build_websocket_accepts_custom_output_folder_name(tmp_pat
                 )
             ]
         )
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     client = TestClient(app)
 
     events = _run_context_build_websocket(client, project.name, {"output_folder_name": "docs_publicados"})
@@ -900,7 +1030,7 @@ async def test_context_build_websocket_accepts_custom_output_folder_name(tmp_pat
 async def test_context_build_websocket_rejects_reserved_output_folder_name(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     client = TestClient(app)
 
     with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect(f"/api/projects/{project.name}/context/build") as websocket:
@@ -915,7 +1045,7 @@ async def test_context_build_websocket_closes_with_1008_when_ai_enabled_but_lite
     monkeypatch.delenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_VIRTUAL_KEY", raising=False)
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     client = TestClient(app)
 
     with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect(f"/api/projects/{project.name}/context/build") as websocket:
@@ -928,7 +1058,7 @@ async def test_context_build_websocket_closes_with_1008_when_ai_enabled_but_lite
 async def test_context_build_websocket_rejects_when_operation_already_in_progress(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     app.state.active_project_operations.add(("default", project.name.lower()))
     client = TestClient(app)
 
@@ -957,7 +1087,7 @@ async def test_context_build_websocket_releases_lock_after_completion_allowing_n
                 )
             ]
         )
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     client = TestClient(app)
 
     _run_context_build_websocket(client, project.name)
@@ -968,7 +1098,7 @@ async def test_context_build_websocket_releases_lock_after_completion_allowing_n
 
 @pytest.mark.asyncio
 async def test_context_build_websocket_404_equivalent_for_missing_project(tmp_path) -> None:
-    app = create_app(registry_path=tmp_path / "projects.json")
+    app = create_app(registry_path=tmp_path / "projects.json", auth_db_path=tmp_path / "auth.db")
     client = TestClient(app)
 
     with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect("/api/projects/No Existe/context/build") as websocket:
@@ -999,7 +1129,7 @@ async def test_context_delete_websocket_removes_everything_and_reports_progress(
                 )
             ]
         )
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     client = TestClient(app)
     with client.websocket_connect(f"/api/projects/{project.name}/context/build") as websocket:
         websocket.send_json({})
@@ -1042,7 +1172,7 @@ async def test_context_delete_websocket_requires_explicit_confirmation(tmp_path)
                 )
             ]
         )
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     client = TestClient(app)
     _run_context_build_websocket(client, project.name)
 
@@ -1057,7 +1187,7 @@ async def test_context_delete_websocket_requires_explicit_confirmation(tmp_path)
 async def test_context_delete_websocket_rejects_when_no_context_built(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     client = TestClient(app)
 
     with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect(f"/api/projects/{project.name}/context/delete") as websocket:
@@ -1070,7 +1200,7 @@ async def test_context_delete_websocket_rejects_when_no_context_built(tmp_path) 
 async def test_context_delete_websocket_rejects_when_operation_already_in_progress(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     app.state.active_project_operations.add(("default", project.name.lower()))
     client = TestClient(app)
 
@@ -1102,7 +1232,7 @@ async def test_context_site_index_redirects_to_trailing_slash(tmp_path) -> None:
                 )
             ]
         )
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         await _build_context_with_fake_site(client, project, project_root)
         response = await client.get(f"/projects/{project.name}/context/site", follow_redirects=False)
@@ -1130,7 +1260,7 @@ async def test_context_site_index_serves_built_index_html(tmp_path) -> None:
                 )
             ]
         )
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         await _build_context_with_fake_site(client, project, project_root)
         response = await client.get(f"/projects/{project.name}/context/site/")
@@ -1158,7 +1288,7 @@ async def test_context_site_asset_redirects_directory_without_trailing_slash(tmp
                 )
             ]
         )
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         await _build_context_with_fake_site(client, project, project_root)
         response = await client.get(f"/projects/{project.name}/context/site/ciberseguridad", follow_redirects=False)
@@ -1186,7 +1316,7 @@ async def test_context_site_asset_serves_domain_page(tmp_path) -> None:
                 )
             ]
         )
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         await _build_context_with_fake_site(client, project, project_root)
         response = await client.get(f"/projects/{project.name}/context/site/ciberseguridad/")
@@ -1199,7 +1329,7 @@ async def test_context_site_asset_serves_domain_page(tmp_path) -> None:
 async def test_context_site_404_when_no_context_built(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
 
     async with _client(app) as client:
         response = await client.get(f"/projects/{project.name}/context/site/")
@@ -1214,7 +1344,7 @@ async def test_context_site_404_when_context_built_but_mkdocs_site_not_built(tmp
     que nunca llegó a construirse."""
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
 
     async with _client(app) as client:
         await client.post(f"/api/projects/{project.name}/context")
@@ -1244,7 +1374,7 @@ async def test_context_site_rejects_path_traversal_outside_site_dir(tmp_path) ->
                 )
             ]
         )
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         await _build_context_with_fake_site(client, project, project_root)
         assert (project_root / "mkdocs.yml").exists()
@@ -1257,7 +1387,7 @@ async def test_context_site_rejects_path_traversal_outside_site_dir(tmp_path) ->
 async def test_context_site_tenant_isolation(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path, tenant_id="acme-corp")
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
 
     async with _client(app) as client:
         response = await client.get(f"/projects/{project.name}/context/site/")
@@ -1284,7 +1414,7 @@ async def test_context_page_links_to_site_when_built(tmp_path) -> None:
                 )
             ]
         )
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         await _build_context_with_fake_site(client, project, project_root)
         response = await client.get(f"/projects/{project.name}/context")
@@ -1329,7 +1459,7 @@ async def test_build_context_uses_taxonomy_manifest_when_present(tmp_path) -> No
             ]
         )
 
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         response = await client.post(f"/api/projects/{project.name}/context", json={"threshold": 0.1})
 
@@ -1359,7 +1489,7 @@ async def test_build_context_rejects_manifest_combined_with_candidate_domains(tm
             ]
         )
 
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         response = await client.post(f"/api/projects/{project.name}/context", json={"candidate_domains": ["calidad"]})
 
@@ -1374,7 +1504,7 @@ async def test_build_context_reports_invalid_manifest_front_matter_as_400(tmp_pa
     project_root = tmp_path / "workspaces" / project.name
     (project_root / "taxonomy_manifest.md").write_text("# Sin front matter\n", encoding="utf-8")
 
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         response = await client.post(f"/api/projects/{project.name}/context")
 
@@ -1397,7 +1527,7 @@ async def test_build_context_with_manifest_and_ai_enabled_but_taxonomy_proxy_not
     project_root = tmp_path / "workspaces" / project.name
     (project_root / "taxonomy_manifest.md").write_text(_VALID_TAXONOMY_MANIFEST, encoding="utf-8")
 
-    app = create_app(registry_path=registry_path)
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         response = await client.post(f"/api/projects/{project.name}/context", json={"ai_classification_enabled": True})
 
@@ -1432,7 +1562,7 @@ async def test_build_context_uses_taxonomy_template_when_no_local_manifest(tmp_p
             ]
         )
 
-    app = create_app(registry_path=registry_path, templates_path=tmp_path / "no-existe-todavia")
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db", templates_path=tmp_path / "no-existe-todavia")
     async with _client(app) as client:
         response = await client.post(f"/api/projects/{project.name}/context", json={"threshold": 0.1, "taxonomy_template_name": "sgi-iso27001"})
 
@@ -1449,7 +1579,7 @@ async def test_build_context_rejects_local_manifest_combined_with_taxonomy_templ
     _seed_converted_document(project_root, "politica", "Política")
     (project_root / "taxonomy_manifest.md").write_text(_VALID_TAXONOMY_MANIFEST, encoding="utf-8")
 
-    app = create_app(registry_path=registry_path, templates_path=tmp_path / "no-existe-todavia")
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db", templates_path=tmp_path / "no-existe-todavia")
     async with _client(app) as client:
         response = await client.post(f"/api/projects/{project.name}/context", json={"taxonomy_template_name": "sgi-iso27001"})
 
@@ -1464,7 +1594,7 @@ async def test_build_context_rejects_candidate_domains_combined_with_taxonomy_te
     project_root = tmp_path / "workspaces" / project.name
     _seed_converted_document(project_root, "politica", "Política")
 
-    app = create_app(registry_path=registry_path, templates_path=tmp_path / "no-existe-todavia")
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db", templates_path=tmp_path / "no-existe-todavia")
     async with _client(app) as client:
         response = await client.post(
             f"/api/projects/{project.name}/context",
@@ -1482,7 +1612,7 @@ async def test_build_context_rejects_unknown_taxonomy_template_name(tmp_path) ->
     project_root = tmp_path / "workspaces" / project.name
     _seed_converted_document(project_root, "politica", "Política")
 
-    app = create_app(registry_path=registry_path, templates_path=tmp_path / "no-existe-todavia")
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db", templates_path=tmp_path / "no-existe-todavia")
     async with _client(app) as client:
         response = await client.post(f"/api/projects/{project.name}/context", json={"taxonomy_template_name": "no-existe-esta-plantilla"})
 
@@ -1491,7 +1621,7 @@ async def test_build_context_rejects_unknown_taxonomy_template_name(tmp_path) ->
 
 @pytest.mark.asyncio
 async def test_list_taxonomy_templates_endpoint_returns_builtin_templates(tmp_path) -> None:
-    app = create_app(registry_path=tmp_path / "projects.json", templates_path=tmp_path / "no-existe-todavia")
+    app = create_app(registry_path=tmp_path / "projects.json", auth_db_path=tmp_path / "auth.db", templates_path=tmp_path / "no-existe-todavia")
     async with _client(app) as client:
         response = await client.get("/api/taxonomy-templates")
 
@@ -1506,7 +1636,7 @@ async def test_list_taxonomy_templates_endpoint_returns_builtin_templates(tmp_pa
 async def test_context_page_shows_taxonomy_template_dropdown_when_no_local_manifest(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
-    app = create_app(registry_path=registry_path, templates_path=tmp_path / "no-existe-todavia")
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db", templates_path=tmp_path / "no-existe-todavia")
 
     async with _client(app) as client:
         response = await client.get(f"/projects/{project.name}/context")
@@ -1522,7 +1652,7 @@ async def test_context_page_hides_taxonomy_template_dropdown_when_local_manifest
     project = await _create_project(tmp_path, registry_path)
     project_root = tmp_path / "workspaces" / project.name
     _seed_taxonomy_manifest(project_root)
-    app = create_app(registry_path=registry_path, templates_path=tmp_path / "no-existe-todavia")
+    app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db", templates_path=tmp_path / "no-existe-todavia")
 
     async with _client(app) as client:
         response = await client.get(f"/projects/{project.name}/context")

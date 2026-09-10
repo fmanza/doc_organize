@@ -3,6 +3,7 @@ Biblioteca de plantillas de manifiesto de taxonomía reutilizables entre proyect
 """
 
 import asyncio
+import os
 import re
 
 from pathlib import Path
@@ -147,6 +148,62 @@ class TaxonomyTemplateRegistry:
         raw = await asyncio.to_thread(template_path.read_text, encoding="utf-8")
         front_matter = _extract_front_matter(raw, template_path)
         return _parse_front_matter(front_matter, template_path)
+
+    async def save_template(self, name: str, manifest: TaxonomyManifest) -> None:
+        """Crea o sobrescribe la plantilla `name` en `templates_dir` (biblioteca de usuario).
+
+        Nunca escribe en `_BUILTIN_TEMPLATES_DIR` (empaquetada, de solo lectura) --
+        una plantilla guardada aquí ya tiene precedencia sobre una empaquetada del
+        mismo nombre (`load_template()`), así que "editar" una empaquetada equivale
+        a crear un override de usuario con su mismo nombre, nunca a tocar el fichero
+        empaquetado.
+
+        Args:
+            name: Slug de la plantilla (sin extensión).
+            manifest: Catálogo a guardar -- `title`/`description` (si se rellenan) se
+                usan para el listado (`list_templates()`); `domains`/`material_types`
+                son el catálogo cerrado en sí.
+
+        Raises:
+            TaxonomyTemplateError: `name` no es un slug válido.
+        """
+        if not _TEMPLATE_NAME_PATTERN.match(name):
+            raise TaxonomyTemplateError(f"'{name}' no es un nombre de plantilla válido — solo minúsculas, dígitos y guiones (p. ej. 'sgi-iso27001').")
+
+        front_matter_payload: dict[str, object] = {}
+        if manifest.title:
+            front_matter_payload["title"] = manifest.title
+        if manifest.description:
+            front_matter_payload["description"] = manifest.description
+        front_matter_payload["domains"] = [entry.model_dump(exclude_none=True) for entry in manifest.domains]
+        front_matter_payload["material_types"] = [entry.model_dump(exclude_none=True) for entry in manifest.material_types]
+        front_matter = yaml.safe_dump(front_matter_payload, allow_unicode=True, sort_keys=False)
+        content = f"---\n{front_matter}---\n"
+
+        await asyncio.to_thread(self.templates_dir.mkdir, parents=True, exist_ok=True)
+        template_path = self.templates_dir / f"{name}{TEMPLATE_FILE_EXTENSION}"
+        tmp_path = template_path.with_suffix(".tmp")
+        await asyncio.to_thread(tmp_path.write_text, content, encoding="utf-8")
+        await asyncio.to_thread(os.replace, tmp_path, template_path)
+        logger.info(f"Plantilla de taxonomía '{name}' guardada en '{template_path}'")
+
+    async def delete_template(self, name: str) -> None:
+        """Borra la plantilla de usuario `name` de `templates_dir`.
+
+        Nunca borra una plantilla empaquetada (`_BUILTIN_TEMPLATES_DIR`) -- si `name`
+        solo existe ahí, no hay nada que hacer en `templates_dir` y se levanta el
+        mismo error que "no existe" (desde fuera, una empaquetada sin override de
+        usuario no es borrable, igual que no lo es editable sin crear un override).
+
+        Raises:
+            TaxonomyTemplateError: No existe ninguna plantilla de usuario llamada
+                `name` en `templates_dir`.
+        """
+        template_path = self.templates_dir / f"{name}{TEMPLATE_FILE_EXTENSION}"
+        if not await asyncio.to_thread(template_path.is_file):
+            raise TaxonomyTemplateError(f"No existe ninguna plantilla de usuario llamada '{name}' en '{self.templates_dir}' que se pueda eliminar.")
+        await asyncio.to_thread(template_path.unlink)
+        logger.info(f"Plantilla de taxonomía '{name}' eliminada de '{template_path}'")
 
 
 # Duplicado intencional de `_extract_front_matter`/`_parse_front_matter`

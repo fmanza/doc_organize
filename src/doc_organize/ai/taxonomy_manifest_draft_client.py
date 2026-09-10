@@ -22,6 +22,7 @@ import httpx
 
 from pydantic import ValidationError
 
+from doc_organize.auth import InstanceSecretsStore
 from doc_organize.core.exceptions import TaxonomyManifestDraftAuthError, TaxonomyManifestDraftConnectionError, TaxonomyManifestDraftError
 from doc_organize.core.models import LiteLLMTaxonomyManifestDraftConfig, TaxonomyCatalogEntry, TaxonomyManifestDraftResult
 from doc_organize.utils.logging import get_logger
@@ -92,6 +93,26 @@ def litellm_taxonomy_manifest_draft_config_from_env() -> LiteLLMTaxonomyManifest
     if not base_url or not virtual_key:
         raise ValueError(f"Definir {_ENV_VAR_BASE_URL} y {_ENV_VAR_VIRTUAL_KEY} para usar litellm_taxonomy_manifest_draft_config_from_env().")
     model = os.environ.get(_ENV_VAR_MODEL)
+    return LiteLLMTaxonomyManifestDraftConfig(base_url=base_url, virtual_key=virtual_key, **({"model": model} if model else {}))
+
+
+async def litellm_taxonomy_manifest_draft_config_from_store_or_env(store: InstanceSecretsStore) -> LiteLLMTaxonomyManifestDraftConfig:
+    """Construye `LiteLLMTaxonomyManifestDraftConfig` con precedencia `store` (panel de
+    configuración IA) > `DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_*` del entorno.
+
+    Mismo criterio que `domain_classification_client.litellm_classification_config_from_store_or_env()`.
+
+    Returns:
+        Config lista para `TaxonomyManifestDraftClient`.
+
+    Raises:
+        ValueError: Si, tras aplicar la precedencia, falta `base_url` o `virtual_key`.
+    """
+    base_url = await store.get(_ENV_VAR_BASE_URL.lower()) or os.environ.get(_ENV_VAR_BASE_URL)
+    virtual_key = await store.get(_ENV_VAR_VIRTUAL_KEY.lower()) or os.environ.get(_ENV_VAR_VIRTUAL_KEY)
+    if not base_url or not virtual_key:
+        raise ValueError(f"Definir {_ENV_VAR_BASE_URL} y {_ENV_VAR_VIRTUAL_KEY} (panel de configuración IA o entorno) para proponer un manifiesto.")
+    model = await store.get(_ENV_VAR_MODEL.lower()) or os.environ.get(_ENV_VAR_MODEL)
     return LiteLLMTaxonomyManifestDraftConfig(base_url=base_url, virtual_key=virtual_key, **({"model": model} if model else {}))
 
 
@@ -253,4 +274,9 @@ def _dedupe_by_slug(entries: list[TaxonomyCatalogEntry]) -> list[TaxonomyCatalog
     return deduped
 
 
-__all__ = ["SampledDocument", "TaxonomyManifestDraftClient", "litellm_taxonomy_manifest_draft_config_from_env"]
+__all__ = [
+    "SampledDocument",
+    "TaxonomyManifestDraftClient",
+    "litellm_taxonomy_manifest_draft_config_from_env",
+    "litellm_taxonomy_manifest_draft_config_from_store_or_env",
+]

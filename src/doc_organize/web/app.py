@@ -9,6 +9,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from doc_organize.context import TaxonomyTemplateRegistry
+from doc_organize.core.constants import PROJECT_NAME_MAX_LENGTH
 from doc_organize.core.exceptions import (
     AuthError,
     ContextError,
@@ -40,6 +41,7 @@ from doc_organize.web.dependencies import (
 )
 from doc_organize.web.pagination import DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, paginate
 from doc_organize.web.routes.admin import router as admin_router
+from doc_organize.web.routes.ai_settings import router as ai_settings_router
 from doc_organize.web.routes.auth import router as auth_router
 from doc_organize.web.routes.cache import router as cache_router
 from doc_organize.web.routes.change_password import router as change_password_router
@@ -157,6 +159,7 @@ def create_app(
     app.include_router(auth_router)
     app.include_router(change_password_router)
     app.include_router(admin_router)
+    app.include_router(ai_settings_router)
     app.include_router(projects_router)
     app.include_router(scan_router)
     app.include_router(scan_errors_router)
@@ -209,6 +212,7 @@ def create_app(
                 "total_pages": resolved_page.total_pages,
                 "range_start": resolved_page.range_start,
                 "range_end": resolved_page.range_end,
+                "project_name_max_length": PROJECT_NAME_MAX_LENGTH,
             },
         )
 

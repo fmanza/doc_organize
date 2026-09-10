@@ -6,7 +6,8 @@
 
 <form id="create-form" class="my-4 flex gap-2 flex-wrap items-start">
     <label for="name" class="sr-only">Nombre del proyecto</label>
-    <input type="text" id="name" placeholder="Nombre del proyecto" required
+    <input type="text" id="name" placeholder="Nombre del proyecto" required maxlength="{{ project_name_max_length }}"
+           title="Máx. {{ project_name_max_length }} caracteres; sin &lt; &gt; : &quot; / \ | ? * ni nombres reservados de Windows (CON, PRN, NUL, COM1...)."
            class="border border-gray-300 rounded px-2 py-1.5 flex-1 min-w-[200px]">
     <label for="location" class="sr-only">Ubicación (carpeta padre)</label>
     <input type="text" id="location" placeholder="Ubicación (carpeta padre)" required
@@ -14,6 +15,9 @@
     {{ folder_browser_button("location-browse") }}
     <button type="submit" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Crear proyecto</button>
 </form>
+<p class="text-xs text-gray-500 mb-2">
+    Nombre: máx. {{ project_name_max_length }} caracteres; sin <code>&lt; &gt; : " / \ | ? *</code> ni nombres reservados de Windows (CON, PRN, NUL, COM1…).
+</p>
 
 {{ folder_browser_panel("location-browse", class_override="my-2 border border-gray-300 rounded p-3 max-w-2xl") }}
 <p id="create-error" class="text-red-700 my-2 min-h-[1.2em]"></p>

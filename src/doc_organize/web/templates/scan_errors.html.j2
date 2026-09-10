@@ -29,7 +29,7 @@
             <th class="py-1 pr-2">Archivo</th>
             <th class="py-1 pr-2">Carpeta</th>
             <th class="py-1 pr-2">Mensaje de error</th>
-            <th class="py-1 pr-2 text-right">Reintentos</th>
+            <th class="py-1 pr-2 text-right" title="Reintentos automáticos consumidos / límite antes de requerir forzar rescan completo (MAX_AUTO_ERROR_RETRIES)">Reintentos</th>
             <th class="py-1 pr-2">Estado</th>
         </tr>
     </thead>
@@ -39,7 +39,7 @@
             <td class="py-1 pr-2 align-top break-all">{{ item.file_path | basename }}</td>
             <td class="py-1 pr-2 align-top break-all text-gray-600 font-mono text-xs" title="{{ item.file_path }}">{{ item.file_path | dirname }}</td>
             <td class="py-1 pr-2 align-top break-all text-red-700">{{ item.error_message }}</td>
-            <td class="py-1 pr-2 align-top text-right whitespace-nowrap">{{ item.error_retry_count }}</td>
+            <td class="py-1 pr-2 align-top text-right whitespace-nowrap">{{ item.error_retry_count }}/{{ max_auto_error_retries }}</td>
             <td class="py-1 pr-2 align-top whitespace-nowrap">
                 {% if item.capped %}
                 <span class="text-red-700">Límite alcanzado (requiere forzar rescan)</span>

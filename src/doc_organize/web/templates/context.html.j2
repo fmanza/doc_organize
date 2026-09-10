@@ -1,6 +1,7 @@
 {% extends "base.html.j2" %}
 {% from "_nav_macros.html.j2" import project_nav %}
 {% from "_semaforo_macros.html.j2" import semaforo_html, semaforo_script %}
+{% from "_example_modal_macros.html.j2" import example_modal_html, example_modal_script %}
 {% block title %}doc_organize — Contexto: {{ project.name }}{% endblock %}
 {% block sidebar_items %}{{ project_nav(project, "context") }}{% endblock %}
 {% block content %}
@@ -41,6 +42,34 @@
 </label>
 {% endif %}
 
+<div class="mb-4 p-3 border border-gray-200 rounded">
+    <div class="flex items-center gap-2 mb-2">
+        <h2 class="font-semibold text-sm">Manifiesto de taxonomía (dominio + tipo de material)</h2>
+        <button type="button" id="manifest-help-btn" class="text-blue-600 underline text-xs bg-transparent border-0 cursor-pointer">Ver ejemplo del fichero</button>
+    </div>
+    {% if has_local_taxonomy_manifest %}
+    <p class="text-sm text-gray-600 mb-2">Puedes generar un borrador nuevo con IA y guardarlo para sobrescribir el <code>taxonomy_manifest.md</code> actual.</p>
+    {% else %}
+    <p class="text-sm text-gray-600 mb-2">Pide a la IA un borrador de catálogo a partir de una muestra de documentos ya convertidos, revísalo/edítalo y guárdalo — sin salir de esta página.</p>
+    {% endif %}
+    <button type="button" id="draft-manifest-btn" class="px-3 py-1.5 border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 cursor-pointer text-sm"
+            {% if not litellm_manifest_draft_configured %}disabled{% endif %}>
+        Proponer con IA
+    </button>
+    {% if not litellm_manifest_draft_configured %}
+    <span class="text-xs text-amber-700 ml-2">⚠ Configura el proxy de borrador de manifiesto en <a href="/admin/configuracion-ia" class="underline">Configuración IA</a> para usar esto.</span>
+    {% endif %}
+    <p id="draft-manifest-error" class="text-red-700 text-sm my-1 min-h-[1.2em]"></p>
+    <div id="draft-manifest-panel" hidden class="mt-2">
+        <p id="draft-manifest-reasoning" class="text-sm text-gray-600 mb-2"></p>
+        <textarea id="draft-manifest-textarea" rows="14" class="w-full border border-gray-300 rounded px-2 py-1 font-mono text-xs"></textarea>
+        <div class="flex items-center gap-2 mt-2">
+            <button type="button" id="save-manifest-btn" class="px-3 py-1.5 border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 cursor-pointer text-sm">Guardar como taxonomy_manifest.md</button>
+            <span id="save-manifest-status" class="text-sm min-h-[1.2em]"></span>
+        </div>
+    </div>
+</div>
+
 <label class="flex items-center gap-2 mb-3 text-sm{% if not litellm_configured %} opacity-50 cursor-not-allowed{% endif %}">
     <input type="checkbox" id="ai-classification-toggle"
            {% if context and context.ai_classification_enabled and litellm_configured %}checked{% endif %}
@@ -52,7 +81,7 @@
 {% else %}
 <p class="text-sm text-amber-700 mb-3">
     ⚠ LiteLLM Proxy no configurado — la clasificación por IA (Sub-fase B) no funcionará hasta configurarlo
-    (<a href="/docs/guides/litellm_proxy_setup/" class="underline">ver guía</a>).
+    (<a href="/admin/configuracion-ia" class="underline">Configuración IA</a>).
 </p>
 {% endif %}
 
@@ -169,6 +198,8 @@
 {% else %}
 <p class="text-gray-500">Todavía no se ha construido el contexto de este proyecto.</p>
 {% endif %}
+
+{{ example_modal_html("manifest-help-modal") }}
 
 <script>
 const projectName = {{ project.name | tojson }};
@@ -350,5 +381,86 @@ if (deleteBtn) {
         };
     });
 }
+
+// --- Borrador de manifiesto de taxonomía por IA: proponer -> revisar/editar en el
+// propio textarea -> guardar. Cierra el hueco que documentaba `draft_taxonomy_manifest`
+// (generaba el texto pero nada lo persistía, había que copiarlo a mano fuera de la
+// aplicación) -- ahora "Guardar" llama a `PUT .../context/taxonomy-manifest`
+// (auditoría de parametrización, sesión 2026-09-10). ---
+const draftManifestBtn = document.getElementById("draft-manifest-btn");
+const draftManifestError = document.getElementById("draft-manifest-error");
+const draftManifestPanel = document.getElementById("draft-manifest-panel");
+const draftManifestReasoning = document.getElementById("draft-manifest-reasoning");
+const draftManifestTextarea = document.getElementById("draft-manifest-textarea");
+const saveManifestBtn = document.getElementById("save-manifest-btn");
+const saveManifestStatus = document.getElementById("save-manifest-status");
+
+if (draftManifestBtn) {
+    draftManifestBtn.addEventListener("click", async () => {
+        if (draftManifestBtn.disabled) return;
+        draftManifestError.textContent = "";
+        draftManifestBtn.disabled = true;
+        try {
+            const result = await postJson(`/api/projects/${encodeURIComponent(projectName)}/context/taxonomy-manifest-draft`, "POST", {});
+            draftManifestTextarea.value = result.manifest_markdown;
+            draftManifestReasoning.textContent = `Muestra: ${result.sample_document_count}/${result.total_document_count} documentos convertidos.`
+                + (result.reasoning ? ` ${result.reasoning}` : "");
+            draftManifestPanel.hidden = false;
+            saveManifestStatus.textContent = "";
+        } catch (err) {
+            draftManifestError.textContent = err.message;
+        } finally {
+            draftManifestBtn.disabled = false;
+        }
+    });
+}
+
+if (saveManifestBtn) {
+    saveManifestBtn.addEventListener("click", async () => {
+        saveManifestStatus.textContent = "";
+        saveManifestStatus.className = "text-sm min-h-[1.2em]";
+        saveManifestBtn.disabled = true;
+        try {
+            await postJson(`/api/projects/${encodeURIComponent(projectName)}/context/taxonomy-manifest`, "PUT", { manifest_markdown: draftManifestTextarea.value });
+            window.location.reload();
+        } catch (err) {
+            saveManifestStatus.textContent = err.message;
+            saveManifestStatus.className = "text-sm text-red-700 min-h-[1.2em]";
+        } finally {
+            saveManifestBtn.disabled = false;
+        }
+    });
+}
+
+{{ example_modal_script("manifest-help-modal", "manifestHelpModal", "openManifestHelp") }}
+
+document.getElementById("manifest-help-btn").addEventListener("click", () => {
+    openManifestHelp(
+        "Ejemplo comentado de taxonomy_manifest.md",
+        "---\n" +
+        "# Catálogo de DOMINIOS (áreas temáticas/normativas del contenido). Cada entrada\n" +
+        "# necesita \"slug\" (identificador corto, solo minúsculas/números/guiones -- se usa\n" +
+        "# como nombre de carpeta) y \"name\" (texto legible). \"description\"/\"keywords\" son\n" +
+        "# opcionales: ayudan a la clasificación por reglas a encontrar coincidencias.\n" +
+        "domains:\n" +
+        "  - slug: ciberseguridad\n" +
+        "    name: Ciberseguridad\n" +
+        "    description: Políticas y procedimientos de seguridad de la información\n" +
+        "    keywords: [iso27001, seguridad, incidentes]\n\n" +
+        "# Catálogo de TIPOS DE MATERIAL (qué clase de documento de origen es) -- eje\n" +
+        "# independiente del de dominio: un documento se clasifica en AMBOS a la vez.\n" +
+        "material_types:\n" +
+        "  - slug: procedimiento\n" +
+        "    name: Procedimiento\n" +
+        "---\n\n" +
+        "<!-- Todo lo de aquí abajo es prosa libre para lectura humana -- NO se parsea. -->\n\n" +
+        "# Manifiesto de taxonomía -- " + projectName + "\n\n" +
+        "Catálogo cerrado de 2 ejes para clasificar los documentos de este proyecto. Un\n" +
+        "documento que no encaje en ningún dominio/tipo con confianza suficiente queda\n" +
+        "como \"sin-clasificar\" (revisable arriba, en la tabla de dominios)."
+    );
+});
 </script>
+
+{% include "_shared_scripts.html.j2" %}
 {% endblock content %}

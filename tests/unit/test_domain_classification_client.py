@@ -7,7 +7,8 @@ import pytest
 
 from pydantic import ValidationError
 
-from doc_organize.ai import DomainClassificationClient, litellm_classification_config_from_env
+from doc_organize.ai import DomainClassificationClient, litellm_classification_config_from_env, litellm_classification_config_from_store_or_env
+from doc_organize.auth import InstanceSecretsStore
 from doc_organize.core.exceptions import DomainClassificationAuthError, DomainClassificationError
 from doc_organize.core.models import DomainClassificationResult, LiteLLMClassificationConfig
 
@@ -154,3 +155,39 @@ def test_litellm_classification_config_from_env_defaults_model_when_unset(monkey
     config = litellm_classification_config_from_env()
 
     assert config.model == "claude-classifier"
+
+
+@pytest.mark.asyncio
+async def test_config_from_store_or_env_falls_back_to_env_when_store_is_empty(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_BASE_URL", "https://litellm.example.com")
+    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_VIRTUAL_KEY", "sk-from-env")
+    monkeypatch.delenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_MODEL", raising=False)
+
+    async with InstanceSecretsStore(tmp_path / "auth.db") as store:
+        config = await litellm_classification_config_from_store_or_env(store)
+
+    assert config.base_url == "https://litellm.example.com"
+    assert config.virtual_key == "sk-from-env"
+
+
+@pytest.mark.asyncio
+async def test_config_from_store_or_env_prefers_store_over_env(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_BASE_URL", "https://env.example.com")
+    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_VIRTUAL_KEY", "sk-from-env")
+
+    async with InstanceSecretsStore(tmp_path / "auth.db") as store:
+        await store.set("doc_organize_litellm_classification_base_url", "https://store.example.com", is_secret=False)
+        config = await litellm_classification_config_from_store_or_env(store)
+
+    assert config.base_url == "https://store.example.com"
+    assert config.virtual_key == "sk-from-env"  # sin override en el store, cae al entorno
+
+
+@pytest.mark.asyncio
+async def test_config_from_store_or_env_raises_when_neither_is_set(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_BASE_URL", raising=False)
+    monkeypatch.delenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_VIRTUAL_KEY", raising=False)
+
+    async with InstanceSecretsStore(tmp_path / "auth.db") as store:
+        with pytest.raises(ValueError):
+            await litellm_classification_config_from_store_or_env(store)

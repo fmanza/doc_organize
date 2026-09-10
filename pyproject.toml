@@ -74,6 +74,10 @@ web = [
     "jinja2>=3.1.0",
     "python-multipart>=0.0.6",
     "openpyxl>=3.1",
+    # Cifrado en reposo de credenciales de IA guardadas desde el panel de
+    # configuración (auth/secrets_cipher.py, Fernet) -- auditoría de parametrización,
+    # 2026-09-10.
+    "cryptography>=41.0",
 ]
 ocr-gpu = [
     "torch>=2.0",

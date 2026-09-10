@@ -4,7 +4,12 @@ from datetime import UTC, datetime
 
 import pytest
 
-from doc_organize.context.taxonomy_manifest import MANIFEST_FILE_NAME, load_taxonomy_manifest, render_taxonomy_manifest_markdown
+from doc_organize.context.taxonomy_manifest import (
+    MANIFEST_FILE_NAME,
+    load_taxonomy_manifest,
+    render_taxonomy_manifest_markdown,
+    save_taxonomy_manifest,
+)
 from doc_organize.core.exceptions import TaxonomyManifestError
 from doc_organize.core.models import Project, TaxonomyCatalogEntry, TaxonomyManifest
 
@@ -152,3 +157,42 @@ def test_render_taxonomy_manifest_markdown_without_reasoning_omits_it_gracefully
 
     assert text.startswith("---\ndomains:")
     assert "| Dominio | Ciberseguridad, Calidad |" in text
+
+
+@pytest.mark.asyncio
+async def test_save_taxonomy_manifest_writes_a_loadable_file(tmp_path):
+    project = _make_project(tmp_path)
+
+    manifest = await save_taxonomy_manifest(project, _VALID_FRONT_MATTER)
+
+    assert [entry.slug for entry in manifest.domains] == ["ciberseguridad", "calidad"]
+    assert (tmp_path / MANIFEST_FILE_NAME).read_text(encoding="utf-8") == _VALID_FRONT_MATTER
+    reloaded = await load_taxonomy_manifest(project)
+    assert reloaded is not None
+    assert [entry.slug for entry in reloaded.domains] == ["ciberseguridad", "calidad"]
+
+
+@pytest.mark.asyncio
+async def test_save_taxonomy_manifest_overwrites_an_existing_file(tmp_path):
+    project = _make_project(tmp_path)
+    (tmp_path / MANIFEST_FILE_NAME).write_text(
+        "---\ndomains:\n  - slug: viejo\n    name: Viejo\nmaterial_types:\n  - slug: x\n    name: X\n---\n", encoding="utf-8"
+    )
+
+    await save_taxonomy_manifest(project, _VALID_FRONT_MATTER)
+
+    reloaded = await load_taxonomy_manifest(project)
+    assert reloaded is not None
+    assert [entry.slug for entry in reloaded.domains] == ["ciberseguridad", "calidad"]
+
+
+@pytest.mark.asyncio
+async def test_save_taxonomy_manifest_rejects_invalid_markdown_without_writing(tmp_path):
+    project = _make_project(tmp_path)
+    (tmp_path / MANIFEST_FILE_NAME).write_text(_VALID_FRONT_MATTER, encoding="utf-8")
+
+    with pytest.raises(TaxonomyManifestError, match="delimitador"):
+        await save_taxonomy_manifest(project, "# Sin front matter\n")
+
+    # El fichero original no se toca si la validación falla.
+    assert (tmp_path / MANIFEST_FILE_NAME).read_text(encoding="utf-8") == _VALID_FRONT_MATTER

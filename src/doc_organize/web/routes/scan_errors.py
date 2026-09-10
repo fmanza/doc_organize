@@ -10,6 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
+from doc_organize.core.constants import MAX_AUTO_ERROR_RETRIES
 from doc_organize.core.models import Project
 from doc_organize.web.dependencies import get_project_registry, get_tenant_id, require_project_access
 from doc_organize.web.scan_errors_data import load_current_errors, load_error_history
@@ -60,6 +61,7 @@ async def scan_errors_page(name: str, request: Request, tab: str = "current") ->
             "history": history,
             "total_history_errors": total_history_errors,
             "active_tab": "history" if tab == "history" else "current",
+            "max_auto_error_retries": MAX_AUTO_ERROR_RETRIES,
         },
     )
 

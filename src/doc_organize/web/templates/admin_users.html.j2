@@ -6,7 +6,8 @@
 
 <form id="create-user-form" class="my-4 flex gap-2 flex-wrap items-center">
     <label for="user-username" class="sr-only">Usuario</label>
-    <input type="text" id="user-username" placeholder="Usuario" required
+    <input type="text" id="user-username" placeholder="Usuario" required maxlength="{{ username_max_length }}"
+           title="Máx. {{ username_max_length }} caracteres; solo letras, números, punto, guion y guion bajo."
            class="border border-gray-300 rounded px-2 py-1.5 flex-1 min-w-[200px]">
     <label for="user-password" class="sr-only">Contraseña</label>
     <input type="password" id="user-password" placeholder="Contraseña" required
@@ -20,6 +21,7 @@
     <label class="flex items-center gap-1"><input type="checkbox" id="user-must-change-password"> Debe cambiar contraseña</label>
     <button type="submit" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Crear usuario</button>
 </form>
+<p class="text-xs text-gray-500 mb-2">Usuario: máx. {{ username_max_length }} caracteres; solo letras, números, punto (.), guion (-) y guion bajo (_).</p>
 <p id="user-error" class="text-red-700 my-2 min-h-[1.2em]"></p>
 
 <table class="w-full border-collapse mt-4">

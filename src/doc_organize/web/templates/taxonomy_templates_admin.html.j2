@@ -1,0 +1,237 @@
+{% extends "base.html.j2" %}
+{% from "_example_modal_macros.html.j2" import example_modal_html, example_modal_script %}
+{% block title %}doc_organize — Plantillas de taxonomía{% endblock %}
+{% block content %}
+<p><a class="text-blue-600 underline" href="/">&larr; Proyectos</a></p>
+<h1 class="text-xl font-semibold mb-2">Plantillas de taxonomía</h1>
+<p class="text-sm text-gray-600 mb-4">
+    Biblioteca de catálogos (dominio + tipo de material) reutilizables entre proyectos.
+    Un proyecto la referencia por nombre al construir su contexto; si además tiene su propio
+    <code>taxonomy_manifest.md</code>, ese fichero local siempre tiene prioridad sobre la plantilla.
+</p>
+
+<table class="w-full text-sm border-collapse mb-6">
+    <thead>
+        <tr class="text-left text-gray-600 border-b border-gray-300">
+            <th class="py-1 pr-2">Nombre</th>
+            <th class="py-1 pr-2">Título</th>
+            <th class="py-1 pr-2">Descripción</th>
+            <th class="py-1 pr-2"></th>
+        </tr>
+    </thead>
+    <tbody id="templates-tbody">
+        {% for template in templates %}
+        <tr class="border-t border-gray-200">
+            <td class="py-1 pr-2 font-mono">{{ template.name }}</td>
+            <td class="py-1 pr-2">{{ template.title or "" }}</td>
+            <td class="py-1 pr-2 text-gray-600">{{ template.description or "" }}</td>
+            <td class="py-1 pr-2 text-right whitespace-nowrap">
+                <button type="button" class="template-edit-btn text-blue-600 hover:underline bg-transparent border-0 cursor-pointer" data-name="{{ template.name }}">Editar</button>
+                <button type="button" class="template-delete-btn text-red-700 hover:underline bg-transparent border-0 cursor-pointer ml-2" data-name="{{ template.name }}">Eliminar</button>
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="py-2 text-gray-500">No hay ninguna plantilla todavía.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<div class="flex items-center gap-3 mb-2">
+    <h2 class="font-semibold" id="template-form-heading">Nueva plantilla</h2>
+    <button type="button" id="template-example-btn" class="text-blue-600 underline text-sm bg-transparent border-0 cursor-pointer">Ver ejemplo comentado</button>
+</div>
+<form id="template-form" class="space-y-3">
+    <div class="flex gap-2 flex-wrap">
+        <label class="flex-1 min-w-[160px] text-sm">Nombre (slug) *
+            <input type="text" id="template-name" required pattern="[a-z0-9][a-z0-9-]*" placeholder="p.ej. sgi-iso27001"
+                   class="block mt-1 w-full border border-gray-300 rounded px-2 py-1 font-mono text-sm">
+        </label>
+        <label class="flex-1 min-w-[160px] text-sm">Título
+            <input type="text" id="template-title" class="block mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm">
+        </label>
+        <label class="flex-[2] min-w-[220px] text-sm">Descripción
+            <input type="text" id="template-description" class="block mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm">
+        </label>
+    </div>
+
+    <fieldset class="border border-gray-200 rounded p-3">
+        <legend class="text-sm font-medium px-1">Dominios *</legend>
+        <div id="domains-rows" class="space-y-1"></div>
+        <button type="button" id="add-domain-btn" class="mt-2 text-sm text-blue-600 underline bg-transparent border-0 cursor-pointer">+ Añadir dominio</button>
+    </fieldset>
+
+    <fieldset class="border border-gray-200 rounded p-3">
+        <legend class="text-sm font-medium px-1">Tipos de material *</legend>
+        <div id="material-types-rows" class="space-y-1"></div>
+        <button type="button" id="add-material-type-btn" class="mt-2 text-sm text-blue-600 underline bg-transparent border-0 cursor-pointer">+ Añadir tipo de material</button>
+    </fieldset>
+
+    <div class="flex items-center gap-3">
+        <button type="submit" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 text-sm">Guardar plantilla</button>
+        <button type="button" id="template-form-cancel" hidden class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200 text-sm">Cancelar edición</button>
+        <span id="template-form-error" class="text-red-700 text-sm min-h-[1.2em]"></span>
+    </div>
+</form>
+
+{{ example_modal_html("template-example-modal") }}
+
+<script>
+function catalogRowHtml() {
+    return `
+        <div class="catalog-row flex gap-2 items-start">
+            <input type="text" class="catalog-slug border border-gray-300 rounded px-2 py-1 text-sm font-mono w-32" placeholder="slug">
+            <input type="text" class="catalog-name border border-gray-300 rounded px-2 py-1 text-sm flex-1 min-w-[120px]" placeholder="Nombre legible">
+            <input type="text" class="catalog-description border border-gray-300 rounded px-2 py-1 text-sm flex-[2] min-w-[160px]" placeholder="Descripción (opcional)">
+            <input type="text" class="catalog-keywords border border-gray-300 rounded px-2 py-1 text-sm flex-1 min-w-[140px]" placeholder="palabras clave, separadas por coma">
+            <button type="button" class="catalog-remove-btn text-red-700 bg-transparent border-0 cursor-pointer text-sm">&times;</button>
+        </div>`;
+}
+
+function addCatalogRow(containerId, entry) {
+    const container = document.getElementById(containerId);
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = catalogRowHtml();
+    const row = wrapper.firstElementChild;
+    if (entry) {
+        row.querySelector(".catalog-slug").value = entry.slug || "";
+        row.querySelector(".catalog-name").value = entry.name || "";
+        row.querySelector(".catalog-description").value = entry.description || "";
+        row.querySelector(".catalog-keywords").value = (entry.keywords || []).join(", ");
+    }
+    row.querySelector(".catalog-remove-btn").addEventListener("click", () => row.remove());
+    container.appendChild(row);
+}
+
+function readCatalogRows(containerId) {
+    return Array.from(document.getElementById(containerId).querySelectorAll(".catalog-row"))
+        .map((row) => ({
+            slug: row.querySelector(".catalog-slug").value.trim(),
+            name: row.querySelector(".catalog-name").value.trim(),
+            description: row.querySelector(".catalog-description").value.trim() || null,
+            keywords: row.querySelector(".catalog-keywords").value.split(",").map((s) => s.trim()).filter(Boolean),
+        }))
+        .filter((entry) => entry.slug && entry.name);
+}
+
+document.getElementById("add-domain-btn").addEventListener("click", () => addCatalogRow("domains-rows"));
+document.getElementById("add-material-type-btn").addEventListener("click", () => addCatalogRow("material-types-rows"));
+
+const form = document.getElementById("template-form");
+const nameInput = document.getElementById("template-name");
+const titleInput = document.getElementById("template-title");
+const descriptionInput = document.getElementById("template-description");
+const formHeading = document.getElementById("template-form-heading");
+const formError = document.getElementById("template-form-error");
+const cancelBtn = document.getElementById("template-form-cancel");
+let editingName = null;
+
+function resetForm() {
+    editingName = null;
+    nameInput.value = "";
+    nameInput.disabled = false;
+    titleInput.value = "";
+    descriptionInput.value = "";
+    document.getElementById("domains-rows").innerHTML = "";
+    document.getElementById("material-types-rows").innerHTML = "";
+    addCatalogRow("domains-rows");
+    addCatalogRow("material-types-rows");
+    formHeading.textContent = "Nueva plantilla";
+    cancelBtn.hidden = true;
+    formError.textContent = "";
+}
+resetForm();
+
+document.querySelectorAll(".template-edit-btn").forEach((button) => {
+    button.addEventListener("click", async () => {
+        formError.textContent = "";
+        try {
+            const response = await fetch(`/api/taxonomy-templates/${encodeURIComponent(button.dataset.name)}`);
+            const data = await response.json();
+            if (!response.ok) throw new Error(apiError(data, "No se pudo cargar la plantilla."));
+            editingName = data.name;
+            nameInput.value = data.name;
+            nameInput.disabled = true;
+            titleInput.value = data.manifest.title || "";
+            descriptionInput.value = data.manifest.description || "";
+            document.getElementById("domains-rows").innerHTML = "";
+            document.getElementById("material-types-rows").innerHTML = "";
+            data.manifest.domains.forEach((entry) => addCatalogRow("domains-rows", entry));
+            data.manifest.material_types.forEach((entry) => addCatalogRow("material-types-rows", entry));
+            formHeading.textContent = `Editando: ${data.name}`;
+            cancelBtn.hidden = false;
+            form.scrollIntoView({ behavior: "smooth" });
+        } catch (err) {
+            formError.textContent = err.message;
+        }
+    });
+});
+
+cancelBtn.addEventListener("click", resetForm);
+
+form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    formError.textContent = "";
+    const domains = readCatalogRows("domains-rows");
+    const materialTypes = readCatalogRows("material-types-rows");
+    if (!domains.length || !materialTypes.length) {
+        formError.textContent = "Añade al menos un dominio y un tipo de material.";
+        return;
+    }
+    const name = editingName || nameInput.value.trim();
+    if (!name) {
+        formError.textContent = "El nombre de la plantilla es obligatorio.";
+        return;
+    }
+    try {
+        await postJson(`/api/taxonomy-templates/${encodeURIComponent(name)}`, "PUT", {
+            title: titleInput.value.trim() || null,
+            description: descriptionInput.value.trim() || null,
+            domains: domains,
+            material_types: materialTypes,
+        });
+        window.location.reload();
+    } catch (err) {
+        formError.textContent = err.message;
+    }
+});
+
+document.querySelectorAll(".template-delete-btn").forEach((button) => {
+    button.addEventListener("click", async () => {
+        formError.textContent = "";
+        try {
+            await postJson(`/api/taxonomy-templates/${encodeURIComponent(button.dataset.name)}`, "DELETE", { confirm: true });
+            window.location.reload();
+        } catch (err) {
+            formError.textContent = err.message;
+        }
+    });
+});
+
+{{ example_modal_script("template-example-modal", "templateExampleModal", "openTemplateExample") }}
+
+document.getElementById("template-example-btn").addEventListener("click", () => {
+    openTemplateExample(
+        "Ejemplo comentado de plantilla",
+        "Cada DOMINIO necesita:\n" +
+        "  slug  -- identificador corto (minúsculas/números/guiones, se usa como carpeta)\n" +
+        "  name  -- nombre legible\n" +
+        "  description (opcional) -- ayuda a la clasificación por reglas\n" +
+        "  palabras clave (opcional) -- términos adicionales que la clasificación por reglas busca\n\n" +
+        "Ejemplo:\n" +
+        "  slug: ciberseguridad\n" +
+        "  name: Ciberseguridad\n" +
+        "  descripción: Políticas y procedimientos de seguridad de la información\n" +
+        "  palabras clave: iso27001, seguridad, incidentes\n\n" +
+        "Cada TIPO DE MATERIAL tiene el mismo formato, en su propio catálogo independiente\n" +
+        "(p.ej. slug: procedimiento, name: Procedimiento).\n\n" +
+        "El título/descripción de la propia plantilla (arriba del formulario) solo se usan\n" +
+        "para el listado -- no afectan a la clasificación.\n\n" +
+        "Ya vienen 2 plantillas de ejemplo completas en la biblioteca empaquetada: \"calidad\"\n" +
+        "(ISO 9001) y \"sgi-iso27001\" (ISO 27001) -- ábrelas con \"Editar\" arriba para ver un\n" +
+        "caso real completo."
+    );
+});
+</script>
+
+{% include "_shared_scripts.html.j2" %}
+{% endblock %}

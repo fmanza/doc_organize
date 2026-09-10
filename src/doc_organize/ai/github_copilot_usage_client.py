@@ -18,6 +18,7 @@ from typing import Any, Self
 
 import httpx
 
+from doc_organize.auth import InstanceSecretsStore
 from doc_organize.core.exceptions import UsageSourceAuthError, UsageSourceConnectionError, UsageSourceError
 from doc_organize.core.models import GitHubCopilotUsageConfig, UsageLineItem, UsageSnapshot, UsageSourceName
 from doc_organize.utils.logging import get_logger
@@ -50,6 +51,25 @@ def github_copilot_usage_config_from_env() -> GitHubCopilotUsageConfig:
     pat = os.environ.get(_ENV_VAR_PAT)
     if not username or not pat:
         raise ValueError(f"Definir {_ENV_VAR_USERNAME} y {_ENV_VAR_PAT} para usar github_copilot_usage_config_from_env().")
+    return GitHubCopilotUsageConfig(username=username, personal_access_token=pat)
+
+
+async def github_copilot_usage_config_from_store_or_env(store: InstanceSecretsStore) -> GitHubCopilotUsageConfig:
+    """Construye `GitHubCopilotUsageConfig` con precedencia `store` (panel de configuración IA) >
+    `DOC_ORGANIZE_GITHUB_USERNAME`/`_PAT` del entorno.
+
+    Mismo criterio que `domain_classification_client.litellm_classification_config_from_store_or_env()`.
+
+    Returns:
+        Config lista para `GitHubCopilotUsageClient`.
+
+    Raises:
+        ValueError: Si, tras aplicar la precedencia, falta `username` o `pat`.
+    """
+    username = await store.get(_ENV_VAR_USERNAME.lower()) or os.environ.get(_ENV_VAR_USERNAME)
+    pat = await store.get(_ENV_VAR_PAT.lower()) or os.environ.get(_ENV_VAR_PAT)
+    if not username or not pat:
+        raise ValueError(f"Definir {_ENV_VAR_USERNAME} y {_ENV_VAR_PAT} (panel de configuración IA o entorno) para consultar uso de Copilot.")
     return GitHubCopilotUsageConfig(username=username, personal_access_token=pat)
 
 
@@ -163,4 +183,4 @@ class GitHubCopilotUsageClient:
         )
 
 
-__all__ = ["GitHubCopilotUsageClient", "github_copilot_usage_config_from_env"]
+__all__ = ["GitHubCopilotUsageClient", "github_copilot_usage_config_from_env", "github_copilot_usage_config_from_store_or_env"]

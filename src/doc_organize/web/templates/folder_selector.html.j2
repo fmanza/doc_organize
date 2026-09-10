@@ -50,7 +50,10 @@
             </p>
         </fieldset>
         <fieldset class="border border-gray-300 rounded px-3 py-2">
-            <legend class="text-xs font-medium text-gray-600 px-1">Formatos a incluir</legend>
+            <legend class="text-xs font-medium text-gray-600 px-1">
+                Formatos a incluir
+                <span class="cursor-help" title="Siempre incluidos: {{ supported_extensions | join(', ') }}. Con &quot;Incluir audio/vídeo&quot;, además: {{ av_supported_extensions | join(', ') }}.">ⓘ</span>
+            </legend>
             <p class="flex gap-4 flex-wrap">
                 <label class="flex items-center gap-1" title="{{ '' if av_status.ready else (av_status.instructions or '') }}">
                     <input type="checkbox" id="include_audio_video" {% if not av_status.ready %}disabled{% endif %}> Incluir audio/vídeo

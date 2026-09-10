@@ -1,0 +1,51 @@
+{#
+Modal reutilizable "Ver ejemplo" -- ayuda contextual bajo demanda (fichero de ejemplo
+comentado, formato esperado de un campo), NO de confirmación: sin botones
+"Cancelar"/"Confirmar", solo "Cerrar". Mismo esqueleto técnico que los modales de
+confirmación ya existentes (`#confirm-modal` en `project_selector.html.j2`,
+`#force-confirm-modal` en `folder_selector.html.j2`): div con `hidden` + Tailwind
+`fixed inset-0 bg-black/50` + JS vanilla alternando `.hidden`/`.classList.add('flex')`
+-- primer uso de ese esqueleto para contenido informativo en vez de una confirmación
+destructiva (auditoría de parametrización, sesión 2026-09-10). Mismo criterio que
+`_semaforo_macros.html.j2`: `example_modal_html` genera el HTML (ids derivados de
+`modal_id`), `example_modal_script` genera el JS parametrizado por los nombres de
+variable/función que cada página elija.
+#}
+
+{% macro example_modal_html(modal_id) %}
+<div id="{{ modal_id }}" hidden class="fixed inset-0 bg-black/50 items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-lg shadow-lg max-w-2xl w-full max-h-[85vh] flex flex-col p-4">
+        <div class="flex items-start justify-between gap-4 mb-2">
+            <h2 id="{{ modal_id }}-title" class="text-lg font-semibold"></h2>
+            <button type="button" id="{{ modal_id }}-close-x" aria-label="Cerrar"
+                    class="text-gray-500 hover:text-gray-800 cursor-pointer bg-transparent border-0 text-xl leading-none">&times;</button>
+        </div>
+        <div id="{{ modal_id }}-body" class="text-xs text-gray-700 overflow-y-auto whitespace-pre-wrap font-mono bg-gray-50 border border-gray-200 rounded p-3"></div>
+        <div class="flex justify-end mt-3">
+            <button type="button" id="{{ modal_id }}-close" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Cerrar</button>
+        </div>
+    </div>
+</div>
+{% endmacro %}
+
+{% macro example_modal_script(modal_id, modal_var, open_fn) %}
+const {{ modal_var }} = {
+    root: document.getElementById("{{ modal_id }}"),
+    title: document.getElementById("{{ modal_id }}-title"),
+    body: document.getElementById("{{ modal_id }}-body"),
+};
+
+function {{ open_fn }}(title, bodyText) {
+    {{ modal_var }}.title.textContent = title;
+    {{ modal_var }}.body.textContent = bodyText;
+    {{ modal_var }}.root.hidden = false;
+    {{ modal_var }}.root.classList.add("flex");
+}
+
+function _{{ open_fn }}Close() {
+    {{ modal_var }}.root.hidden = true;
+    {{ modal_var }}.root.classList.remove("flex");
+}
+document.getElementById("{{ modal_id }}-close").addEventListener("click", _{{ open_fn }}Close);
+document.getElementById("{{ modal_id }}-close-x").addEventListener("click", _{{ open_fn }}Close);
+{% endmacro %}
