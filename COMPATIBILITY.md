@@ -6,9 +6,18 @@ Tabla de compatibilidad por versión de `doc_organize`. Generada a partir del hi
 `CHANGELOG.md`): todas las versiones listadas son estados internos del repositorio, no paquetes
 instalables desde fuera.
 
+> **Nota de corrección (2026-09-10)**: esta tabla llevaba desde 0.4.0 sin una fila nueva pese a que
+> `pyproject.toml` ya iba por 0.7.0 — 3 versiones de diferencia. Las filas 0.5.0/0.6.0/0.7.0 se han
+> reconstruido ahora verificando `git show <commit-de-bump>:pyproject.toml` de cada una (mismas
+> cotas que 0.4.0 en los tres casos, sin cambios) al cerrar la 0.8.0.
+
 | Versión | Python | Dependencias clave | Estado |
 |---|---|---|---|
-| 0.4.0 | `>=3.11` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0` | ✅ Activa |
+| 0.8.0 | `>=3.11` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0`; nuevos extras `[ai]`: `httpx>=0.24`, `[context]`: `pyyaml>=6.0` | ✅ Activa |
+| 0.7.0 | `>=3.11` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0` | ❌ EOL |
+| 0.6.0 | `>=3.11` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0` | ❌ EOL |
+| 0.5.0 | `>=3.11` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0` | ❌ EOL |
+| 0.4.0 | `>=3.11` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0` | ❌ EOL |
 | 0.3.0 | `>=3.11` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0` | ❌ EOL |
 | 0.2.0 | `>=3.10` → `>=3.11`¹ | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0` | ❌ EOL |
 | 0.1.0 | `>=3.10` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0` | ❌ EOL |
@@ -19,8 +28,9 @@ instalables desde fuera.
 versión tal como quedó commiteado (`>=3.11`), no su estado inicial.
 
 Las dependencias clave (`docling`, `pydantic`, `aiosqlite`) no han cambiado de cota mínima en
-ninguna versión hasta la fecha — la columna se repite igual en las cuatro filas porque es un hecho
-verificado (`git show <commit>:pyproject.toml`), no una omisión.
+ninguna versión hasta la fecha — la columna se repite igual en la mayoría de filas porque es un
+hecho verificado (`git show <commit>:pyproject.toml`), no una omisión. La 0.8.0 es la primera en
+sumar cotas nuevas, vía dos extras opcionales (`ai`, `context`) que no afectan a la instalación base.
 
 ## Cómo mantener esta tabla
 

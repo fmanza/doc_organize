@@ -6,6 +6,8 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-10
+
 ### Fixed
 
 - `src/doc_organize/converter/converter.py`: dos fallos reales de conversión sin diagnóstico útil.
@@ -38,6 +40,14 @@ releases publicados antes de esa versión).
   podía dejar la vista con datos de una carpeta distinta a la mostrada) ni contra doble clic en
   "Usar esta carpeta" durante una petición en curso. Añadido token de generación de petición y
   deshabilitado temporal del botón mientras se resuelve `onSelect`.
+- `src/doc_organize/context/{domain_classifier,context_builder,reorganizer}.py`: `images_dir` de
+  `ConversionResult` se perdía al construir `DomainDocument` y `Reorganizer._copy_document` nunca
+  copiaba la carpeta `img/<stem>/` al destino reorganizado, así que MkDocs servía las imágenes de
+  los documentos como rotas. Corregido en dos pasadas: propagar `images_dir` por `DomainDocument`/
+  `Reorganizer`, y `web/routes/context.py::_gather_converted_documents` (que reconstruye
+  `ConversionResult` desde `cache.db` recalculando `markdown_path`/`json_path`) recalculando también
+  `images_dir` — no se persiste en `cache.db` ni en `document.json`, así que el primer fix por sí
+  solo operaba sobre un `ConversionResult` que ya nacía sin él.
 
 ### Added
 
@@ -111,6 +121,26 @@ releases publicados antes de esa versión).
 - `deploy/litellm/{docker-compose.yml,config.yaml.example,.env.example}` + guía
   [`docs/guides/litellm_proxy_setup.md`](docs/guides/litellm_proxy_setup.md): despliegue local del
   LiteLLM Proxy que requiere la Sub-fase B (proxy + Postgres, virtual key dedicada).
+- `src/doc_organize/context/mkdocs_generator.py`: construir el contexto ejecuta ahora `mkdocs build`
+  a disco (si `mkdocs` está instalado) en vez de dejar solo `mkdocs.yml` sin construir.
+  `output_folder_name` es elegible en la primera construcción de un proyecto (validado contra path
+  traversal y contra nombres ya reservados por otros subsistemas) y queda fijo hasta que se elimina
+  el contexto por completo — nuevo `DELETE /api/projects/{name}/context`, con confirmación explícita
+  en la UI — así se puede elegir otra carpeta sin dejar copias huérfanas. La página de Contexto avisa
+  si LiteLLM Proxy está configurado antes de que el usuario intente activar la Sub-fase B.
+- `src/doc_organize/web/routes/context.py`: nuevo `GET /projects/{name}/context/site[...]` para
+  visualizar el sitio MkDocs ya construido de cualquier proyecto, independiente del flujo de
+  build/reconstruir contexto, con el mismo control de acceso por tenant/rol que el resto de la app
+  (`require_project_access`). Nunca se dispara automáticamente tras un build — el usuario lo abre
+  desde el enlace "ver documentación generada", visible solo cuando `mkdocs_site_built` es `True`.
+- `src/doc_organize/web/templates/context.html.j2`: "Reconstruir/Construir contexto" y "Eliminar
+  contexto" muestran ahora el mismo semáforo de 3 luces que Escanear/Duplicados
+  (Inicio/Ejecución/Finalización, rojo en error), con progreso real vía dos WebSocket nuevos
+  (`/context/build`, `/context/delete`) que retransmiten cada paso de
+  `ContextBuilder`/`Reorganizer`/`MkDocsGenerator` — incluida una barra numérica X/Y para la
+  clasificación por IA y la copia de documentos. El checkbox de "Clasificación asistida por IA" se
+  deshabilita (y se fuerza desmarcado) cuando LiteLLM Proxy no está configurado, incluso si un build
+  anterior lo había dejado activo.
 
 ### Changed
 
@@ -123,6 +153,14 @@ releases publicados antes de esa versión).
   clases Tailwind propias de "Mover"/"ubicación al crear proyecto"); sin cambio de comportamiento
   observable — incluida la diferencia real de cerrar o no el panel tras seleccionar (resuelta con
   un segundo argumento `close()` que cada página invoca o ignora según su flujo).
+- `src/doc_organize/web/dependencies.py`: la autenticación y el lock de los WebSocket de proyecto
+  (antes duplicados entre `scan.py` y `context.py`, con textos ya divergentes entre sí) se
+  centralizan aquí, reutilizados por los WS de escaneo, deduplicación y, ahora, construir/eliminar
+  contexto.
+- `src/doc_organize/web/templates/_semaforo_macros.html.j2` (nuevo): el HTML/JS del semáforo de 3
+  luces (antes triplicado entre `folder_selector.html.j2`, `duplicates_resolver.html.j2` y
+  `context.html.j2`) se extrae a esta macro común; sin cambio de comportamiento observable
+  (verificado en navegador real con Playwright en las 3 páginas).
 
 ## [0.7.0] - 2026-09-03
 

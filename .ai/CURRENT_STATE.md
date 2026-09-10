@@ -1,11 +1,13 @@
 # CURRENT STATE — doc_organize
 
-**Generado**: 2026-08-29 · **actualizado**: 2026-09-04
+**Generado**: 2026-08-29 · **actualizado**: 2026-09-10
 **Fuente de esta actualización**: `git log`, `pyproject.toml`/`CHANGELOG.md`, y
 re-ejecución en vivo de `ruff`/`mypy`/`pytest`/`mkdocs build --strict` — no una
 promesa (mismo criterio que `.ai/sessions/2026-09-03-historial-escaneo-fecha-docs-offline/TRACEABILITY.md`).
-**Rama activa**: `develop`, al día con lo commiteado (`16094cc` es el HEAD)
-**Versión**: `0.7.0` (`pyproject.toml`/`CHANGELOG.md`)
+**Rama activa**: `develop`, HEAD commiteado `a6ffc93` + cierre de versión 0.8.0 pendiente de commit
+(`pyproject.toml`/`CHANGELOG.md`/`COMPATIBILITY.md` ya actualizados en el working tree)
+**Versión**: `0.8.0` (`pyproject.toml`/`CHANGELOG.md`) — cierra todo lo acumulado en `[Unreleased]`
+desde la 0.7.0, incluido el paquete `context/` completo (sesiones `2026-09-08`/`2026-09-10`)
 
 > **Nota de corrección (2026-09-04)**: este documento llevaba desde 2026-08-29
 > (`v0.2.0`) sin actualizarse — 5 versiones y ~15 sesiones de trabajo de
@@ -44,6 +46,15 @@ detalle completo, no reproducido aquí) añadió, entre otras cosas:
   cognitiva de `AuthMiddleware.dispatch()` y `DocumentScanner._build_node()`, import
   privado de Docling, causa raíz de un falso "falta argumento" de pyright en 16
   campos `Field()` de `core/models.py`, excepción redundante en `av_detector.py`.
+- Nuevo paquete `context/` (extra `context`, sesión `2026-09-08-organizacion-documental-contextos`):
+  organiza los documentos ya convertidos de un proyecto por dominios (clasificación por reglas,
+  opcionalmente asistida por IA vía LiteLLM Proxy), los copia a una carpeta reorganizada configurable
+  y genera/construye un sitio MkDocs navegable a partir de ella. Continuado en la sesión
+  `2026-09-10-context-mkdocs-site-imagenes`: build a disco real (antes solo dejaba `mkdocs.yml` sin
+  construir), endpoint para servir el sitio ya construido independiente del flujo de build, semáforo
+  de progreso en tiempo real (mismo patrón que Escanear/Duplicados) y fix de imágenes rotas
+  (`images_dir` no se persiste en `cache.db`, hay que recalcularlo al reconstruir desde caché).
+  Cerrado en la versión `0.8.0` (2026-09-10).
 
 **Fuente de verdad detallada por versión**: `CHANGELOG.md` (formato Keep a
 Changelog, bien mantenido). **Historial de sesiones con directrices para
@@ -51,19 +62,26 @@ futuras IAs**: `.ai/sessions/<fecha>[-slug]/TRACEABILITY.md`.
 
 ---
 
-## Calidad actual (verificado en vivo, 2026-09-04)
+## Calidad actual (verificado en vivo, 2026-09-10)
 
 ```
 python -m ruff check src tests           → All checks passed!
-python -m mypy src                        → Success: no issues found in 52 source files
-python -m pytest -q --no-cov              → 478 passed
-python -m pytest --doctest-modules src    → 26 passed (verificado idempotente, dos ejecuciones)
-mkdocs build --strict                     → exit 0, sin links rotos
+python -m mypy src                        → Success: no issues found in 65 source files
+python -m pytest -q --no-cov              → 643 passed
+mkdocs build --strict                     → Documentation built in 2.45s, sin errores
+                                             (único aviso: deprecación de Material for MkDocs
+                                             sobre MkDocs 2.0 — ruido del tema, no del build)
+python -m build                           → doc_organize-0.8.0.tar.gz y
+                                             doc_organize-0.8.0-py3-none-any.whl generados sin error
 ```
+
+`python -m pytest --doctest-modules src -q` → 35 passed, 3 skipped (subía de 26 passed en la
+verificación anterior, sesión `2026-09-04-cierre-backlog-maturity-audit`, por los docstrings con
+ejemplo del nuevo paquete `context/`).
 
 ---
 
-## Estructura del código (verificada 2026-09-04)
+## Estructura del código (recuento verificado 2026-09-10, diagrama de niveles sin revisar desde 2026-09-04)
 
 ```
 src/doc_organize/
@@ -72,7 +90,12 @@ src/doc_organize/
 └── scan/, web/, main.py         # Nivel 3
 ```
 
-52 ficheros `.py` en `src/doc_organize/` (11 paquetes + `main.py`/`__main__.py`).
+65 ficheros `.py` en `src/doc_organize/` (13 paquetes + `main.py`/`__main__.py`) — subió de 52
+ficheros/11 paquetes con los paquetes `ai/` (monitorización de uso/coste + cliente de clasificación
+por dominios, sesiones `2026-09-07`/`2026-09-08`) y `context/` (organización documental por
+dominios, sesiones `2026-09-08`/`2026-09-10`). **Pendiente**: `.ai/architecture.md` no se ha
+actualizado con el nivel de `ai/`/`context/` en el diagrama — no asumir su nivel sin revisar sus
+imports reales.
 Excepción documentada a la regla de niveles: `projects/` importa de
 `validators/` (ambos Nivel 2) — ver `.ai/architecture.md` para la
 justificación. Detalle completo: `.ai/architecture.md`, `docs/functional/index.md`.
@@ -110,6 +133,15 @@ justificación. Detalle completo: `.ai/architecture.md`, `docs/functional/index.
   antes de `cache.save_entries()`, `main.py::_run_deduplicate` no traduce
   excepciones inesperadas a un mensaje limpio) — cada uno con su
   justificación propia documentada en esa sesión, no re-evaluados aquí.
+- `context/`: dos documentos con el mismo `stem` en el mismo dominio/tipo se pisan en
+  `organizado/` — sin desambiguación todavía (limitación conocida, documentada en `Reorganizer`).
+- `context/`: sin test de integración real contra un LiteLLM Proxy vía Docker (solo
+  `httpx.MockTransport`) — validar manualmente antes de depender de la Sub-fase B en producción.
+- `context/`: `images_dir` de `ConversionResult` no se persiste en `cache.db` ni en `document.json`
+  — cualquier código futuro que reconstruya `ConversionResult` desde caché debe recalcularlo
+  explícitamente (dos bugs reales, sesión `2026-09-10-context-mkdocs-site-imagenes`, nacieron de
+  olvidar este campo en dos sitios del mismo flujo). Sin test de regresión que falle si se vuelve a
+  omitir.
 
 ---
 
