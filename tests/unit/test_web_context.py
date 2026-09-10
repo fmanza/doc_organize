@@ -1,11 +1,15 @@
 """Tests de las rutas web de Contexto (construir/ver el contexto de un proyecto)."""
 
 import json
+import re
 
 from pathlib import Path
 
 import httpx
 import pytest
+
+from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from doc_organize.cache import CacheManager
 from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME
@@ -16,6 +20,12 @@ from doc_organize.web import create_app
 
 def _client(app, base_url: str = "http://testserver") -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=base_url)
+
+
+def _ai_toggle_tag(html: str) -> str:
+    match = re.search(r'<input[^>]*id="ai-classification-toggle"[^>]*>', html, re.DOTALL)
+    assert match is not None, "No se encontró el checkbox #ai-classification-toggle en el HTML"
+    return match.group()
 
 
 @pytest.fixture(autouse=True)
@@ -425,6 +435,8 @@ async def test_context_page_shows_litellm_not_configured_warning(tmp_path, monke
 
     assert response.status_code == 200
     assert "LiteLLM Proxy no configurado" in response.text
+    assert "disabled" in _ai_toggle_tag(response.text)
+    assert "checked" not in _ai_toggle_tag(response.text)
 
 
 @pytest.mark.asyncio
@@ -441,3 +453,262 @@ async def test_context_page_shows_litellm_configured_confirmation(tmp_path, monk
     assert response.status_code == 200
     assert "LiteLLM Proxy configurado" in response.text
     assert "LiteLLM Proxy no configurado" not in response.text
+    assert "disabled" not in _ai_toggle_tag(response.text)
+
+
+@pytest.mark.asyncio
+async def test_ai_toggle_is_unchecked_and_disabled_if_litellm_becomes_unconfigured_after_being_enabled(tmp_path, monkeypatch) -> None:
+    """Si un contexto se construyó con `ai_classification_enabled=True` cuando
+    LiteLLM sí estaba configurado, y luego el proxy deja de estarlo, el checkbox
+    debe mostrarse desmarcado y deshabilitado (no "marcado pero deshabilitado") —
+    así la siguiente reconstrucción nunca reenvía `ai_classification_enabled: true`
+    para una casilla que el usuario ya no puede desmarcar desde la UI."""
+    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_BASE_URL", "https://proxy.example.test")
+    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_VIRTUAL_KEY", "sk-test")
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    file_path = _seed_converted_document(project_root, "informe", "Informe anual")
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+        )
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        build_response = await client.post(f"/api/projects/{project.name}/context", json={"ai_classification_enabled": True})
+    assert build_response.status_code == 200
+    assert build_response.json()["ai_classification_enabled"] is True
+
+    monkeypatch.delenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_BASE_URL", raising=False)
+    monkeypatch.delenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_VIRTUAL_KEY", raising=False)
+    async with _client(app) as client:
+        page_response = await client.get(f"/projects/{project.name}/context")
+
+    tag = _ai_toggle_tag(page_response.text)
+    assert "disabled" in tag
+    assert "checked" not in tag
+
+
+# ===== WS /api/projects/{name}/context/build =====
+
+
+def _run_context_build_websocket(client: TestClient, project_name: str, payload: dict | None = None) -> list[dict]:
+    events: list[dict] = []
+    with client.websocket_connect(f"/api/projects/{project_name}/context/build") as websocket:
+        websocket.send_json(payload or {})
+        while True:
+            message = websocket.receive_json()
+            events.append(message)
+            if message["event"] == "completed":
+                break
+    return events
+
+
+@pytest.mark.asyncio
+async def test_context_build_websocket_reports_progress_and_completes(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    file_path = _seed_converted_document(project_root, "informe", "Informe anual")
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+        )
+    app = create_app(registry_path=registry_path)
+    client = TestClient(app)
+
+    events = _run_context_build_websocket(client, project.name)
+
+    event_names = [event["event"] for event in events]
+    assert event_names == ["started", "reorganize_started", "document_copied", "mkdocs_started", "completed"]
+    reorganize_started = events[1]
+    assert reorganize_started["data"] == {"total": 1}
+    document_copied = events[2]
+    assert document_copied["data"] == {"index": 1, "total": 1, "path": file_path}
+    completed = events[-1]
+    assert completed["data"]["domains"] == [{"slug": "ciberseguridad", "name": "Ciberseguridad", "status": "borrador", "document_count": 1}]
+    assert completed["data"]["reorganized"] is True
+    assert completed["data"]["mkdocs_generated"] is True
+    assert (project_root / "organizado" / "ciberseguridad" / "pdf" / "informe" / "informe.pdf").exists()
+
+
+@pytest.mark.asyncio
+async def test_context_build_websocket_accepts_custom_output_folder_name(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    file_path = _seed_converted_document(project_root, "informe", "Informe anual")
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+        )
+    app = create_app(registry_path=registry_path)
+    client = TestClient(app)
+
+    events = _run_context_build_websocket(client, project.name, {"output_folder_name": "docs_publicados"})
+
+    assert events[-1]["data"]["output_folder_name"] == "docs_publicados"
+    assert (project_root / "docs_publicados").is_dir()
+
+
+@pytest.mark.asyncio
+async def test_context_build_websocket_rejects_reserved_output_folder_name(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+    client = TestClient(app)
+
+    with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect(f"/api/projects/{project.name}/context/build") as websocket:
+        websocket.send_json({"output_folder_name": "domains"})
+        websocket.receive_json()
+    assert exc_info.value.code == 1008
+
+
+@pytest.mark.asyncio
+async def test_context_build_websocket_closes_with_1008_when_ai_enabled_but_litellm_not_configured(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_BASE_URL", raising=False)
+    monkeypatch.delenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_VIRTUAL_KEY", raising=False)
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+    client = TestClient(app)
+
+    with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect(f"/api/projects/{project.name}/context/build") as websocket:
+        websocket.send_json({"ai_classification_enabled": True})
+        websocket.receive_json()
+    assert exc_info.value.code == 1008
+
+
+@pytest.mark.asyncio
+async def test_context_build_websocket_rejects_when_operation_already_in_progress(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+    app.state.active_project_operations.add(("default", project.name.lower()))
+    client = TestClient(app)
+
+    with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect(f"/api/projects/{project.name}/context/build") as websocket:
+        websocket.send_json({})
+        websocket.receive_json()
+    assert exc_info.value.code == 1008
+
+
+@pytest.mark.asyncio
+async def test_context_build_websocket_releases_lock_after_completion_allowing_next_build(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    file_path = _seed_converted_document(project_root, "informe", "Informe anual")
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+        )
+    app = create_app(registry_path=registry_path)
+    client = TestClient(app)
+
+    _run_context_build_websocket(client, project.name)
+    events = _run_context_build_websocket(client, project.name)  # segunda reconstrucción, sin 409/1008 residual
+
+    assert events[-1]["event"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_context_build_websocket_404_equivalent_for_missing_project(tmp_path) -> None:
+    app = create_app(registry_path=tmp_path / "projects.json")
+    client = TestClient(app)
+
+    with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect("/api/projects/No Existe/context/build") as websocket:
+        websocket.send_json({})
+        websocket.receive_json()
+    assert exc_info.value.code == 1008
+
+
+# ===== WS /api/projects/{name}/context/delete =====
+
+
+@pytest.mark.asyncio
+async def test_context_delete_websocket_removes_everything_and_reports_progress(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    file_path = _seed_converted_document(project_root, "informe", "Informe anual")
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+        )
+    app = create_app(registry_path=registry_path)
+    client = TestClient(app)
+    with client.websocket_connect(f"/api/projects/{project.name}/context/build") as websocket:
+        websocket.send_json({})
+        while websocket.receive_json()["event"] != "completed":
+            pass
+    assert (project_root / "organizado").exists()
+    assert (project_root / "context.json").exists()
+
+    events: list[dict] = []
+    with client.websocket_connect(f"/api/projects/{project.name}/context/delete") as websocket:
+        websocket.send_json({"confirm": True})
+        while True:
+            message = websocket.receive_json()
+            events.append(message)
+            if message["event"] == "completed":
+                break
+
+    assert [event["event"] for event in events] == ["started", "output_deleted", "site_deleted", "completed"]
+    assert not (project_root / "organizado").exists()
+    assert not (project_root / "mkdocs.yml").exists()
+    assert not (project_root / "context.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_context_delete_websocket_requires_explicit_confirmation(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    file_path = _seed_converted_document(project_root, "informe", "Informe anual")
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+        )
+    app = create_app(registry_path=registry_path)
+    client = TestClient(app)
+    _run_context_build_websocket(client, project.name)
+
+    with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect(f"/api/projects/{project.name}/context/delete") as websocket:
+        websocket.send_json({"confirm": False})
+        websocket.receive_json()
+    assert exc_info.value.code == 1008
+    assert (project_root / "organizado").exists()
+
+
+@pytest.mark.asyncio
+async def test_context_delete_websocket_rejects_when_no_context_built(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+    client = TestClient(app)
+
+    with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect(f"/api/projects/{project.name}/context/delete") as websocket:
+        websocket.send_json({"confirm": True})
+        websocket.receive_json()
+    assert exc_info.value.code == 1008
+
+
+@pytest.mark.asyncio
+async def test_context_delete_websocket_rejects_when_operation_already_in_progress(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+    app.state.active_project_operations.add(("default", project.name.lower()))
+    client = TestClient(app)
+
+    with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect(f"/api/projects/{project.name}/context/delete") as websocket:
+        websocket.send_json({"confirm": True})
+        websocket.receive_json()
+    assert exc_info.value.code == 1008

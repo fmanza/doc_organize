@@ -2,6 +2,7 @@
 Orquestador de la construcción del contexto de organización documental de un proyecto.
 """
 
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 from doc_organize.ai import DomainClassificationClient
@@ -69,6 +70,7 @@ class ContextBuilder:
         ai_classification_enabled: bool = False,
         ai_classification_client: DomainClassificationClient | None = None,
         output_folder_name: str = "organizado",
+        on_ai_progress: Callable[[int, int, str], Awaitable[None]] | None = None,
     ) -> Context:
         """Clasifica `documents` (Sub-fase A + B opcional) y persiste el contexto de `project`.
 
@@ -88,6 +90,12 @@ class ContextBuilder:
                 a `root_path` — solo tiene efecto en la primera construcción de un
                 proyecto; `web/routes/context.py` reutiliza el valor ya persistido en
                 reconstrucciones posteriores (el campo queda fijo tras la primera vez).
+            on_ai_progress: Si se da, se invoca `await on_ai_progress(index, total, source_path)`
+                tras cada documento intentado en la Sub-fase B (clasificado o no),
+                `index` empezando en 1 — usado por `web/routes/context.py::context_build_websocket`
+                para retransmitir progreso en tiempo real (semáforo). `None` (default)
+                no tiene efecto ninguno: los llamadores existentes no cambian de
+                comportamiento.
 
         Returns:
             El `Context` construido y ya persistido vía `self.registry`.
@@ -97,7 +105,7 @@ class ContextBuilder:
 
         if ai_classification_enabled and ai_classification_client is not None and unclassified:
             classified, unclassified = await self._classify_with_ai(
-                ai_classification_client, classified, unclassified, classifier.candidate_domains
+                ai_classification_client, classified, unclassified, classifier.candidate_domains, on_progress=on_ai_progress
             )
 
         domains = [
@@ -133,6 +141,7 @@ class ContextBuilder:
         classified: dict[str, list[DomainDocument]],
         unclassified: list[ConversionResult],
         candidate_domains: list[str] | None,
+        on_progress: Callable[[int, int, str], Awaitable[None]] | None = None,
     ) -> tuple[dict[str, list[DomainDocument]], list[ConversionResult]]:
         """Sub-fase B: intenta clasificar por IA lo que la Sub-fase A dejó sin
         clasificar, eligiendo solo entre el catálogo ya confirmado (el predefinido,
@@ -142,14 +151,17 @@ class ContextBuilder:
         if not catalog:
             return classified, unclassified
 
+        total = len(unclassified)
         still_unclassified: list[ConversionResult] = []
-        for document in unclassified:
+        for index, document in enumerate(unclassified, start=1):
             assigned = await self._try_classify_document_with_ai(client, document, catalog)
             if assigned is None:
                 still_unclassified.append(document)
-                continue
-            slug, domain_document = assigned
-            classified.setdefault(slug, []).append(domain_document)
+            else:
+                slug, domain_document = assigned
+                classified.setdefault(slug, []).append(domain_document)
+            if on_progress is not None:
+                await on_progress(index, total, document.source_path)
         return classified, still_unclassified
 
     async def _try_classify_document_with_ai(

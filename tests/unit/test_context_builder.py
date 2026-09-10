@@ -116,6 +116,46 @@ async def test_ai_fallback_classifies_document_left_unclassified_by_rules(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_on_ai_progress_called_once_per_unclassified_document(tmp_path):
+    project = _make_project(tmp_path)
+    doc_a = _make_document(tmp_path, "varios", "a", "Receta A")
+    doc_b = _make_document(tmp_path, "varios", "b", "Receta B")
+
+    progress_calls: list[tuple[int, int, str]] = []
+
+    async def on_progress(index: int, total: int, path: str) -> None:
+        progress_calls.append((index, total, path))
+
+    ai_client = _StubAIClient(domain="calidad")
+    builder = ContextBuilder()
+    await builder.build(
+        project,
+        [doc_a, doc_b],
+        candidate_domains=["calidad"],
+        ai_classification_enabled=True,
+        ai_classification_client=ai_client,
+        on_ai_progress=on_progress,
+    )
+
+    assert progress_calls == [(1, 2, doc_a.source_path), (2, 2, doc_b.source_path)]
+
+
+@pytest.mark.asyncio
+async def test_on_ai_progress_not_called_when_ai_disabled(tmp_path):
+    project = _make_project(tmp_path)
+    document = _make_document(tmp_path, "varios", "receta", "Receta de cocina")
+
+    progress_calls: list[tuple[int, int, str]] = []
+
+    async def on_progress(index: int, total: int, path: str) -> None:
+        progress_calls.append((index, total, path))
+
+    await ContextBuilder().build(project, [document], candidate_domains=["calidad"], on_ai_progress=on_progress)
+
+    assert progress_calls == []
+
+
+@pytest.mark.asyncio
 async def test_ai_fallback_never_invents_domain_when_ai_finds_no_match(tmp_path):
     project = _make_project(tmp_path)
     document = _make_document(tmp_path, "varios", "receta", "Receta de cocina")

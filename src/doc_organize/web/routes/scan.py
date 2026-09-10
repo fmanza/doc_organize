@@ -33,14 +33,14 @@ from doc_organize.utils.gpu_detector import detect_gpu_status
 from doc_organize.utils.logging import get_logger
 from doc_organize.utils.path_utils import paths_within_roots
 from doc_organize.validators import FolderValidator
-from doc_organize.web.auth import authenticate_session, requires_auth
 from doc_organize.web.dependencies import (
+    acquire_project_operation_lock,
+    authorize_project_websocket,
     get_allowed_scan_roots,
-    get_auth_store,
     get_project_registry,
     get_scanned_folders_store,
     get_tenant_id,
-    project_operation_key,
+    release_project_operation_lock,
     require_project_access,
 )
 from doc_organize.web.pagination import DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, Page, paginate
@@ -263,80 +263,17 @@ async def validate_folders(name: str, payload: ValidateFoldersRequest, request: 
     return ValidateFoldersResponse(valid=result.is_valid, warnings=result.warnings, clean_paths=result.clean_paths)
 
 
-async def _authorize_project_websocket(websocket: WebSocket, project_name: str) -> tuple[str, list[str] | None] | None:
-    """Autentica (si aplica) y resuelve `tenant_id` + `allowed_scan_roots` para la conexión.
-
-    Compartida por `scan_websocket` y `deduplicate_websocket` (ambas operan sobre
-    las mismas carpetas guardadas del proyecto, con la misma restricción de acceso).
-
-    Autenticación manual (Fase D-2b, §2.7.3): `AuthMiddleware` extiende
-    `BaseHTTPMiddleware`, que **no** intercepta conexiones WebSocket — Starlette pasa
-    el scope `"websocket"` directo a la app interna sin llamar a `dispatch()`. Sin
-    esta comprobación explícita, esta ruta quedaría accesible sin sesión aunque el
-    resto de la app la exija en modo no-loopback.
-
-    Devuelve `None` si ya se cerró el websocket (sin sesión válida, o sin acceso al
-    proyecto) — el llamador no debe hacer nada más. `allowed_scan_roots` es `None`
-    cuando no hay restricción de rutas (admin o loopback/sin auth); una lista
-    (posiblemente vacía) restringe los `paths` aceptados a esas raíces.
-    """
-    security = websocket.app.state.security
-    auth_db_path = getattr(websocket.app.state, "auth_db_path", None)
-
-    if not requires_auth(security):
-        return "default", None
-
-    authenticated = await authenticate_session(websocket.cookies, auth_db_path)
-    if authenticated is None:
-        await websocket.close(code=1008, reason="Unauthorized")
-        return None
-
-    tenant_id = authenticated.session.tenant_id
-    if authenticated.is_admin:
-        return tenant_id, None
-
-    async with get_auth_store(websocket) as store:
-        allowed = await store.can_access_project(tenant_id, authenticated.role_id, project_name)
-        if not allowed:
-            await websocket.close(code=1008, reason="Project not found")
-            return None
-        role = await store.get_role(tenant_id, authenticated.role_id)
-        return tenant_id, role.allowed_scan_roots
-
-
-async def _acquire_project_operation_lock(websocket: WebSocket, tenant_id: str, project_name: str) -> tuple[str, str] | None:
-    """Reserva `(tenant_id, project_name)` para esta conexión, para que un
-    escaneo y una deduplicación (o dos escaneos) del MISMO proyecto no corran a
-    la vez — ambos leen/escriben `cache.db`/`Conversión/`/mueven ficheros
-    duplicados sin ninguna otra coordinación entre sí (AUDIT_CODE, sesión
-    2026-09-04). Devuelve la clave reservada (para liberarla después con
-    `_release_project_operation_lock`), o `None` si ya había una operación en
-    curso para ese proyecto (y ya cerró el websocket con 1008 — el llamador no
-    debe hacer nada más)."""
-    key = project_operation_key(tenant_id, project_name)
-    active = websocket.app.state.active_project_operations
-    if key in active:
-        await websocket.close(code=1008, reason="Ya hay un escaneo o deduplicación en curso para este proyecto")
-        return None
-    active.add(key)
-    return key
-
-
-def _release_project_operation_lock(websocket: WebSocket, key: tuple[str, str]) -> None:
-    websocket.app.state.active_project_operations.discard(key)
-
-
 @router.websocket("/api/projects/{name}/scan")
 async def scan_websocket(name: str, websocket: WebSocket) -> None:
     """Escanea/convierte el proyecto `name`, retransmitiendo cada `ScanEvent` como JSON."""
     await websocket.accept()
 
-    auth_result = await _authorize_project_websocket(websocket, name)
+    auth_result = await authorize_project_websocket(websocket, name)
     if auth_result is None:
         return
     tenant_id, allowed_scan_roots = auth_result
 
-    operation_key = await _acquire_project_operation_lock(websocket, tenant_id, name)
+    operation_key = await acquire_project_operation_lock(websocket, tenant_id, name)
     if operation_key is None:
         return
     try:
@@ -421,7 +358,7 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
 
         await websocket.close()
     finally:
-        _release_project_operation_lock(websocket, operation_key)
+        release_project_operation_lock(websocket, operation_key)
 
 
 @router.websocket("/api/projects/{name}/scan/deduplicate")
@@ -432,16 +369,16 @@ async def deduplicate_websocket(name: str, websocket: WebSocket) -> None:
 
     Mismo patrón que `scan_websocket`: sin payload de entrada (a diferencia del
     escaneo, no hay opciones que configurar), autorización + resolución de
-    carpetas guardadas compartidas vía `_authorize_project_websocket`.
+    carpetas guardadas compartidas vía `authorize_project_websocket`.
     """
     await websocket.accept()
 
-    auth_result = await _authorize_project_websocket(websocket, name)
+    auth_result = await authorize_project_websocket(websocket, name)
     if auth_result is None:
         return
     tenant_id, allowed_scan_roots = auth_result
 
-    operation_key = await _acquire_project_operation_lock(websocket, tenant_id, name)
+    operation_key = await acquire_project_operation_lock(websocket, tenant_id, name)
     if operation_key is None:
         return
     try:
@@ -475,7 +412,7 @@ async def deduplicate_websocket(name: str, websocket: WebSocket) -> None:
 
         await websocket.close()
     finally:
-        _release_project_operation_lock(websocket, operation_key)
+        release_project_operation_lock(websocket, operation_key)
 
 
 __all__ = ["router"]

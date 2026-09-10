@@ -3,15 +3,16 @@ Organización documental por dominios y contextos: construir/ver el contexto de 
 """
 
 import asyncio
+import json
 import re
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from doc_organize.ai import DomainClassificationClient, litellm_classification_config_from_env
 from doc_organize.cache import CacheManager
@@ -24,19 +25,33 @@ from doc_organize.core.constants import (
     SCAN_ERRORS_FOLDER_NAME,
     SCAN_HISTORY_FOLDER_NAME,
 )
-from doc_organize.core.exceptions import ContextNotFoundError
-from doc_organize.core.models import Context, ConversionResult, ConversionStatus, Project
+from doc_organize.core.exceptions import ContextNotFoundError, ProjectNotFoundError
+from doc_organize.core.models import (
+    Context,
+    ContextBuildEvent,
+    ContextBuildEventType,
+    ContextDeleteEvent,
+    ContextDeleteEventType,
+    ConversionResult,
+    ConversionStatus,
+    Project,
+)
+from doc_organize.utils.logging import get_logger
 from doc_organize.web.dependencies import (
+    acquire_project_operation_lock,
+    authorize_project_websocket,
     get_project_registry,
     get_scanned_folders_store,
     get_tenant_id,
     project_operation_key,
+    release_project_operation_lock,
     require_project_access,
 )
 from doc_organize.web.templating import create_templates
 
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 _templates = create_templates(_TEMPLATES_DIR)
+logger = get_logger(__name__)
 
 router = APIRouter(tags=["context"])
 
@@ -320,6 +335,181 @@ async def delete_context_endpoint(name: str, payload: ConfirmedActionRequest, re
         await _context_registry.delete_context(project)
     finally:
         _release_operation_lock(request, key)
+
+
+@router.websocket("/api/projects/{name}/context/build")
+async def context_build_websocket(name: str, websocket: WebSocket) -> None:
+    """Construye (o reconstruye) el contexto de `name`, retransmitiendo progreso
+    (semáforo) como `ContextBuildEvent` JSON — equivalente en efectos a
+    `build_context()` (REST), del que reutiliza toda la lógica de validación y
+    orquestación, pero con eventos en tiempo real para la Sub-fase B (IA) y para
+    `Reorganizer.reorganize()` (mismo patrón que `scan_websocket`/`ScanEvent`).
+    """
+    await websocket.accept()
+
+    auth_result = await authorize_project_websocket(websocket, name)
+    if auth_result is None:
+        return
+    tenant_id, _allowed_scan_roots = auth_result  # construir/eliminar contexto no acepta rutas de filesystem del cliente
+
+    operation_key = await acquire_project_operation_lock(websocket, tenant_id, name)
+    if operation_key is None:
+        return
+    try:
+        async with get_project_registry(websocket) as registry:
+            try:
+                project = await registry.get_project(name, tenant_id=tenant_id)
+            except ProjectNotFoundError:
+                await websocket.close(code=1008, reason="Project not found")
+                return
+
+        try:
+            request_payload = await websocket.receive_json()
+        except WebSocketDisconnect:
+            return
+        except json.JSONDecodeError:
+            await websocket.close(code=1008, reason="El payload debe ser JSON válido")
+            return
+        if not isinstance(request_payload, dict):
+            await websocket.close(code=1008, reason="El payload debe ser un objeto JSON")
+            return
+        try:
+            payload = BuildContextRequest.model_validate(request_payload)
+        except ValidationError:
+            await websocket.close(code=1008, reason="Payload inválido")
+            return
+
+        try:
+            documents = await _gather_converted_documents(project)
+            existing_context = await _load_existing_context_or_none(project)
+            output_folder_name = _resolve_output_folder_name(existing_context, payload.output_folder_name)
+        except HTTPException as exc:
+            await websocket.close(code=1008, reason=str(exc.detail))
+            return
+
+        async def on_ai_progress(index: int, total: int, path: str) -> None:
+            await websocket.send_json(
+                ContextBuildEvent(event=ContextBuildEventType.AI_DOCUMENT_CLASSIFIED, data={"index": index, "total": total, "path": path}).model_dump(
+                    mode="json"
+                )
+            )
+
+        async def on_document_copied(index: int, total: int, path: str) -> None:
+            await websocket.send_json(
+                ContextBuildEvent(event=ContextBuildEventType.DOCUMENT_COPIED, data={"index": index, "total": total, "path": path}).model_dump(
+                    mode="json"
+                )
+            )
+
+        context: Context | None = None
+        try:
+            async with _optional_ai_client(payload.ai_classification_enabled) as ai_client:
+                # `_optional_ai_client` resuelve la config de LiteLLM (y puede lanzar
+                # `HTTPException`) ANTES de emitir "started" -- evita que el semáforo
+                # llegue a mostrar "iniciando..." para acto seguido cerrarse en error.
+                await websocket.send_json(ContextBuildEvent(event=ContextBuildEventType.STARTED, data={}).model_dump(mode="json"))
+                if ai_client is not None:
+                    await websocket.send_json(ContextBuildEvent(event=ContextBuildEventType.AI_CLASSIFYING_STARTED, data={}).model_dump(mode="json"))
+                context = await _context_builder.build(
+                    project,
+                    documents,
+                    candidate_domains=payload.candidate_domains,
+                    threshold=payload.threshold,
+                    ai_classification_enabled=payload.ai_classification_enabled,
+                    ai_classification_client=ai_client,
+                    output_folder_name=output_folder_name,
+                    on_ai_progress=on_ai_progress,
+                )
+                total_documents = sum(len(domain.documents) for domain in context.domains)
+                await websocket.send_json(
+                    ContextBuildEvent(event=ContextBuildEventType.REORGANIZE_STARTED, data={"total": total_documents}).model_dump(mode="json")
+                )
+                await _reorganizer.reorganize(project, context, on_document_copied=on_document_copied)
+                context.reorganized = True
+                await websocket.send_json(ContextBuildEvent(event=ContextBuildEventType.MKDOCS_STARTED, data={}).model_dump(mode="json"))
+                _, site_built = await _mkdocs_generator.generate(project, context)
+                context.mkdocs_generated = True
+                context.mkdocs_site_built = site_built
+        except HTTPException as exc:
+            await websocket.close(code=1008, reason=str(exc.detail))
+            return
+        except WebSocketDisconnect:
+            logger.info(f"Cliente desconectado durante la construcción del contexto de '{name}' (tenant '{tenant_id}')")
+            return
+        finally:
+            # Igual que `build_context()` (REST): si `reorganize()`/`generate()` fallan
+            # o el cliente se desconecta a mitad, `context.json` se persiste igualmente
+            # con los flags que reflejan lo que de verdad se completó.
+            if context is not None:
+                await _context_registry.save_context(project, context)
+
+        await websocket.send_json(
+            ContextBuildEvent(event=ContextBuildEventType.COMPLETED, data=_to_response(context).model_dump(mode="json")).model_dump(mode="json")
+        )
+        await websocket.close()
+    finally:
+        release_project_operation_lock(websocket, operation_key)
+
+
+@router.websocket("/api/projects/{name}/context/delete")
+async def context_delete_websocket(name: str, websocket: WebSocket) -> None:
+    """Elimina el contexto de `name`, retransmitiendo progreso (semáforo) como
+    `ContextDeleteEvent` JSON — equivalente en efectos a `delete_context_endpoint()`
+    (REST). Solo 3 pasos macro (sin bucles por documento que reportar), a
+    diferencia de `context_build_websocket`.
+    """
+    await websocket.accept()
+
+    auth_result = await authorize_project_websocket(websocket, name)
+    if auth_result is None:
+        return
+    tenant_id, _allowed_scan_roots = auth_result  # construir/eliminar contexto no acepta rutas de filesystem del cliente
+
+    operation_key = await acquire_project_operation_lock(websocket, tenant_id, name)
+    if operation_key is None:
+        return
+    try:
+        async with get_project_registry(websocket) as registry:
+            try:
+                project = await registry.get_project(name, tenant_id=tenant_id)
+            except ProjectNotFoundError:
+                await websocket.close(code=1008, reason="Project not found")
+                return
+
+        try:
+            request_payload = await websocket.receive_json()
+        except WebSocketDisconnect:
+            return
+        except json.JSONDecodeError:
+            await websocket.close(code=1008, reason="El payload debe ser JSON válido")
+            return
+        if not isinstance(request_payload, dict) or request_payload.get("confirm") is not True:
+            await websocket.close(code=1008, reason="Se requiere confirmación explícita para eliminar el contexto.")
+            return
+
+        try:
+            context = await _context_registry.load_context(project)
+        except ContextNotFoundError:
+            await websocket.close(code=1008, reason="El proyecto no tiene contexto construido.")
+            return
+
+        try:
+            await websocket.send_json(ContextDeleteEvent(event=ContextDeleteEventType.STARTED, data={}).model_dump(mode="json"))
+            # Limpieza física antes de borrar context.json: mismo orden defensivo que
+            # `delete_context_endpoint` (REST) — si algo falla a mitad, context.json
+            # sigue existiendo como fuente de verdad de qué queda por limpiar.
+            await _reorganizer.delete_output(project, context)
+            await websocket.send_json(ContextDeleteEvent(event=ContextDeleteEventType.OUTPUT_DELETED, data={}).model_dump(mode="json"))
+            await _mkdocs_generator.delete_site(project)
+            await websocket.send_json(ContextDeleteEvent(event=ContextDeleteEventType.SITE_DELETED, data={}).model_dump(mode="json"))
+            await _context_registry.delete_context(project)
+            await websocket.send_json(ContextDeleteEvent(event=ContextDeleteEventType.COMPLETED, data={}).model_dump(mode="json"))
+        except WebSocketDisconnect:
+            logger.info(f"Cliente desconectado durante la eliminación del contexto de '{name}' (tenant '{tenant_id}')")
+            return
+        await websocket.close()
+    finally:
+        release_project_operation_lock(websocket, operation_key)
 
 
 def _is_litellm_classification_configured() -> bool:

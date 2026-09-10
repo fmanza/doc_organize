@@ -1,5 +1,6 @@
 {% extends "base.html.j2" %}
 {% from "_nav_macros.html.j2" import project_nav %}
+{% from "_semaforo_macros.html.j2" import semaforo_html, semaforo_script %}
 {% block title %}doc_organize — Escanear: {{ project.name }}{% endblock %}
 {% block sidebar_items %}{{ project_nav(project, "scan") }}{% endblock %}
 {% block content %}
@@ -83,22 +84,7 @@
 </form>
 <p id="scan-error" class="text-red-700 my-2 min-h-[1.2em]"></p>
 
-<div id="scan-semaforo" role="status" aria-live="polite" class="flex flex-wrap items-center gap-4 my-3 px-3 py-2 rounded border border-gray-200 bg-gray-50 w-fit">
-    <span class="flex items-center gap-1.5">
-        <span id="light-started" class="inline-block w-3.5 h-3.5 rounded-full border bg-gray-300 border-gray-400"></span>
-        <span class="text-xs text-gray-600">Inicio</span>
-    </span>
-    <span class="flex items-center gap-1.5">
-        <span id="light-running" class="inline-block w-3.5 h-3.5 rounded-full border bg-gray-300 border-gray-400"></span>
-        <span class="text-xs text-gray-600">Ejecución</span>
-    </span>
-    <span class="flex items-center gap-1.5">
-        <span id="light-completed" class="inline-block w-3.5 h-3.5 rounded-full border bg-gray-300 border-gray-400"></span>
-        <span class="text-xs text-gray-600">Finalización</span>
-    </span>
-    <span id="semaforo-status-text" class="text-sm font-medium text-gray-600 ml-2">Sin iniciar</span>
-    <span id="semaforo-duration-text" class="text-sm text-gray-500 ml-2"></span>
-</div>
+{{ semaforo_html("scan-semaforo", "light-started", "light-running", "light-completed", "semaforo-status-text", "semaforo-duration-text") }}
 
 <div id="scan-file-progress" class="my-3" hidden>
     <p id="scan-file-progress-text" class="text-sm text-gray-700 mb-1"></p>
@@ -498,14 +484,8 @@ function handleScanCompletedOcrProgress() {
 }
 
 // --- Semáforo de estado (Inicio / Ejecución / Finalización / Error) ---
-
-const semaforoLights = {
-    started: document.getElementById("light-started"),
-    running: document.getElementById("light-running"),
-    completed: document.getElementById("light-completed"),
-};
-const semaforoText = document.getElementById("semaforo-status-text");
-const semaforoDurationText = document.getElementById("semaforo-duration-text");
+// Funciones generadas por `_semaforo_macros.html.j2::semaforo_script` (AUDIT_CODE,
+// sesión 2026-09-10) — antes duplicadas literalmente entre Escanear/Duplicados/Contexto.
 const lastScanRunText = document.getElementById("last-scan-run-text");
 
 function formatDurationClientSide(seconds) {
@@ -514,57 +494,16 @@ function formatDurationClientSide(seconds) {
     const secs = total % 60;
     return minutes ? minutes + "m " + secs + "s" : secs + "s";
 }
-const LIGHT_OFF = "bg-gray-300 border-gray-400";
-const LIGHT_ON_AMBER = "bg-amber-400 border-amber-500";
-const LIGHT_ON_GREEN = "bg-green-500 border-green-600";
-const LIGHT_ON_RED = "bg-red-500 border-red-600";
 
-const SCAN_PHASE = { IDLE: "idle", STARTED: "started", RUNNING: "running", COMPLETED: "completed", ERROR: "error" };
-
-let semaforoPhase = SCAN_PHASE.IDLE; // último estado real alcanzado (no ERROR): IDLE|STARTED|RUNNING|COMPLETED
-
-function paintLight(el, colorClass, pulse) {
-    el.className = "inline-block w-3.5 h-3.5 rounded-full border " + colorClass + (pulse ? " animate-pulse" : "");
-}
-
-function resetSemaforo() {
-    paintLight(semaforoLights.started, LIGHT_OFF);
-    paintLight(semaforoLights.running, LIGHT_OFF);
-    paintLight(semaforoLights.completed, LIGHT_OFF);
-    semaforoText.textContent = "Sin iniciar";
-    semaforoText.className = "text-sm font-medium text-gray-600 ml-2";
-    semaforoDurationText.textContent = "";
-    semaforoPhase = SCAN_PHASE.IDLE;
-}
-
-function setSemaforo(phase) {
-    if (phase === SCAN_PHASE.ERROR) {
-        const failedLight = semaforoPhase === SCAN_PHASE.RUNNING ? semaforoLights.running : semaforoLights.started;
-        paintLight(failedLight, LIGHT_ON_RED);
-        semaforoText.textContent = "Error: el escaneo se ha interrumpido";
-        semaforoText.className = "text-sm font-medium text-red-700 ml-2";
-        return;
-    }
-    semaforoPhase = phase;
-    if (phase === SCAN_PHASE.STARTED) {
-        paintLight(semaforoLights.started, LIGHT_ON_AMBER);
-        semaforoText.textContent = "Iniciando escaneo…";
-        semaforoText.className = "text-sm font-medium text-amber-700 ml-2";
-    } else if (phase === SCAN_PHASE.RUNNING) {
-        paintLight(semaforoLights.started, LIGHT_ON_AMBER);
-        paintLight(semaforoLights.running, LIGHT_ON_AMBER, true);
-        semaforoText.textContent = "Escaneo en ejecución…";
-        semaforoText.className = "text-sm font-medium text-amber-700 ml-2";
-    } else if (phase === SCAN_PHASE.COMPLETED) {
-        paintLight(semaforoLights.started, LIGHT_ON_AMBER);
-        paintLight(semaforoLights.running, LIGHT_ON_AMBER);
-        paintLight(semaforoLights.completed, LIGHT_ON_GREEN);
-        semaforoText.textContent = "Escaneo finalizado";
-        semaforoText.className = "text-sm font-medium text-green-700 ml-2";
-    } else {
-        console.error("setSemaforo: fase desconocida", phase);
-    }
-}
+{{ semaforo_script(
+    lights_var="semaforoLights", text_var="semaforoText", phase_const="SCAN_PHASE", phase_var="semaforoPhase",
+    reset_fn="resetSemaforo", set_fn="setSemaforo",
+    started_id="light-started", running_id="light-running", completed_id="light-completed",
+    text_id="semaforo-status-text",
+    started_text="Iniciando escaneo…", running_text="Escaneo en ejecución…",
+    completed_text="Escaneo finalizado", error_text="Error: el escaneo se ha interrumpido",
+    duration_var="semaforoDurationText", duration_id="semaforo-duration-text"
+) }}
 
 function appendProgress(event) {
     progressBox.value += event.event + ": " + JSON.stringify(event.data) + "\n";

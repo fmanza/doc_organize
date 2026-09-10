@@ -215,6 +215,52 @@ async def test_reorganizer_destination_matches_mkdocs_generator_nav_path(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_on_document_copied_called_once_per_document_in_order(tmp_path):
+    project = _make_project(tmp_path)
+    doc_a = DomainDocument(
+        source_path=str(_write_file(tmp_path, "a.pdf", b"A")),
+        markdown_path=str(_write_file(tmp_path, "a.md", b"# A")),
+        json_path=str(_write_file(tmp_path, "a.json", b"{}")),
+        title="A",
+        document_type="pdf",
+        confidence=0.9,
+    )
+    doc_b = DomainDocument(
+        source_path=str(_write_file(tmp_path, "b.pdf", b"B")),
+        markdown_path=str(_write_file(tmp_path, "b.md", b"# B")),
+        json_path=str(_write_file(tmp_path, "b.json", b"{}")),
+        title="B",
+        document_type="pdf",
+        confidence=0.9,
+    )
+    context = _make_context(project, [Domain(slug="calidad", name="Calidad", documents=[doc_a, doc_b])])
+
+    progress_calls: list[tuple[int, int, str]] = []
+
+    async def on_document_copied(index: int, total: int, path: str) -> None:
+        progress_calls.append((index, total, path))
+
+    await Reorganizer().reorganize(project, context, on_document_copied=on_document_copied)
+
+    assert progress_calls == [(1, 2, doc_a.source_path), (2, 2, doc_b.source_path)]
+
+
+@pytest.mark.asyncio
+async def test_on_document_copied_not_called_when_no_documents(tmp_path):
+    project = _make_project(tmp_path)
+    context = _make_context(project, [])
+
+    progress_calls: list[tuple[int, int, str]] = []
+
+    async def on_document_copied(index: int, total: int, path: str) -> None:
+        progress_calls.append((index, total, path))
+
+    await Reorganizer().reorganize(project, context, on_document_copied=on_document_copied)
+
+    assert progress_calls == []
+
+
+@pytest.mark.asyncio
 async def test_delete_output_removes_the_output_folder(tmp_path):
     project = _make_project(tmp_path)
     document = DomainDocument(

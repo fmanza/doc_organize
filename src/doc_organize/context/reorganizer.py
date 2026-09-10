@@ -5,6 +5,7 @@ Copia física de los documentos clasificados a la carpeta reorganizada del proye
 import asyncio
 import shutil
 
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from doc_organize.core.exceptions import IncompleteConversionArtifactsError
@@ -53,7 +54,12 @@ class Reorganizer:
     def __init__(self) -> None:
         self.logger = logger
 
-    async def reorganize(self, project: Project, context: Context) -> Path:
+    async def reorganize(
+        self,
+        project: Project,
+        context: Context,
+        on_document_copied: Callable[[int, int, str], Awaitable[None]] | None = None,
+    ) -> Path:
         """Copia todos los documentos clasificados de `context` a la carpeta de salida.
 
         Valida que los tres artefactos de **todos** los documentos existan en
@@ -71,6 +77,13 @@ class Reorganizer:
         dominio eliminado entre dos reconstrucciones) dejaba su copia física
         huérfana en disco para siempre (AUDIT_CODE, sesión 2026-09-08).
 
+        Args:
+            on_document_copied: Si se da, se invoca `await on_document_copied(index, total, source_path)`
+                tras copiar cada documento (`index` empezando en 1) — usado por
+                `web/routes/context.py::context_build_websocket` para retransmitir
+                progreso en tiempo real (semáforo). `None` (default) no tiene efecto
+                ninguno: los llamadores existentes no cambian de comportamiento.
+
         Returns:
             La carpeta de salida (`<project.root_path>/<context.output_folder_name>/`).
 
@@ -87,10 +100,15 @@ class Reorganizer:
         current_slugs = {domain.slug for domain in context.domains}
         await self._remove_stale_domain_dirs(output_root, current_slugs)
 
+        total = sum(len(domain.documents) for domain in context.domains)
+        index = 0
         for domain in context.domains:
             await self._reset_domain_dir(output_root, domain.slug)
             for document in domain.documents:
                 await self._copy_document(output_root, domain.slug, document)
+                index += 1
+                if on_document_copied is not None:
+                    await on_document_copied(index, total, document.source_path)
         return output_root
 
     @staticmethod

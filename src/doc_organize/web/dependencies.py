@@ -4,16 +4,17 @@ Dependencias compartidas de las rutas web (REQ-007, revisión 9 roles y gestión
 
 from typing import cast
 
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, WebSocket
 from starlette.requests import HTTPConnection
 
 from doc_organize.auth import AuthStore
 from doc_organize.projects import ProjectRegistry, ScannedFoldersStore
+from doc_organize.web.auth import authenticate_session, requires_auth
 
 # `HTTPConnection` (no `Request`): base compartida de `Request` y `WebSocket` en
 # Starlette. Estas funciones solo tocan `.app.state`/`.state`, presentes en ambas —
-# así sirven igual para las rutas HTTP normales y para el handler WebSocket de
-# `web/routes/scan.py` (Fase D-2b, §2.7.3).
+# así sirven igual para las rutas HTTP normales y para los handlers WebSocket de
+# `web/routes/scan.py` (Fase D-2b, §2.7.3) y `web/routes/context.py`.
 
 
 def get_project_registry(conn: HTTPConnection) -> ProjectRegistry:
@@ -59,16 +60,99 @@ def get_scanned_folders_store() -> ScannedFoldersStore:
     return _scanned_folders_store
 
 
+async def authorize_project_websocket(websocket: WebSocket, project_name: str) -> tuple[str, list[str] | None] | None:
+    """Autentica (si aplica) y resuelve `tenant_id` + `allowed_scan_roots` para una
+    conexión WebSocket sobre un proyecto.
+
+    Compartida por los WebSocket de `web/routes/scan.py` (escaneo/deduplicación) y
+    `web/routes/context.py` (construir/eliminar contexto) — antes cada fichero
+    mantenía su propia copia de esta lógica de autenticación/autorización; unificada
+    aquí para que una corrección de seguridad futura no dependa de recordar
+    replicarla en el otro sitio (AUDIT_CODE, sesión 2026-09-10).
+
+    Autenticación manual (Fase D-2b, §2.7.3): `AuthMiddleware` extiende
+    `BaseHTTPMiddleware`, que **no** intercepta conexiones WebSocket — Starlette pasa
+    el scope `"websocket"` directo a la app interna sin llamar a `dispatch()`. Sin
+    esta comprobación explícita, estas rutas quedarían accesibles sin sesión aunque
+    el resto de la app la exija en modo no-loopback.
+
+    Devuelve `None` si ya se cerró el websocket (sin sesión válida, o sin acceso al
+    proyecto) — el llamador no debe hacer nada más. `allowed_scan_roots` es `None`
+    cuando no hay restricción de rutas (admin o loopback/sin auth); una lista
+    (posiblemente vacía) restringe los `paths` aceptados a esas raíces — los
+    llamadores que no aceptan rutas de filesystem del cliente (p.ej.
+    `web/routes/context.py`) simplemente ignoran ese segundo valor.
+    """
+    security = websocket.app.state.security
+    auth_db_path = getattr(websocket.app.state, "auth_db_path", None)
+
+    if not requires_auth(security):
+        return "default", None
+
+    authenticated = await authenticate_session(websocket.cookies, auth_db_path)
+    if authenticated is None:
+        await websocket.close(code=1008, reason="Unauthorized")
+        return None
+
+    tenant_id = authenticated.session.tenant_id
+    if authenticated.is_admin:
+        return tenant_id, None
+
+    async with get_auth_store(websocket) as store:
+        allowed = await store.can_access_project(tenant_id, authenticated.role_id, project_name)
+        if not allowed:
+            await websocket.close(code=1008, reason="Project not found")
+            return None
+        role = await store.get_role(tenant_id, authenticated.role_id)
+        return tenant_id, role.allowed_scan_roots
+
+
 def project_operation_key(tenant_id: str, project_name: str) -> tuple[str, str]:
     """Clave case-insensitive (mismo criterio que `ProjectRegistry.get_project`)
     para identificar un proyecto en `app.state.active_project_operations`.
 
-    Compartida entre `web/routes/scan.py` (escaneo/deduplicación, vía WebSocket) y
-    `web/routes/projects.py` (operaciones de mantenimiento, vía HTTP) — ambos leen y
-    escriben el mismo `app.state.active_project_operations`, así que deben coincidir
-    exactamente para que se bloqueen mutuamente sobre el mismo proyecto.
+    Usada por `acquire_project_operation_lock()` (WebSocket, más abajo en este mismo
+    fichero) y, duplicada por valor de retorno idéntico, por los locks HTTP de
+    `web/routes/projects.py` y `web/routes/context.py` (operaciones de mantenimiento
+    y de contexto) — todos leen y escriben el mismo `app.state.active_project_operations`,
+    así que deben coincidir exactamente para que se bloqueen mutuamente sobre el
+    mismo proyecto sea cual sea el transporte (HTTP o WebSocket).
     """
     return (tenant_id, project_name.lower())
+
+
+async def acquire_project_operation_lock(websocket: WebSocket, tenant_id: str, project_name: str) -> tuple[str, str] | None:
+    """Reserva `(tenant_id, project_name)` para esta conexión WebSocket, o cierra
+    con 1008 si ya hay una operación en curso para ese proyecto.
+
+    Compartida por los WebSocket de `web/routes/scan.py` (escaneo/deduplicación) y
+    `web/routes/context.py` (construir/eliminar contexto) — todos leen/escriben el
+    mismo `app.state.active_project_operations` vía la misma `project_operation_key()`,
+    así que se bloquean mutuamente entre sí y con las operaciones equivalentes por
+    HTTP (`_acquire_operation_lock`, duplicado en cada fichero de rutas HTTP — ver
+    su propio docstring sobre por qué ESE sí sigue duplicado). Antes cada WebSocket
+    mantenía su propia copia de esta función, con un texto de error ligeramente
+    distinto entre sí ("Ya hay un escaneo o deduplicación..." en `scan.py` frente a
+    "...u otra operación..." en `context.py`, que coincidía con el texto ya usado en
+    los 409 HTTP) — unificada aquí junto con `authorize_project_websocket()`
+    (AUDIT_CODE, sesión 2026-09-10).
+
+    Devuelve la clave reservada (para liberarla después con
+    `release_project_operation_lock()`), o `None` si ya había una operación en curso
+    para ese proyecto (y ya cerró el websocket con 1008 — el llamador no debe hacer
+    nada más).
+    """
+    key = project_operation_key(tenant_id, project_name)
+    active = websocket.app.state.active_project_operations
+    if key in active:
+        await websocket.close(code=1008, reason="Ya hay un escaneo, deduplicación u otra operación en curso para este proyecto")
+        return None
+    active.add(key)
+    return key
+
+
+def release_project_operation_lock(websocket: WebSocket, key: tuple[str, str]) -> None:
+    websocket.app.state.active_project_operations.discard(key)
 
 
 def get_tenant_id(conn: HTTPConnection) -> str:
@@ -77,9 +161,10 @@ def get_tenant_id(conn: HTTPConnection) -> str:
     `AuthMiddleware` solo fija `request.state.tenant_id` cuando exige sesión (host
     no-loopback); en loopback/sin auth no hay sesión que resolver, así que se usa
     el tenant implícito `"default"` — el mismo que usa el CLI. Nunca se lee de un
-    parámetro de query/body: el cliente no puede elegir en qué tenant opera. El
-    handler WebSocket de `web/routes/scan.py` resuelve el tenant aparte (no pasa
-    por `AuthMiddleware`, que no cubre WebSocket) y no usa esta función.
+    parámetro de query/body: el cliente no puede elegir en qué tenant opera. Los
+    handlers WebSocket (`web/routes/scan.py`, `web/routes/context.py`) resuelven el
+    tenant aparte, vía `authorize_project_websocket()` (no pasan por `AuthMiddleware`,
+    que no cubre WebSocket) y no usan esta función.
     """
     return getattr(conn.state, "tenant_id", "default")
 
@@ -101,9 +186,9 @@ def require_admin(request: Request) -> None:
 async def get_allowed_scan_roots(request: Request) -> list[str] | None:
     """Resuelve las raíces de escaneo permitidas para la sesión de `request`, o `None` si no hay restricción.
 
-    Equivalente HTTP de la comprobación que `scan.py::_authorize_project_websocket`
-    hace a mano para los WebSocket de escaneo/deduplicación (`BaseHTTPMiddleware`
-    no cubre WebSocket, así que ese handler no puede depender de
+    Equivalente HTTP de la comprobación que `authorize_project_websocket()` hace a
+    mano para los WebSocket de escaneo/deduplicación/contexto (`BaseHTTPMiddleware`
+    no cubre WebSocket, así que esos handlers no pueden depender de
     `AuthMiddleware`/`request.state`). Usado
     por los endpoints REST del explorador de carpetas y de la lista persistente
     de carpetas (`web/routes/filesystem.py`, `web/routes/scan.py`), que sí pasan
@@ -149,11 +234,14 @@ async def require_project_access(name: str, request: Request) -> None:
 
 
 __all__ = [
+    "acquire_project_operation_lock",
+    "authorize_project_websocket",
     "get_allowed_scan_roots",
     "get_auth_store",
     "get_project_registry",
     "get_tenant_id",
     "project_operation_key",
+    "release_project_operation_lock",
     "require_admin",
     "require_project_access",
 ]

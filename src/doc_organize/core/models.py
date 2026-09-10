@@ -84,6 +84,35 @@ class DedupEventType(str, Enum):
     COMPLETED = "completed"
 
 
+class ContextBuildEventType(str, Enum):
+    """Tipo de evento de progreso emitido por `context_build_websocket()` (semáforo
+    de "Reconstruir/Construir contexto"). `AI_CLASSIFYING_STARTED`/`AI_DOCUMENT_CLASSIFIED`
+    solo se emiten si la Sub-fase B está activa; `REORGANIZE_STARTED` lleva el
+    `total` de documentos a copiar, pero `AI_CLASSIFYING_STARTED` no (el total de la
+    Sub-fase B no se conoce hasta que termina la Sub-fase A, dentro de la misma
+    llamada a `ContextBuilder.build()`) — el cliente toma el `total` del primer
+    `AI_DOCUMENT_CLASSIFIED` que reciba."""
+
+    STARTED = "started"
+    AI_CLASSIFYING_STARTED = "ai_classifying_started"
+    AI_DOCUMENT_CLASSIFIED = "ai_document_classified"
+    REORGANIZE_STARTED = "reorganize_started"
+    DOCUMENT_COPIED = "document_copied"
+    MKDOCS_STARTED = "mkdocs_started"
+    COMPLETED = "completed"
+
+
+class ContextDeleteEventType(str, Enum):
+    """Tipo de evento de progreso emitido por `context_delete_websocket()` (semáforo
+    de "Eliminar contexto"). Solo 3 pasos macro, sin bucles reales que reportar —
+    a diferencia de `ContextBuildEventType`, no hay eventos por documento."""
+
+    STARTED = "started"
+    OUTPUT_DELETED = "output_deleted"
+    SITE_DELETED = "site_deleted"
+    COMPLETED = "completed"
+
+
 class UsageSourceName(str, Enum):
     """Fuente que produjo un `UsageSnapshot` (monitorización de uso/coste de IA, fase 2)."""
 
@@ -352,6 +381,26 @@ class DedupEvent(BaseModel):
     """
 
     event: DedupEventType = Field(..., description="Tipo de evento de progreso")
+    data: dict[str, Any] = Field(default_factory=dict, description="Payload del evento; su forma depende de `event`")
+
+
+class ContextBuildEvent(BaseModel):
+    """Un evento de progreso emitido por `context_build_websocket()`.
+
+    Mismo criterio que `ScanEvent`/`DedupEvent`: payload `dict[str, Any]` laxo.
+    """
+
+    event: ContextBuildEventType = Field(..., description="Tipo de evento de progreso")
+    data: dict[str, Any] = Field(default_factory=dict, description="Payload del evento; su forma depende de `event`")
+
+
+class ContextDeleteEvent(BaseModel):
+    """Un evento de progreso emitido por `context_delete_websocket()`.
+
+    Mismo criterio que `ScanEvent`/`DedupEvent`: payload `dict[str, Any]` laxo.
+    """
+
+    event: ContextDeleteEventType = Field(..., description="Tipo de evento de progreso")
     data: dict[str, Any] = Field(default_factory=dict, description="Payload del evento; su forma depende de `event`")
 
 
@@ -691,6 +740,10 @@ __all__ = [
     "CacheEntry",
     "CacheExportSnapshot",
     "Context",
+    "ContextBuildEvent",
+    "ContextBuildEventType",
+    "ContextDeleteEvent",
+    "ContextDeleteEventType",
     "ConversionResult",
     "ConversionStatus",
     "DedupEvent",

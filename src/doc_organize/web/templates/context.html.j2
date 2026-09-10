@@ -1,5 +1,6 @@
 {% extends "base.html.j2" %}
 {% from "_nav_macros.html.j2" import project_nav %}
+{% from "_semaforo_macros.html.j2" import semaforo_html, semaforo_script %}
 {% block title %}doc_organize — Contexto: {{ project.name }}{% endblock %}
 {% block sidebar_items %}{{ project_nav(project, "context") }}{% endblock %}
 {% block content %}
@@ -22,8 +23,10 @@
 </label>
 {% endif %}
 
-<label class="flex items-center gap-2 mb-3 text-sm">
-    <input type="checkbox" id="ai-classification-toggle" {% if context and context.ai_classification_enabled %}checked{% endif %}>
+<label class="flex items-center gap-2 mb-3 text-sm{% if not litellm_configured %} opacity-50 cursor-not-allowed{% endif %}">
+    <input type="checkbox" id="ai-classification-toggle"
+           {% if context and context.ai_classification_enabled and litellm_configured %}checked{% endif %}
+           {% if not litellm_configured %}disabled{% endif %}>
     Clasificación asistida por IA (Sub-fase B) para lo que las reglas dejen sin clasificar.
 </label>
 {% if litellm_configured %}
@@ -46,6 +49,13 @@
 {% endif %}
 </div>
 <p id="build-context-error" class="text-red-700 my-2 min-h-[1.2em]"></p>
+
+{{ semaforo_html("context-semaforo", "context-light-started", "context-light-running", "context-light-completed", "context-semaforo-status-text") }}
+
+<div id="context-build-progress" class="my-3" hidden>
+    <p id="context-build-progress-text" class="text-sm text-gray-700 mb-1"></p>
+    <progress id="context-build-progress-bar" class="w-full h-2" max="1" value="0"></progress>
+</div>
 
 {% if context %}
 <div id="delete-context-confirm" hidden class="mb-4 p-3 border border-red-300 rounded bg-red-50 text-sm">
@@ -100,53 +110,165 @@
 
 <script>
 const projectName = {{ project.name | tojson }};
-const contextUrl = "/api/projects/" + encodeURIComponent(projectName) + "/context";
+const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+const wsBaseUrl = wsProtocol + "//" + window.location.host + "/api/projects/" + encodeURIComponent(projectName) + "/context";
 
-document.getElementById("build-context-btn").addEventListener("click", async () => {
-    const errorEl = document.getElementById("build-context-error");
+const errorEl = document.getElementById("build-context-error");
+const buildBtn = document.getElementById("build-context-btn");
+const deleteBtn = document.getElementById("delete-context-btn");
+
+function setControlsDisabled(disabled) {
+    buildBtn.disabled = disabled;
+    if (deleteBtn) deleteBtn.disabled = disabled;
+}
+
+// --- Semáforo (mismo patrón que folder_selector.html.j2/duplicates_resolver.html.j2:
+// 3 luces + texto, "error" repinta de rojo la última luz alcanzada en vez de añadir
+// una 4ª luz) — compartido entre "Reconstruir/Construir contexto" y "Eliminar
+// contexto": solo una de las dos puede estar en curso a la vez (mismo lock de
+// operación de proyecto que ya bloquea escaneo/dedup/mover/borrar). Funciones
+// generadas por `_semaforo_macros.html.j2::semaforo_script` (AUDIT_CODE, sesión
+// 2026-09-10) — `setSemaforo(phase, label)` usa `label` para las sub-fases propias
+// de Contexto (Clasificando/Copiando/Generando/Eliminando), que Escanear/Duplicados
+// no tienen. ---
+{{ semaforo_script(
+    lights_var="semaforoLights", text_var="semaforoText", phase_const="PHASE", phase_var="semaforoPhase",
+    reset_fn="resetSemaforo", set_fn="setSemaforo",
+    started_id="context-light-started", running_id="context-light-running", completed_id="context-light-completed",
+    text_id="context-semaforo-status-text",
+    started_text="Iniciando…", running_text="En ejecución…", completed_text="Finalizado",
+    error_text="Error: la operación se ha interrumpido"
+) }}
+
+// --- Barra de progreso numérica, solo para build (delete no tiene bucles reales
+// que contar — solo 3 pasos macro, cubiertos ya por el semáforo). ---
+const buildProgressContainer = document.getElementById("context-build-progress");
+const buildProgressText = document.getElementById("context-build-progress-text");
+const buildProgressBar = document.getElementById("context-build-progress-bar");
+
+function resetBuildProgress() {
+    buildProgressContainer.hidden = true;
+    buildProgressText.textContent = "";
+    buildProgressBar.max = 1;
+    buildProgressBar.value = 0;
+}
+
+function showBuildProgress(total, index, label) {
+    if (total <= 0) return;
+    buildProgressContainer.hidden = false;
+    buildProgressBar.max = total;
+    buildProgressBar.value = index;
+    buildProgressText.textContent = label + " " + index + "/" + total;
+}
+
+buildBtn.addEventListener("click", () => {
+    if (buildBtn.disabled) return;
     errorEl.textContent = "";
+    resetSemaforo();
+    resetBuildProgress();
+    setControlsDisabled(true);
+
     const aiEnabled = document.getElementById("ai-classification-toggle").checked;
     const outputFolderInput = document.getElementById("output-folder-name-input");
     const body = { ai_classification_enabled: aiEnabled };
     if (outputFolderInput) {
         body.output_folder_name = outputFolderInput.value;
     }
-    const response = await fetch(contextUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-    });
-    if (response.ok) {
-        window.location.reload();
-    } else {
-        const data = await response.json();
-        errorEl.textContent = (data && data.detail) || "No se pudo construir el contexto.";
-    }
+
+    const ws = new WebSocket(wsBaseUrl + "/build");
+    let finished = false;
+
+    ws.onopen = () => {
+        ws.send(JSON.stringify(body));
+    };
+    ws.onmessage = (message) => {
+        const event = JSON.parse(message.data);
+        if (event.event === "started") {
+            setSemaforo(PHASE.STARTED);
+        } else if (event.event === "ai_classifying_started") {
+            setSemaforo(PHASE.RUNNING, "Clasificando con IA…");
+        } else if (event.event === "ai_document_classified") {
+            setSemaforo(PHASE.RUNNING, "Clasificando con IA…");
+            showBuildProgress(event.data.total, event.data.index, "Clasificando");
+        } else if (event.event === "reorganize_started") {
+            setSemaforo(PHASE.RUNNING, "Copiando documentos…");
+            showBuildProgress(event.data.total, 0, "Copiando");
+        } else if (event.event === "document_copied") {
+            setSemaforo(PHASE.RUNNING, "Copiando documentos…");
+            showBuildProgress(event.data.total, event.data.index, "Copiando");
+        } else if (event.event === "mkdocs_started") {
+            setSemaforo(PHASE.RUNNING, "Generando sitio MkDocs…");
+        } else if (event.event === "completed") {
+            finished = true;
+            setSemaforo(PHASE.COMPLETED, "Contexto construido");
+            ws.close();
+            window.location.reload();
+        }
+    };
+    ws.onerror = () => {
+        errorEl.textContent = "Error de conexión durante la construcción del contexto.";
+        setSemaforo(PHASE.ERROR);
+        setControlsDisabled(false);
+    };
+    ws.onclose = (closeEvent) => {
+        if (!finished) {
+            setSemaforo(PHASE.ERROR);
+            errorEl.textContent = closeEvent.reason || "No se pudo construir el contexto.";
+            setControlsDisabled(false);
+        }
+    };
 });
 
-const deleteContextBtn = document.getElementById("delete-context-btn");
-if (deleteContextBtn) {
+if (deleteBtn) {
     const confirmPanel = document.getElementById("delete-context-confirm");
-    deleteContextBtn.addEventListener("click", () => {
+    deleteBtn.addEventListener("click", () => {
         confirmPanel.hidden = false;
     });
     document.getElementById("delete-context-cancel-btn").addEventListener("click", () => {
         confirmPanel.hidden = true;
     });
-    document.getElementById("delete-context-confirm-btn").addEventListener("click", async () => {
-        const errorEl = document.getElementById("build-context-error");
+    const deleteConfirmBtn = document.getElementById("delete-context-confirm-btn");
+    deleteConfirmBtn.addEventListener("click", () => {
+        if (deleteConfirmBtn.disabled) return;
         errorEl.textContent = "";
-        const response = await fetch(contextUrl, {
-            method: "DELETE",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ confirm: true }),
-        });
-        if (response.ok) {
-            window.location.reload();
-        } else {
-            const data = await response.json();
-            errorEl.textContent = (data && data.detail) || "No se pudo eliminar el contexto.";
-        }
+        confirmPanel.hidden = true;
+        resetSemaforo();
+        setControlsDisabled(true);
+        deleteConfirmBtn.disabled = true;
+
+        const ws = new WebSocket(wsBaseUrl + "/delete");
+        let finished = false;
+
+        ws.onopen = () => {
+            ws.send(JSON.stringify({ confirm: true }));
+        };
+        ws.onmessage = (message) => {
+            const event = JSON.parse(message.data);
+            if (event.event === "started") {
+                setSemaforo(PHASE.STARTED);
+            } else if (event.event === "output_deleted" || event.event === "site_deleted") {
+                setSemaforo(PHASE.RUNNING, "Eliminando contexto…");
+            } else if (event.event === "completed") {
+                finished = true;
+                setSemaforo(PHASE.COMPLETED, "Contexto eliminado");
+                ws.close();
+                window.location.reload();
+            }
+        };
+        ws.onerror = () => {
+            errorEl.textContent = "Error de conexión durante la eliminación del contexto.";
+            setSemaforo(PHASE.ERROR);
+            setControlsDisabled(false);
+            deleteConfirmBtn.disabled = false;
+        };
+        ws.onclose = (closeEvent) => {
+            if (!finished) {
+                setSemaforo(PHASE.ERROR);
+                errorEl.textContent = closeEvent.reason || "No se pudo eliminar el contexto.";
+                setControlsDisabled(false);
+                deleteConfirmBtn.disabled = false;
+            }
+        };
     });
 }
 </script>

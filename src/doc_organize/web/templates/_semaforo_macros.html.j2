@@ -1,0 +1,108 @@
+{#
+Semáforo de estado (Inicio / Ejecución / Finalización / Error) — patrón compartido
+por Escanear (`folder_selector.html.j2`), Duplicados (`duplicates_resolver.html.j2`)
+y Contexto (`context.html.j2`). Antes cada plantilla mantenía su propia copia del
+HTML y de las funciones JS (`paintLight`/`resetSemaforo`/`setSemaforo`), con nombres
+de variable y textos por fase ya divergentes entre sí (p. ej. el mensaje de error de
+escaneo/dedup difería en la conjunción "o"/"u otra operación") — unificado aquí
+(AUDIT_CODE, sesión 2026-09-10).
+
+`semaforo_html` genera exactamente el mismo HTML que ya tenía cada página (ids
+explícitos, no derivados de un prefijo, para no renombrar nada existente).
+`semaforo_script` genera las mismas funciones JS, parametrizadas por los nombres de
+variable/función que cada página ya usa y por el texto de cada fase — `set_fn` acepta
+un segundo argumento `label` opcional que sobrescribe el texto por defecto de
+RUNNING/COMPLETED (usado por Contexto, que tiene varias sub-fases con texto propio;
+Escanear/Duplicados simplemente no lo pasan y conservan su texto fijo de siempre).
+#}
+
+{% macro semaforo_html(container_id, started_id, running_id, completed_id, text_id, duration_id=none) %}
+<div id="{{ container_id }}" role="status" aria-live="polite" class="flex flex-wrap items-center gap-4 my-3 px-3 py-2 rounded border border-gray-200 bg-gray-50 w-fit">
+    <span class="flex items-center gap-1.5">
+        <span id="{{ started_id }}" class="inline-block w-3.5 h-3.5 rounded-full border bg-gray-300 border-gray-400"></span>
+        <span class="text-xs text-gray-600">Inicio</span>
+    </span>
+    <span class="flex items-center gap-1.5">
+        <span id="{{ running_id }}" class="inline-block w-3.5 h-3.5 rounded-full border bg-gray-300 border-gray-400"></span>
+        <span class="text-xs text-gray-600">Ejecución</span>
+    </span>
+    <span class="flex items-center gap-1.5">
+        <span id="{{ completed_id }}" class="inline-block w-3.5 h-3.5 rounded-full border bg-gray-300 border-gray-400"></span>
+        <span class="text-xs text-gray-600">Finalización</span>
+    </span>
+    <span id="{{ text_id }}" class="text-sm font-medium text-gray-600 ml-2">Sin iniciar</span>
+    {%- if duration_id %}
+    <span id="{{ duration_id }}" class="text-sm text-gray-500 ml-2"></span>
+    {%- endif %}
+</div>
+{% endmacro %}
+
+{% macro semaforo_script(
+    lights_var, text_var, phase_const, phase_var, reset_fn, set_fn,
+    started_id, running_id, completed_id, text_id,
+    started_text, running_text, completed_text, error_text,
+    duration_var=none, duration_id=none
+) %}
+const {{ lights_var }} = {
+    started: document.getElementById("{{ started_id }}"),
+    running: document.getElementById("{{ running_id }}"),
+    completed: document.getElementById("{{ completed_id }}"),
+};
+const {{ text_var }} = document.getElementById("{{ text_id }}");
+{%- if duration_var %}
+const {{ duration_var }} = document.getElementById("{{ duration_id }}");
+{%- endif %}
+const LIGHT_OFF = "bg-gray-300 border-gray-400";
+const LIGHT_ON_AMBER = "bg-amber-400 border-amber-500";
+const LIGHT_ON_GREEN = "bg-green-500 border-green-600";
+const LIGHT_ON_RED = "bg-red-500 border-red-600";
+
+const {{ phase_const }} = { IDLE: "idle", STARTED: "started", RUNNING: "running", COMPLETED: "completed", ERROR: "error" };
+
+let {{ phase_var }} = {{ phase_const }}.IDLE; // último estado real alcanzado (no ERROR): IDLE|STARTED|RUNNING|COMPLETED
+
+function paintLight(el, colorClass, pulse) {
+    el.className = "inline-block w-3.5 h-3.5 rounded-full border " + colorClass + (pulse ? " animate-pulse" : "");
+}
+
+function {{ reset_fn }}() {
+    paintLight({{ lights_var }}.started, LIGHT_OFF);
+    paintLight({{ lights_var }}.running, LIGHT_OFF);
+    paintLight({{ lights_var }}.completed, LIGHT_OFF);
+    {{ text_var }}.textContent = "Sin iniciar";
+    {{ text_var }}.className = "text-sm font-medium text-gray-600 ml-2";
+    {%- if duration_var %}
+    {{ duration_var }}.textContent = "";
+    {%- endif %}
+    {{ phase_var }} = {{ phase_const }}.IDLE;
+}
+
+function {{ set_fn }}(phase, label) {
+    if (phase === {{ phase_const }}.ERROR) {
+        const failedLight = {{ phase_var }} === {{ phase_const }}.RUNNING ? {{ lights_var }}.running : {{ lights_var }}.started;
+        paintLight(failedLight, LIGHT_ON_RED);
+        {{ text_var }}.textContent = label || {{ error_text | tojson }};
+        {{ text_var }}.className = "text-sm font-medium text-red-700 ml-2";
+        return;
+    }
+    {{ phase_var }} = phase;
+    if (phase === {{ phase_const }}.STARTED) {
+        paintLight({{ lights_var }}.started, LIGHT_ON_AMBER);
+        {{ text_var }}.textContent = label || {{ started_text | tojson }};
+        {{ text_var }}.className = "text-sm font-medium text-amber-700 ml-2";
+    } else if (phase === {{ phase_const }}.RUNNING) {
+        paintLight({{ lights_var }}.started, LIGHT_ON_AMBER);
+        paintLight({{ lights_var }}.running, LIGHT_ON_AMBER, true);
+        {{ text_var }}.textContent = label || {{ running_text | tojson }};
+        {{ text_var }}.className = "text-sm font-medium text-amber-700 ml-2";
+    } else if (phase === {{ phase_const }}.COMPLETED) {
+        paintLight({{ lights_var }}.started, LIGHT_ON_AMBER);
+        paintLight({{ lights_var }}.running, LIGHT_ON_AMBER);
+        paintLight({{ lights_var }}.completed, LIGHT_ON_GREEN);
+        {{ text_var }}.textContent = label || {{ completed_text | tojson }};
+        {{ text_var }}.className = "text-sm font-medium text-green-700 ml-2";
+    } else {
+        console.error("{{ set_fn }}: fase desconocida", phase);
+    }
+}
+{% endmacro %}
