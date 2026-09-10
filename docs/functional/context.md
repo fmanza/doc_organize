@@ -91,6 +91,12 @@ copia física y el sitio MkDocs reflejan el segundo eje:
 Si no existe `taxonomy_manifest.md`, todo el comportamiento (clasificación de un
 eje, `<tipo>`=extensión, nav plano por dominio) queda exactamente igual que antes.
 
+`GET /projects/{name}/context` refleja el modo manifiesto en la tabla "Contexto": un aviso
+"Modo manifiesto de taxonomía activo" cuando `Context.taxonomy_manifest_used`, y cada fila de
+dominio se puede desplegar para ver el tipo de material de cada documento
+(`DomainDocument.material_type_name`, o una etiqueta derivada del slug si el documento cayó
+en el placeholder `sin-clasificar` por no alcanzar el umbral en ese eje).
+
 ## Visualizar el Sitio Generado
 
 `GET /projects/{name}/context/site/` sirve el sitio MkDocs ya construido

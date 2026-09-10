@@ -103,6 +103,26 @@ async def test_context_page_empty_state(tmp_path) -> None:
     assert "Todavía no se ha construido el contexto de este proyecto." in response.text
 
 
+def _seed_taxonomy_manifest(project_root: Path, domain_slug: str = "ciberseguridad", domain_name: str = "Ciberseguridad") -> None:
+    """Escribe un `taxonomy_manifest.md` mínimo (front matter YAML + prosa libre) — mismo
+    fichero que `_load_taxonomy_manifest_or_400` (`web/routes/context.py`) carga
+    automáticamente si existe, sin que el llamador tenga que activar nada en el payload."""
+    manifest_body = f"""---
+domains:
+  - slug: {domain_slug}
+    name: {domain_name}
+material_types:
+  - slug: normativa
+    name: Normativa
+  - slug: procedimiento
+    name: Procedimiento
+---
+
+# Taxonomía de prueba
+"""
+    (project_root / "taxonomy_manifest.md").write_text(manifest_body, encoding="utf-8")
+
+
 @pytest.mark.asyncio
 async def test_get_context_api_404_before_build(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
@@ -316,6 +336,83 @@ async def test_context_page_tenant_isolation(tmp_path) -> None:
         response = await client.get(f"/projects/{project.name}/context")
 
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_context_page_hides_taxonomy_manifest_status_without_manifest(tmp_path) -> None:
+    """Sin `taxonomy_manifest.md`, la página no debe insinuar el modo manifiesto — ni el
+    aviso de estado ni el botón de despliegue por documento (`domain-toggle-btn`)."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    file_path = _seed_converted_document(project_root, "informe", "Informe anual")
+
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
+        )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        build_response = await client.post(f"/api/projects/{project.name}/context")
+        assert build_response.status_code == 200
+        page_response = await client.get(f"/projects/{project.name}/context")
+
+    assert page_response.status_code == 200
+    assert "Modo manifiesto de taxonomía activo" not in page_response.text
+    assert 'data-target="domain-detail-' not in page_response.text
+
+
+@pytest.mark.asyncio
+async def test_context_page_shows_taxonomy_manifest_status_and_material_type_detail(tmp_path) -> None:
+    """Con `taxonomy_manifest.md`, la página debe mostrar el aviso de modo manifiesto
+    activo y, al desplegar el dominio, el tipo de material de cada documento (nombre
+    legible del catálogo, `DomainDocument.material_type_name`, no el slug crudo)."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    # Carpeta "Ciberseguridad" para el bonus de ruta del eje de dominio; el título
+    # incluye la palabra "normativa" para puntuar ese tipo de material (mismo criterio
+    # de puntuación que `domain_classifier.score_catalog`, ver docs/functional/context.md).
+    file_path = _seed_converted_document(project_root, "politica", "Normativa de seguridad")
+    _seed_taxonomy_manifest(project_root)
+
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
+        )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        build_response = await client.post(f"/api/projects/{project.name}/context", json={"threshold": 0.1})
+        assert build_response.status_code == 200
+        page_response = await client.get(f"/projects/{project.name}/context")
+
+    assert page_response.status_code == 200
+    html = page_response.text
+    assert "Modo manifiesto de taxonomía activo" in html
+    assert 'class="domain-toggle-btn' in html
+    assert "Tipo de material" in html
+    assert "Normativa de seguridad" in html  # título del documento en la fila de detalle
+    assert re.search(r">\s*Normativa\s*<", html)  # material_type_name del catálogo, no el slug "normativa"
 
 
 @pytest.mark.asyncio

@@ -32,6 +32,12 @@ releases publicados antes de esa versión).
 - `src/doc_organize/web/routes/context.py`: `POST /api/projects/{name}/context` (REST y
   WebSocket) carga `taxonomy_manifest.md` automáticamente si existe; lo combina con
   `candidate_domains` en la misma petición devuelve `400` explícito.
+- `src/doc_organize/web/templates/context.html.j2`: la página "Contexto" expone el modo
+  manifiesto de taxonomía — aviso "Modo manifiesto de taxonomía activo" cuando
+  `Context.taxonomy_manifest_used`, y cada fila de dominio se despliega para ver el tipo de
+  material de cada documento (`DomainDocument.material_type_name`, o el slug derivado si el
+  documento cayó en el placeholder `sin-clasificar`). Sin cambios en `web/routes/context.py`
+  ni en el contrato REST/WebSocket — la plantilla ya recibía el `Context` completo.
 
 ### Fixed
 

@@ -83,6 +83,13 @@
 </p>
 {% endif %}
 
+{% if context and context.taxonomy_manifest_used %}
+<p class="text-sm text-green-700 mb-3">
+    ✓ Modo manifiesto de taxonomía activo — catálogo de dominios + tipos de material cargado desde <code>taxonomy_manifest.md</code>.
+    Cada dominio clasifica también por tipo de material (despliega la fila para verlo por documento).
+</p>
+{% endif %}
+
 {% if context and context.domains %}
 <div class="overflow-x-auto">
 <table class="w-full text-sm border-collapse">
@@ -96,10 +103,41 @@
     <tbody>
         {% for domain in context.domains %}
         <tr class="border-t border-gray-200">
-            <td class="py-1 pr-2">{{ domain.name }}</td>
+            <td class="py-1 pr-2">
+                {% if context.taxonomy_manifest_used %}
+                <button type="button" class="domain-toggle-btn text-gray-500 hover:text-gray-800 cursor-pointer mr-1"
+                        data-target="domain-detail-{{ domain.slug }}" aria-expanded="false">▸</button>
+                {% endif %}
+                {{ domain.name }}
+            </td>
             <td class="py-1 pr-2">{{ "Confirmado" if domain.status == "confirmado" else "Borrador" }}</td>
             <td class="py-1 pr-2 text-right">{{ domain.documents | length }}</td>
         </tr>
+        {% if context.taxonomy_manifest_used %}
+        <tr id="domain-detail-{{ domain.slug }}" class="border-t border-gray-200 bg-gray-50" hidden>
+            <td colspan="3" class="py-1 pr-2">
+                <table class="w-full text-xs border-collapse">
+                    <thead>
+                        <tr class="text-left text-gray-500">
+                            <th class="py-0.5 pr-2">Documento</th>
+                            <th class="py-0.5 pr-2">Tipo de material</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for document in domain.documents %}
+                        {% set material_slug = document.material_type or "sin-clasificar" %}
+                        <tr class="border-t border-gray-200">
+                            <td class="py-0.5 pr-2">{{ document.title }}</td>
+                            <td class="py-0.5 pr-2{% if material_slug == 'sin-clasificar' %} text-amber-700{% endif %}">
+                                {{ document.material_type_name or material_slug.replace("-", " ").title() }}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </td>
+        </tr>
+        {% endif %}
         {% endfor %}
     </tbody>
 </table>
@@ -126,6 +164,19 @@ function setControlsDisabled(disabled) {
     buildBtn.disabled = disabled;
     if (deleteBtn) deleteBtn.disabled = disabled;
 }
+
+// --- Despliega/colapsa la fila de detalle (documentos + tipo de material) de un
+// dominio, solo presente en modo manifiesto de taxonomía (botones renderizados
+// por el servidor únicamente cuando `context.taxonomy_manifest_used`). ---
+document.querySelectorAll(".domain-toggle-btn").forEach((toggleBtn) => {
+    toggleBtn.addEventListener("click", () => {
+        const detailRow = document.getElementById(toggleBtn.dataset.target);
+        const expanding = detailRow.hidden;
+        detailRow.hidden = !expanding;
+        toggleBtn.textContent = expanding ? "▾" : "▸";
+        toggleBtn.setAttribute("aria-expanded", String(expanding));
+    });
+});
 
 // --- Semáforo (mismo patrón que folder_selector.html.j2/duplicates_resolver.html.j2:
 // 3 luces + texto, "error" repinta de rojo la última luz alcanzada en vez de añadir
@@ -277,4 +328,4 @@ if (deleteBtn) {
     });
 }
 </script>
-{% endblock %}
+{% endblock content %}
