@@ -43,7 +43,6 @@ from doc_organize.core.constants import (
 )
 from doc_organize.core.exceptions import (
     ContextNotFoundError,
-    ProjectNotFoundError,
     TaxonomyManifestDraftError,
     TaxonomyManifestError,
     TaxonomyTemplateError,
@@ -71,6 +70,7 @@ from doc_organize.web.dependencies import (
     project_operation_key,
     release_project_operation_lock,
     require_project_access,
+    resolve_ws_project,
 )
 from doc_organize.web.templating import create_templates
 
@@ -579,11 +579,9 @@ async def context_build_websocket(name: str, websocket: WebSocket) -> None:
         return
     try:
         async with get_project_registry(websocket) as registry:
-            try:
-                project = await registry.get_project(name, tenant_id=tenant_id)
-            except ProjectNotFoundError:
-                await websocket.close(code=1008, reason="Project not found")
-                return
+            project = await resolve_ws_project(websocket, registry, name, tenant_id)
+        if project is None:
+            return
 
         try:
             request_payload = await websocket.receive_json()
@@ -699,11 +697,9 @@ async def context_delete_websocket(name: str, websocket: WebSocket) -> None:
         return
     try:
         async with get_project_registry(websocket) as registry:
-            try:
-                project = await registry.get_project(name, tenant_id=tenant_id)
-            except ProjectNotFoundError:
-                await websocket.close(code=1008, reason="Project not found")
-                return
+            project = await resolve_ws_project(websocket, registry, name, tenant_id)
+        if project is None:
+            return
 
         try:
             request_payload = await websocket.receive_json()

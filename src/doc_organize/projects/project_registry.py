@@ -111,7 +111,7 @@ class ProjectRegistry:
         async with self._lock:
             projects = await self._load()
             if any(p.name.lower() == normalized_name.lower() and p.tenant_id == tenant_id for p in projects):
-                raise ProjectAlreadyExistsError(f"Ya existe un proyecto llamado '{normalized_name}' en este tenant.")
+                raise ProjectAlreadyExistsError(normalized_name)
 
             project_root = safe_path_join(base_path, normalized_name)
 
@@ -164,7 +164,7 @@ class ProjectRegistry:
         for project in projects:
             if project.name.lower() == name.lower() and project.tenant_id == tenant_id:
                 return project
-        raise ProjectNotFoundError(f"No existe ningún proyecto llamado '{name}'.")
+        raise ProjectNotFoundError(name)
 
     async def delete_project(self, name: str, tenant_id: str = "default") -> None:
         """Elimina `name` del registro y borra su carpeta de trabajo por completo.
@@ -199,7 +199,7 @@ class ProjectRegistry:
             projects = await self._load()
             project = next((p for p in projects if p.name.lower() == name.lower() and p.tenant_id == tenant_id), None)
             if project is None:
-                raise ProjectNotFoundError(f"No existe ningún proyecto llamado '{name}'.")
+                raise ProjectNotFoundError(name)
 
             root_path = Path(project.root_path)
             if root_path.exists():
@@ -265,7 +265,7 @@ class ProjectRegistry:
                 None,
             )
             if index is None:
-                raise ProjectNotFoundError(f"No existe ningún proyecto llamado '{name}'.")
+                raise ProjectNotFoundError(name)
             project = projects[index]
 
             old_root = Path(project.root_path)

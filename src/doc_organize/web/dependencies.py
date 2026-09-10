@@ -9,8 +9,15 @@ from starlette.requests import HTTPConnection
 
 from doc_organize.auth import AuthStore
 from doc_organize.context import TaxonomyTemplateRegistry
+from doc_organize.core.exceptions import ProjectNotFoundError
+from doc_organize.core.models import Project
 from doc_organize.projects import ProjectRegistry, ScannedFoldersStore
 from doc_organize.web.auth import authenticate_session, requires_auth
+
+#: Motivo de cierre WebSocket cuando el proyecto no existe (o el rol no tiene
+#: acceso, ver `authorize_project_websocket`) — compartido con `resolve_ws_project()`
+#: para que ambos casos cierren con exactamente el mismo texto.
+_WS_REASON_PROJECT_NOT_FOUND = "Project not found"
 
 # `HTTPConnection` (no `Request`): base compartida de `Request` y `WebSocket` en
 # Starlette. Estas funciones solo tocan `.app.state`/`.state`, presentes en ambas —
@@ -117,10 +124,29 @@ async def authorize_project_websocket(websocket: WebSocket, project_name: str) -
     async with get_auth_store(websocket) as store:
         allowed = await store.can_access_project(tenant_id, authenticated.role_id, project_name)
         if not allowed:
-            await websocket.close(code=1008, reason="Project not found")
+            await websocket.close(code=1008, reason=_WS_REASON_PROJECT_NOT_FOUND)
             return None
         role = await store.get_role(tenant_id, authenticated.role_id)
         return tenant_id, role.allowed_scan_roots
+
+
+async def resolve_ws_project(websocket: WebSocket, registry: ProjectRegistry, name: str, tenant_id: str) -> Project | None:
+    """Resuelve el proyecto `name` para una conexión WebSocket ya autorizada, cerrando
+    con 1008 si no existe.
+
+    Compartida por los 4 WebSocket de `web/routes/scan.py` (escaneo/deduplicación) y
+    `web/routes/context.py` (construir/eliminar contexto) — cada uno repetía el mismo
+    `try/except ProjectNotFoundError` alrededor de `ProjectRegistry.get_project()` con
+    idéntico texto de cierre; unificada aquí junto con `authorize_project_websocket()`/
+    `acquire_project_operation_lock()` (AUDIT_CODE, sesión 2026-09-10).
+
+    Devuelve `None` si ya se cerró el websocket — el llamador no debe hacer nada más.
+    """
+    try:
+        return await registry.get_project(name, tenant_id=tenant_id)
+    except ProjectNotFoundError:
+        await websocket.close(code=1008, reason=_WS_REASON_PROJECT_NOT_FOUND)
+        return None
 
 
 def project_operation_key(tenant_id: str, project_name: str) -> tuple[str, str]:
@@ -246,7 +272,7 @@ async def require_project_access(name: str, request: Request) -> None:
     async with get_auth_store(request) as store:
         allowed = await store.can_access_project(tenant_id, role_id, name)
     if not allowed:
-        raise HTTPException(status_code=404, detail=f"No existe ningún proyecto llamado '{name}'.")
+        raise HTTPException(status_code=404, detail=str(ProjectNotFoundError(name)))
 
 
 __all__ = [
@@ -261,4 +287,5 @@ __all__ = [
     "release_project_operation_lock",
     "require_admin",
     "require_project_access",
+    "resolve_ws_project",
 ]

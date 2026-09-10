@@ -358,7 +358,7 @@ class AuthStore:
             raise AuthError(f"El identificador del tenant no puede superar los {TENANT_ID_MAX_LENGTH} caracteres: '{slug}'.")
 
         if await self.tenant_exists(slug):
-            raise TenantAlreadyExistsError(f"Ya existe un tenant con id '{slug}'.")
+            raise TenantAlreadyExistsError(slug)
 
         tenant = Tenant(id=slug, name=stripped, created_at=_now_iso())
         admin_role = Role(id=str(uuid4()), tenant_id=slug, name=DEFAULT_ADMIN_ROLE_NAME, is_admin=True, created_at=tenant.created_at)
@@ -387,7 +387,7 @@ class AuthStore:
             # UNIQUE/PK real) es la última línea de defensa — nunca debe escapar un
             # IntegrityError en bruto hasta la API.
             await self._connection.rollback()
-            raise TenantAlreadyExistsError(f"Ya existe un tenant con id '{slug}'.") from exc
+            raise TenantAlreadyExistsError(slug) from exc
         except Exception:
             await self._connection.rollback()
             raise
@@ -451,10 +451,10 @@ class AuthStore:
             raise AuthError("Un rol admin puede escanear cualquier ruta; no se le puede asignar una lista de raíces de escaneo.")
 
         if not await self.tenant_exists(tenant_id):
-            raise TenantNotFoundError(f"No existe ningún tenant con id '{tenant_id}'.")
+            raise TenantNotFoundError(tenant_id)
 
         if await self._role_name_taken(tenant_id, stripped_name):
-            raise RoleAlreadyExistsError(f"Ya existe un rol '{stripped_name}' en el tenant '{tenant_id}'.")
+            raise RoleAlreadyExistsError(stripped_name, tenant_id)
 
         role = Role(
             id=str(uuid4()),
@@ -472,7 +472,7 @@ class AuthStore:
             # Misma ventana de carrera que `create_tenant`: el SELECT de arriba no
             # es la única defensa, el UNIQUE(tenant_id, name) del esquema lo es.
             await self._connection.rollback()
-            raise RoleAlreadyExistsError(f"Ya existe un rol '{stripped_name}' en el tenant '{tenant_id}'.") from exc
+            raise RoleAlreadyExistsError(stripped_name, tenant_id) from exc
         self.logger.info(f"Rol creado: '{role.name}' en tenant '{tenant_id}' (is_admin={is_admin})")
         return role
 
@@ -513,7 +513,7 @@ class AuthStore:
         )
         row = await cursor.fetchone()
         if row is None:
-            raise RoleNotFoundError(f"No existe ningún rol '{role_id}' en el tenant '{tenant_id}'.")
+            raise RoleNotFoundError(role_id, tenant_id)
         project_names = await self._load_role_project_names(row[0])
         allowed_scan_roots = await self._load_role_scan_roots(row[0])
         return Role(
@@ -599,7 +599,7 @@ class AuthStore:
         )
 
         if new_name.lower() != current.name.lower() and await self._role_name_taken(tenant_id, new_name, exclude_role_id=role_id):
-            raise RoleAlreadyExistsError(f"Ya existe un rol '{new_name}' en el tenant '{tenant_id}'.")
+            raise RoleAlreadyExistsError(new_name, tenant_id)
 
         await self._connection.execute("UPDATE roles SET name = ?, is_admin = ? WHERE id = ?", (new_name, int(new_is_admin), role_id))
         await self._replace_role_associations(role_id, new_project_names, new_scan_roots)
@@ -697,7 +697,7 @@ class AuthStore:
             raise AuthError("La contraseña no puede estar vacía.")
 
         if not await self.tenant_exists(tenant_id):
-            raise TenantNotFoundError(f"No existe ningún tenant con id '{tenant_id}'.")
+            raise TenantNotFoundError(tenant_id)
 
         if role_id is None:
             role_id = await self._get_or_create_admin_role_id(tenant_id)
@@ -705,7 +705,7 @@ class AuthStore:
             await self.get_role(tenant_id, role_id)  # RoleNotFoundError si no existe/otro tenant
 
         if await self._username_taken(tenant_id, stripped_username):
-            raise UserAlreadyExistsError(f"Ya existe un usuario '{stripped_username}' en el tenant '{tenant_id}'.")
+            raise UserAlreadyExistsError(stripped_username, tenant_id)
 
         salt, password_hash = await asyncio.to_thread(_hash_password, password)
         user = User(
@@ -724,7 +724,7 @@ class AuthStore:
             # de arriba no es la única defensa, el UNIQUE(tenant_id, username) del
             # esquema lo es.
             await self._connection.rollback()
-            raise UserAlreadyExistsError(f"Ya existe un usuario '{stripped_username}' en el tenant '{tenant_id}'.") from exc
+            raise UserAlreadyExistsError(stripped_username, tenant_id) from exc
         self.logger.info(f"Usuario creado: '{user.username}' en tenant '{tenant_id}'")
         return user
 
@@ -749,7 +749,7 @@ class AuthStore:
         )
         row = await cursor.fetchone()
         if row is None:
-            raise UserNotFoundError(f"No existe ningún usuario '{user_id}' en el tenant '{tenant_id}'.")
+            raise UserNotFoundError(user_id, tenant_id)
         return User(id=row[0], tenant_id=row[1], username=row[2], role_id=row[3], must_change_password=bool(row[4]), created_at=row[5])
 
     async def _count_other_admins(self, tenant_id: str, exclude_user_id: str) -> int:

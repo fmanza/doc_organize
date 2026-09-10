@@ -25,7 +25,6 @@ from doc_organize.core.constants import (
     SCAN_HISTORY_FOLDER_NAME,
     SCAN_HISTORY_JSONL_NAME,
 )
-from doc_organize.core.exceptions import ProjectNotFoundError
 from doc_organize.core.models import Project, ScanEventType, ScannedFolder, ScanRunReport
 from doc_organize.scan import ScanCommand, list_scan_runs
 from doc_organize.utils.av_detector import detect_av_status
@@ -42,6 +41,7 @@ from doc_organize.web.dependencies import (
     get_tenant_id,
     release_project_operation_lock,
     require_project_access,
+    resolve_ws_project,
 )
 from doc_organize.web.pagination import DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, Page, paginate
 from doc_organize.web.routes.cache import CacheEntryResponse, cache_entry_to_response
@@ -278,11 +278,9 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
         return
     try:
         async with get_project_registry(websocket) as registry:
-            try:
-                project = await registry.get_project(name, tenant_id=tenant_id)
-            except ProjectNotFoundError:
-                await websocket.close(code=1008, reason="Project not found")
-                return
+            project = await resolve_ws_project(websocket, registry, name, tenant_id)
+        if project is None:
+            return
 
         try:
             request_payload = await websocket.receive_json()
@@ -333,7 +331,7 @@ async def scan_websocket(name: str, websocket: WebSocket) -> None:
             async for event in ScanCommand().run_streaming(
                 paths=paths,
                 output_dir=root / CONVERSION_FOLDER_NAME,
-                cache_db=root / "cache.db",
+                cache_db=root / DEFAULT_CACHE_DB_NAME,
                 folders_json=root / SCAN_FOLDERS_JSON_NAME,
                 use_ocr=use_ocr,
                 use_gpu=use_gpu,
@@ -383,11 +381,9 @@ async def deduplicate_websocket(name: str, websocket: WebSocket) -> None:
         return
     try:
         async with get_project_registry(websocket) as registry:
-            try:
-                project = await registry.get_project(name, tenant_id=tenant_id)
-            except ProjectNotFoundError:
-                await websocket.close(code=1008, reason="Project not found")
-                return
+            project = await resolve_ws_project(websocket, registry, name, tenant_id)
+        if project is None:
+            return
 
         folders = await get_scanned_folders_store().list_folders(project)
         saved_paths = [folder.path for folder in folders]

@@ -17,6 +17,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME
+
 # ===== Enumeraciones =====
 
 
@@ -524,7 +526,7 @@ class DoclingConfig(BaseModel):
 class CacheConfig(BaseModel):
     """Configuración de la base de datos de cache."""
 
-    cache_db_path: str = Field(default="cache.db", description="Ruta a la base de datos SQLite de cache")
+    cache_db_path: str = Field(default=DEFAULT_CACHE_DB_NAME, description="Ruta a la base de datos SQLite de cache")
     enable_wal: bool = Field(default=True, description="Activar modo WAL para concurrencia")
     auto_backup: bool = Field(default=True, description="Backup automático de cache.db antes de escrituras masivas")
 

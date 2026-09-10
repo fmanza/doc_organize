@@ -18,7 +18,7 @@ from starlette.background import BackgroundTask
 
 from doc_organize.cache import CacheManager
 from doc_organize.core.constants import CONVERSION_FOLDER_NAME, DEDUP_REPORT_JSON_NAME, DEFAULT_CACHE_DB_NAME, DUPLICATES_FOLDER_NAME
-from doc_organize.core.models import CacheEntry, CacheExportSnapshot, DocumentStatus, ScanErrorReport
+from doc_organize.core.models import CacheEntry, CacheExportSnapshot, DocumentStatus, ScanErrorEntry, ScanErrorReport
 from doc_organize.web.dependencies import get_project_registry, get_tenant_id, require_project_access
 
 # Reutiliza las mismas consultas que la página HTML de Errores de Escaneo (no las
@@ -29,10 +29,22 @@ from doc_organize.web.scan_errors_data import load_current_errors, load_error_hi
 router = APIRouter(tags=["downloads"])
 
 _CACHE_XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+# Columnas de fichero compartidas por los distintos exports Excel (cache y errores de
+# escaneo describen ambos ficheros del proyecto) — definidas una vez para que
+# `_CACHE_XLSX_COLUMNS`/`_SCAN_ERRORS_CURRENT_COLUMNS`/`_SCAN_ERRORS_HISTORY_COLUMNS`
+# no puedan divergir entre sí (S1192).
+_COL_ARCHIVO = "Archivo"
+_COL_CARPETA = "Carpeta"
+_COL_RUTA_COMPLETA = "Ruta completa"
+_COL_MENSAJE_ERROR = "Mensaje de error"
+_COL_REINTENTOS = "Reintentos"
+_COL_LIMITE_ALCANZADO = "Límite alcanzado"
+
 _CACHE_XLSX_COLUMNS = (
-    "Archivo",
-    "Carpeta",
-    "Ruta completa",
+    _COL_ARCHIVO,
+    _COL_CARPETA,
+    _COL_RUTA_COMPLETA,
     "Hash SHA-256",
     "Estado",
     "Conversión",
@@ -185,6 +197,21 @@ def _excel_safe(value: str) -> str:
     return value
 
 
+def _cache_export_row(entry: CacheEntry) -> dict[str, object]:
+    """Fila del Excel de `cache.db`, con claves derivadas de `_CACHE_XLSX_COLUMNS`
+    (en vez de re-teclearlas) para que ambas no puedan desincronizarse."""
+    values = (
+        _excel_safe(Path(entry.file_path).name),
+        _excel_safe(str(Path(entry.file_path).parent)),
+        _excel_safe(entry.file_path),
+        entry.sha256_hash,
+        entry.status.value,
+        entry.conversion_status.value if entry.conversion_status else "",
+        datetime.fromtimestamp(entry.timestamp, tz=UTC).isoformat(),
+    )
+    return dict(zip(_CACHE_XLSX_COLUMNS, values, strict=True))
+
+
 def _build_cache_export_xlsx(cached_entries: dict[str, CacheEntry]) -> Path:
     """Construye el Excel de export de `cache.db` en un fichero temporal del sistema.
 
@@ -194,18 +221,7 @@ def _build_cache_export_xlsx(cached_entries: dict[str, CacheEntry]) -> Path:
     Viewer, igual criterio que `export_project` para `cache_export.json`), ordenadas
     por `file_path` para un resultado determinista.
     """
-    rows = [
-        {
-            "Archivo": _excel_safe(Path(entry.file_path).name),
-            "Carpeta": _excel_safe(str(Path(entry.file_path).parent)),
-            "Ruta completa": _excel_safe(entry.file_path),
-            "Hash SHA-256": entry.sha256_hash,
-            "Estado": entry.status.value,
-            "Conversión": entry.conversion_status.value if entry.conversion_status else "",
-            "Última actualización (UTC)": datetime.fromtimestamp(entry.timestamp, tz=UTC).isoformat(),
-        }
-        for entry in sorted(cached_entries.values(), key=lambda entry: entry.file_path)
-    ]
+    rows = [_cache_export_row(entry) for entry in sorted(cached_entries.values(), key=lambda entry: entry.file_path)]
     frame = pd.DataFrame(rows, columns=list(_CACHE_XLSX_COLUMNS))
 
     fd, tmp_path_str = tempfile.mkstemp(suffix=".xlsx", prefix="doc_organize_cache_export_")
@@ -243,17 +259,54 @@ async def export_cache_xlsx(name: str, request: Request) -> FileResponse:
 
 
 _SCAN_ERRORS_XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-_SCAN_ERRORS_CURRENT_COLUMNS = ("Archivo", "Carpeta", "Ruta completa", "Mensaje de error", "Reintentos", "Límite alcanzado")
+_SCAN_ERRORS_CURRENT_COLUMNS = (
+    _COL_ARCHIVO,
+    _COL_CARPETA,
+    _COL_RUTA_COMPLETA,
+    _COL_MENSAJE_ERROR,
+    _COL_REINTENTOS,
+    _COL_LIMITE_ALCANZADO,
+)
 _SCAN_ERRORS_HISTORY_COLUMNS = (
     "Ejecución (scan_run_id)",
     "Fecha (UTC)",
-    "Archivo",
-    "Carpeta",
-    "Ruta completa",
-    "Mensaje de error",
-    "Reintentos",
-    "Límite alcanzado",
+    _COL_ARCHIVO,
+    _COL_CARPETA,
+    _COL_RUTA_COMPLETA,
+    _COL_MENSAJE_ERROR,
+    _COL_REINTENTOS,
+    _COL_LIMITE_ALCANZADO,
 )
+
+
+def _scan_error_current_row(item: dict[str, object]) -> dict[str, object]:
+    """Fila de la hoja "Estado actual", con claves derivadas de
+    `_SCAN_ERRORS_CURRENT_COLUMNS` (ver `_cache_export_row`)."""
+    values = (
+        _excel_safe(Path(str(item["file_path"])).name),
+        _excel_safe(str(Path(str(item["file_path"])).parent)),
+        _excel_safe(str(item["file_path"])),
+        _excel_safe(str(item["error_message"])),
+        item["error_retry_count"],
+        "Sí" if item["capped"] else "No",
+    )
+    return dict(zip(_SCAN_ERRORS_CURRENT_COLUMNS, values, strict=True))
+
+
+def _scan_error_history_row(report: ScanErrorReport, entry: ScanErrorEntry) -> dict[str, object]:
+    """Fila de la hoja "Histórico", con claves derivadas de
+    `_SCAN_ERRORS_HISTORY_COLUMNS` (ver `_cache_export_row`)."""
+    values = (
+        report.scan_run_id,
+        report.timestamp,
+        _excel_safe(Path(entry.file_path).name),
+        _excel_safe(str(Path(entry.file_path).parent)),
+        _excel_safe(entry.file_path),
+        _excel_safe(entry.error_message),
+        entry.error_retry_count,
+        "Sí" if entry.capped else "No",
+    )
+    return dict(zip(_SCAN_ERRORS_HISTORY_COLUMNS, values, strict=True))
 
 
 def _build_scan_errors_export_xlsx(current_errors: list[dict[str, object]], history: list[ScanErrorReport]) -> Path:
@@ -262,31 +315,8 @@ def _build_scan_errors_export_xlsx(current_errors: list[dict[str, object]], hist
     `.xlsx`, no dos ficheros) — mismo patrón síncrono que `_build_cache_export_xlsx`,
     llamado vía `asyncio.to_thread` desde la ruta.
     """
-    current_rows = [
-        {
-            "Archivo": _excel_safe(Path(str(item["file_path"])).name),
-            "Carpeta": _excel_safe(str(Path(str(item["file_path"])).parent)),
-            "Ruta completa": _excel_safe(str(item["file_path"])),
-            "Mensaje de error": _excel_safe(str(item["error_message"])),
-            "Reintentos": item["error_retry_count"],
-            "Límite alcanzado": "Sí" if item["capped"] else "No",
-        }
-        for item in current_errors
-    ]
-    history_rows = [
-        {
-            "Ejecución (scan_run_id)": report.scan_run_id,
-            "Fecha (UTC)": report.timestamp,
-            "Archivo": _excel_safe(Path(entry.file_path).name),
-            "Carpeta": _excel_safe(str(Path(entry.file_path).parent)),
-            "Ruta completa": _excel_safe(entry.file_path),
-            "Mensaje de error": _excel_safe(entry.error_message),
-            "Reintentos": entry.error_retry_count,
-            "Límite alcanzado": "Sí" if entry.capped else "No",
-        }
-        for report in history
-        for entry in report.entries
-    ]
+    current_rows = [_scan_error_current_row(item) for item in current_errors]
+    history_rows = [_scan_error_history_row(report, entry) for report in history for entry in report.entries]
     current_frame = pd.DataFrame(current_rows, columns=list(_SCAN_ERRORS_CURRENT_COLUMNS))
     history_frame = pd.DataFrame(history_rows, columns=list(_SCAN_ERRORS_HISTORY_COLUMNS))
 

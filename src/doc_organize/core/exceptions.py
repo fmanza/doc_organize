@@ -38,9 +38,22 @@ class ProjectNameError(ProjectError):
 class ProjectAlreadyExistsError(ProjectError):
     """Ya existe un proyecto registrado con ese nombre (comparacion case-insensitive)."""
 
+    def __init__(self, name: str) -> None:
+        super().__init__(f"Ya existe un proyecto llamado '{name}' en este tenant.")
+
 
 class ProjectNotFoundError(ProjectError):
-    """No hay ningun proyecto registrado con ese nombre."""
+    """No hay ningun proyecto registrado con ese nombre.
+
+    El mensaje se construye aqui (antes se repetia como f-string en cada
+    llamador: `ProjectRegistry.get_project`/`delete_project`/`move_project_root`
+    y `web/dependencies.py::require_project_access`) para que las 4 copias no
+    puedan divergir entre si (AUDIT_CODE, sesión 2026-09-10 — cluster S1192
+    "No existe ningún proyecto llamado").
+    """
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"No existe ningún proyecto llamado '{name}'.")
 
 
 class ProjectNotScannedError(ProjectError):
@@ -66,25 +79,43 @@ class AuthError(DocOrganizeError):
 class TenantAlreadyExistsError(AuthError):
     """Ya existe un tenant registrado con ese identificador."""
 
+    def __init__(self, tenant_id: str) -> None:
+        super().__init__(f"Ya existe un tenant con id '{tenant_id}'.")
+
 
 class TenantNotFoundError(AuthError):
     """No hay ningun tenant registrado con ese identificador."""
+
+    def __init__(self, tenant_id: str) -> None:
+        super().__init__(f"No existe ningún tenant con id '{tenant_id}'.")
 
 
 class UserAlreadyExistsError(AuthError):
     """Ya existe un usuario con ese nombre dentro del tenant."""
 
+    def __init__(self, username: str, tenant_id: str) -> None:
+        super().__init__(f"Ya existe un usuario '{username}' en el tenant '{tenant_id}'.")
+
 
 class UserNotFoundError(AuthError):
     """No hay ningun usuario registrado con ese id dentro del tenant."""
+
+    def __init__(self, user_id: str, tenant_id: str) -> None:
+        super().__init__(f"No existe ningún usuario '{user_id}' en el tenant '{tenant_id}'.")
 
 
 class RoleAlreadyExistsError(AuthError):
     """Ya existe un rol con ese nombre dentro del tenant."""
 
+    def __init__(self, name: str, tenant_id: str) -> None:
+        super().__init__(f"Ya existe un rol '{name}' en el tenant '{tenant_id}'.")
+
 
 class RoleNotFoundError(AuthError):
     """No hay ningun rol registrado con ese id dentro del tenant."""
+
+    def __init__(self, role_id: str, tenant_id: str) -> None:
+        super().__init__(f"No existe ningún rol '{role_id}' en el tenant '{tenant_id}'.")
 
 
 class RoleInUseError(AuthError):

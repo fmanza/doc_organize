@@ -7,6 +7,7 @@ from typing import Self
 
 import aiosqlite
 
+from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME
 from doc_organize.core.exceptions import CacheError
 from doc_organize.core.models import CacheEntry, ConversionStatus, DocumentMetadata, DocumentStatus
 from doc_organize.utils.hash_utils import hash_file
@@ -71,7 +72,7 @@ class CacheManager:
         {}
     """
 
-    def __init__(self, db_path: str | Path = "cache.db") -> None:
+    def __init__(self, db_path: str | Path = DEFAULT_CACHE_DB_NAME) -> None:
         self.db_path = Path(db_path)
         self.logger = get_logger(__name__)
         self._conn: aiosqlite.Connection | None = None
