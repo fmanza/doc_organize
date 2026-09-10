@@ -47,6 +47,17 @@ sequenceDiagram
     API-->>Usuario: dominios, sin_clasificar, reorganized, mkdocs_generated
 ```
 
+## Visualizar el Sitio Generado
+
+`GET /projects/{name}/context/site/` sirve el sitio MkDocs ya construido
+(`<project.root_path>/site/`), como acción de solo lectura totalmente
+independiente de construir/reconstruir el contexto: nunca se abre
+automáticamente al terminar un `POST`, el usuario decide cuándo verlo (enlace
+"ver documentación generada" en la página del proyecto, visible solo cuando
+`mkdocs_site_built` es `True`). Al ser un sitio distinto por cada `Project`
+(cada uno con su propio `root_path`), la misma ruta sirve el sitio de
+cualquier proyecto sin acoplarse a la construcción de ningún otro.
+
 ## Reglas de Negocio
 
 | Regla | Descripción |

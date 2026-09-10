@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel, ValidationError
 
 from doc_organize.ai import DomainClassificationClient, litellm_classification_config_from_env
@@ -72,6 +72,11 @@ _OUTPUT_FOLDER_NAME_PATTERN = re.compile(r"^[\w.\- ]+$")
 _RESERVED_OUTPUT_FOLDER_NAMES = frozenset(
     name.casefold() for name in (DUPLICATES_FOLDER_NAME, SCAN_ERRORS_FOLDER_NAME, SCAN_HISTORY_FOLDER_NAME, CONVERSION_FOLDER_NAME, "domains", "site")
 )
+
+# Duplicado de `MkDocsGenerator._SITE_DIR_NAME` (privada a su módulo) — política
+# "prohibido refactorizar" de `/new-feature`, mismo criterio que `ConfirmedActionRequest`.
+_SITE_DIR_NAME = "site"
+_SITE_INDEX_NAME = "index.html"
 
 
 class BuildContextRequest(BaseModel):
@@ -533,6 +538,65 @@ async def context_page(name: str, request: Request) -> HTMLResponse:
         "context.html.j2",
         {"project": project, "context": context, "litellm_configured": litellm_configured, "default_output_folder_name": _DEFAULT_OUTPUT_FOLDER_NAME},
     )
+
+
+async def _load_built_context(request: Request, name: str) -> Path:
+    """Resuelve `site_root` para servir el sitio MkDocs ya construido de `name` —
+    usado por `context_site_index`/`context_site_asset`, nunca por el flujo de
+    build (`build_context`/`context_build_websocket`): visualizar el sitio es una
+    acción de solo lectura totalmente independiente de generarlo.
+
+    Raises:
+        HTTPException: 404 si el proyecto no tiene contexto construido, o si la
+            última construcción no dejó un sitio navegable (`mkdocs_site_built`
+            en `False` — ver `MkDocsGenerator._build_site`).
+    """
+    project = await _get_project(request, name)
+    context = await _load_existing_context_or_none(project)
+    if context is None or not context.mkdocs_site_built:
+        raise HTTPException(status_code=404, detail="El proyecto no tiene un sitio de documentación construido.")
+    return (Path(project.root_path) / _SITE_DIR_NAME).resolve()
+
+
+@router.get("/projects/{name}/context/site", dependencies=[Depends(require_project_access)])
+async def context_site_index(name: str, request: Request) -> RedirectResponse:
+    """Redirige a la versión con barra final (`.../site/`): las páginas que genera
+    mkdocs usan URLs relativas (CSS/JS/enlaces de navegación) que asumen que el
+    índice se sirve en una ruta terminada en '/' (`use_directory_urls`, activo por
+    defecto — ver `MkDocsGenerator._build_config`); sin la barra, esos enlaces
+    relativos resolverían un nivel por encima del sitio.
+    """
+    await _load_built_context(request, name)
+    return RedirectResponse(url=f"{request.url.path}/")
+
+
+@router.get("/projects/{name}/context/site/{file_path:path}", response_model=None, dependencies=[Depends(require_project_access)])
+async def context_site_asset(name: str, file_path: str, request: Request) -> FileResponse | RedirectResponse:
+    """Sirve un fichero del sitio MkDocs ya construido de `name`, bajo `site/{file_path}`.
+
+    Si `file_path` resuelve a un directorio (páginas de mkdocs con
+    `use_directory_urls`) y la petición no terminaba en '/', redirige añadiéndola
+    (mismo motivo que `context_site_index`); si ya terminaba en '/', sirve el
+    `index.html` de ese directorio.
+
+    Raises:
+        HTTPException: 404 si no hay sitio construido (ver `_load_built_context`),
+            o si `file_path` no resuelve a nada dentro de `site/` — incluye
+            cualquier intento de escapar de ese directorio vía `..`.
+    """
+    site_root = await _load_built_context(request, name)
+    target = (site_root / file_path).resolve()
+    if not target.is_relative_to(site_root):
+        raise HTTPException(status_code=404, detail="Recurso no encontrado en el sitio de documentación.")
+
+    if await asyncio.to_thread(target.is_dir):
+        if not request.url.path.endswith("/"):
+            return RedirectResponse(url=f"{request.url.path}/")
+        target = target / _SITE_INDEX_NAME
+
+    if not await asyncio.to_thread(target.is_file):
+        raise HTTPException(status_code=404, detail="Recurso no encontrado en el sitio de documentación.")
+    return FileResponse(target)
 
 
 __all__ = ["router"]

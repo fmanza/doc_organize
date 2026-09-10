@@ -141,7 +141,12 @@ class MkDocsGenerator:
 
 Escribe `<project.root_path>/mkdocs.yml` (usando `<output_folder_name>/` como
 `docs_dir` directamente, sin copiar el contenido una vez más) + `index.md`, con
-`nav` agrupado por dominio. No ejecuta `mkdocs build` — solo la configuración.
+`nav` agrupado por dominio. Además ejecuta `mkdocs build --clean` (si `mkdocs`
+está instalado — extra `doc_organize[docs]`) dejando `<project.root_path>/site/`
+ya navegable; si no está instalado o el build falla, se loguea un aviso y
+`Context.mkdocs_site_built` queda en `False`, sin propagar la excepción. Ver
+"Rutas HTTP" para cómo se visualiza ese sitio (`GET .../context/site/...`),
+acción independiente de este `generate()`.
 
 ---
 
@@ -230,6 +235,8 @@ Todas bajo `/projects/{name}/context` (página) y `/api/projects/{name}/context`
 | `/projects/{name}/context` | `GET` | Página HTML — lista de dominios, o estado vacío si no hay contexto todavía |
 | `/api/projects/{name}/context` | `POST` | Construye/reconstruye: `{candidate_domains?, threshold?, ai_classification_enabled?}` → `409` si hay otra operación en curso; `400` si la IA está activada sin proxy configurado |
 | `/api/projects/{name}/context` | `GET` | Devuelve el contexto ya construido — `404` si no existe todavía |
+| `/projects/{name}/context/site` | `GET` | Redirige a `.../site/` (barra final — las páginas de mkdocs usan URLs relativas que la necesitan) |
+| `/projects/{name}/context/site/{file_path}` | `GET` | Sirve el sitio MkDocs ya construido (`<project.root_path>/site/{file_path}`) — `404` si `mkdocs_site_built` es `False` o si `file_path` no resuelve dentro de `site/`. Acción de solo lectura, independiente de `POST .../context` (nunca se dispara automáticamente tras un build) |
 
 ## Dependencias
 

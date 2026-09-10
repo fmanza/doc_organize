@@ -4,6 +4,7 @@ import json
 import re
 
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 import pytest
@@ -12,8 +13,9 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from doc_organize.cache import CacheManager
+from doc_organize.context import ContextRegistry
 from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME
-from doc_organize.core.models import CacheEntry, ConversionStatus, DocumentStatus
+from doc_organize.core.models import CacheEntry, ConversionStatus, DocumentStatus, Project
 from doc_organize.projects import ProjectRegistry
 from doc_organize.web import create_app
 
@@ -57,6 +59,27 @@ def _seed_converted_document(project_root: Path, stem: str, title: str) -> str:
     (output_dir / f"{stem}.md").write_text(f"# {title}", encoding="utf-8")
     (output_dir / f"{stem}.json").write_text(json.dumps({"title": title, "chunks": []}), encoding="utf-8")
     return str(source)
+
+
+async def _build_context_with_fake_site(client: httpx.AsyncClient, project: Project, project_root: Path) -> None:
+    """Construye el contexto (con `mkdocs build` real deshabilitado, ver
+    `_no_real_mkdocs_build`) y simula a mano lo que dejaría un `mkdocs build` real
+    en disco — `site/index.html` + una página de dominio con `use_directory_urls`
+    (`site/<dominio>/index.html`) — marcando `mkdocs_site_built=True`, para poder
+    probar `context_site_index`/`context_site_asset` sin depender de tener
+    `mkdocs` instalado en el entorno de tests."""
+    response = await client.post(f"/api/projects/{project.name}/context")
+    assert response.status_code == 200
+
+    site_dir = project_root / "site"
+    (site_dir / "ciberseguridad").mkdir(parents=True, exist_ok=True)
+    (site_dir / "index.html").write_text("<html><body>Inicio del sitio</body></html>", encoding="utf-8")
+    (site_dir / "ciberseguridad" / "index.html").write_text("<html><body>Dominio Ciberseguridad</body></html>", encoding="utf-8")
+
+    registry = ContextRegistry()
+    context = await registry.load_context(project)
+    context.mkdocs_site_built = True
+    await registry.save_context(project, context)
 
 
 @pytest.mark.asyncio
@@ -712,3 +735,169 @@ async def test_context_delete_websocket_rejects_when_operation_already_in_progre
         websocket.send_json({"confirm": True})
         websocket.receive_json()
     assert exc_info.value.code == 1008
+
+
+# ===== GET /projects/{name}/context/site (visualización, independiente del build) =====
+
+
+@pytest.mark.asyncio
+async def test_context_site_index_redirects_to_trailing_slash(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    file_path = _seed_converted_document(project_root, "informe", "Informe anual")
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+        )
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        await _build_context_with_fake_site(client, project, project_root)
+        response = await client.get(f"/projects/{project.name}/context/site", follow_redirects=False)
+
+    assert response.status_code == 307
+    assert response.headers["location"] == f"/projects/{quote(project.name)}/context/site/"
+
+
+@pytest.mark.asyncio
+async def test_context_site_index_serves_built_index_html(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    file_path = _seed_converted_document(project_root, "informe", "Informe anual")
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+        )
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        await _build_context_with_fake_site(client, project, project_root)
+        response = await client.get(f"/projects/{project.name}/context/site/")
+
+    assert response.status_code == 200
+    assert "Inicio del sitio" in response.text
+
+
+@pytest.mark.asyncio
+async def test_context_site_asset_redirects_directory_without_trailing_slash(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    file_path = _seed_converted_document(project_root, "informe", "Informe anual")
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+        )
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        await _build_context_with_fake_site(client, project, project_root)
+        response = await client.get(f"/projects/{project.name}/context/site/ciberseguridad", follow_redirects=False)
+
+    assert response.status_code == 307
+    assert response.headers["location"] == f"/projects/{quote(project.name)}/context/site/ciberseguridad/"
+
+
+@pytest.mark.asyncio
+async def test_context_site_asset_serves_domain_page(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    file_path = _seed_converted_document(project_root, "informe", "Informe anual")
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+        )
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        await _build_context_with_fake_site(client, project, project_root)
+        response = await client.get(f"/projects/{project.name}/context/site/ciberseguridad/")
+
+    assert response.status_code == 200
+    assert "Dominio Ciberseguridad" in response.text
+
+
+@pytest.mark.asyncio
+async def test_context_site_404_when_no_context_built(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/context/site/")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_context_site_404_when_context_built_but_mkdocs_site_not_built(tmp_path) -> None:
+    """`_no_real_mkdocs_build` deja `mkdocs_site_built=False` tras un build normal
+    (sin sitio simulado a mano) — el visor debe devolver 404, no servir un sitio
+    que nunca llegó a construirse."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        await client.post(f"/api/projects/{project.name}/context")
+        response = await client.get(f"/projects/{project.name}/context/site/")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_context_site_rejects_path_traversal_outside_site_dir(tmp_path) -> None:
+    """`mkdocs.yml` vive en `project.root_path`, un nivel por encima de `site/` —
+    si el guard de `context_site_asset` fallara, este `..` lo expondría."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    file_path = _seed_converted_document(project_root, "informe", "Informe anual")
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+        )
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        await _build_context_with_fake_site(client, project, project_root)
+        assert (project_root / "mkdocs.yml").exists()
+        response = await client.get(f"/projects/{project.name}/context/site/../mkdocs.yml")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_context_site_tenant_isolation(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path, tenant_id="acme-corp")
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/context/site/")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_context_page_links_to_site_when_built(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    file_path = _seed_converted_document(project_root, "informe", "Informe anual")
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [CacheEntry(file_path=file_path, sha256_hash="a" * 64, timestamp=1_700_000_000.0, status=DocumentStatus.NEW, conversion_status=ConversionStatus.SUCCESS)]
+        )
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        await _build_context_with_fake_site(client, project, project_root)
+        response = await client.get(f"/projects/{project.name}/context")
+
+    assert response.status_code == 200
+    assert f"/projects/{quote(project.name)}/context/site/" in response.text
+    assert "ver documentación generada" in response.text
