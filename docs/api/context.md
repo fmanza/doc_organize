@@ -324,6 +324,57 @@ es el JSON esperado).
 
 ---
 
+## TaxonomyManifestDraftClient (borrador de manifiesto de taxonomía por IA)
+
+```python
+class TaxonomyManifestDraftClient:
+    def __init__(self, config: LiteLLMTaxonomyManifestDraftConfig, *, transport: httpx.AsyncBaseTransport | None = None) -> None
+    async def propose_manifest(self, *, documents: list[SampledDocument]) -> TaxonomyManifestDraftResult
+
+def litellm_taxonomy_manifest_draft_config_from_env() -> LiteLLMTaxonomyManifestDraftConfig
+```
+
+Endpoint nuevo, distinto de la Sub-fase B: `DomainClassificationClient`/`TaxonomyClassificationClient`
+**eligen** dentro de un catálogo ya confirmado por el usuario; este cliente **propone el catálogo
+mismo** (dominios + tipos de material) a partir de una muestra de documentos ya convertidos —
+nunca se aplica directamente, el usuario revisa/edita el borrador devuelto antes de guardarlo a
+mano como `taxonomy_manifest.md` (no hay hoy ningún endpoint que persista ese fichero por el
+usuario). Independiente de `ContextBuilder`: se invoca directamente desde
+`POST .../context/taxonomy-manifest-draft` (ver "Rutas HTTP"), nunca como parte de
+`ContextBuilder.build()`.
+
+Mismo endpoint `chat/completions` OpenAI-compatible que los otros dos clientes de IA, pero en una
+única llamada para **toda la muestra** (no una por documento). `domains`/`material_types` del
+resultado siempre cumplen el schema de `TaxonomyCatalogEntry` y nunca tienen slugs repetidos
+dentro del mismo eje — validado en el propio cliente, no solo por instrucción al modelo; un
+catálogo vacío en cualquier eje se trata como error (`TaxonomyManifestDraftError`), nunca como un
+borrador a medias. Config propia (`LiteLLMTaxonomyManifestDraftConfig`) — no comparte credenciales
+con `LiteLLMClassificationConfig`/`LiteLLMTaxonomyClassificationConfig` (ISP, mismo criterio que ya
+las separa entre sí), aunque en despliegue las tres puedan apuntar al mismo LiteLLM Proxy.
+`litellm_taxonomy_manifest_draft_config_from_env()` lee
+`DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_BASE_URL`/`_VIRTUAL_KEY` (obligatorias) y `_MODEL`
+(opcional).
+
+La muestra de documentos se selecciona con `context.select_document_sample(documents, sample_size)`
+(`context/taxonomy_manifest_sampler.py`): hasta `sample_size` documentos, repartidos en
+round-robin determinista entre carpetas contenedoras (hasta 2 niveles, sin rutas absolutas) para
+dar diversidad real en vez de los primeros N alfabéticos de una única carpeta. Un documento cuyo
+`.json` de conversión no se puede leer se descarta de la muestra (mismo criterio que
+`DomainClassifier`), así que la muestra final puede ser más pequeña que `sample_size`.
+
+El borrador estructurado se puede renderizar como el mismo formato de fichero que
+`load_taxonomy_manifest()` espera con `context.render_taxonomy_manifest_markdown(manifest, *,
+reasoning, sample_document_count, total_document_count)` (`context/taxonomy_manifest.py`) — front
+matter YAML + una nota/tabla de prosa indicando que es un borrador generado por IA pendiente de
+revisión. No escribe nada en disco; el llamador (`web/routes/context.py`) decide qué hacer con el
+texto devuelto.
+
+**Excepciones**: `TaxonomyManifestDraftAuthError` (401/403), `TaxonomyManifestDraftConnectionError`
+(red/timeout), `TaxonomyManifestDraftError` (cualquier otro error, incluida una respuesta que no
+cumple el schema de catálogo de taxonomía esperado, o un catálogo vacío en algún eje).
+
+---
+
 ## Modelos (`core.models`)
 
 ```python
@@ -389,6 +440,17 @@ class LiteLLMTaxonomyClassificationConfig(BaseModel):
     model: str  # default "claude-classifier"
     timeout_s: float
 
+class TaxonomyManifestDraftResult(BaseModel):
+    domains: list[TaxonomyCatalogEntry]        # min 1
+    material_types: list[TaxonomyCatalogEntry]  # min 1
+    reasoning: str | None
+
+class LiteLLMTaxonomyManifestDraftConfig(BaseModel):
+    base_url: str
+    virtual_key: str
+    model: str      # default "claude-classifier"
+    timeout_s: float  # default 60.0 (prompt más grande, varios documentos a la vez)
+
 class TaxonomyCatalogEntry(BaseModel):
     slug: str
     name: str
@@ -417,6 +479,7 @@ Todas bajo `/projects/{name}/context` (página) y `/api/projects/{name}/context`
 | `/projects/{name}/context` | `GET` | Página HTML — lista de dominios, o estado vacío si no hay contexto todavía |
 | `/api/projects/{name}/context` | `POST` | Construye/reconstruye: `{candidate_domains?, threshold?, ai_classification_enabled?, taxonomy_template_name?}` → `409` si hay otra operación en curso; `400` si la IA está activada sin el proxy correspondiente configurado (1 eje o 2 ejes según haya o no manifiesto), o si se combinan entre sí `taxonomy_manifest.md` local, `candidate_domains` y `taxonomy_template_name` (cualquier par es excluyente — ver `TaxonomyTemplateRegistry`). Si existe `taxonomy_manifest.md`, se carga automáticamente — no hace falta pasar nada en el payload para activar el modo manifiesto (ni para que `ai_classification_enabled` use el cliente de 2 ejes) |
 | `/api/projects/{name}/context` | `GET` | Devuelve el contexto ya construido — `404` si no existe todavía |
+| `/api/projects/{name}/context/taxonomy-manifest-draft` | `POST` | Pide a la IA un borrador de manifiesto de taxonomía: `{sample_size?}` (1-60, default 25) → `TaxonomyManifestDraftResponse` (`manifest`, `manifest_markdown`, `reasoning`, `sample_document_count`, `total_document_count`). Endpoint de solo lectura (sin lock de operación, nunca escribe nada en disco) — distinto de `ai_classification_enabled` en `POST .../context` (Sub-fase B: elige DENTRO de un catálogo ya confirmado), aquí la IA propone el catálogo mismo. `400` si el proyecto no tiene documentos convertidos (o ninguno con `.json` legible), o si `DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_*` no está configurado; `502` si el LiteLLM Proxy falla o responde algo que no cumple el schema esperado |
 | `/api/taxonomy-templates` | `GET` | Lista las plantillas disponibles (`TaxonomyTemplateRegistry.list_templates()`) — biblioteca compartida, no ligada a ningún proyecto ni tenant |
 | `/projects/{name}/context/site` | `GET` | Redirige a `.../site/` (barra final — las páginas de mkdocs usan URLs relativas que la necesitan) |
 | `/projects/{name}/context/site/{file_path}` | `GET` | Sirve el sitio MkDocs ya construido (`<project.root_path>/site/{file_path}`) — `404` si `mkdocs_site_built` es `False` o si `file_path` no resuelve dentro de `site/`. Acción de solo lectura, independiente de `POST .../context` (nunca se dispara automáticamente tras un build) |

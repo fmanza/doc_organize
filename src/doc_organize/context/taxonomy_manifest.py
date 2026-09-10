@@ -90,4 +90,65 @@ def _parse_front_matter(front_matter: str, manifest_path: Path) -> TaxonomyManif
         raise TaxonomyManifestError(f"El front matter de '{manifest_path}' no cumple el schema de taxonomía: {exc}") from exc
 
 
-__all__ = ["MANIFEST_FILE_NAME", "load_taxonomy_manifest"]
+def render_taxonomy_manifest_markdown(
+    manifest: TaxonomyManifest, *, reasoning: str | None, sample_document_count: int, total_document_count: int
+) -> str:
+    """Renderiza `manifest` en el mismo formato de fichero que `load_taxonomy_manifest()` espera
+    (front matter YAML delimitado por `---` + prosa libre) — listo para que el usuario lo revise,
+    edite y guarde a mano como `<project.root_path>/taxonomy_manifest.md` (o como una plantilla
+    nueva de `TaxonomyTemplateRegistry`).
+
+    Usado por `web/routes/context.py::draft_taxonomy_manifest` para componer la respuesta de un
+    borrador propuesto por IA (`ai.TaxonomyManifestDraftClient`) — nunca escribe nada en disco por
+    sí mismo; no existe hoy ningún endpoint que persista `taxonomy_manifest.md` por el usuario, así
+    que "confirmar" el borrador es siempre una acción manual fuera de esta función.
+
+    Args:
+        manifest: Catálogo propuesto (`domains`/`material_types`). `title`/`description` del
+            propio `manifest` se ignoran — solo relevantes para una plantilla compartida (ver
+            `TaxonomyManifest`), no para un manifiesto de proyecto.
+        reasoning: Justificación devuelta por la IA (`TaxonomyManifestDraftResult.reasoning`), o
+            `None` si no la reportó.
+        sample_document_count: Documentos realmente enviados a la IA.
+        total_document_count: Total de documentos convertidos del proyecto en el momento de pedir
+            el borrador.
+
+    Returns:
+        Texto completo del fichero, empezando por el front matter YAML.
+
+    Example:
+        >>> from doc_organize.core.models import TaxonomyCatalogEntry
+        >>> manifest = TaxonomyManifest(
+        ...     domains=[TaxonomyCatalogEntry(slug="calidad", name="Calidad")],
+        ...     material_types=[TaxonomyCatalogEntry(slug="procedimiento", name="Procedimiento")],
+        ... )
+        >>> text = render_taxonomy_manifest_markdown(manifest, reasoning=None, sample_document_count=5, total_document_count=20)
+        >>> text.startswith("---\\ndomains:")
+        True
+    """
+    front_matter = yaml.safe_dump(
+        {
+            "domains": [entry.model_dump(exclude_none=True) for entry in manifest.domains],
+            "material_types": [entry.model_dump(exclude_none=True) for entry in manifest.material_types],
+        },
+        allow_unicode=True,
+        sort_keys=False,
+    )
+    domain_names = ", ".join(entry.name for entry in manifest.domains)
+    material_type_names = ", ".join(entry.name for entry in manifest.material_types)
+    reasoning_paragraph = f"\n{reasoning}\n" if reasoning else ""
+    return (
+        f"---\n{front_matter}---\n\n"
+        "# Borrador de taxonomía (generado por IA)\n\n"
+        f"> Borrador generado automáticamente a partir de una muestra de {sample_document_count} de "
+        f"{total_document_count} documentos convertidos. Revísalo y edítalo antes de guardarlo como "
+        "`taxonomy_manifest.md` — no se aplica ningún cambio automáticamente.\n"
+        f"{reasoning_paragraph}\n"
+        "| Eje | Propuestas |\n"
+        "|---|---|\n"
+        f"| Dominio | {domain_names} |\n"
+        f"| Tipo de material | {material_type_names} |\n"
+    )
+
+
+__all__ = ["MANIFEST_FILE_NAME", "load_taxonomy_manifest", "render_taxonomy_manifest_markdown"]

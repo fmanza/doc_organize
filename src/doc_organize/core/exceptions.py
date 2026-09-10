@@ -162,6 +162,24 @@ class TaxonomyClassificationConnectionError(TaxonomyClassificationError):
     """Error de red o timeout consultando el LiteLLM Proxy para clasificar un documento por manifiesto."""
 
 
+class TaxonomyManifestDraftError(DocOrganizeError):
+    """Error base del cliente de propuesta de manifiesto de taxonomia por IA (`doc_organize.ai`).
+
+    A diferencia de `TaxonomyClassificationError` (Sub-fase B, elige DENTRO de un catalogo ya
+    confirmado), aqui el catalogo mismo es la propuesta que falla -- nunca degrada en silencio a
+    un borrador vacio (violaria `TaxonomyManifest.domains`/`material_types` min_length=1), siempre
+    se propaga.
+    """
+
+
+class TaxonomyManifestDraftAuthError(TaxonomyManifestDraftError):
+    """El LiteLLM Proxy rechazo la virtual key de propuesta de manifiesto (credencial invalida o sin permiso)."""
+
+
+class TaxonomyManifestDraftConnectionError(TaxonomyManifestDraftError):
+    """Error de red o timeout consultando el LiteLLM Proxy para proponer un manifiesto de taxonomia."""
+
+
 __all__ = [
     "AuthError",
     "CacheError",
@@ -190,6 +208,9 @@ __all__ = [
     "TaxonomyClassificationAuthError",
     "TaxonomyClassificationConnectionError",
     "TaxonomyClassificationError",
+    "TaxonomyManifestDraftAuthError",
+    "TaxonomyManifestDraftConnectionError",
+    "TaxonomyManifestDraftError",
     "TaxonomyManifestError",
     "TaxonomyTemplateError",
     "TenantAlreadyExistsError",

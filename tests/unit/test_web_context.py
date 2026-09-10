@@ -135,6 +135,100 @@ async def test_get_context_api_404_before_build(tmp_path) -> None:
     assert response.status_code == 404
 
 
+# Tests de `POST .../context/taxonomy-manifest-draft` (borrador de manifiesto de taxonomía por
+# IA). El éxito de la llamada a la IA solo se cubre en `test_taxonomy_manifest_draft_client.py`
+# (con `httpx.MockTransport` inyectado en el cliente) -- igual que el resto de rutas de este
+# fichero para la Sub-fase B, aquí no hay forma de inyectar un transporte falso en el cliente que
+# construye la propia ruta, así que a nivel HTTP solo se cubren los caminos que no llegan a llamar
+# al proxy (sin documentos, o sin configurar).
+
+
+@pytest.mark.asyncio
+async def test_draft_taxonomy_manifest_400_without_any_converted_document(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_BASE_URL", "https://proxy.example.test")
+    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_VIRTUAL_KEY", "sk-test")
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.post(f"/api/projects/{project.name}/context/taxonomy-manifest-draft")
+
+    assert response.status_code == 400
+    assert "no tiene documentos convertidos" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_draft_taxonomy_manifest_400_when_no_document_has_a_readable_json(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_BASE_URL", "https://proxy.example.test")
+    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_VIRTUAL_KEY", "sk-test")
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    file_path = _seed_converted_document(project_root, "informe", "Informe anual")
+    (project_root / "Conversión" / "informe.json").write_text("esto no es JSON", encoding="utf-8")
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
+        )
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.post(f"/api/projects/{project.name}/context/taxonomy-manifest-draft")
+
+    assert response.status_code == 400
+    assert ".json de conversión legible" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_draft_taxonomy_manifest_400_when_litellm_draft_proxy_not_configured(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_BASE_URL", raising=False)
+    monkeypatch.delenv("DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_VIRTUAL_KEY", raising=False)
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    file_path = _seed_converted_document(project_root, "informe", "Informe anual")
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
+        )
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.post(f"/api/projects/{project.name}/context/taxonomy-manifest-draft")
+
+    assert response.status_code == 400
+    assert "DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_draft_taxonomy_manifest_404_for_missing_project(tmp_path) -> None:
+    app = create_app(registry_path=tmp_path / "projects.json")
+
+    async with _client(app) as client:
+        response = await client.post("/api/projects/No Existe/context/taxonomy-manifest-draft")
+
+    assert response.status_code == 404
+
+
 @pytest.mark.asyncio
 async def test_build_context_classifies_reorganizes_and_generates_mkdocs(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"

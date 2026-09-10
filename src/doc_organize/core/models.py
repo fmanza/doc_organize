@@ -856,6 +856,38 @@ class LiteLLMTaxonomyClassificationConfig(BaseModel):
     timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
 
 
+class TaxonomyManifestDraftResult(BaseModel):
+    """Resultado de pedir a la IA un borrador de manifiesto de taxonomía (dominios + tipos de
+    material) a partir de una muestra de documentos ya convertidos (`TaxonomyManifestDraftClient`).
+
+    A diferencia de `TaxonomyClassificationResult` (Sub-fase B, elige DENTRO de un catálogo ya
+    confirmado), aquí el catálogo mismo es la propuesta — nunca se aplica directamente, el
+    usuario lo revisa/edita antes de guardarlo como `taxonomy_manifest.md`.
+    """
+
+    domains: list[TaxonomyCatalogEntry] = Field(..., min_length=1, description="Catálogo de dominios propuesto por la IA")
+    material_types: list[TaxonomyCatalogEntry] = Field(..., min_length=1, description="Catálogo de tipos de material propuesto por la IA")
+    reasoning: str | None = Field(default=None, description="Justificación breve devuelta por el modelo, si la reporta")
+
+
+class LiteLLMTaxonomyManifestDraftConfig(BaseModel):
+    """Configuración de acceso al LiteLLM Proxy para `TaxonomyManifestDraftClient`.
+
+    Config propia (ISP, mismo criterio que separa `LiteLLMClassificationConfig` de
+    `LiteLLMTaxonomyClassificationConfig`): proponer un catálogo nuevo es una carga de trabajo
+    distinta de clasificar dentro de uno ya cerrado, aunque en despliegue las tres puedan apuntar
+    al mismo LiteLLM Proxy.
+    """
+
+    base_url: str = Field(..., description="URL base del LiteLLM Proxy")
+    virtual_key: str = Field(..., description="Virtual key con permiso de `chat/completions` para proponer manifiestos de taxonomía")
+    model: str = Field(default="claude-classifier", description="Alias de modelo configurado en el proxy para proponer manifiestos")
+    timeout_s: float = Field(
+        default=60.0,
+        description="Timeout de las peticiones HTTP, en segundos (más alto que el resto: el prompt incluye varios documentos a la vez, no uno solo)",
+    )
+
+
 __all__ = [
     "AvStatus",
     "CacheConfig",
@@ -887,6 +919,7 @@ __all__ = [
     "GpuStatus",
     "LiteLLMClassificationConfig",
     "LiteLLMTaxonomyClassificationConfig",
+    "LiteLLMTaxonomyManifestDraftConfig",
     "LiteLLMUsageConfig",
     "OcrMode",
     "Project",

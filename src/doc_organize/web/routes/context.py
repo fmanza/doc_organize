@@ -12,16 +12,27 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from doc_organize.ai import (
     DomainClassificationClient,
     TaxonomyClassificationClient,
+    TaxonomyManifestDraftClient,
     litellm_classification_config_from_env,
     litellm_taxonomy_classification_config_from_env,
+    litellm_taxonomy_manifest_draft_config_from_env,
 )
 from doc_organize.cache import CacheManager
-from doc_organize.context import ContextBuilder, ContextRegistry, MkDocsGenerator, Reorganizer, TaxonomyTemplateRegistry, load_taxonomy_manifest
+from doc_organize.context import (
+    ContextBuilder,
+    ContextRegistry,
+    MkDocsGenerator,
+    Reorganizer,
+    TaxonomyTemplateRegistry,
+    load_taxonomy_manifest,
+    render_taxonomy_manifest_markdown,
+    select_document_sample,
+)
 from doc_organize.converter import DocumentConverter
 from doc_organize.core.constants import (
     CONVERSION_FOLDER_NAME,
@@ -30,7 +41,13 @@ from doc_organize.core.constants import (
     SCAN_ERRORS_FOLDER_NAME,
     SCAN_HISTORY_FOLDER_NAME,
 )
-from doc_organize.core.exceptions import ContextNotFoundError, ProjectNotFoundError, TaxonomyManifestError, TaxonomyTemplateError
+from doc_organize.core.exceptions import (
+    ContextNotFoundError,
+    ProjectNotFoundError,
+    TaxonomyManifestDraftError,
+    TaxonomyManifestError,
+    TaxonomyTemplateError,
+)
 from doc_organize.core.models import (
     Context,
     ContextBuildEvent,
@@ -132,6 +149,21 @@ class ContextResponse(BaseModel):
 
 class TaxonomyTemplateListResponse(BaseModel):
     templates: list[TaxonomyTemplateSummary]
+
+
+class TaxonomyManifestDraftRequest(BaseModel):
+    sample_size: int = Field(default=25, ge=1, le=60)
+    """Tope de documentos convertidos a incluir en la muestra enviada a la IA (repartidos entre
+    carpetas contenedoras, ver `select_document_sample()`) — acotado server-side para no dejar que
+    un cliente fuerce un prompt arbitrariamente grande (coste/tamaño) al LiteLLM Proxy."""
+
+
+class TaxonomyManifestDraftResponse(BaseModel):
+    manifest: TaxonomyManifest
+    manifest_markdown: str
+    reasoning: str | None = None
+    sample_document_count: int
+    total_document_count: int
 
 
 def _acquire_operation_lock(request: Request, tenant_id: str, project_name: str) -> tuple[str, str]:
@@ -358,6 +390,70 @@ async def list_taxonomy_templates(request: Request) -> TaxonomyTemplateListRespo
     poblar el selector de `payload.taxonomy_template_name` (`POST .../context`)."""
     template_registry = get_taxonomy_template_registry(request)
     return TaxonomyTemplateListResponse(templates=await template_registry.list_templates())
+
+
+@router.post(
+    "/api/projects/{name}/context/taxonomy-manifest-draft",
+    response_model=TaxonomyManifestDraftResponse,
+    dependencies=[Depends(require_project_access)],
+)
+async def draft_taxonomy_manifest(name: str, request: Request, payload: TaxonomyManifestDraftRequest | None = None) -> TaxonomyManifestDraftResponse:
+    """Pide a la IA un BORRADOR de manifiesto de taxonomía (dominios + tipos de material) a partir
+    de una muestra de documentos ya convertidos de `name`.
+
+    Distinto de `POST .../context` con `ai_classification_enabled=True` (Sub-fase B): aquella
+    elige DENTRO de un catálogo de dominios ya confirmado por el usuario; este endpoint propone el
+    catálogo mismo. Nunca lo persiste ni lo aplica — no existe hoy ningún endpoint que escriba
+    `taxonomy_manifest.md` por el usuario, así que "confirmar" el borrador es siempre una acción
+    manual (revisar/editar `manifest`/`manifest_markdown` y guardarlo a mano). Por eso mismo es de
+    solo lectura: sin `_acquire_operation_lock` (igual que `GET .../context`/
+    `GET /api/taxonomy-templates`), no toca `context.json` ni ninguna carpeta del proyecto.
+
+    Raises:
+        HTTPException: 400 si el proyecto no tiene documentos convertidos todavía (o ninguno con
+            un `.json` de conversión legible), o si el proxy de propuesta de manifiesto
+            (`DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_*`) no está configurado; 502 si el
+            LiteLLM Proxy rechaza la petición, hay un error de red, o la respuesta no cumple el
+            schema de catálogo de taxonomía esperado.
+    """
+    payload = payload or TaxonomyManifestDraftRequest()
+    project = await _get_project(request, name)
+    documents = await _gather_converted_documents(project)
+    if not documents:
+        raise HTTPException(
+            status_code=400,
+            detail="El proyecto no tiene documentos convertidos todavía -- ejecuta un escaneo antes de generar un borrador de taxonomía.",
+        )
+
+    sample = await select_document_sample(documents, payload.sample_size)
+    if not sample:
+        raise HTTPException(
+            status_code=400,
+            detail="Ninguno de los documentos convertidos tiene un .json de conversión legible -- no se puede generar un borrador de taxonomía.",
+        )
+
+    try:
+        config = litellm_taxonomy_manifest_draft_config_from_env()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        async with TaxonomyManifestDraftClient(config) as client:
+            result = await client.propose_manifest(documents=sample)
+    except TaxonomyManifestDraftError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    manifest = TaxonomyManifest(domains=result.domains, material_types=result.material_types)
+    manifest_markdown = render_taxonomy_manifest_markdown(
+        manifest, reasoning=result.reasoning, sample_document_count=len(sample), total_document_count=len(documents)
+    )
+    return TaxonomyManifestDraftResponse(
+        manifest=manifest,
+        manifest_markdown=manifest_markdown,
+        reasoning=result.reasoning,
+        sample_document_count=len(sample),
+        total_document_count=len(documents),
+    )
 
 
 @router.post("/api/projects/{name}/context", response_model=ContextResponse, dependencies=[Depends(require_project_access)])

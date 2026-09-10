@@ -4,9 +4,9 @@ from datetime import UTC, datetime
 
 import pytest
 
-from doc_organize.context.taxonomy_manifest import MANIFEST_FILE_NAME, load_taxonomy_manifest
+from doc_organize.context.taxonomy_manifest import MANIFEST_FILE_NAME, load_taxonomy_manifest, render_taxonomy_manifest_markdown
 from doc_organize.core.exceptions import TaxonomyManifestError
-from doc_organize.core.models import Project
+from doc_organize.core.models import Project, TaxonomyCatalogEntry, TaxonomyManifest
 
 _VALID_FRONT_MATTER = """---
 domains:
@@ -106,3 +106,49 @@ async def test_raises_when_material_types_catalog_is_missing(tmp_path):
 
     with pytest.raises(TaxonomyManifestError, match="schema de taxonomía"):
         await load_taxonomy_manifest(project)
+
+
+def _make_manifest() -> TaxonomyManifest:
+    return TaxonomyManifest(
+        domains=[
+            TaxonomyCatalogEntry(slug="ciberseguridad", name="Ciberseguridad", description="Normas de seguridad", keywords=["iso27001"]),
+            TaxonomyCatalogEntry(slug="calidad", name="Calidad"),
+        ],
+        material_types=[TaxonomyCatalogEntry(slug="normativa", name="Normativa"), TaxonomyCatalogEntry(slug="procedimiento", name="Procedimiento")],
+    )
+
+
+@pytest.mark.asyncio
+async def test_render_taxonomy_manifest_markdown_produces_a_loadable_front_matter(tmp_path) -> None:
+    """El texto renderizado debe poder recargarse tal cual con `load_taxonomy_manifest()` --
+    mismo formato de fichero (front matter YAML delimitado por '---' + prosa libre)."""
+    text = render_taxonomy_manifest_markdown(
+        _make_manifest(), reasoning="Dos áreas temáticas claras", sample_document_count=5, total_document_count=20
+    )
+    (tmp_path / MANIFEST_FILE_NAME).write_text(text, encoding="utf-8")
+    project = Project(name="Demo", root_path=str(tmp_path), created_at=datetime.now(UTC).isoformat())
+
+    manifest = await load_taxonomy_manifest(project)
+
+    assert manifest is not None
+    assert [entry.slug for entry in manifest.domains] == ["ciberseguridad", "calidad"]
+    assert manifest.domains[0].keywords == ["iso27001"]
+    assert [entry.slug for entry in manifest.material_types] == ["normativa", "procedimiento"]
+
+
+def test_render_taxonomy_manifest_markdown_includes_sample_coverage_and_reasoning() -> None:
+    text = render_taxonomy_manifest_markdown(
+        _make_manifest(), reasoning="Dos áreas temáticas claras", sample_document_count=5, total_document_count=20
+    )
+
+    assert "muestra de 5 de 20 documentos" in text
+    assert "Dos áreas temáticas claras" in text
+    assert "Ciberseguridad, Calidad" in text
+    assert "Normativa, Procedimiento" in text
+
+
+def test_render_taxonomy_manifest_markdown_without_reasoning_omits_it_gracefully() -> None:
+    text = render_taxonomy_manifest_markdown(_make_manifest(), reasoning=None, sample_document_count=5, total_document_count=20)
+
+    assert text.startswith("---\ndomains:")
+    assert "| Dominio | Ciberseguridad, Calidad |" in text
