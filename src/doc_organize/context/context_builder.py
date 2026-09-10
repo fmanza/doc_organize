@@ -135,10 +135,14 @@ class ContextBuilder:
                 )
 
         has_predefined_catalog = bool(candidate_domains) or taxonomy_manifest is not None
+        manifest_domains_by_slug = (
+            {DomainClassifier._slugify(entry.slug): entry for entry in taxonomy_manifest.domains} if taxonomy_manifest is not None else {}
+        )
         domains = [
             Domain(
                 slug=slug,
-                name=slug.replace("-", " ").title(),
+                name=manifest_domains_by_slug[slug].name if slug in manifest_domains_by_slug else slug.replace("-", " ").title(),
+                description=manifest_domains_by_slug[slug].description if slug in manifest_domains_by_slug else None,
                 status=DomainStatus.CONFIRMED if has_predefined_catalog else DomainStatus.DRAFT,
                 predefined=has_predefined_catalog,
                 documents=domain_documents,
@@ -190,6 +194,14 @@ class ContextBuilder:
         domain_keywords = {DomainClassifier._slugify(entry.slug): entry.keywords for entry in manifest.domains if entry.keywords}
         material_keywords = {DomainClassifier._slugify(entry.slug): entry.keywords for entry in manifest.material_types if entry.keywords}
 
+        # Mismo saneado que `domain_keywords`/`material_keywords`, para el mismo motivo:
+        # `TaxonomyCatalogEntry.name` (nombre legible declarado en el manifiesto) se leía
+        # pero nunca se propagaba a `DomainDocument.material_type_name` — `MkDocsGenerator`
+        # acababa derivando la etiqueta del nav del slug (`"normativa" -> "Normativa"`) en vez
+        # de usar el nombre declarado (AUDIT_CODE, mismo hallazgo que `Domain.name`/`.description`
+        # en `build()`).
+        material_names = {DomainClassifier._slugify(entry.slug): entry.name for entry in manifest.material_types}
+
         classified: dict[str, list[DomainDocument]] = {}
         unclassified: list[ConversionResult] = []
 
@@ -221,6 +233,7 @@ class ContextBuilder:
                     title=resolved_title,
                     document_type=document_type,
                     material_type=material_slug,
+                    material_type_name=material_names.get(material_slug),
                     confidence=domain_score,
                     classified_by="rules",
                 )

@@ -320,3 +320,81 @@ async def test_build_with_manifest_uses_catalog_entry_keywords_for_scoring(tmp_p
 
     assert context.domains[0].slug == "ciberseguridad"
     assert context.domains[0].documents[0].material_type == "normativa"
+
+
+@pytest.mark.asyncio
+async def test_build_with_manifest_uses_catalog_entry_name_and_description_for_domain(tmp_path):
+    """`TaxonomyCatalogEntry.name`/`.description` del manifiesto deben ganar sobre el
+    fallback `slug.replace("-", " ").title()`/`None` — antes de este fix, `Domain.name`
+    siempre se derivaba del slug e ignoraba el `name` (obligatorio en el manifiesto) y la
+    `description` declarados (AUDIT_CODE, sesión de QA manual de la feature). El slug
+    "rrhh" se elige a propósito porque `"rrhh".title()` == "Rrhh", claramente distinto del
+    `name` declarado — así el test no puede pasar por coincidencia como con slugs tipo
+    "calidad"/"Calidad".
+    """
+    project = _make_project(tmp_path)
+    document = _make_document(tmp_path, "varios", "informe", "Gestion de personal y plantilla")
+    manifest = TaxonomyManifest(
+        domains=[TaxonomyCatalogEntry(slug="rrhh", name="Recursos Humanos", description="Gestión de personas", keywords=["personal", "plantilla"])],
+        material_types=[TaxonomyCatalogEntry(slug="normativa", name="Normativa")],
+    )
+
+    context = await ContextBuilder().build(project, [document], taxonomy_manifest=manifest, threshold=0.5)
+
+    assert context.domains[0].slug == "rrhh"
+    assert context.domains[0].name == "Recursos Humanos"
+    assert context.domains[0].description == "Gestión de personas"
+
+
+@pytest.mark.asyncio
+async def test_build_with_manifest_placeholder_domain_keeps_slug_derived_name(tmp_path):
+    """El placeholder `sin-clasificar` no tiene entrada en el manifiesto -- debe seguir
+    cayendo al fallback derivado del slug (`name="Sin Clasificar"`, `description=None`),
+    no romperse por el lookup nuevo introducido para el resto de dominios."""
+    project = _make_project(tmp_path)
+    document = _make_document(tmp_path, "varios", "receta", "Receta de cocina con ingredientes y horno")
+    manifest = TaxonomyManifest(
+        domains=[TaxonomyCatalogEntry(slug="ciberseguridad", name="Ciberseguridad")],
+        material_types=[TaxonomyCatalogEntry(slug="normativa", name="Normativa")],
+    )
+
+    context = await ContextBuilder().build(project, [document], taxonomy_manifest=manifest, threshold=0.5)
+
+    assert context.domains[0].slug == "sin-clasificar"
+    assert context.domains[0].name == "Sin Clasificar"
+    assert context.domains[0].description is None
+
+
+@pytest.mark.asyncio
+async def test_build_with_manifest_sets_material_type_name_from_catalog_entry(tmp_path):
+    """Mismo hallazgo que el test de dominio, para el segundo eje: `DomainDocument.material_type_name`
+    debe reflejar el `name` declarado para el tipo de material, no quedar `None` a la espera de que
+    el llamador lo derive del slug."""
+    project = _make_project(tmp_path)
+    document = _make_document(tmp_path, "varios", "politica", "Politica de seguridad normativa ISO 27001")
+    manifest = TaxonomyManifest(
+        domains=[TaxonomyCatalogEntry(slug="ciberseguridad", name="Ciberseguridad")],
+        material_types=[TaxonomyCatalogEntry(slug="normativa", name="Normativa Vigente")],
+    )
+
+    context = await ContextBuilder().build(project, [document], taxonomy_manifest=manifest, threshold=0.1)
+
+    document_result = context.domains[0].documents[0]
+    assert document_result.material_type == "normativa"
+    assert document_result.material_type_name == "Normativa Vigente"
+
+
+@pytest.mark.asyncio
+async def test_build_with_manifest_placeholder_material_type_keeps_name_unset(tmp_path):
+    """El placeholder `sin-clasificar` en el eje de tipo de material tampoco tiene entrada
+    en el manifiesto -- `material_type_name` debe quedar `None` (el llamador, `MkDocsGenerator`,
+    es quien decide el fallback visual), no reventar el lookup."""
+    project = _make_project(tmp_path)
+    document = _make_document(tmp_path, "varios", "receta", "Receta de cocina con ingredientes y horno")
+    manifest = _make_manifest(["ciberseguridad", "calidad"], ["normativa", "procedimiento"])
+
+    context = await ContextBuilder().build(project, [document], taxonomy_manifest=manifest, threshold=0.5)
+
+    document_result = context.domains[0].documents[0]
+    assert document_result.material_type == "sin-clasificar"
+    assert document_result.material_type_name is None

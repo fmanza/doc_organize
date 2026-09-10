@@ -33,6 +33,14 @@ releases publicados antes de esa versión).
   WebSocket) carga `taxonomy_manifest.md` automáticamente si existe; lo combina con
   `candidate_domains` en la misma petición devuelve `400` explícito.
 
+### Fixed
+
+- `src/doc_organize/context/context_builder.py`/`mkdocs_generator.py`: el `name`/`description`
+  declarados por dominio y tipo de material en `taxonomy_manifest.md` ahora se reflejan en la
+  tabla "Contexto", `context.json` y el nav de `mkdocs.yml` — antes se ignoraban y siempre se
+  mostraba el slug derivado (p. ej. "Rrhh" en vez de "Recursos Humanos"), pese a que `name` es
+  un campo obligatorio del manifiesto.
+
 ## [0.8.0] - 2026-09-10
 
 ### Fixed

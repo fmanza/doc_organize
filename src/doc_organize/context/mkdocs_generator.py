@@ -97,7 +97,14 @@ class MkDocsGenerator:
         nav: list[Any] = []
         for material_type, docs in by_material_type.items():
             entries = [{document.title: self._relative_doc_path(domain, document)} for document in docs]
-            nav.append({material_type.replace("-", " ").title(): entries})
+            # `material_type_name` (nombre legible del manifiesto) es el mismo para todos los
+            # documentos de este grupo -- comparten `material_type`, luego la misma entrada del
+            # catálogo `TaxonomyManifest.material_types`. `None` para el placeholder "sin-clasificar"
+            # (sin entrada en el manifiesto) o en modo sin manifiesto: cae al fallback derivado del
+            # slug, igual que antes (AUDIT_CODE: antes de esto, la etiqueta siempre se derivaba del
+            # slug, ignorando el `name` declarado en el manifiesto).
+            label = docs[0].material_type_name or material_type.replace("-", " ").title()
+            nav.append({label: entries})
         return nav
 
     async def _build_site(self, project: Project, mkdocs_yml_path: Path) -> bool:

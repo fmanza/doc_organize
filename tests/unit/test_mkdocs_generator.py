@@ -88,6 +88,33 @@ async def test_generate_groups_nav_by_material_type_when_taxonomy_manifest_used(
 
 
 @pytest.mark.asyncio
+async def test_generate_nav_prefers_material_type_name_over_slug_derived_label(tmp_path, monkeypatch):
+    """`material_type_name` (nombre legible del manifiesto, propagado por `ContextBuilder`)
+    debe usarse como etiqueta del grupo en el nav en vez de derivarla del slug -- antes de
+    este fix, la etiqueta siempre era `material_type.replace("-", " ").title()`, ignorando
+    el `name` declarado (AUDIT_CODE, mismo hallazgo que `Domain.name`/`.description`)."""
+    _disable_mkdocs_build(monkeypatch)
+    project = _make_project(tmp_path)
+    document = DomainDocument(
+        source_path="/docs/a.pdf",
+        markdown_path="/out/a.md",
+        json_path="/out/a.json",
+        title="Norma A",
+        document_type="pdf",
+        material_type="normativa",
+        material_type_name="Normativa Vigente",
+        confidence=0.9,
+    )
+    context = _make_context(project, [Domain(slug="calidad", name="Calidad", documents=[document])])
+    context.taxonomy_manifest_used = True
+
+    mkdocs_yml_path, _site_built = await MkDocsGenerator().generate(project, context)
+
+    config = yaml.safe_load(mkdocs_yml_path.read_text(encoding="utf-8"))
+    assert config["nav"][1] == {"Calidad": [{"Normativa Vigente": [{"Norma A": "calidad/normativa/a/a.md"}]}]}
+
+
+@pytest.mark.asyncio
 async def test_generate_writes_index_md_listing_domains(tmp_path, monkeypatch):
     _disable_mkdocs_build(monkeypatch)
     project = _make_project(tmp_path)

@@ -675,6 +675,14 @@ class DomainDocument(BaseModel):
             "`TaxonomyManifest.material_types`), o `None` en modo sin manifiesto de taxonomía"
         ),
     )
+    material_type_name: str | None = Field(
+        default=None,
+        description=(
+            "Nombre legible de `material_type` (`TaxonomyCatalogEntry.name` del manifiesto), o `None` si "
+            "`material_type` es el placeholder `sin-clasificar` o no hay manifiesto — el llamador (p. ej. "
+            "`MkDocsGenerator`) recurre entonces a derivar una etiqueta a partir del slug"
+        ),
+    )
     confidence: float = Field(..., ge=0.0, le=1.0, description="Score de confianza de la clasificación, 0-1")
     classified_by: str = Field(default="rules", description="'rules' (Sub-fase A) o 'ai' (Sub-fase B) según qué clasificó el documento")
 
