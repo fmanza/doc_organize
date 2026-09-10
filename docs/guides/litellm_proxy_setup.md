@@ -7,6 +7,11 @@ reglas dejan sin clasificar pasan por un **LiteLLM Proxy** (Sub-fase B) — nunc
 llama a un proveedor de IA directamente. Esta guía explica cómo levantar ese proxy
 en local con Docker.
 
+Un proyecto con `taxonomy_manifest.md` (clasificación de 2 ejes: dominio + tipo de
+material) usa el mismo proxy pero un cliente y unas variables de entorno propias
+(`TaxonomyClassificationClient`, §4) — el mismo toggle "IA" activa una llamada
+combinada que resuelve ambos ejes a la vez, en vez de la llamada de 1 eje.
+
 No necesitas esta guía si no vas a usar la Sub-fase B: la clasificación por reglas
 funciona sin ningún proxy ni credencial de IA.
 
@@ -87,6 +92,21 @@ Estas variables se leen explícitamente vía
 implícita. Si activas el toggle "IA" en la pantalla Contexto sin haberlas
 definido, `POST /api/projects/{name}/context` devuelve un 400 con un mensaje
 explícito en vez de un error críptico.
+
+**Si el proyecto tiene `taxonomy_manifest.md`** (modo de 2 ejes), configura en su
+lugar las variables de `TaxonomyClassificationClient` — son una config separada
+(ISP: una virtual key por carga de trabajo, para poder atribuir presupuesto/rate-limit
+por separado), aunque apunten al mismo proxy que acabas de levantar:
+
+```bash
+DOC_ORGANIZE_LITELLM_TAXONOMY_CLASSIFICATION_BASE_URL=http://localhost:4000
+DOC_ORGANIZE_LITELLM_TAXONOMY_CLASSIFICATION_VIRTUAL_KEY=sk-...   # genera otra virtual key en el paso 3
+DOC_ORGANIZE_LITELLM_TAXONOMY_CLASSIFICATION_MODEL=claude-classifier   # opcional, es el valor por defecto
+```
+
+Un proyecto sin manifiesto solo necesita las variables de 1 eje; uno con
+manifiesto solo necesita las de 2 ejes — no hace falta definir ambos juegos a la
+vez salvo que el mismo despliegue de doc_organize sirva proyectos de los dos tipos.
 
 Requiere el extra `doc_organize[context]` instalado (`pip install
 doc_organize[context]`) para `pyyaml` (generación de `mkdocs.yml`) — el cliente

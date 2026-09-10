@@ -88,6 +88,14 @@ copia física y el sitio MkDocs reflejan el segundo eje:
 `<output_folder_name>/<dominio>/<tipo-de-material>/<stem>/`, y el nav de
 `mkdocs.yml` se agrupa `dominio > tipo de material > documentos`.
 
+Con `ai_classification_enabled=True` (y el proxy de clasificación de 2 ejes
+configurado, ver más abajo), cada documento que las reglas dejan con el placeholder
+`sin-clasificar` en algún eje se reintenta por IA — `TaxonomyClassificationClient`
+resuelve dominio + tipo de material **en una sola llamada combinada**, pero solo se
+aplica al eje que seguía sin clasificar; un eje que las reglas ya resolvieron con
+confianza nunca se sobreescribe, aunque la IA sugiera algo distinto para ese eje en
+la misma respuesta.
+
 Si no existe `taxonomy_manifest.md`, todo el comportamiento (clasificación de un
 eje, `<tipo>`=extensión, nav plano por dominio) queda exactamente igual que antes.
 
@@ -135,19 +143,19 @@ cualquier proyecto sin acoplarse a la construcción de ningún otro.
   si de algún modo llega a `Reorganizer` con un artefacto ausente, se levanta
   `IncompleteConversionArtifactsError` (no se reorganiza a medias).
 - **IA activada sin proxy configurado**: `POST` devuelve `400` con un mensaje
-  explícito (`DOC_ORGANIZE_LITELLM_CLASSIFICATION_BASE_URL`/`_VIRTUAL_KEY` sin
-  definir), no un error genérico.
-- **IA sugiere un dominio fuera del catálogo**: se descarta y se trata como "no
-  encaja en ninguno" — validado en `DomainClassificationClient`, no solo por
+  explícito — `DOC_ORGANIZE_LITELLM_CLASSIFICATION_BASE_URL`/`_VIRTUAL_KEY` sin
+  definir (modo de 1 eje), o `DOC_ORGANIZE_LITELLM_TAXONOMY_CLASSIFICATION_BASE_URL`/
+  `_VIRTUAL_KEY` sin definir (modo manifiesto, 2 ejes) — nunca un error genérico.
+- **IA sugiere un dominio o tipo de material fuera del catálogo**: se descarta y se
+  trata como "no encaja en ninguno" en ese eje — validado en
+  `DomainClassificationClient`/`TaxonomyClassificationClient`, no solo por
   instrucción al modelo.
 - **Fallo de red/autenticación con el proxy** durante la Sub-fase B: el
-  documento afectado queda sin clasificar; no interrumpe el resto del lote.
+  documento afectado queda sin clasificar (en el eje que la IA no llegó a
+  resolver); no interrumpe el resto del lote.
 - **`taxonomy_manifest.md` con front matter inválido** (no empieza/cierra con
   `---`, YAML roto, o catálogo `domains`/`material_types` vacío o ausente):
   `POST` devuelve `400` con el motivo exacto, no un error genérico.
-- **Sub-fase B (IA) con manifiesto activo**: sin efecto en este ciclo — la
-  clasificación de 2 ejes es solo por reglas; `ai_classification_enabled` se
-  ignora mientras haya `taxonomy_manifest.md`.
 
 ## Criterios de Aceptación
 

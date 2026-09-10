@@ -24,14 +24,38 @@ releases publicados antes de esa versión).
   2 ejes (dominio + tipo de material); un documento con los tres artefactos completos siempre
   se reorganiza, con el slug placeholder `sin-clasificar` en el eje que no alcance el umbral,
   en vez de excluirse (`unclassified_documents` sigue reservado a artefactos incompletos). Sin
-  manifiesto, comportamiento idéntico al de antes de esta sesión. La Sub-fase B (IA) queda sin
-  efecto en modo manifiesto en este ciclo — diferida a una sesión futura.
+  manifiesto, comportamiento idéntico al de antes de esta sesión. La Sub-fase B (IA) en modo
+  manifiesto se añade en esta misma sesión (ver bullet siguiente) — ya no queda diferida.
+- `src/doc_organize/ai/taxonomy_classification_client.py` (nuevo): `TaxonomyClassificationClient`
+  — Sub-fase B para manifiesto de taxonomía, resuelve dominio + tipo de material en **una sola
+  llamada combinada** al LiteLLM Proxy (en vez de dos llamadas independientes). Mismo patrón que
+  `DomainClassificationClient`: `httpx.AsyncClient` con `transport` inyectable, config propia
+  (`LiteLLMTaxonomyClassificationConfig`, nuevo en `core/models.py`, env vars propias
+  `DOC_ORGANIZE_LITELLM_TAXONOMY_CLASSIFICATION_BASE_URL`/`_VIRTUAL_KEY`/`_MODEL` — no comparte
+  credenciales con la config de 1 eje, ISP) y excepciones propias
+  (`TaxonomyClassificationError`/`AuthError`/`ConnectionError`, nuevas en `core/exceptions.py`).
+  El valor devuelto en cada eje se valida siempre contra su propio catálogo candidato, nunca
+  inventa un dominio o tipo de material fuera de lista.
+  `ContextBuilder.build()` gana el parámetro `taxonomy_classification_client`; en modo
+  manifiesto, con `ai_classification_enabled=True` y un cliente dado,
+  `_classify_with_manifest_ai()` reintenta por IA cada documento que las reglas dejaron con el
+  placeholder `sin-clasificar` en el eje de dominio y/o en el de tipo de material — la sugerencia
+  de la IA solo se aplica al eje que seguía en placeholder; un eje ya resuelto por reglas con
+  confianza nunca se sobreescribe, aunque la IA sugiera algo distinto para ese eje en la misma
+  respuesta. `DomainDocument.classified_by` pasa a `"ai"` si la IA cambió efectivamente algún eje,
+  se queda en `"rules"` si no cambió nada (un único campo string sigue bastando).
 - `src/doc_organize/context/reorganizer.py`/`mkdocs_generator.py`: la carpeta de tipo
   (`<dominio>/<tipo>/<stem>/` y el nav de `mkdocs.yml`) usa `DomainDocument.material_type`
   cuando está definido, o la extensión como hasta ahora.
 - `src/doc_organize/web/routes/context.py`: `POST /api/projects/{name}/context` (REST y
   WebSocket) carga `taxonomy_manifest.md` automáticamente si existe; lo combina con
-  `candidate_domains` en la misma petición devuelve `400` explícito.
+  `candidate_domains` en la misma petición devuelve `400` explícito. `ai_classification_enabled`
+  ahora también tiene efecto en modo manifiesto: `_optional_ai_client()` construye
+  `TaxonomyClassificationClient` (2 ejes) en vez de `DomainClassificationClient` (1 eje) cuando
+  hay `taxonomy_manifest` — env vars de clasificación de 2 ejes sin definir se traduce en `400`
+  explícito, igual criterio que ya existía para las de 1 eje. La página "Contexto"
+  (`GET /projects/{name}/context`) consulta la config del proxy correspondiente al modo
+  (manifiesto o no) para decidir si el checkbox de IA aparece habilitado.
 - `src/doc_organize/web/templates/context.html.j2`: la página "Contexto" expone el modo
   manifiesto de taxonomía — aviso "Modo manifiesto de taxonomía activo" cuando
   `Context.taxonomy_manifest_used`, y cada fila de dominio se despliega para ver el tipo de

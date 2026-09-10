@@ -1,6 +1,6 @@
 # Organización Documental — Referencia Técnica
 
-API Reference de `doc_organize.context` (Sub-fase A) y `doc_organize.ai.DomainClassificationClient` (Sub-fase B).
+API Reference de `doc_organize.context` (Sub-fase A) y `doc_organize.ai.DomainClassificationClient`/`TaxonomyClassificationClient` (Sub-fase B).
 
 ## Arquitectura
 
@@ -8,7 +8,7 @@ API Reference de `doc_organize.context` (Sub-fase A) y `doc_organize.ai.DomainCl
 classDiagram
     class ContextBuilder {
         +registry: ContextRegistry
-        +build(project, documents, candidate_domains, threshold, ai_classification_enabled, ai_classification_client, taxonomy_manifest) Context
+        +build(project, documents, candidate_domains, threshold, ai_classification_enabled, ai_classification_client, taxonomy_manifest, taxonomy_classification_client) Context
     }
     class DomainClassifier {
         +candidate_domains: list[str]|None
@@ -36,11 +36,16 @@ classDiagram
         +config: LiteLLMClassificationConfig
         +classify(chunks_text, title, candidate_domains) DomainClassificationResult
     }
+    class TaxonomyClassificationClient {
+        +config: LiteLLMTaxonomyClassificationConfig
+        +classify(chunks_text, title, candidate_domains, candidate_material_types) TaxonomyClassificationResult
+    }
 
     ContextBuilder --> DomainClassifier
     ContextBuilder --> MaterialTypeClassifier
     ContextBuilder --> ContextRegistry
     ContextBuilder --> DomainClassificationClient
+    ContextBuilder --> TaxonomyClassificationClient
 ```
 
 ## ContextBuilder
@@ -59,6 +64,7 @@ class ContextBuilder:
         ai_classification_client: DomainClassificationClient | None = None,
         output_folder_name: str = "organizado",
         taxonomy_manifest: TaxonomyManifest | None = None,
+        taxonomy_classification_client: TaxonomyClassificationClient | None = None,
     ) -> Context
 ```
 
@@ -69,9 +75,10 @@ Orquesta Sub-fase A (siempre) + Sub-fase B (opt-in) y persiste el `Context` resu
 | `documents` | `list[ConversionResult]` | Documentos ya convertidos con éxito |
 | `candidate_domains` | `list[str] \| None` | Catálogo predefinido, o `None` para descubrir del contenido. Ignorado si se da `taxonomy_manifest` |
 | `threshold` | `float` | Score mínimo (0-1) de la Sub-fase A antes de intentar la Sub-fase B (o el placeholder `sin-clasificar` en modo manifiesto) |
-| `ai_classification_enabled` | `bool` | Activa la Sub-fase B — se persiste en `Context.ai_classification_enabled`. Sin efecto si hay `taxonomy_manifest` |
-| `ai_classification_client` | `DomainClassificationClient \| None` | Cliente ya configurado; si `enabled=True` sin cliente, la Sub-fase B no se ejecuta |
-| `taxonomy_manifest` | `TaxonomyManifest \| None` | Manifiesto de taxonomía (ver [TaxonomyManifest](#taxonomymanifest-manifiesto-de-taxonomia)) — activa la clasificación de 2 ejes (dominio + tipo de material), solo por reglas en este ciclo |
+| `ai_classification_enabled` | `bool` | Activa la Sub-fase B — se persiste en `Context.ai_classification_enabled`. En modo manifiesto activa `taxonomy_classification_client` en vez de `ai_classification_client` |
+| `ai_classification_client` | `DomainClassificationClient \| None` | Cliente ya configurado para la Sub-fase B de 1 eje; si `enabled=True` sin cliente, la Sub-fase B no se ejecuta. Ignorado si hay `taxonomy_manifest` |
+| `taxonomy_manifest` | `TaxonomyManifest \| None` | Manifiesto de taxonomía (ver [TaxonomyManifest](#taxonomymanifest-manifiesto-de-taxonomia)) — activa la clasificación de 2 ejes (dominio + tipo de material) |
+| `taxonomy_classification_client` | `TaxonomyClassificationClient \| None` | Cliente ya configurado para la Sub-fase B de 2 ejes (una sola llamada combinada). Sin efecto si `taxonomy_manifest` es `None`, o si `enabled=False` |
 
 **Reglas**: el catálogo de la Sub-fase B es `candidate_domains` si se dio uno, o los
 dominios que la Sub-fase A ya descubrió — nunca un dominio nuevo. Un fallo de la
@@ -79,7 +86,11 @@ Sub-fase B (`DomainClassificationError`) en un documento no interrumpe el resto
 del lote. Con `taxonomy_manifest`, un documento con los tres artefactos completos
 **siempre** se reorganiza: si un eje no alcanza `threshold`, se le asigna el slug
 placeholder `sin-clasificar` en ese eje en vez de excluirse — `unclassified_documents`
-queda reservado a artefactos incompletos.
+queda reservado a artefactos incompletos. Con `taxonomy_manifest` + Sub-fase B activa,
+`TaxonomyClassificationClient.classify()` se invoca **una sola vez por documento** que
+sigue en placeholder en algún eje, resolviendo ambos ejes en la misma llamada — pero
+solo se aplica la sugerencia al eje que seguía en `sin-clasificar`; un eje ya resuelto
+por reglas con confianza nunca se sobreescribe.
 
 ---
 
@@ -248,6 +259,34 @@ respuesta que no es el JSON esperado).
 
 ---
 
+## TaxonomyClassificationClient (Sub-fase B, manifiesto de taxonomía)
+
+```python
+class TaxonomyClassificationClient:
+    def __init__(self, config: LiteLLMTaxonomyClassificationConfig, *, transport: httpx.AsyncBaseTransport | None = None) -> None
+    async def classify(
+        self, *, chunks_text: str, title: str | None, candidate_domains: list[str], candidate_material_types: list[str]
+    ) -> TaxonomyClassificationResult
+
+def litellm_taxonomy_classification_config_from_env() -> LiteLLMTaxonomyClassificationConfig
+```
+
+Mismo endpoint/patrón que `DomainClassificationClient`, pero resuelve **dominio + tipo de
+material en una sola llamada** (`chat/completions`, `response_format: json_object`) — decisión
+explícita de la sesión que añadió este cliente, en vez de dos llamadas independientes. `domain`
+del resultado siempre está en `candidate_domains` o es `None`; `material_type` siempre está en
+`candidate_material_types` o es `None` — cada eje se valida contra su propio catálogo, no solo
+por instrucción al modelo. `litellm_taxonomy_classification_config_from_env()` lee
+`DOC_ORGANIZE_LITELLM_TAXONOMY_CLASSIFICATION_BASE_URL`/`_VIRTUAL_KEY` (obligatorias) y `_MODEL`
+(opcional). Config propia — no comparte credenciales con `LiteLLMClassificationConfig` (1 eje,
+ISP) aunque en despliegue ambas apunten al mismo LiteLLM Proxy.
+
+**Excepciones**: `TaxonomyClassificationAuthError` (401/403), `TaxonomyClassificationConnectionError`
+(red/timeout), `TaxonomyClassificationError` (cualquier otro error, incluida una respuesta que no
+es el JSON esperado).
+
+---
+
 ## Modelos (`core.models`)
 
 ```python
@@ -299,6 +338,19 @@ class LiteLLMClassificationConfig(BaseModel):
     model: str  # default "claude-classifier"
     timeout_s: float
 
+class TaxonomyClassificationResult(BaseModel):
+    domain: str | None
+    domain_confidence: float
+    material_type: str | None
+    material_type_confidence: float
+    reasoning: str | None
+
+class LiteLLMTaxonomyClassificationConfig(BaseModel):
+    base_url: str
+    virtual_key: str
+    model: str  # default "claude-classifier"
+    timeout_s: float
+
 class TaxonomyCatalogEntry(BaseModel):
     slug: str
     name: str
@@ -318,7 +370,7 @@ Todas bajo `/projects/{name}/context` (página) y `/api/projects/{name}/context`
 | Ruta | Método | Descripción |
 |---|---|---|
 | `/projects/{name}/context` | `GET` | Página HTML — lista de dominios, o estado vacío si no hay contexto todavía |
-| `/api/projects/{name}/context` | `POST` | Construye/reconstruye: `{candidate_domains?, threshold?, ai_classification_enabled?}` → `409` si hay otra operación en curso; `400` si la IA está activada sin proxy configurado, o si el proyecto tiene `taxonomy_manifest.md` y la petición también trae `candidate_domains`. Si existe `taxonomy_manifest.md`, se carga automáticamente — no hace falta pasar nada en el payload para activar el modo manifiesto |
+| `/api/projects/{name}/context` | `POST` | Construye/reconstruye: `{candidate_domains?, threshold?, ai_classification_enabled?}` → `409` si hay otra operación en curso; `400` si la IA está activada sin el proxy correspondiente configurado (1 eje o 2 ejes según haya o no `taxonomy_manifest.md`), o si el proyecto tiene `taxonomy_manifest.md` y la petición también trae `candidate_domains`. Si existe `taxonomy_manifest.md`, se carga automáticamente — no hace falta pasar nada en el payload para activar el modo manifiesto (ni para que `ai_classification_enabled` use el cliente de 2 ejes) |
 | `/api/projects/{name}/context` | `GET` | Devuelve el contexto ya construido — `404` si no existe todavía |
 | `/projects/{name}/context/site` | `GET` | Redirige a `.../site/` (barra final — las páginas de mkdocs usan URLs relativas que la necesitan) |
 | `/projects/{name}/context/site/{file_path}` | `GET` | Sirve el sitio MkDocs ya construido (`<project.root_path>/site/{file_path}`) — `404` si `mkdocs_site_built` es `False` o si `file_path` no resuelve dentro de `site/`. Acción de solo lectura, independiente de `POST .../context` (nunca se dispara automáticamente tras un build) |
@@ -330,8 +382,8 @@ Todas bajo `/projects/{name}/context` (página) y `/api/projects/{name}/context`
 | `converter.DocumentConverter.resolve_output_paths()` | Recalcula `markdown_path`/`json_path` desde `cache.db`, sin persistirlos aparte |
 | `cache.CacheManager` | Fuente de los documentos ya convertidos con éxito |
 | `projects.ScannedFoldersStore` | Carpetas de escaneo guardadas, usadas como `scan_roots` |
-| `core.exceptions` | `ContextError`, `DomainClassificationError`, `TaxonomyManifestError` y sus subclases |
-| `httpx` | Cliente HTTP del `DomainClassificationClient` (ya incluido en el extra `ai`) |
+| `core.exceptions` | `ContextError`, `DomainClassificationError`, `TaxonomyClassificationError`, `TaxonomyManifestError` y sus subclases |
+| `httpx` | Cliente HTTP de `DomainClassificationClient`/`TaxonomyClassificationClient` (ya incluido en el extra `ai`) |
 | `pyyaml` (extra `context`) | Serialización de `mkdocs.yml` y parseo del front matter de `taxonomy_manifest.md` |
 
 ## Ejemplos Relacionados

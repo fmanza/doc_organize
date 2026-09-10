@@ -143,6 +143,18 @@ class DomainClassificationConnectionError(DomainClassificationError):
     """Error de red o timeout consultando el LiteLLM Proxy para clasificar un documento."""
 
 
+class TaxonomyClassificationError(DocOrganizeError):
+    """Error base del cliente de clasificacion combinada dominio + tipo de material por IA (`doc_organize.ai`, Sub-fase B, manifiesto de taxonomia)."""
+
+
+class TaxonomyClassificationAuthError(TaxonomyClassificationError):
+    """El LiteLLM Proxy rechazo la virtual key de clasificacion por manifiesto (credencial invalida o sin permiso)."""
+
+
+class TaxonomyClassificationConnectionError(TaxonomyClassificationError):
+    """Error de red o timeout consultando el LiteLLM Proxy para clasificar un documento por manifiesto."""
+
+
 __all__ = [
     "AuthError",
     "CacheError",
@@ -168,6 +180,9 @@ __all__ = [
     "ScannedFolderError",
     "ScannedFolderInUseError",
     "ScannedFolderNotFoundError",
+    "TaxonomyClassificationAuthError",
+    "TaxonomyClassificationConnectionError",
+    "TaxonomyClassificationError",
     "TaxonomyManifestError",
     "TenantAlreadyExistsError",
     "TenantNotFoundError",

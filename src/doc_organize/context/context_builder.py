@@ -5,10 +5,10 @@ Orquestador de la construcción del contexto de organización documental de un p
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
-from doc_organize.ai import DomainClassificationClient
+from doc_organize.ai import DomainClassificationClient, TaxonomyClassificationClient
 from doc_organize.context.context_registry import ContextRegistry
 from doc_organize.context.domain_classifier import DomainClassifier, MaterialTypeClassifier, read_conversion_json, resolve_title_and_type
-from doc_organize.core.exceptions import DomainClassificationError
+from doc_organize.core.exceptions import DomainClassificationError, TaxonomyClassificationError
 from doc_organize.core.models import Context, ConversionResult, Domain, DomainDocument, DomainStatus, Project, TaxonomyManifest
 from doc_organize.utils.logging import get_logger
 
@@ -30,11 +30,15 @@ class ContextBuilder:
     Dos sub-fases (ver `.ai/sessions/2026-09-08-organizacion-documental-contextos/00_REQUEST.md`):
 
     - **Sub-fase A** (siempre): `DomainClassifier`, reglas sobre `chunks`/`title`.
-    - **Sub-fase B** (opt-in vía `ai_classification_enabled` + `ai_classification_client`):
-      fallback por IA, **solo** para los documentos que la Sub-fase A deja sin
-      clasificar, y **solo** eligiendo entre el catálogo ya confirmado por la
-      Sub-fase A (el propio catálogo predefinido, o los dominios descubiertos) —
-      nunca crea un dominio nuevo.
+    - **Sub-fase B** (opt-in vía `ai_classification_enabled` + `ai_classification_client`, o
+      `+ taxonomy_classification_client` en modo manifiesto): fallback por IA, **solo** para
+      los documentos que la Sub-fase A deja sin clasificar (en cualquiera de los dos ejes, en
+      modo manifiesto), y **solo** eligiendo entre el catálogo ya confirmado por la Sub-fase A
+      (el propio catálogo predefinido/manifiesto, o los dominios descubiertos) — nunca crea un
+      dominio o tipo de material nuevo. En modo manifiesto, `TaxonomyClassificationClient`
+      resuelve ambos ejes en una sola llamada combinada, pero solo se aplica al eje que seguía
+      en el placeholder `sin-clasificar` — un eje que la Sub-fase A ya clasificó con confianza
+      nunca se sobreescribe.
 
     La copia física a `<output_folder_name>/` y la generación del sitio MkDocs son
     responsabilidad de `Reorganizer`/`MkDocsGenerator` — este builder no toca
@@ -81,16 +85,17 @@ class ContextBuilder:
         output_folder_name: str = "organizado",
         on_ai_progress: Callable[[int, int, str], Awaitable[None]] | None = None,
         taxonomy_manifest: TaxonomyManifest | None = None,
+        taxonomy_classification_client: TaxonomyClassificationClient | None = None,
     ) -> Context:
         """Clasifica `documents` y persiste el contexto de `project`.
 
         Sin `taxonomy_manifest` (default): comportamiento sin cambios — Sub-fase A
-        (`DomainClassifier`, un eje) + Sub-fase B opcional (IA, fallback). Con
-        `taxonomy_manifest`: clasificación de 2 ejes (dominio + tipo de material de
-        origen) vía `_classify_with_manifest`, solo por reglas en este ciclo — la
-        Sub-fase B combinada de 2 ejes queda fuera de alcance (ver PLAN de la sesión de
-        manifiesto de taxonomía); `ai_classification_enabled`/`ai_classification_client`
-        se ignoran cuando hay manifiesto.
+        (`DomainClassifier`, un eje) + Sub-fase B opcional (IA, fallback vía
+        `ai_classification_client`). Con `taxonomy_manifest`: clasificación de 2 ejes
+        (dominio + tipo de material de origen) vía `_classify_with_manifest` (reglas) +
+        Sub-fase B opcional vía `taxonomy_classification_client` (`_classify_with_manifest_ai`,
+        una sola llamada combinada para ambos ejes) — `ai_classification_client` (de un eje)
+        se ignora en modo manifiesto, que usa `taxonomy_classification_client` en su lugar.
 
         Args:
             project: Proyecto propietario del contexto.
@@ -101,11 +106,12 @@ class ContextBuilder:
             threshold: Score mínimo de la Sub-fase A antes de considerar un documento
                 candidato a la Sub-fase B (o "sin clasificar"/placeholder según el modo).
             ai_classification_enabled: Activa la Sub-fase B — opt-in explícito, se
-                persiste en `Context.ai_classification_enabled`. Sin efecto si hay
-                `taxonomy_manifest` (ver arriba).
-            ai_classification_client: Cliente ya configurado para la Sub-fase B. Si
+                persiste en `Context.ai_classification_enabled`. En modo manifiesto activa
+                `_classify_with_manifest_ai` en vez de `_classify_with_ai` (ver arriba).
+            ai_classification_client: Cliente ya configurado para la Sub-fase B de un eje. Si
                 `ai_classification_enabled=True` pero no se pasa cliente, la Sub-fase B
-                simplemente no se ejecuta (los documentos quedan sin clasificar).
+                simplemente no se ejecuta (los documentos quedan sin clasificar). Ignorado si
+                hay `taxonomy_manifest`.
             output_folder_name: Nombre de la carpeta de salida reorganizada, relativa
                 a `root_path` — solo tiene efecto en la primera construcción de un
                 proyecto; `web/routes/context.py` reutiliza el valor ya persistido en
@@ -119,12 +125,19 @@ class ContextBuilder:
             taxonomy_manifest: Manifiesto de taxonomía del proyecto (ver
                 `doc_organize.context.taxonomy_manifest.load_taxonomy_manifest`), o `None`
                 (default) para el modo de un eje sin cambios.
+            taxonomy_classification_client: Cliente ya configurado para la Sub-fase B en modo
+                manifiesto (2 ejes, una sola llamada combinada). Sin efecto si `taxonomy_manifest`
+                es `None`, o si `ai_classification_enabled=False`.
 
         Returns:
             El `Context` construido y ya persistido vía `self.registry`.
         """
         if taxonomy_manifest is not None:
             classified, unclassified = await self._classify_with_manifest(documents, taxonomy_manifest, threshold)
+            if ai_classification_enabled and taxonomy_classification_client is not None:
+                classified = await self._classify_with_manifest_ai(
+                    taxonomy_classification_client, classified, taxonomy_manifest, on_progress=on_ai_progress
+                )
         else:
             classifier = DomainClassifier(candidate_domains=candidate_domains, threshold=threshold)
             classified, unclassified = await classifier.classify(documents)
@@ -178,8 +191,9 @@ class ContextBuilder:
         de excluir el documento por completo — decisión de negocio explícita de esta
         sesión (manifiesto de taxonomía). Solo un documento con algún artefacto incompleto
         (falta original/`.md`/`.json`) queda en `unclassified_documents`, igual criterio que
-        el modo de un eje. Solo reglas (Sub-fase A): la Sub-fase B combinada de 2 ejes queda
-        fuera de alcance de este ciclo.
+        el modo de un eje. Solo reglas (Sub-fase A) — la Sub-fase B combinada de 2 ejes, si
+        está activa, se aplica después vía `_classify_with_manifest_ai` sobre el resultado
+        de este método.
         """
         domain_slugs = [entry.slug for entry in manifest.domains]
         material_slugs = [entry.slug for entry in manifest.material_types]
@@ -240,6 +254,91 @@ class ContextBuilder:
             )
 
         return classified, unclassified
+
+    async def _classify_with_manifest_ai(
+        self,
+        client: TaxonomyClassificationClient,
+        classified: dict[str, list[DomainDocument]],
+        manifest: TaxonomyManifest,
+        on_progress: Callable[[int, int, str], Awaitable[None]] | None = None,
+    ) -> dict[str, list[DomainDocument]]:
+        """Sub-fase B en modo manifiesto: para cada documento que `_classify_with_manifest` dejó
+        con el placeholder `_UNCLASSIFIED_SLUG` en el eje de dominio y/o en el de tipo de
+        material, intenta resolver AMBOS ejes en una sola llamada combinada a `client.classify()`
+        — decisión de esta sesión, en vez de una llamada por eje. Solo se aplica la sugerencia de
+        la IA al eje que seguía en el placeholder; un eje que la Sub-fase A ya clasificó con
+        confianza nunca se sobreescribe, aunque la IA sugiera algo distinto para ese eje en la
+        misma respuesta.
+
+        `DomainDocument.classified_by` pasa a `"ai"` si la IA cambió efectivamente al menos un eje
+        (de placeholder a un valor real); se queda en `"rules"` si no cambió nada, aunque se haya
+        intentado — un único campo string sigue bastando (mismo criterio que en modo de un eje).
+        """
+        domain_slugs = list(dict.fromkeys(slug for slug in (DomainClassifier._slugify(entry.slug) for entry in manifest.domains) if slug))
+        material_slugs = list(dict.fromkeys(slug for slug in (DomainClassifier._slugify(entry.slug) for entry in manifest.material_types) if slug))
+        material_names = {DomainClassifier._slugify(entry.slug): entry.name for entry in manifest.material_types}
+
+        pending = [
+            (domain_slug, document)
+            for domain_slug, documents in classified.items()
+            for document in documents
+            if domain_slug == _UNCLASSIFIED_SLUG or document.material_type == _UNCLASSIFIED_SLUG
+        ]
+        if not pending:
+            return classified
+
+        total = len(pending)
+        for index, (old_domain_slug, document) in enumerate(pending, start=1):
+            await self._try_classify_document_with_manifest_ai(
+                client, document, old_domain_slug, classified, domain_slugs, material_slugs, material_names
+            )
+            if on_progress is not None:
+                await on_progress(index, total, document.source_path)
+
+        # Poda buckets que quedaron vacíos (p.ej. todo "sin-clasificar" se resolvió a otros
+        # dominios) — sin esto, `build()` crearía un `Domain` fantasma sin documentos.
+        return {slug: documents for slug, documents in classified.items() if documents}
+
+    async def _try_classify_document_with_manifest_ai(
+        self,
+        client: TaxonomyClassificationClient,
+        document: DomainDocument,
+        old_domain_slug: str,
+        classified: dict[str, list[DomainDocument]],
+        domain_slugs: list[str],
+        material_slugs: list[str],
+        material_names: dict[str, str],
+    ) -> None:
+        """Resuelve un único `document` vía `client.classify()` y aplica el resultado a
+        `classified` in-place — mueve el documento de bucket si el eje de dominio cambió,
+        o lo muta in-place si solo cambió el eje de tipo de material (mismo objeto en la
+        misma lista, sin necesidad de mover nada).
+        """
+        chunks_result = await read_conversion_json(document.json_path)
+        if chunks_result is None:
+            return
+        chunks_text, title = chunks_result
+
+        try:
+            result = await client.classify(
+                chunks_text=chunks_text, title=title, candidate_domains=domain_slugs, candidate_material_types=material_slugs
+            )
+        except TaxonomyClassificationError as exc:
+            self.logger.warning(f"Fallo la clasificación por IA (manifiesto) de '{document.source_path}': {exc} — sigue sin clasificar")
+            return
+
+        changed = False
+        if old_domain_slug == _UNCLASSIFIED_SLUG and result.domain is not None:
+            classified[old_domain_slug] = [candidate for candidate in classified[old_domain_slug] if candidate is not document]
+            document.confidence = result.domain_confidence
+            classified.setdefault(result.domain, []).append(document)
+            changed = True
+        if document.material_type == _UNCLASSIFIED_SLUG and result.material_type is not None:
+            document.material_type = result.material_type
+            document.material_type_name = material_names.get(result.material_type)
+            changed = True
+        if changed:
+            document.classified_by = "ai"
 
     async def _classify_with_ai(
         self,

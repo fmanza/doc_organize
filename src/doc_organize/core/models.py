@@ -796,6 +796,37 @@ class LiteLLMClassificationConfig(BaseModel):
     timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
 
 
+class TaxonomyClassificationResult(BaseModel):
+    """Resultado de clasificar un documento por IA en los 2 ejes de un manifiesto de taxonomía
+    (Sub-fase B combinada, `TaxonomyClassificationClient`) — una sola llamada para dominio y
+    tipo de material de origen, en vez de dos llamadas independientes (decisión de la sesión que
+    añadió este cliente)."""
+
+    domain: str | None = Field(default=None, description="Slug del dominio elegido del catálogo, o `None` si no encaja en ninguno")
+    domain_confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="Confianza reportada por el modelo para el eje de dominio, 0-1")
+    material_type: str | None = Field(default=None, description="Slug del tipo de material elegido del catálogo, o `None` si no encaja en ninguno")
+    material_type_confidence: float = Field(
+        default=0.0, ge=0.0, le=1.0, description="Confianza reportada por el modelo para el eje de tipo de material, 0-1"
+    )
+    reasoning: str | None = Field(default=None, description="Justificación breve devuelta por el modelo, si la reporta")
+
+
+class LiteLLMTaxonomyClassificationConfig(BaseModel):
+    """Configuración de acceso al LiteLLM Proxy para `TaxonomyClassificationClient` (Sub-fase B,
+    manifiesto de taxonomía).
+
+    Config propia, no comparte campos ni credenciales con `LiteLLMClassificationConfig` (ISP —
+    mismo criterio que ya separa esa de `LiteLLMUsageConfig`): la clasificación combinada de 2 ejes
+    es una carga de trabajo distinta de la clasificación de dominio de 1 eje, aunque en despliegue
+    ambas puedan apuntar al mismo LiteLLM Proxy.
+    """
+
+    base_url: str = Field(..., description="URL base del LiteLLM Proxy")
+    virtual_key: str = Field(..., description="Virtual key con permiso de `chat/completions` para clasificación por manifiesto")
+    model: str = Field(default="claude-classifier", description="Alias de modelo configurado en el proxy para clasificar por manifiesto")
+    timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
+
+
 __all__ = [
     "AvStatus",
     "CacheConfig",
@@ -826,6 +857,7 @@ __all__ = [
     "GitHubCopilotUsageConfig",
     "GpuStatus",
     "LiteLLMClassificationConfig",
+    "LiteLLMTaxonomyClassificationConfig",
     "LiteLLMUsageConfig",
     "OcrMode",
     "Project",
@@ -841,6 +873,7 @@ __all__ = [
     "SecurityConfig",
     "Session",
     "TaxonomyCatalogEntry",
+    "TaxonomyClassificationResult",
     "TaxonomyManifest",
     "Tenant",
     "UsageLineItem",

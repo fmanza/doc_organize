@@ -648,6 +648,39 @@ async def test_context_page_shows_litellm_configured_confirmation(tmp_path, monk
 
 
 @pytest.mark.asyncio
+async def test_context_page_with_manifest_checks_taxonomy_proxy_config_not_the_1_axis_one(tmp_path, monkeypatch) -> None:
+    """Con `taxonomy_manifest.md` presente, la página debe consultar la config de
+    `TaxonomyClassificationClient` (2 ejes) para decidir si mostrar el checkbox de IA
+    habilitado -- que la config de `DomainClassificationClient` (1 eje) esté definida no
+    debe bastar, son proxies/env vars separados (ISP, mismo criterio que en `build_context`)."""
+    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_BASE_URL", "https://proxy.example.test")
+    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_VIRTUAL_KEY", "sk-test")
+    monkeypatch.delenv("DOC_ORGANIZE_LITELLM_TAXONOMY_CLASSIFICATION_BASE_URL", raising=False)
+    monkeypatch.delenv("DOC_ORGANIZE_LITELLM_TAXONOMY_CLASSIFICATION_VIRTUAL_KEY", raising=False)
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    (project_root / "taxonomy_manifest.md").write_text(_VALID_TAXONOMY_MANIFEST, encoding="utf-8")
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/context")
+
+    assert response.status_code == 200
+    assert "LiteLLM Proxy no configurado" in response.text
+    assert "disabled" in _ai_toggle_tag(response.text)
+
+    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_TAXONOMY_CLASSIFICATION_BASE_URL", "https://proxy.example.test")
+    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_TAXONOMY_CLASSIFICATION_VIRTUAL_KEY", "sk-test")
+
+    async with _client(app) as client:
+        second_response = await client.get(f"/projects/{project.name}/context")
+
+    assert "LiteLLM Proxy configurado" in second_response.text
+    assert "disabled" not in _ai_toggle_tag(second_response.text)
+
+
+@pytest.mark.asyncio
 async def test_ai_toggle_is_unchecked_and_disabled_if_litellm_becomes_unconfigured_after_being_enabled(tmp_path, monkeypatch) -> None:
     """Si un contexto se construyó con `ai_classification_enabled=True` cuando
     LiteLLM sí estaba configurado, y luego el proxy deja de estarlo, el checkbox
@@ -1250,5 +1283,28 @@ async def test_build_context_reports_invalid_manifest_front_matter_as_400(tmp_pa
     app = create_app(registry_path=registry_path)
     async with _client(app) as client:
         response = await client.post(f"/api/projects/{project.name}/context")
+
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_build_context_with_manifest_and_ai_enabled_but_taxonomy_proxy_not_configured_returns_400(tmp_path, monkeypatch) -> None:
+    """Con manifiesto activo, `ai_classification_enabled=True` construye
+    `TaxonomyClassificationClient` -- sus propias env vars
+    (`DOC_ORGANIZE_LITELLM_TAXONOMY_CLASSIFICATION_*`) deben estar definidas, no basta con
+    que lo estén las de `DomainClassificationClient` (1 eje): son configs separadas (ISP),
+    por diseño no hay fallback implícito de una a otra."""
+    monkeypatch.delenv("DOC_ORGANIZE_LITELLM_TAXONOMY_CLASSIFICATION_BASE_URL", raising=False)
+    monkeypatch.delenv("DOC_ORGANIZE_LITELLM_TAXONOMY_CLASSIFICATION_VIRTUAL_KEY", raising=False)
+    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_BASE_URL", "https://proxy.example.test")
+    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_VIRTUAL_KEY", "sk-test")
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    (project_root / "taxonomy_manifest.md").write_text(_VALID_TAXONOMY_MANIFEST, encoding="utf-8")
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.post(f"/api/projects/{project.name}/context", json={"ai_classification_enabled": True})
 
     assert response.status_code == 400

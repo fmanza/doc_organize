@@ -14,7 +14,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSo
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel, ValidationError
 
-from doc_organize.ai import DomainClassificationClient, litellm_classification_config_from_env
+from doc_organize.ai import (
+    DomainClassificationClient,
+    TaxonomyClassificationClient,
+    litellm_classification_config_from_env,
+    litellm_taxonomy_classification_config_from_env,
+)
 from doc_organize.cache import CacheManager
 from doc_organize.context import ContextBuilder, ContextRegistry, MkDocsGenerator, Reorganizer, load_taxonomy_manifest
 from doc_organize.converter import DocumentConverter
@@ -140,22 +145,35 @@ def _release_operation_lock(request: Request, key: tuple[str, str]) -> None:
 
 
 @asynccontextmanager
-async def _optional_ai_client(enabled: bool) -> AsyncIterator[DomainClassificationClient | None]:
-    """`None` si la Sub-fase B no está activa; si lo está, construye el cliente
-    desde el entorno (`litellm_classification_config_from_env()`) y lo cierra al
-    salir. `DOC_ORGANIZE_LITELLM_CLASSIFICATION_BASE_URL`/`_VIRTUAL_KEY` sin
-    definir se traduce en 400, no en un 500 críptico — el usuario activó el
-    toggle de IA, pero el proxy de clasificación no está configurado todavía
-    (ver `docs/guides/litellm_proxy_setup.md`)."""
+async def _optional_ai_client(
+    enabled: bool, taxonomy_manifest: TaxonomyManifest | None
+) -> AsyncIterator[tuple[DomainClassificationClient | None, TaxonomyClassificationClient | None]]:
+    """`(None, None)` si la Sub-fase B no está activa. Si lo está, construye
+    `TaxonomyClassificationClient` (2 ejes, llamada combinada) cuando hay
+    `taxonomy_manifest`, o `DomainClassificationClient` (1 eje) si no -- nunca
+    los dos a la vez, el llamador solo usa el que corresponda a su modo. Cierra
+    el cliente construido al salir. Config de LiteLLM sin definir en el entorno
+    (`litellm_classification_config_from_env()`/`litellm_taxonomy_classification_config_from_env()`
+    según el caso) se traduce en 400, no en un 500 críptico — el usuario activó
+    el toggle de IA, pero el proxy de clasificación correspondiente no está
+    configurado todavía (ver `docs/guides/litellm_proxy_setup.md`)."""
     if not enabled:
-        yield None
+        yield None, None
+        return
+    if taxonomy_manifest is not None:
+        try:
+            taxonomy_config = litellm_taxonomy_classification_config_from_env()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        async with TaxonomyClassificationClient(taxonomy_config) as taxonomy_client:
+            yield None, taxonomy_client
         return
     try:
         config = litellm_classification_config_from_env()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     async with DomainClassificationClient(config) as client:
-        yield client
+        yield client, None
 
 
 async def _get_project(request: Request, name: str) -> Project:
@@ -307,7 +325,7 @@ async def build_context(name: str, request: Request, payload: BuildContextReques
         output_folder_name = _resolve_output_folder_name(existing_context, payload.output_folder_name)
         taxonomy_manifest = await _load_taxonomy_manifest_or_400(project, payload.candidate_domains)
 
-        async with _optional_ai_client(payload.ai_classification_enabled) as ai_client:
+        async with _optional_ai_client(payload.ai_classification_enabled, taxonomy_manifest) as (ai_client, taxonomy_client):
             context = await _context_builder.build(
                 project,
                 documents,
@@ -317,6 +335,7 @@ async def build_context(name: str, request: Request, payload: BuildContextReques
                 ai_classification_client=ai_client,
                 output_folder_name=output_folder_name,
                 taxonomy_manifest=taxonomy_manifest,
+                taxonomy_classification_client=taxonomy_client,
             )
         try:
             await _reorganizer.reorganize(project, context)
@@ -445,12 +464,12 @@ async def context_build_websocket(name: str, websocket: WebSocket) -> None:
 
         context: Context | None = None
         try:
-            async with _optional_ai_client(payload.ai_classification_enabled) as ai_client:
+            async with _optional_ai_client(payload.ai_classification_enabled, taxonomy_manifest) as (ai_client, taxonomy_client):
                 # `_optional_ai_client` resuelve la config de LiteLLM (y puede lanzar
                 # `HTTPException`) ANTES de emitir "started" -- evita que el semáforo
                 # llegue a mostrar "iniciando..." para acto seguido cerrarse en error.
                 await websocket.send_json(ContextBuildEvent(event=ContextBuildEventType.STARTED, data={}).model_dump(mode="json"))
-                if ai_client is not None:
+                if ai_client is not None or taxonomy_client is not None:
                     await websocket.send_json(ContextBuildEvent(event=ContextBuildEventType.AI_CLASSIFYING_STARTED, data={}).model_dump(mode="json"))
                 context = await _context_builder.build(
                     project,
@@ -462,6 +481,7 @@ async def context_build_websocket(name: str, websocket: WebSocket) -> None:
                     output_folder_name=output_folder_name,
                     on_ai_progress=on_ai_progress,
                     taxonomy_manifest=taxonomy_manifest,
+                    taxonomy_classification_client=taxonomy_client,
                 )
                 total_documents = sum(len(domain.documents) for domain in context.domains)
                 await websocket.send_json(
@@ -566,11 +586,32 @@ def _is_litellm_classification_configured() -> bool:
     return True
 
 
+def _is_litellm_taxonomy_classification_configured() -> bool:
+    # Mismo chequeo que `_is_litellm_classification_configured()`, pero contra las
+    # env vars propias de `TaxonomyClassificationClient` (2 ejes) — el proyecto con
+    # manifiesto activo usa ese proxy en vez del de 1 eje (ver `_optional_ai_client`).
+    try:
+        litellm_taxonomy_classification_config_from_env()
+    except ValueError:
+        return False
+    return True
+
+
 @router.get("/projects/{name}/context", response_class=HTMLResponse, dependencies=[Depends(require_project_access)])
 async def context_page(name: str, request: Request) -> HTMLResponse:
     project = await _get_project(request, name)
     context = await _load_existing_context_or_none(project)
-    litellm_configured = _is_litellm_classification_configured()
+    try:
+        taxonomy_manifest = await load_taxonomy_manifest(project)
+    except TaxonomyManifestError:
+        # Página de solo lectura: un manifiesto mal formado no debe impedir ver el
+        # contexto ya construido — el usuario puede estar aquí precisamente para
+        # detectar el problema. `build_context`/`context_build_websocket` sí lo
+        # rechazan con 400 explícito al intentar construir (`_load_taxonomy_manifest_or_400`).
+        taxonomy_manifest = None
+    litellm_configured = (
+        _is_litellm_taxonomy_classification_configured() if taxonomy_manifest is not None else _is_litellm_classification_configured()
+    )
     return _templates.TemplateResponse(
         request,
         "context.html.j2",
