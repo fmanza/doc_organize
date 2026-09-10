@@ -4,7 +4,7 @@
 - **Fecha**: 2026-09-10 / 2026-09-11
 - **Tipo**: `audit` → `feature`
 - **Rama**: `develop`
-- **Estado**: EN CURSO (implementación y auditoría completas; **sin commitear todavía** — pendiente de confirmación del usuario)
+- **Estado**: ✅ COMPLETADA
 
 ## Objetivo
 Auditoría (`/audit-code`) de toda la superficie de parametrización de la aplicación (variables de
@@ -31,7 +31,7 @@ solo flags de CLI); y ni `.env.example` ni la guía de LiteLLM documentaban
 hallazgo inicial de la propia auditoría ("`_BUILTIN_TEMPLATES_DIR` no existe") resultó ser un error
 de comprobación (ruta equivocada: `web/routes/` en vez de `context/`) — la carpeta sí existe, con 2
 plantillas de ejemplo reales (`calidad`, `sgi-iso27001`); corregido en conversación al detectarlo.
-**Status**: ✅ Completo (sin commitear)
+**Status**: ✅ Completo (commit `c4c084a`)
 
 ### ✅ 2. Almacén de secretos cifrado + panel `/admin/configuracion-ia`
 
@@ -49,7 +49,7 @@ complementan (no sustituyen) las `*_config_from_env()` existentes — ningún de
 configura por `.env` se rompe. `cryptography` añadida solo al extra `web` (import perezoso dentro de
 `auth`, para no forzarla en instalaciones `[ai]`/base que ya importaban `doc_organize.auth`
 indirectamente).
-**Status**: ✅ Completo (sin commitear)
+**Status**: ✅ Completo (commit `c4c084a`)
 
 ### ✅ 3. CRUD de plantillas de taxonomía + guardado de `taxonomy_manifest.md`
 
@@ -70,7 +70,7 @@ Verificado explícitamente que un slug malicioso vía estos endpoints nuevos no 
 `project.root_path` al reorganizar — la sanitización ya existente en
 `DomainClassifier`/`MaterialTypeClassifier` (`_normalize_candidate_domains`/`_normalize`, AUDIT_CODE
 sesión 2026-09-08) se aplica de forma uniforme sea cual sea el origen del slug.
-**Status**: ✅ Completo (sin commitear)
+**Status**: ✅ Completo (commit `c4c084a`)
 
 ### ✅ 4. Hallazgos menores de la auditoría + verificación visual
 
@@ -81,7 +81,7 @@ sesión 2026-09-08) se aplica de forma uniforme sea cual sea el origen del slug.
 en los campos de nombre de proyecto/usuario/rol. Verificado en navegador real (Playwright, entorno
 aislado en el scratchpad de la sesión, sin tocar datos reales) que las 3 páginas nuevas/modificadas
 renderizan sin errores de consola y que los botones/modales interactivos funcionan.
-**Status**: ✅ Completo (sin commitear)
+**Status**: ✅ Completo (commit `c4c084a`)
 
 ### ✅ 5. AUDIT_CODE post-implementación + 3 correcciones
 
@@ -101,7 +101,7 @@ que de verdad los necesita;
 enmascarado — ahora muestra `"***"` en ese caso.
 También se sustituyó un `assert` de invariante en `InstanceSecretsStore.get()` (se pierde bajo
 `python -O`) por una excepción de dominio explícita.
-**Status**: ✅ Completo (sin commitear)
+**Status**: ✅ Completo (commit `c4c084a`)
 
 ---
 
@@ -168,21 +168,18 @@ que el `mtime` del fichero real no vuelve a cambiar tras la re-ejecución comple
 | Sin test end-to-end que compruebe que un valor guardado en el panel llega de verdad a una llamada de clasificación simulada durante `build_context`/`context_build_websocket` | Documentado como pendiente en VERSION | Abierto |
 | `masked_hint` también revela los últimos 4 caracteres de un secreto que viene de `.env` (no solo de los guardados desde el panel) — aceptable con el alcance actual (config de instancia, no por tenant) | Decisión documentada en AUDIT_CODE; reconsiderar si la config de IA pasa a ser por tenant | Aceptado por ahora |
 | `InstanceSecretsStore` no tiene lógica de migración de esquema (a diferencia de `AuthStore._migrate_schema()`) | Aceptable hoy (tabla nueva, sin datos legacy); necesaria si cambian las columnas en el futuro | Abierto |
-| Nada de esta sesión está commiteado todavía | Pendiente de confirmación explícita del usuario antes de `git commit` | Abierto |
 
 ---
 
 ## Siguientes Pasos (Recomendado)
-1. Confirmar con el usuario si se commitea ahora (mensaje propuesto en la fase VERSION de esta
-   misma sesión) o si quiere revisar el diff primero.
-2. Añadir tests unitarios directos de `*_config_from_store_or_env()` para las 4 familias que hoy
+1. Añadir tests unitarios directos de `*_config_from_store_or_env()` para las 4 familias que hoy
    solo se ejercitan indirectamente (`taxonomy_classification`, `taxonomy_manifest_draft`,
    `litellm_usage`, `github_copilot_usage`).
-3. Añadir un test end-to-end (con `httpx.MockTransport`) que compruebe que un valor guardado en el
+2. Añadir un test end-to-end (con `httpx.MockTransport`) que compruebe que un valor guardado en el
    panel llega de verdad a una llamada de clasificación simulada durante `build_context`.
-4. Validar manualmente el panel de configuración IA contra un LiteLLM Proxy real (heredado de
+3. Validar manualmente el panel de configuración IA contra un LiteLLM Proxy real (heredado de
    sesiones anteriores — sigue sin haber validación contra un proxy real, solo mocks).
-5. Decidir si `CHANGELOG.md`/`pyproject.toml` (versión) necesitan una pasada de sincronización antes
+4. Decidir si `CHANGELOG.md`/`pyproject.toml` (versión) necesitan una pasada de sincronización antes
    de cerrar una release — no tocados en esta sesión.
 
 ---
@@ -234,20 +231,19 @@ que el `mtime` del fichero real no vuelve a cambiar tras la re-ejecución comple
 
 ## Veredicto
 
-### 🟡 GO_CONDICIONAL
+### 🟢 COMPLETADA
 
 **Criterios**:
 - Las 5 sub-áreas de trabajo (auditoría + 2 fixes de doc, almacén cifrado + panel IA, CRUD de
   plantillas + guardado de manifiesto, hallazgos menores + verificación visual, AUDIT_CODE + 3
-  correcciones) completas y verificadas en vivo.
+  correcciones) completas, verificadas en vivo y commiteadas.
 - ruff/ruff format/mypy/pytest/`mkdocs build --strict` todos en verde tras las correcciones.
 - Sin cambios breaking.
-- **Condición pendiente**: nada de esto está commiteado — el usuario no ha confirmado todavía si
-  proceder con el commit propuesto en la fase VERSION.
+- Working tree limpio tras el commit (`git status` sin salida).
 
 **Evidencia**:
 - Branch: `develop`
-- Commits: ninguno todavía (working tree con 32 ficheros modificados + 12 nuevos)
+- Commits: `c4c084a`
 - Tests: `pytest` → 793 passed (150 más que el cierre de la sesión anterior, `2026-09-10`, con 643)
 
-**Sesión abierta**: 2026-09-11 (pendiente de cierre tras decisión de commit)
+**Sesión cerrada**: 2026-09-11
