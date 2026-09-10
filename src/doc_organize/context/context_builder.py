@@ -188,6 +188,7 @@ class ContextBuilder:
             source_path=document.source_path,
             markdown_path=document.markdown_path,
             json_path=document.json_path,
+            images_dir=document.images_dir,
             title=resolved_title,
             document_type=document_type,
             confidence=result.confidence,

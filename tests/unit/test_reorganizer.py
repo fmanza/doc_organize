@@ -51,6 +51,64 @@ async def test_reorganize_copies_all_three_artifacts(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_reorganize_copies_images_dir_alongside_markdown(tmp_path):
+    """Regresión: las imágenes extraídas por `extract_images=True` deben quedar
+    junto al `.md` reorganizado en el mismo layout relativo `img/<stem>/` que
+    asume su referencia `![](img/<stem>/imagen.png)` (que no se reescribe) —
+    antes se perdían por completo y MkDocs servía imágenes rotas."""
+    project = _make_project(tmp_path)
+    source_dir = tmp_path / "originales"
+    source_dir.mkdir()
+    source = source_dir / "informe.pdf"
+    source.write_bytes(b"%PDF-1.4 contenido")
+    markdown = tmp_path / "informe.md"
+    markdown.write_text("# Informe\n\n![](img/informe/foto.png)", encoding="utf-8")
+    json_file = tmp_path / "informe.json"
+    json_file.write_text('{"title": "Informe"}', encoding="utf-8")
+    images_dir = tmp_path / "img" / "informe"
+    images_dir.mkdir(parents=True)
+    (images_dir / "foto.png").write_bytes(b"\x89PNG")
+
+    document = DomainDocument(
+        source_path=str(source),
+        markdown_path=str(markdown),
+        json_path=str(json_file),
+        images_dir=str(images_dir),
+        title="Informe",
+        document_type="pdf",
+        confidence=0.9,
+    )
+    context = _make_context(project, [Domain(slug="calidad", name="Calidad", documents=[document])])
+
+    output_root = await Reorganizer().reorganize(project, context)
+
+    target_dir = output_root / "calidad" / "pdf" / "informe"
+    assert (target_dir / "img" / "informe" / "foto.png").read_bytes() == b"\x89PNG"
+
+
+@pytest.mark.asyncio
+async def test_reorganize_without_images_dir_does_not_fail(tmp_path):
+    """La mayoría de documentos no tienen imágenes (`images_dir=None`) — no debe
+    tratarse como artefacto incompleto ni fallar la copia."""
+    project = _make_project(tmp_path)
+    document = DomainDocument(
+        source_path=str(_write_file(tmp_path, "a.pdf", b"A")),
+        markdown_path=str(_write_file(tmp_path, "a.md", b"# A")),
+        json_path=str(_write_file(tmp_path, "a.json", b"{}")),
+        title="A",
+        document_type="pdf",
+        confidence=0.9,
+    )
+    context = _make_context(project, [Domain(slug="calidad", name="Calidad", documents=[document])])
+
+    output_root = await Reorganizer().reorganize(project, context)
+
+    target_dir = output_root / "calidad" / "pdf" / "a"
+    assert (target_dir / "a.pdf").is_file()
+    assert not (target_dir / "img").exists()
+
+
+@pytest.mark.asyncio
 async def test_reorganize_raises_when_artifact_missing(tmp_path):
     project = _make_project(tmp_path)
     document = DomainDocument(

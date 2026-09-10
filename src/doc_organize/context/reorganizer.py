@@ -160,5 +160,14 @@ class Reorganizer:
         await asyncio.to_thread(shutil.copy2, markdown, target_dir / markdown.name)
         await asyncio.to_thread(shutil.copy2, json_file, target_dir / json_file.name)
 
+        if document.images_dir is not None:
+            images_dir = Path(document.images_dir)
+            if await asyncio.to_thread(images_dir.is_dir):
+                # Mismo layout relativo ("img/<stem>/") que asume la referencia
+                # `![](img/<stem>/imagen.png)` del `.md` (ver `converter.resolve_images_dir`)
+                # — el `.md` no se reescribe, así que la carpeta debe quedar sibling
+                # con el mismo nombre para que la ruta relativa siga resolviendo.
+                await asyncio.to_thread(shutil.copytree, images_dir, target_dir / "img" / stem, dirs_exist_ok=True)
+
 
 __all__ = ["Reorganizer", "resolve_document_slug_parts"]

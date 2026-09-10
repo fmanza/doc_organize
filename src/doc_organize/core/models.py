@@ -662,6 +662,10 @@ class DomainDocument(BaseModel):
     source_path: str = Field(..., description="Ruta del documento original")
     markdown_path: str = Field(..., description="Ruta del `.md` generado por `converter/`")
     json_path: str = Field(..., description="Ruta del `.json` generado por `converter/` (fuente de la clasificación, §2.4)")
+    images_dir: str | None = Field(
+        default=None,
+        description="Carpeta con las imágenes extraídas del documento (`ConversionResult.images_dir`), si las hubo",
+    )
     title: str = Field(..., description="Título del documento")
     document_type: str = Field(..., description="Tipo de documento dentro del dominio (extensión original, en minúsculas, sin punto)")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Score de confianza de la clasificación, 0-1")
