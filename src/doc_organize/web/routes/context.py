@@ -200,10 +200,14 @@ def _resolve_output_folder_name(existing_context: Context | None, requested: str
 
 async def _gather_converted_documents(project: Project) -> list[ConversionResult]:
     """Reconstruye un `ConversionResult` por cada fichero ya convertido con éxito
-    en `cache.db`, recalculando `markdown_path`/`json_path` con
-    `DocumentConverter.resolve_output_paths()` — determinista a partir de la ruta
-    origen + las carpetas de escaneo guardadas, no hace falta persistir esas
-    rutas de salida por separado (mismo criterio que `ScanCommand._delete_orphaned_outputs`).
+    en `cache.db`, recalculando `markdown_path`/`json_path`/`images_dir` con
+    `DocumentConverter.resolve_output_paths()`/`resolve_images_dir()` — determinista
+    a partir de la ruta origen + las carpetas de escaneo guardadas, no hace falta
+    persistir esas rutas de salida por separado (mismo criterio que
+    `ScanCommand._delete_orphaned_outputs`). `images_dir` no se persiste en
+    `cache.db` ni en `document.json`, así que hay que recalcularlo igual que
+    `markdown_path`/`json_path` — de lo contrario `Reorganizer` nunca recibe la
+    carpeta de imágenes y MkDocs las sirve rotas (AUDIT_CODE, sesión 2026-09-10).
 
     Omite las entradas cuyo original ya no existe en `entry.file_path`: `dedup/`
     no actualiza `cache.db` al mover un duplicado a `duplicados/`, así que una
@@ -227,7 +231,13 @@ async def _gather_converted_documents(project: Project) -> list[ConversionResult
         if not await asyncio.to_thread(Path(entry.file_path).is_file):
             continue
         markdown_path, json_path = DocumentConverter.resolve_output_paths(entry.file_path, output_dir, scan_roots)
-        documents.append(ConversionResult(source_path=entry.file_path, markdown_path=str(markdown_path), json_path=str(json_path), success=True))
+        images_dir = DocumentConverter.resolve_images_dir(markdown_path)
+        images_dir_str = str(images_dir) if await asyncio.to_thread(images_dir.is_dir) else None
+        documents.append(
+            ConversionResult(
+                source_path=entry.file_path, markdown_path=str(markdown_path), json_path=str(json_path), images_dir=images_dir_str, success=True
+            )
+        )
     return documents
 
 

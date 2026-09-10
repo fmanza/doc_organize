@@ -156,6 +156,43 @@ async def test_build_context_classifies_reorganizes_and_generates_mkdocs(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_build_context_copies_extracted_images(tmp_path) -> None:
+    """Regresión: `_gather_converted_documents` debe recalcular `images_dir` (no
+    persistido en `cache.db` ni en `document.json`) para que `Reorganizer` copie
+    la carpeta de imágenes extraídas — de lo contrario MkDocs las sirve rotas
+    (AUDIT_CODE, sesión 2026-09-10)."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    file_path = _seed_converted_document(project_root, "informe", "Informe anual")
+
+    images_dir = project_root / "Conversión" / "img" / "informe"
+    images_dir.mkdir(parents=True)
+    (images_dir / "foto.png").write_bytes(b"\x89PNG")
+
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
+        )
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.post(f"/api/projects/{project.name}/context")
+
+    assert response.status_code == 200
+    assert (project_root / "organizado" / "ciberseguridad" / "pdf" / "informe" / "img" / "informe" / "foto.png").read_bytes() == b"\x89PNG"
+
+
+@pytest.mark.asyncio
 async def test_build_context_partial_failure_persists_honest_state(tmp_path) -> None:
     """Si `Reorganizer` falla a mitad, `context.json` debe reflejarlo (`reorganized:
     false`) en vez de quedar como si la construcción hubiese terminado bien."""
