@@ -737,6 +737,15 @@ class Context(BaseModel):
             "por `DomainDocument.material_type`"
         ),
     )
+    taxonomy_template_name: str | None = Field(
+        default=None,
+        description=(
+            "Nombre de la plantilla de taxonomía compartida (`TaxonomyTemplateRegistry`) usada en "
+            "esta construcción, o `None` si se usó un `taxonomy_manifest.md` local, o ningún "
+            "manifiesto — solo informativo (no afecta la reconstrucción, que exige repetir la "
+            "elección en cada `POST`, igual que `candidate_domains`)"
+        ),
+    )
     created_at: str = Field(..., description="Timestamp ISO 8601 de creación del contexto")
     updated_at: str = Field(..., description="Timestamp ISO 8601 de la última reconstrucción del contexto")
 
@@ -779,8 +788,28 @@ class TaxonomyManifest(BaseModel):
         'ciberseguridad'
     """
 
+    title: str | None = Field(
+        default=None,
+        description="Título legible, solo relevante para una plantilla compartida (ver `TaxonomyTemplateRegistry`); `None` en un manifiesto de proyecto",
+    )
+    description: str | None = Field(
+        default=None,
+        description="Descripción breve, solo relevante para una plantilla compartida (ver `TaxonomyTemplateRegistry`); `None` en un manifiesto de proyecto",
+    )
     domains: list[TaxonomyCatalogEntry] = Field(..., min_length=1, description="Catálogo cerrado de dominios normativos")
     material_types: list[TaxonomyCatalogEntry] = Field(..., min_length=1, description="Catálogo cerrado de tipos de material de origen")
+
+
+class TaxonomyTemplateSummary(BaseModel):
+    """Entrada de listado de `TaxonomyTemplateRegistry.list_templates()`: identifica una
+    plantilla de manifiesto compartida sin cargar/parsear sus catálogos completos.
+    """
+
+    name: str = Field(..., description="Nombre de la plantilla (slug del fichero, sin extensión) — el identificador que se pasa a `load_template()`")
+    title: str | None = Field(default=None, description="Título legible de la plantilla (front matter `title`), o `None` si no se rellenó")
+    description: str | None = Field(
+        default=None, description="Descripción breve de la plantilla (front matter `description`), o `None` si no se rellenó"
+    )
 
 
 class LiteLLMClassificationConfig(BaseModel):

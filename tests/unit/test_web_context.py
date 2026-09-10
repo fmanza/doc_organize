@@ -1308,3 +1308,131 @@ async def test_build_context_with_manifest_and_ai_enabled_but_taxonomy_proxy_not
         response = await client.post(f"/api/projects/{project.name}/context", json={"ai_classification_enabled": True})
 
     assert response.status_code == 400
+
+
+# --- Plantillas de manifiesto de taxonomía (TaxonomyTemplateRegistry) ---
+# `templates_path` apunta siempre a una carpeta que no existe: fuerza a que
+# `TaxonomyTemplateRegistry` resuelva "sgi-iso27001"/"calidad" desde la biblioteca
+# empaquetada (nunca desde `~/.doc_organize/taxonomy_templates/` real), para que
+# estos tests sean deterministas sin importar qué haya en la máquina que los ejecuta.
+
+
+@pytest.mark.asyncio
+async def test_build_context_uses_taxonomy_template_when_no_local_manifest(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    file_path = _seed_converted_document(project_root, "informe", "Informe de politica y gobierno")
+
+    cache_db = project_root / DEFAULT_CACHE_DB_NAME
+    async with CacheManager(cache_db) as cache:
+        await cache.save_entries(
+            [
+                CacheEntry(
+                    file_path=file_path,
+                    sha256_hash="a" * 64,
+                    timestamp=1_700_000_000.0,
+                    status=DocumentStatus.NEW,
+                    conversion_status=ConversionStatus.SUCCESS,
+                )
+            ]
+        )
+
+    app = create_app(registry_path=registry_path, templates_path=tmp_path / "no-existe-todavia")
+    async with _client(app) as client:
+        response = await client.post(f"/api/projects/{project.name}/context", json={"threshold": 0.1, "taxonomy_template_name": "sgi-iso27001"})
+
+    assert response.status_code == 200
+    assert response.json()["taxonomy_template_name"] == "sgi-iso27001"
+    assert (project_root / "organizado" / "gobierno-seguridad" / "politica" / "informe").is_dir()
+
+
+@pytest.mark.asyncio
+async def test_build_context_rejects_local_manifest_combined_with_taxonomy_template_name(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    _seed_converted_document(project_root, "politica", "Política")
+    (project_root / "taxonomy_manifest.md").write_text(_VALID_TAXONOMY_MANIFEST, encoding="utf-8")
+
+    app = create_app(registry_path=registry_path, templates_path=tmp_path / "no-existe-todavia")
+    async with _client(app) as client:
+        response = await client.post(f"/api/projects/{project.name}/context", json={"taxonomy_template_name": "sgi-iso27001"})
+
+    assert response.status_code == 400
+    assert "taxonomy_manifest.md" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_build_context_rejects_candidate_domains_combined_with_taxonomy_template_name(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    _seed_converted_document(project_root, "politica", "Política")
+
+    app = create_app(registry_path=registry_path, templates_path=tmp_path / "no-existe-todavia")
+    async with _client(app) as client:
+        response = await client.post(
+            f"/api/projects/{project.name}/context",
+            json={"candidate_domains": ["calidad"], "taxonomy_template_name": "sgi-iso27001"},
+        )
+
+    assert response.status_code == 400
+    assert "candidate_domains" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_build_context_rejects_unknown_taxonomy_template_name(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    _seed_converted_document(project_root, "politica", "Política")
+
+    app = create_app(registry_path=registry_path, templates_path=tmp_path / "no-existe-todavia")
+    async with _client(app) as client:
+        response = await client.post(f"/api/projects/{project.name}/context", json={"taxonomy_template_name": "no-existe-esta-plantilla"})
+
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_list_taxonomy_templates_endpoint_returns_builtin_templates(tmp_path) -> None:
+    app = create_app(registry_path=tmp_path / "projects.json", templates_path=tmp_path / "no-existe-todavia")
+    async with _client(app) as client:
+        response = await client.get("/api/taxonomy-templates")
+
+    assert response.status_code == 200
+    templates = {entry["name"]: entry for entry in response.json()["templates"]}
+    assert "sgi-iso27001" in templates
+    assert templates["sgi-iso27001"]["title"] == "SGI ISO 27001"
+    assert "calidad" in templates
+
+
+@pytest.mark.asyncio
+async def test_context_page_shows_taxonomy_template_dropdown_when_no_local_manifest(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path, templates_path=tmp_path / "no-existe-todavia")
+
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/context")
+
+    assert response.status_code == 200
+    assert 'id="taxonomy-template-select"' in response.text
+    assert "SGI ISO 27001" in response.text
+
+
+@pytest.mark.asyncio
+async def test_context_page_hides_taxonomy_template_dropdown_when_local_manifest_present(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    _seed_taxonomy_manifest(project_root)
+    app = create_app(registry_path=registry_path, templates_path=tmp_path / "no-existe-todavia")
+
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/context")
+
+    assert response.status_code == 200
+    assert 'id="taxonomy-template-select"' not in response.text
+    assert "tiene prioridad sobre cualquier plantilla compartida" in response.text

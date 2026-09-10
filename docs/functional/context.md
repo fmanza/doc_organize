@@ -105,6 +105,51 @@ dominio se puede desplegar para ver el tipo de material de cada documento
 (`DomainDocument.material_type_name`, o una etiqueta derivada del slug si el documento cayó
 en el placeholder `sin-clasificar` por no alcanzar el umbral en ese eje).
 
+## Plantillas de Manifiesto (biblioteca compartida entre proyectos)
+
+Además del `taxonomy_manifest.md` propio de un proyecto, `doc_organize` mantiene una
+**biblioteca de plantillas** reutilizables entre proyectos — mismo formato de fichero
+(front matter YAML + prosa libre), pero fuera de cualquier `project.root_path`:
+`~/.doc_organize/taxonomy_templates/<nombre>.md` (gestionada por el usuario; ruta
+alternativa vía `doc_organize web --templates-path`), más un par de plantillas de
+ejemplo empaquetadas con la propia librería ("sgi-iso27001", "calidad") que sirven de
+fallback de solo lectura cuando no hay una plantilla de usuario con ese nombre.
+
+Un proyecto referencia una plantilla por nombre al construir el contexto
+(`POST .../context` con `taxonomy_template_name`), sin necesidad de copiar el fichero:
+
+```yaml
+---
+title: SGI ISO 27001
+description: Catálogo de dominios y tipos de material de un SGSI (ISO/IEC 27001).
+domains:
+  - slug: gobierno-seguridad
+    name: Gobierno de la Seguridad
+    keywords: [politica, gobierno, roles, objetivos]
+material_types:
+  - slug: politica
+    name: Política
+---
+```
+
+**Precedencia** (sin ningún mecanismo nuevo de "override"): si el proyecto tiene su
+propio `taxonomy_manifest.md`, ese fichero local **siempre gana** — es el override
+sin tocar la plantilla compartida. `taxonomy_template_name` solo se usa cuando no hay
+fichero local. Combinar un manifiesto (local o de plantilla) con `candidate_domains`,
+o un fichero local con `taxonomy_template_name`, se rechaza con `400` explícito — mismo
+criterio de "nunca precedencia silenciosa" que ya aplica a `candidate_domains`.
+
+`taxonomy_template_name` no es "sticky": a diferencia de `output_folder_name`, cada
+reconstrucción debe repetirlo para seguir usando la misma plantilla (aunque la UI
+preselecciona la última usada, leída de `Context.taxonomy_template_name`).
+
+`GET /api/taxonomy-templates` lista las plantillas disponibles (nombre, título,
+descripción) — usado por el selector de la página "Contexto" para poblar el
+desplegable cuando el proyecto no tiene ya un `taxonomy_manifest.md` local.
+
+Si nunca se usa ninguna plantilla (`taxonomy_template_name` ausente y sin fichero
+local), el comportamiento es exactamente el mismo que antes de esta funcionalidad.
+
 ## Visualizar el Sitio Generado
 
 `GET /projects/{name}/context/site/` sirve el sitio MkDocs ya construido
@@ -128,7 +173,8 @@ cualquier proyecto sin acoplarse a la construcción de ningún otro.
 | **Estado honesto ante fallo parcial** | Si la reorganización o la generación de MkDocs fallan a mitad, `context.json` persiste `reorganized`/`mkdocs_generated=false` — nunca se reporta éxito falso |
 | **Una operación a la vez** | `POST /api/projects/{name}/context` se rechaza con `409` si hay un escaneo, deduplicación u otra construcción de contexto en curso para el mismo proyecto |
 | **Manifiesto y catálogo simple son excluyentes** | Un proyecto con `taxonomy_manifest.md` no puede combinar `candidate_domains` en la misma petición — `400` explícito, nunca precedencia silenciosa |
-| **Modo manifiesto nunca excluye por completo** | Con manifiesto activo, un documento con los tres artefactos completos siempre se reorganiza — si un eje (dominio o tipo de material) no alcanza el umbral, se le asigna el slug `sin-clasificar` en ese eje en vez de dejarlo fuera |
+| **Fichero local, catálogo simple y plantilla son excluyentes entre sí** | Cualquier combinación de `taxonomy_manifest.md` local, `candidate_domains` y `taxonomy_template_name` en la misma petición se rechaza con `400` explícito — el fichero local, si existe, siempre gana sobre una plantilla, nunca precedencia silenciosa |
+| **Modo manifiesto nunca excluye por completo** | Con manifiesto activo (fichero local o plantilla), un documento con los tres artefactos completos siempre se reorganiza — si un eje (dominio o tipo de material) no alcanza el umbral, se le asigna el slug `sin-clasificar` en ese eje en vez de dejarlo fuera |
 
 ## Límites y Restricciones
 
@@ -156,6 +202,10 @@ cualquier proyecto sin acoplarse a la construcción de ningún otro.
 - **`taxonomy_manifest.md` con front matter inválido** (no empieza/cierra con
   `---`, YAML roto, o catálogo `domains`/`material_types` vacío o ausente):
   `POST` devuelve `400` con el motivo exacto, no un error genérico.
+- **`taxonomy_template_name` que no existe, con nombre inválido, o cuya plantilla de
+  usuario tiene el front matter roto**: `POST` devuelve `400` con el motivo exacto
+  (`TaxonomyTemplateError`) — un fichero de plantilla de usuario roto nunca cae en
+  silencio a la plantilla empaquetada del mismo nombre (enmascararía el error).
 
 ## Criterios de Aceptación
 

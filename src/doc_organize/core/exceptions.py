@@ -119,6 +119,13 @@ class TaxonomyManifestError(ContextError):
     """`taxonomy_manifest.md` existe pero su front matter falta, no es YAML válido, o no cumple el schema de `TaxonomyManifest`."""
 
 
+class TaxonomyTemplateError(ContextError):
+    """El nombre de plantilla no es un slug válido, no existe ninguna plantilla con ese nombre
+    (ni en `~/.doc_organize/taxonomy_templates/` ni entre las empaquetadas con `doc_organize`), o la
+    plantilla existe pero su front matter falta, no es YAML válido, o no cumple el schema de
+    `TaxonomyManifest` — mismos motivos que `TaxonomyManifestError`, ver `TaxonomyTemplateRegistry`."""
+
+
 class IncompleteConversionArtifactsError(ContextError):
     """Un documento no tiene los tres artefactos completos (original + .md + .json).
 
@@ -184,6 +191,7 @@ __all__ = [
     "TaxonomyClassificationConnectionError",
     "TaxonomyClassificationError",
     "TaxonomyManifestError",
+    "TaxonomyTemplateError",
     "TenantAlreadyExistsError",
     "TenantNotFoundError",
     "UsageSourceAuthError",

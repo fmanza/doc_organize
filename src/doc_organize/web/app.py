@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from doc_organize.context import TaxonomyTemplateRegistry
 from doc_organize.core.exceptions import (
     AuthError,
     ContextError,
@@ -98,6 +99,7 @@ def create_app(
     security: SecurityConfig | None = None,
     registry_path: str | Path | None = None,
     auth_db_path: str | Path | None = None,
+    templates_path: str | Path | None = None,
 ) -> FastAPI:
     """Crea la app FastAPI de doc_organize (REQ-007, Fase D-2a + revisión 8 §2.7.2).
 
@@ -109,6 +111,8 @@ def create_app(
             tests, para no tocar `~/.doc_organize/auth.db`). Ya no existe un
             parámetro `api_token`: la revisión 8 retira el bearer compartido en
             favor de sesión por usuario (`§2.7.2`).
+        templates_path: Carpeta alternativa a la biblioteca de plantillas de
+            taxonomía (uso en tests, para no tocar `~/.doc_organize/taxonomy_templates/`).
 
     Returns:
         La app FastAPI, con la autenticación (`AuthMiddleware`), las rutas de
@@ -126,6 +130,11 @@ def create_app(
     # chocar sobre el mismo fichero temporal).
     app.state.project_registry = ProjectRegistry(registry_path) if registry_path else ProjectRegistry()
     app.state.auth_db_path = str(auth_db_path) if auth_db_path else None
+    # Sin `asyncio.Lock` interno (a diferencia de `project_registry`): esta clase
+    # solo lee plantillas de disco, nunca escribe — la instancia única evita
+    # resolver la ruta por defecto (`Path.home() / ...`) en cada petición, no
+    # protege ninguna escritura concurrente (ver `TaxonomyTemplateRegistry`).
+    app.state.taxonomy_template_registry = TaxonomyTemplateRegistry(templates_path) if templates_path else TaxonomyTemplateRegistry()
     # Expuesto en app.state (no solo pasado al middleware): el handler WebSocket de
     # web/routes/scan.py necesita `security` para autenticar a mano (Fase D-2b,
     # §2.7.3 — BaseHTTPMiddleware no protege rutas WebSocket).

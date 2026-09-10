@@ -87,7 +87,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Ruta alternativa a la base de datos de autenticación (por defecto ~/.doc_organize/auth.db)",
     )
 
-    web_parser = subparsers.add_parser("web", help="Arrancar la interfaz web (REQ-007)", parents=[registry_flag, auth_db_flag])
+    templates_flag = argparse.ArgumentParser(add_help=False)
+    templates_flag.add_argument(
+        "--templates-path",
+        help="Ruta alternativa a la biblioteca de plantillas de taxonomía (por defecto ~/.doc_organize/taxonomy_templates)",
+    )
+
+    web_parser = subparsers.add_parser("web", help="Arrancar la interfaz web (REQ-007)", parents=[registry_flag, auth_db_flag, templates_flag])
     web_parser.add_argument("--host", default="127.0.0.1", help="Host de bind (por defecto 127.0.0.1)")
     web_parser.add_argument("--port", type=int, default=8000, help="Puerto de bind (por defecto 8000)")
 
@@ -272,7 +278,8 @@ def _run_web(args: argparse.Namespace) -> int:
 
     registry_path = getattr(args, "registry_path", None)
     auth_db_path = getattr(args, "auth_db_path", None)
-    app = create_app(security=security, registry_path=registry_path, auth_db_path=auth_db_path)
+    templates_path = getattr(args, "templates_path", None)
+    app = create_app(security=security, registry_path=registry_path, auth_db_path=auth_db_path, templates_path=templates_path)
     uvicorn.run(app, host=args.host, port=args.port)
     return 0
 

@@ -8,6 +8,7 @@ from fastapi import HTTPException, Request, WebSocket
 from starlette.requests import HTTPConnection
 
 from doc_organize.auth import AuthStore
+from doc_organize.context import TaxonomyTemplateRegistry
 from doc_organize.projects import ProjectRegistry, ScannedFoldersStore
 from doc_organize.web.auth import authenticate_session, requires_auth
 
@@ -43,6 +44,21 @@ def get_auth_store(conn: HTTPConnection) -> AuthStore:
     """
     auth_db_path = getattr(conn.app.state, "auth_db_path", None)
     return AuthStore(auth_db_path) if auth_db_path else AuthStore()
+
+
+def get_taxonomy_template_registry(conn: HTTPConnection) -> TaxonomyTemplateRegistry:
+    """Devuelve la instancia de `TaxonomyTemplateRegistry` compartida por esta app.
+
+    Mismo patrón que `get_project_registry`: instancia única creada en `create_app()`
+    (`app.state.taxonomy_template_registry`), con una ruta de biblioteca alternativa
+    inyectable en tests (`create_app(templates_path=...)`, igual que `main.py::_run_web()`
+    hace para el CLI vía `--templates-path`) para no tocar
+    `~/.doc_organize/taxonomy_templates/` real. A diferencia de `ProjectRegistry`/
+    `AuthStore`, esta clase no escribe nada (solo lee plantillas de disco), así que no
+    necesita compartir ningún lock — la instancia única es solo para no repetir la
+    resolución de ruta en cada petición.
+    """
+    return cast(TaxonomyTemplateRegistry, conn.app.state.taxonomy_template_registry)
 
 
 #: Instancia única de proceso: a diferencia de `ProjectRegistry`/`AuthStore`,
@@ -239,6 +255,7 @@ __all__ = [
     "get_allowed_scan_roots",
     "get_auth_store",
     "get_project_registry",
+    "get_taxonomy_template_registry",
     "get_tenant_id",
     "project_operation_key",
     "release_project_operation_lock",

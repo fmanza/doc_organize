@@ -86,6 +86,7 @@ class ContextBuilder:
         on_ai_progress: Callable[[int, int, str], Awaitable[None]] | None = None,
         taxonomy_manifest: TaxonomyManifest | None = None,
         taxonomy_classification_client: TaxonomyClassificationClient | None = None,
+        taxonomy_template_name: str | None = None,
     ) -> Context:
         """Clasifica `documents` y persiste el contexto de `project`.
 
@@ -128,6 +129,11 @@ class ContextBuilder:
             taxonomy_classification_client: Cliente ya configurado para la Sub-fase B en modo
                 manifiesto (2 ejes, una sola llamada combinada). Sin efecto si `taxonomy_manifest`
                 es `None`, o si `ai_classification_enabled=False`.
+            taxonomy_template_name: Nombre de la plantilla de `TaxonomyTemplateRegistry` de la que
+                proviene `taxonomy_manifest`, o `None` si viene de un `taxonomy_manifest.md` local o
+                si no hay manifiesto — puramente informativo, se persiste en
+                `Context.taxonomy_template_name` para que la UI pueda mostrar/preseleccionar qué
+                plantilla se usó; no afecta a la clasificación (ya resuelta en `taxonomy_manifest`).
 
         Returns:
             El `Context` construido y ya persistido vía `self.registry`.
@@ -173,6 +179,7 @@ class ContextBuilder:
             domains=domains,
             unclassified_documents=[document.source_path for document in unclassified],
             taxonomy_manifest_used=taxonomy_manifest is not None,
+            taxonomy_template_name=taxonomy_template_name,
             created_at=now,
             updated_at=now,
         )

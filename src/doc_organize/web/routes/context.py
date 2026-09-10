@@ -21,7 +21,7 @@ from doc_organize.ai import (
     litellm_taxonomy_classification_config_from_env,
 )
 from doc_organize.cache import CacheManager
-from doc_organize.context import ContextBuilder, ContextRegistry, MkDocsGenerator, Reorganizer, load_taxonomy_manifest
+from doc_organize.context import ContextBuilder, ContextRegistry, MkDocsGenerator, Reorganizer, TaxonomyTemplateRegistry, load_taxonomy_manifest
 from doc_organize.converter import DocumentConverter
 from doc_organize.core.constants import (
     CONVERSION_FOLDER_NAME,
@@ -30,7 +30,7 @@ from doc_organize.core.constants import (
     SCAN_ERRORS_FOLDER_NAME,
     SCAN_HISTORY_FOLDER_NAME,
 )
-from doc_organize.core.exceptions import ContextNotFoundError, ProjectNotFoundError, TaxonomyManifestError
+from doc_organize.core.exceptions import ContextNotFoundError, ProjectNotFoundError, TaxonomyManifestError, TaxonomyTemplateError
 from doc_organize.core.models import (
     Context,
     ContextBuildEvent,
@@ -41,6 +41,7 @@ from doc_organize.core.models import (
     ConversionStatus,
     Project,
     TaxonomyManifest,
+    TaxonomyTemplateSummary,
 )
 from doc_organize.utils.logging import get_logger
 from doc_organize.web.dependencies import (
@@ -48,6 +49,7 @@ from doc_organize.web.dependencies import (
     authorize_project_websocket,
     get_project_registry,
     get_scanned_folders_store,
+    get_taxonomy_template_registry,
     get_tenant_id,
     project_operation_key,
     release_project_operation_lock,
@@ -94,6 +96,14 @@ class BuildContextRequest(BaseModel):
     construcción del contexto de un proyecto (cuando no hay `context.json` todavía)
     — en reconstrucciones posteriores se ignora y se reutiliza el valor ya
     persistido, ver `_resolve_output_folder_name()`."""
+    taxonomy_template_name: str | None = None
+    """Nombre de una plantilla de `TaxonomyTemplateRegistry` a usar como manifiesto
+    de taxonomía de esta construcción (2 ejes: dominio + tipo de material), o `None`
+    para no usar ninguna. Excluyente con `candidate_domains` y con que el proyecto
+    tenga su propio `taxonomy_manifest.md` local (ese fichero, si existe, siempre
+    gana — ver `_load_taxonomy_manifest_or_400()`). A diferencia de
+    `output_folder_name`, no se vuelve "sticky": cada reconstrucción debe repetirlo
+    para seguir usando la misma plantilla, igual que `candidate_domains`."""
 
 
 class ConfirmedActionRequest(BaseModel):
@@ -117,6 +127,11 @@ class ContextResponse(BaseModel):
     mkdocs_generated: bool
     mkdocs_site_built: bool
     ai_classification_enabled: bool
+    taxonomy_template_name: str | None = None
+
+
+class TaxonomyTemplateListResponse(BaseModel):
+    templates: list[TaxonomyTemplateSummary]
 
 
 def _acquire_operation_lock(request: Request, tenant_id: str, project_name: str) -> tuple[str, str]:
@@ -190,26 +205,63 @@ async def _load_existing_context_or_none(project: Project) -> Context | None:
         return None
 
 
-async def _load_taxonomy_manifest_or_400(project: Project, candidate_domains: list[str] | None) -> TaxonomyManifest | None:
-    """Carga `taxonomy_manifest.md` de `project`, si existe, validando que no llegue junto
-    a `candidate_domains` en la misma petición — ambos son catálogos de dominio distintos
-    (manifiesto: 2 ejes; `candidate_domains`: 1 eje) y no hay una regla de precedencia
-    implícita razonable entre ellos, así que se rechaza explícito en vez de elegir uno en
-    silencio (mismo criterio que `_resolve_output_folder_name` para nombres reservados).
+async def _load_taxonomy_manifest_or_400(
+    project: Project,
+    candidate_domains: list[str] | None,
+    taxonomy_template_name: str | None,
+    template_registry: TaxonomyTemplateRegistry,
+) -> TaxonomyManifest | None:
+    """Resuelve el manifiesto de taxonomía de `project`, con esta precedencia:
+    1) `taxonomy_manifest.md` local (comportamiento sin cambios); 2) si no existe,
+    la plantilla `taxonomy_template_name` de `template_registry`; 3) si no se da
+    ninguna, `None` (modo de un eje, sin cambios).
+
+    El fichero local es el "override" del proyecto sobre una plantilla compartida —
+    si existe, gana siempre, sin ningún mecanismo nuevo. `candidate_domains`
+    (1 eje) y `taxonomy_template_name` (2 ejes) son catálogos de dominio distintos
+    sin una regla de precedencia implícita razonable entre ellos, así que cualquier
+    combinación con el manifiesto (local o de plantilla) se rechaza explícita en vez
+    de elegir uno en silencio (mismo criterio que `_resolve_output_folder_name` para
+    nombres reservados).
 
     Raises:
-        HTTPException: 400 si el fichero existe pero su front matter es inválido
-            (`TaxonomyManifestError`), o si además llega `candidate_domains` no vacío.
+        HTTPException: 400 si el fichero local existe pero su front matter es
+            inválido (`TaxonomyManifestError`); si se combina un manifiesto (local o
+            de plantilla) con `candidate_domains`; si se combina un fichero local con
+            `taxonomy_template_name`; o si `taxonomy_template_name` no resuelve a
+            ninguna plantilla (`TaxonomyTemplateError`).
     """
     try:
         manifest = await load_taxonomy_manifest(project)
     except TaxonomyManifestError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     if manifest is not None and candidate_domains:
         raise HTTPException(
             status_code=400,
             detail="El proyecto tiene un manifiesto de taxonomía (taxonomy_manifest.md) — no se puede combinar con 'candidate_domains' en la misma petición.",
         )
+    if manifest is not None and taxonomy_template_name:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "El proyecto ya tiene un manifiesto de taxonomía local (taxonomy_manifest.md) — no se puede "
+                "combinar con 'taxonomy_template_name' en la misma petición; el fichero local es el override "
+                "y siempre tiene prioridad."
+            ),
+        )
+    if candidate_domains and taxonomy_template_name:
+        raise HTTPException(
+            status_code=400,
+            detail="'candidate_domains' y 'taxonomy_template_name' son catálogos de dominio incompatibles — no se pueden combinar en la misma petición.",
+        )
+
+    if manifest is None and taxonomy_template_name:
+        try:
+            manifest = await template_registry.load_template(taxonomy_template_name)
+        except TaxonomyTemplateError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     return manifest
 
 
@@ -295,7 +347,17 @@ def _to_response(context: Context) -> ContextResponse:
         mkdocs_generated=context.mkdocs_generated,
         mkdocs_site_built=context.mkdocs_site_built,
         ai_classification_enabled=context.ai_classification_enabled,
+        taxonomy_template_name=context.taxonomy_template_name,
     )
+
+
+@router.get("/api/taxonomy-templates", response_model=TaxonomyTemplateListResponse)
+async def list_taxonomy_templates(request: Request) -> TaxonomyTemplateListResponse:
+    """Lista las plantillas de manifiesto de taxonomía disponibles (biblioteca compartida
+    de `TaxonomyTemplateRegistry`, no ligada a ningún proyecto ni tenant concreto), para
+    poblar el selector de `payload.taxonomy_template_name` (`POST .../context`)."""
+    template_registry = get_taxonomy_template_registry(request)
+    return TaxonomyTemplateListResponse(templates=await template_registry.list_templates())
 
 
 @router.post("/api/projects/{name}/context", response_model=ContextResponse, dependencies=[Depends(require_project_access)])
@@ -323,7 +385,10 @@ async def build_context(name: str, request: Request, payload: BuildContextReques
         documents = await _gather_converted_documents(project)
         existing_context = await _load_existing_context_or_none(project)
         output_folder_name = _resolve_output_folder_name(existing_context, payload.output_folder_name)
-        taxonomy_manifest = await _load_taxonomy_manifest_or_400(project, payload.candidate_domains)
+        template_registry = get_taxonomy_template_registry(request)
+        taxonomy_manifest = await _load_taxonomy_manifest_or_400(
+            project, payload.candidate_domains, payload.taxonomy_template_name, template_registry
+        )
 
         async with _optional_ai_client(payload.ai_classification_enabled, taxonomy_manifest) as (ai_client, taxonomy_client):
             context = await _context_builder.build(
@@ -336,6 +401,7 @@ async def build_context(name: str, request: Request, payload: BuildContextReques
                 output_folder_name=output_folder_name,
                 taxonomy_manifest=taxonomy_manifest,
                 taxonomy_classification_client=taxonomy_client,
+                taxonomy_template_name=payload.taxonomy_template_name if taxonomy_manifest is not None else None,
             )
         try:
             await _reorganizer.reorganize(project, context)
@@ -443,7 +509,10 @@ async def context_build_websocket(name: str, websocket: WebSocket) -> None:
             documents = await _gather_converted_documents(project)
             existing_context = await _load_existing_context_or_none(project)
             output_folder_name = _resolve_output_folder_name(existing_context, payload.output_folder_name)
-            taxonomy_manifest = await _load_taxonomy_manifest_or_400(project, payload.candidate_domains)
+            template_registry = get_taxonomy_template_registry(websocket)
+            taxonomy_manifest = await _load_taxonomy_manifest_or_400(
+                project, payload.candidate_domains, payload.taxonomy_template_name, template_registry
+            )
         except HTTPException as exc:
             await websocket.close(code=1008, reason=str(exc.detail))
             return
@@ -482,6 +551,7 @@ async def context_build_websocket(name: str, websocket: WebSocket) -> None:
                     on_ai_progress=on_ai_progress,
                     taxonomy_manifest=taxonomy_manifest,
                     taxonomy_classification_client=taxonomy_client,
+                    taxonomy_template_name=payload.taxonomy_template_name if taxonomy_manifest is not None else None,
                 )
                 total_documents = sum(len(domain.documents) for domain in context.domains)
                 await websocket.send_json(
@@ -612,10 +682,19 @@ async def context_page(name: str, request: Request) -> HTMLResponse:
     litellm_configured = (
         _is_litellm_taxonomy_classification_configured() if taxonomy_manifest is not None else _is_litellm_classification_configured()
     )
+    template_registry = get_taxonomy_template_registry(request)
+    taxonomy_templates = await template_registry.list_templates()
     return _templates.TemplateResponse(
         request,
         "context.html.j2",
-        {"project": project, "context": context, "litellm_configured": litellm_configured, "default_output_folder_name": _DEFAULT_OUTPUT_FOLDER_NAME},
+        {
+            "project": project,
+            "context": context,
+            "litellm_configured": litellm_configured,
+            "default_output_folder_name": _DEFAULT_OUTPUT_FOLDER_NAME,
+            "taxonomy_templates": taxonomy_templates,
+            "has_local_taxonomy_manifest": taxonomy_manifest is not None,
+        },
     )
 
 

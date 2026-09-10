@@ -8,7 +8,12 @@ API Reference de `doc_organize.context` (Sub-fase A) y `doc_organize.ai.DomainCl
 classDiagram
     class ContextBuilder {
         +registry: ContextRegistry
-        +build(project, documents, candidate_domains, threshold, ai_classification_enabled, ai_classification_client, taxonomy_manifest, taxonomy_classification_client) Context
+        +build(project, documents, candidate_domains, threshold, ai_classification_enabled, ai_classification_client, taxonomy_manifest, taxonomy_classification_client, taxonomy_template_name) Context
+    }
+    class TaxonomyTemplateRegistry {
+        +templates_dir: Path
+        +list_templates() list~TaxonomyTemplateSummary~
+        +load_template(name) TaxonomyManifest
     }
     class DomainClassifier {
         +candidate_domains: list[str]|None
@@ -65,6 +70,7 @@ class ContextBuilder:
         output_folder_name: str = "organizado",
         taxonomy_manifest: TaxonomyManifest | None = None,
         taxonomy_classification_client: TaxonomyClassificationClient | None = None,
+        taxonomy_template_name: str | None = None,
     ) -> Context
 ```
 
@@ -79,6 +85,7 @@ Orquesta Sub-fase A (siempre) + Sub-fase B (opt-in) y persiste el `Context` resu
 | `ai_classification_client` | `DomainClassificationClient \| None` | Cliente ya configurado para la Sub-fase B de 1 eje; si `enabled=True` sin cliente, la Sub-fase B no se ejecuta. Ignorado si hay `taxonomy_manifest` |
 | `taxonomy_manifest` | `TaxonomyManifest \| None` | Manifiesto de taxonomía (ver [TaxonomyManifest](#taxonomymanifest-manifiesto-de-taxonomia)) — activa la clasificación de 2 ejes (dominio + tipo de material) |
 | `taxonomy_classification_client` | `TaxonomyClassificationClient \| None` | Cliente ya configurado para la Sub-fase B de 2 ejes (una sola llamada combinada). Sin efecto si `taxonomy_manifest` es `None`, o si `enabled=False` |
+| `taxonomy_template_name` | `str \| None` | Nombre de la plantilla de `TaxonomyTemplateRegistry` de la que proviene `taxonomy_manifest`, o `None` si viene de un fichero local o si no hay manifiesto — puramente informativo, se persiste en `Context.taxonomy_template_name` |
 
 **Reglas**: el catálogo de la Sub-fase B es `candidate_domains` si se dio uno, o los
 dominios que la Sub-fase A ya descubrió — nunca un dominio nuevo. Un fallo de la
@@ -171,6 +178,36 @@ Prosa libre — descripción, tablas, diagramas Mermaid. No se parsea.
 **Excepciones**: `TaxonomyManifestError` si el fichero existe pero no empieza/cierra
 el delimitador de front matter, el YAML no es válido, o no cumple el schema
 (`domains`/`material_types` no vacíos, cada entrada con `slug`+`name`).
+
+---
+
+## TaxonomyTemplateRegistry (biblioteca de plantillas de manifiesto)
+
+```python
+class TaxonomyTemplateRegistry:
+    def __init__(self, templates_dir: str | Path = Path.home() / ".doc_organize" / "taxonomy_templates") -> None
+    async def list_templates(self) -> list[TaxonomyTemplateSummary]
+    async def load_template(self, name: str) -> TaxonomyManifest
+```
+
+Biblioteca de plantillas de `TaxonomyManifest` reutilizables entre proyectos —
+mismo formato de fichero que `taxonomy_manifest.md` (front matter YAML + prosa
+libre), pero fuera de cualquier `project.root_path`. `load_template(name)` busca
+primero en `templates_dir` (plantillas de usuario) y, si no encuentra `name` ahí,
+en las plantillas de ejemplo empaquetadas con `doc_organize` (`sgi-iso27001`,
+`calidad`) — una plantilla de usuario con el mismo nombre siempre tiene prioridad.
+`list_templates()` combina ambos orígenes sin duplicar nombres, omitiendo del
+listado (no del error) cualquier fichero de usuario con front matter inválido.
+
+`name` se valida contra `^[a-z0-9][a-z0-9-]*$` **antes** de construir ninguna ruta
+de fichero — un nombre que no cumpla el patrón (p. ej. con `../`) se rechaza sin
+tocar el filesystem, en vez de sanearse en silencio.
+
+**Excepciones**: `TaxonomyTemplateError` si `name` no es un slug válido; no existe
+ninguna plantilla con ese nombre en ninguna de las dos ubicaciones; o existe una
+plantilla de usuario con ese nombre pero su front matter es inválido (en ese caso
+el error se propaga tal cual — nunca cae en silencio a la plantilla empaquetada,
+que enmascararía el fichero de usuario roto).
 
 ---
 
@@ -324,6 +361,7 @@ class Context(BaseModel):
     reorganized: bool
     mkdocs_generated: bool
     taxonomy_manifest_used: bool  # default False
+    taxonomy_template_name: str | None  # default None — nombre de la plantilla usada, o None (fichero local / sin manifiesto)
     created_at: str
     updated_at: str
 
@@ -358,8 +396,15 @@ class TaxonomyCatalogEntry(BaseModel):
     keywords: list[str]
 
 class TaxonomyManifest(BaseModel):
+    title: str | None            # solo relevante en una plantilla compartida
+    description: str | None      # solo relevante en una plantilla compartida
     domains: list[TaxonomyCatalogEntry]        # min 1
     material_types: list[TaxonomyCatalogEntry]  # min 1
+
+class TaxonomyTemplateSummary(BaseModel):
+    name: str            # slug del fichero, sin extensión — identificador de load_template()
+    title: str | None
+    description: str | None
 ```
 
 ## Rutas HTTP
@@ -370,8 +415,9 @@ Todas bajo `/projects/{name}/context` (página) y `/api/projects/{name}/context`
 | Ruta | Método | Descripción |
 |---|---|---|
 | `/projects/{name}/context` | `GET` | Página HTML — lista de dominios, o estado vacío si no hay contexto todavía |
-| `/api/projects/{name}/context` | `POST` | Construye/reconstruye: `{candidate_domains?, threshold?, ai_classification_enabled?}` → `409` si hay otra operación en curso; `400` si la IA está activada sin el proxy correspondiente configurado (1 eje o 2 ejes según haya o no `taxonomy_manifest.md`), o si el proyecto tiene `taxonomy_manifest.md` y la petición también trae `candidate_domains`. Si existe `taxonomy_manifest.md`, se carga automáticamente — no hace falta pasar nada en el payload para activar el modo manifiesto (ni para que `ai_classification_enabled` use el cliente de 2 ejes) |
+| `/api/projects/{name}/context` | `POST` | Construye/reconstruye: `{candidate_domains?, threshold?, ai_classification_enabled?, taxonomy_template_name?}` → `409` si hay otra operación en curso; `400` si la IA está activada sin el proxy correspondiente configurado (1 eje o 2 ejes según haya o no manifiesto), o si se combinan entre sí `taxonomy_manifest.md` local, `candidate_domains` y `taxonomy_template_name` (cualquier par es excluyente — ver `TaxonomyTemplateRegistry`). Si existe `taxonomy_manifest.md`, se carga automáticamente — no hace falta pasar nada en el payload para activar el modo manifiesto (ni para que `ai_classification_enabled` use el cliente de 2 ejes) |
 | `/api/projects/{name}/context` | `GET` | Devuelve el contexto ya construido — `404` si no existe todavía |
+| `/api/taxonomy-templates` | `GET` | Lista las plantillas disponibles (`TaxonomyTemplateRegistry.list_templates()`) — biblioteca compartida, no ligada a ningún proyecto ni tenant |
 | `/projects/{name}/context/site` | `GET` | Redirige a `.../site/` (barra final — las páginas de mkdocs usan URLs relativas que la necesitan) |
 | `/projects/{name}/context/site/{file_path}` | `GET` | Sirve el sitio MkDocs ya construido (`<project.root_path>/site/{file_path}`) — `404` si `mkdocs_site_built` es `False` o si `file_path` no resuelve dentro de `site/`. Acción de solo lectura, independiente de `POST .../context` (nunca se dispara automáticamente tras un build) |
 
@@ -382,9 +428,9 @@ Todas bajo `/projects/{name}/context` (página) y `/api/projects/{name}/context`
 | `converter.DocumentConverter.resolve_output_paths()` | Recalcula `markdown_path`/`json_path` desde `cache.db`, sin persistirlos aparte |
 | `cache.CacheManager` | Fuente de los documentos ya convertidos con éxito |
 | `projects.ScannedFoldersStore` | Carpetas de escaneo guardadas, usadas como `scan_roots` |
-| `core.exceptions` | `ContextError`, `DomainClassificationError`, `TaxonomyClassificationError`, `TaxonomyManifestError` y sus subclases |
+| `core.exceptions` | `ContextError`, `DomainClassificationError`, `TaxonomyClassificationError`, `TaxonomyManifestError`, `TaxonomyTemplateError` y sus subclases |
 | `httpx` | Cliente HTTP de `DomainClassificationClient`/`TaxonomyClassificationClient` (ya incluido en el extra `ai`) |
-| `pyyaml` (extra `context`) | Serialización de `mkdocs.yml` y parseo del front matter de `taxonomy_manifest.md` |
+| `pyyaml` (extra `context`) | Serialización de `mkdocs.yml` y parseo del front matter de `taxonomy_manifest.md`/plantillas de `TaxonomyTemplateRegistry` |
 
 ## Ejemplos Relacionados
 
