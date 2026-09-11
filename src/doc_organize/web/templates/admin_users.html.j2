@@ -40,8 +40,25 @@
             <td class="px-2.5 py-1.5 border-b border-gray-300">{{ "Sí" if user.must_change_password else "No" }}</td>
             <td class="px-2.5 py-1.5 border-b border-gray-300">{{ "Bloqueado" if user.is_blocked else "Activo" }}</td>
             <td class="px-2.5 py-1.5 border-b border-gray-300 whitespace-nowrap">
+                <button type="button" class="edit-user text-blue-600 hover:underline bg-transparent border-0 cursor-pointer p-0 mr-3" data-user-id="{{ user.id }}">Editar</button>
                 <button type="button" class="toggle-block text-blue-600 hover:underline bg-transparent border-0 cursor-pointer p-0 mr-3" data-user-id="{{ user.id }}" data-blocked="{{ user.is_blocked | lower }}">{{ "Desbloquear" if user.is_blocked else "Bloquear" }}</button>
                 <button type="button" class="delete-user text-red-700 hover:underline bg-transparent border-0 cursor-pointer p-0" data-user-id="{{ user.id }}">Eliminar</button>
+            </td>
+        </tr>
+        <tr class="edit-user-row" data-user-id="{{ user.id }}" hidden>
+            <td colspan="5" class="px-2.5 py-2 border-b border-gray-300 bg-gray-50">
+                <form class="edit-user-form flex gap-2 flex-wrap items-center" data-user-id="{{ user.id }}">
+                    <label class="sr-only" for="edit-role-{{ user.id }}">Rol</label>
+                    <select id="edit-role-{{ user.id }}" class="edit-role border border-gray-300 rounded px-2 py-1.5" data-initial-value="{{ user.role_id }}">
+                        {% for role in roles %}
+                        <option value="{{ role.id }}" {% if role.id == user.role_id %}selected{% endif %}>{{ role.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <label class="sr-only" for="edit-password-{{ user.id }}">Nueva contraseña</label>
+                    <input type="password" id="edit-password-{{ user.id }}" class="edit-password border border-gray-300 rounded px-2 py-1.5 flex-1 min-w-[220px]" placeholder="Nueva contraseña (déjalo en blanco para no cambiarla)" autocomplete="new-password">
+                    <button type="submit" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Guardar</button>
+                    <button type="button" class="cancel-edit-user px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-white hover:bg-gray-100" data-user-id="{{ user.id }}">Cancelar</button>
+                </form>
             </td>
         </tr>
     {% endfor %}
@@ -80,6 +97,46 @@ document.querySelectorAll(".toggle-block").forEach((button) => {
         const is_blocked = button.dataset.blocked !== "true";
         try {
             await postJson(`/api/users/${button.dataset.userId}`, "PATCH", { is_blocked });
+            window.location.reload();
+        } catch (err) {
+            document.getElementById("user-error").textContent = err.message;
+        }
+    });
+});
+
+function closeEditUserRow(userId) {
+    const row = document.querySelector(`.edit-user-row[data-user-id="${userId}"]`);
+    const roleSelect = row.querySelector(".edit-role");
+    roleSelect.value = roleSelect.dataset.initialValue;
+    row.querySelector(".edit-password").value = "";
+    row.hidden = true;
+}
+
+document.querySelectorAll(".edit-user").forEach((button) => {
+    button.addEventListener("click", () => {
+        document.querySelector(`.edit-user-row[data-user-id="${button.dataset.userId}"]`).hidden = false;
+    });
+});
+
+document.querySelectorAll(".cancel-edit-user").forEach((button) => {
+    button.addEventListener("click", () => closeEditUserRow(button.dataset.userId));
+});
+
+document.querySelectorAll(".edit-user-form").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const userId = form.dataset.userId;
+        const roleSelect = form.querySelector(".edit-role");
+        const passwordInput = form.querySelector(".edit-password");
+        const payload = {};
+        if (roleSelect.value !== roleSelect.dataset.initialValue) payload.role_id = roleSelect.value;
+        if (passwordInput.value) payload.password = passwordInput.value;
+        if (Object.keys(payload).length === 0) {
+            closeEditUserRow(userId);
+            return;
+        }
+        try {
+            await postJson(`/api/users/${userId}`, "PATCH", payload);
             window.location.reload();
         } catch (err) {
             document.getElementById("user-error").textContent = err.message;
