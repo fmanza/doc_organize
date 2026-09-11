@@ -30,6 +30,7 @@
         <input type="password" class="user-password border border-gray-300 rounded px-2 py-1.5" placeholder="Contraseña" required>
         <label class="sr-only">Rol</label>
         <select class="user-role border border-gray-300 rounded px-2 py-1.5" required>
+            <option value="" selected disabled hidden>Selecciona un rol…</option>
             {% for role in roles %}
             <option value="{{ role.id }}">{{ role.name }}</option>
             {% endfor %}
