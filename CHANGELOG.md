@@ -63,6 +63,59 @@ releases publicados antes de esa versión).
   documento cayó en el placeholder `sin-clasificar`). Sin cambios en `web/routes/context.py`
   ni en el contrato REST/WebSocket — la plantilla ya recibía el `Context` completo.
 
+- `src/doc_organize/context/taxonomy_template_registry.py` (nuevo): `TaxonomyTemplateRegistry` —
+  biblioteca de plantillas de manifiesto de taxonomía reutilizables **entre proyectos**
+  (`~/.doc_organize/taxonomy_templates/` por defecto, o ruta alternativa vía
+  `doc_organize web --templates-path`), con fallback a plantillas empaquetadas de solo lectura
+  (`sgi-iso27001`, `calidad`). Seleccionable por nombre al construir el contexto de un proyecto
+  (`taxonomy_template_name`, selector en la página "Contexto"); el `taxonomy_manifest.md` local de
+  un proyecto, si existe, sigue ganando siempre sobre cualquier plantilla.
+- `src/doc_organize/ai/taxonomy_manifest_draft_client.py` (nuevo): `TaxonomyManifestDraftClient` +
+  `POST /api/projects/{name}/context/taxonomy-manifest-draft` — a partir de una muestra de
+  documentos ya convertidos (muestreo round-robin determinista por carpeta,
+  `taxonomy_manifest_sampler.select_document_sample()`), pide a un LiteLLM Proxy que proponga un
+  catálogo de dominios + tipos de material. Distinto de la Sub-fase B de clasificación (que elige
+  DENTRO de un catálogo ya cerrado): aquí la IA propone el catálogo mismo. Endpoint de solo
+  lectura — nunca persiste nada; el usuario revisa/edita el borrador antes de guardarlo.
+- `src/doc_organize/auth/instance_secrets_store.py` (nuevo) + `web/routes/ai_settings.py`: panel
+  `/admin/configuracion-ia` — ver/editar desde la web las 5 familias de credenciales de IA que
+  antes solo eran configurables editando `.env` a mano. Cifradas en reposo con
+  [Fernet](https://cryptography.io/en/latest/fernet/) (`DOC_ORGANIZE_SECRETS_KEY`, extra `[web]`);
+  un secreto ya guardado nunca se reexpone (`GET` solo devuelve `masked_hint`, últimos 4
+  caracteres). Precedencia store → `.env` → sin configurar. `PUT
+  /api/projects/{name}/context/taxonomy-manifest` (nuevo) persiste por fin el borrador que
+  "Proponer con IA" generaba pero nadie podía guardar hasta ahora. `/admin/plantillas-taxonomia`
+  gana CRUD completo (crear/editar/borrar) sobre `TaxonomyTemplateRegistry`.
+
+### Changed
+
+- `src/doc_organize/core/exceptions.py`: `ProjectNotFoundError`/`ProjectAlreadyExistsError`
+  construyen ahora su propio mensaje en `__init__(name: str)` a partir del nombre, en vez de que
+  cada llamador repitiera el mismo f-string (cluster de literales duplicados, regla S1192) —
+  cualquier código que las instanciara pasando un mensaje ya formateado debe pasar solo `name`.
+- **Rediseño Tenant/Role/User** (breaking change en la API pública de `AuthStore`, ver
+  `.ai/DECISIONS_LOG.md` Revisión 16 y `.ai/sessions/2026-09-11-tenant-role-user-redesign/`):
+  `AuthStore` aprovisiona de fábrica, sin CLI previa, un tenant `"default"` + usuario `admin` al
+  primer arranque (`must_change_password=True`, `is_instance_admin=True`); esa cuenta no puede
+  completar `POST /login` en modo no-loopback mientras conserve la contraseña de fábrica.
+  `create_tenant()` ya no aprovisiona ningún rol/usuario para tenants adicionales. `Role` deja de
+  estar ligado a un tenant (`name` único **globalmente**): `create_role/get_role/update_role/
+  delete_role/list_roles/can_access_project` pierden el parámetro `tenant_id`.
+  `RoleNotFoundError`/`RoleAlreadyExistsError` pierden el parámetro `tenant_id` en su constructor.
+  El acceso de escaneo de un rol no-admin pasa a ser implícito (`project.root_path` de cada
+  proyecto en `project_names`); `GET /api/fs/browse` gana el parámetro opcional `project`. Nuevo
+  `User.is_blocked` (bloquear invalida todas sus sesiones activas en la misma transacción) e
+  `User.is_instance_admin` (nivel de instancia, independiente del `is_admin` de un rol; gestiona
+  cualquier tenant desde la nueva pantalla `/admin/tenants` y es el único que puede tocar
+  configuración de IA/plantillas de taxonomía, que pasan de `require_admin` a
+  `require_instance_admin`). Nuevo subcomando CLI `user set-instance-admin`.
+
+### Removed
+
+- `src/doc_organize/core/models.py`: `Role.tenant_id` y `Role.allowed_scan_roots` (ver "Changed"
+  arriba) — el acceso de escaneo de un rol restringido ya no se declara explícitamente, es
+  implícito a la carpeta de sus proyectos permitidos.
+
 ### Fixed
 
 - `src/doc_organize/context/context_builder.py`/`mkdocs_generator.py`: el `name`/`description`
@@ -70,6 +123,11 @@ releases publicados antes de esa versión).
   tabla "Contexto", `context.json` y el nav de `mkdocs.yml` — antes se ignoraban y siempre se
   mostraba el slug derivado (p. ej. "Rrhh" en vez de "Recursos Humanos"), pese a que `name` es
   un campo obligatorio del manifiesto.
+- `src/doc_organize/auth/auth_store.py`: las guardas de "último admin del tenant"
+  (`delete_user`/`update_user`/`set_user_blocked`) bloqueaban también vaciar un tenant por
+  completo eliminando/bloqueando/degradando a su único usuario restante, dejando `delete_tenant()`
+  (que exige cero usuarios) inalcanzable para ese tenant. Ahora solo bloquean si dejarían a OTROS
+  usuarios del tenant sin ningún admin.
 
 ## [0.8.0] - 2026-09-10
 
