@@ -910,6 +910,13 @@ python -m doc_organize user create alice --tenant acme-corp
 # de la máquina — mismo motivo por el que ya no existe --api-token (AUDIT_PLAN cond. 4, revisión 2)
 ```
 
+> **Nota (2026-09-11, rediseño Tenant/Role/User)**: esto describe la decisión de la revisión 8
+> (2026-08-28), ya no el comportamiento actual. Desde `.ai/DECISIONS_LOG.md` Revisión 16: el
+> tenant `default` y su usuario `admin` se aprovisionan **de fábrica**, sin CLI previa, al primer
+> arranque de `AuthStore` (esa cuenta no puede completar el login en modo no-loopback mientras
+> conserve la contraseña de fábrica). `tenant create`/`user create` siguen existiendo tal cual para
+> tenants adicionales al `default`. Ver `.ai/sessions/2026-09-11-tenant-role-user-redesign/`.
+
 > **AUDIT_PLAN de `§2.7.2` (revisión 8, 2026-08-28)**
 >
 > **Riesgos funcionales**:

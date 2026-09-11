@@ -1,13 +1,14 @@
 # CURRENT STATE — doc_organize
 
-**Generado**: 2026-08-29 · **actualizado**: 2026-09-10
+**Generado**: 2026-08-29 · **actualizado**: 2026-09-11
 **Fuente de esta actualización**: `git log`, `pyproject.toml`/`CHANGELOG.md`, y
-re-ejecución en vivo de `ruff`/`mypy`/`pytest`/`mkdocs build --strict` — no una
+re-ejecución en vivo de `ruff`/`mypy`/`pytest`/`mkdocs build --strict`/`python -m build` — no una
 promesa (mismo criterio que `.ai/sessions/2026-09-03-historial-escaneo-fecha-docs-offline/TRACEABILITY.md`).
-**Rama activa**: `develop`, HEAD commiteado `a6ffc93` + cierre de versión 0.8.0 pendiente de commit
-(`pyproject.toml`/`CHANGELOG.md`/`COMPATIBILITY.md` ya actualizados en el working tree)
-**Versión**: `0.8.0` (`pyproject.toml`/`CHANGELOG.md`) — cierra todo lo acumulado en `[Unreleased]`
-desde la 0.7.0, incluido el paquete `context/` completo (sesiones `2026-09-08`/`2026-09-10`)
+**Rama activa**: `develop`, HEAD commiteado `e2877a4` (rediseño Tenant/Role/User)
+**Versión**: `pyproject.toml` sigue en `0.8.0` — **9 commits `feat`/`fix` acumulados en
+`CHANGELOG.md` `[Unreleased]` sin bump todavía** (plantillas de taxonomía compartidas, borrador de
+manifiesto por IA, panel de configuración de IA cifrada, y el rediseño Tenant/Role/User); de esos
+9, solo 4 tenían entrada en `[Unreleased]` antes de esta revisión — ver "Trabajo pendiente" abajo
 
 > **Nota de corrección (2026-09-04)**: este documento llevaba desde 2026-08-29
 > (`v0.2.0`) sin actualizarse — 5 versiones y ~15 sesiones de trabajo de
@@ -55,6 +56,17 @@ detalle completo, no reproducido aquí) añadió, entre otras cosas:
   de progreso en tiempo real (mismo patrón que Escanear/Duplicados) y fix de imágenes rotas
   (`images_dir` no se persiste en `cache.db`, hay que recalcularlo al reconstruir desde caché).
   Cerrado en la versión `0.8.0` (2026-09-10).
+- Tras el cierre de `0.8.0`, sin versión nueva todavía: manifiesto de taxonomía (2 ejes,
+  dominio + tipo de material), biblioteca de plantillas de taxonomía reutilizables entre
+  proyectos, borrador de manifiesto por IA a partir de una muestra de documentos, y panel
+  `/admin/configuracion-ia` (credenciales de IA cifradas en reposo con Fernet, extra `[web]`).
+- **Rediseño Tenant/Role/User** (sesión `2026-09-11-tenant-role-user-redesign`, commit `e2877a4`,
+  **breaking change** en `AuthStore`): tenant `default` + usuario `admin` de fábrica sin CLI previa
+  (bloqueado en modo no-loopback hasta cambiar la contraseña); `Role` global (ya no por tenant,
+  `allowed_scan_roots` retirado en favor de acceso de escaneo implícito por proyecto); nuevo
+  `User.is_instance_admin` + pantalla "Tenants y usuarios"; `User.is_blocked` invalida sesiones al
+  instante. Ver `.ai/sessions/2026-09-11-tenant-role-user-redesign/{00_PLAN,TRACEABILITY}.md` y
+  `.ai/DECISIONS_LOG.md` Revisión 16.
 
 **Fuente de verdad detallada por versión**: `CHANGELOG.md` (formato Keep a
 Changelog, bien mantenido). **Historial de sesiones con directrices para
@@ -62,48 +74,58 @@ futuras IAs**: `.ai/sessions/<fecha>[-slug]/TRACEABILITY.md`.
 
 ---
 
-## Calidad actual (verificado en vivo, 2026-09-10)
+## Calidad actual (verificado en vivo, 2026-09-11)
 
 ```
-python -m ruff check src tests           → All checks passed!
-python -m mypy src                        → Success: no issues found in 65 source files
-python -m pytest -q --no-cov              → 643 passed
-mkdocs build --strict                     → Documentation built in 2.45s, sin errores
+python -m ruff check src tests           → 3 hallazgos preexistentes, ajenos a la sesión 2026-09-11
+                                             (orden de __all__ en core/models.py, nested-with en
+                                             web/routes/context.py, BLE001 en scan/scan_command.py)
+python -m mypy src                        → 4 errores preexistentes (stubs ausentes: yaml, pandas),
+                                             ninguno en código propio
+python -m pytest -q --no-cov              → 832 passed
+mkdocs build --strict                     → Documentation built in ~2.6s, sin errores
                                              (único aviso: deprecación de Material for MkDocs
                                              sobre MkDocs 2.0 — ruido del tema, no del build)
 python -m build                           → doc_organize-0.8.0.tar.gz y
                                              doc_organize-0.8.0-py3-none-any.whl generados sin error
 ```
 
-`python -m pytest --doctest-modules src -q` → 35 passed, 3 skipped (subía de 26 passed en la
-verificación anterior, sesión `2026-09-04-cierre-backlog-maturity-audit`, por los docstrings con
-ejemplo del nuevo paquete `context/`).
+`python -m pytest --doctest-modules src -q` → 43 passed, 6 skipped (subía de 35 passed en la
+verificación anterior, 2026-09-10, por los docstrings con ejemplo de `ai/`/`context/` y del
+`AuthStore`/`Role`/`User` reescritos en la sesión `2026-09-11-tenant-role-user-redesign`).
 
 ---
 
-## Estructura del código (recuento verificado 2026-09-10, diagrama de niveles sin revisar desde 2026-09-04)
+## Estructura del código (recuento verificado 2026-09-11, diagrama de niveles actualizado en la misma fecha)
 
 ```
 src/doc_organize/
-├── core/, utils/               # Nivel 1
-├── validators/, scanner/, converter/, dedup/, cache/, projects/, auth/   # Nivel 2
-└── scan/, web/, main.py         # Nivel 3
+├── core/, utils/                                                      # Nivel 1
+├── validators/, scanner/, converter/, dedup/, cache/, projects/,
+│   auth/, ai/, context/                                               # Nivel 2
+└── scan/, web/, main.py                                               # Nivel 3
 ```
 
-65 ficheros `.py` en `src/doc_organize/` (13 paquetes + `main.py`/`__main__.py`) — subió de 52
-ficheros/11 paquetes con los paquetes `ai/` (monitorización de uso/coste + cliente de clasificación
-por dominios, sesiones `2026-09-07`/`2026-09-08`) y `context/` (organización documental por
-dominios, sesiones `2026-09-08`/`2026-09-10`). **Pendiente**: `.ai/architecture.md` no se ha
-actualizado con el nivel de `ai/`/`context/` en el diagrama — no asumir su nivel sin revisar sus
-imports reales.
-Excepción documentada a la regla de niveles: `projects/` importa de
-`validators/` (ambos Nivel 2) — ver `.ai/architecture.md` para la
-justificación. Detalle completo: `.ai/architecture.md`, `docs/functional/index.md`.
+75 ficheros `.py` en `src/doc_organize/` (15 paquetes + `main.py`/`__main__.py`) — subió de 65
+ficheros/13 paquetes con el nuevo `web/routes/tenants.py` y el resto del rediseño Tenant/Role/User
+(sesión `2026-09-11-tenant-role-user-redesign`); `ai/`/`context/` (monitorización de uso/coste,
+clasificación por dominios/taxonomía y organización documental, sesiones `2026-09-07` a
+`2026-09-10`) ya estaban contados desde la actualización anterior.
+Excepciones documentadas a la regla de niveles (ambas en `.ai/architecture.md`): `projects/`
+importa de `validators/`; `context/` importa de `ai/` (tipos para el cliente IA inyectado,
+opcional). Detalle completo: `.ai/architecture.md`, `docs/functional/index.md`.
 
 ---
 
 ## Trabajo pendiente conocido (no bloqueante)
 
+- **Sincronización de versión**: `CHANGELOG.md` `[Unreleased]` le faltaban 3 entradas (plantillas
+  de taxonomía compartidas, borrador de manifiesto por IA, panel de configuración de IA) y toda la
+  entrada del rediseño Tenant/Role/User — completadas en la sesión `2026-09-11` de esta misma
+  fecha (maturity-assessment). Sigue pendiente: bump de `pyproject.toml` a la siguiente versión
+  (candidato `0.9.0`, sin breaking changes de *paquete* — la API pública de `AuthStore` sí tiene un
+  breaking change interno, pero el proyecto no publica en PyPI todavía) y la fila correspondiente
+  en `COMPATIBILITY.md` — ver `sync.instructions.md` para el checklist completo.
 - Migración de los 6 enums de `core/models.py` (`DocumentStatus`,
   `ConversionStatus`, `DuplicateReason`, `OcrMode`, `ScanEventType`,
   `DedupEventType`) a `enum.StrEnum` (sugerencia `UP042` de ruff) — diferida
@@ -137,6 +159,10 @@ justificación. Detalle completo: `.ai/architecture.md`, `docs/functional/index.
   `organizado/` — sin desambiguación todavía (limitación conocida, documentada en `Reorganizer`).
 - `context/`: sin test de integración real contra un LiteLLM Proxy vía Docker (solo
   `httpx.MockTransport`) — validar manualmente antes de depender de la Sub-fase B en producción.
+- `web/routes/tenants.py`: 6 de sus 8 handlers HTTP y sus 6 modelos Pydantic de payload no llevan
+  docstring — mismo patrón ya presente en `web/routes/admin.py` (su hermano, imitado al crear este
+  fichero), no una regresión de la sesión `2026-09-11-tenant-role-user-redesign` que lo introdujo.
+  Bajo valor, no priorizado (los nombres de función/campo ya son autoexplicativos).
 - `context/`: `images_dir` de `ConversionResult` no se persiste en `cache.db` ni en `document.json`
   — cualquier código futuro que reconstruya `ConversionResult` desde caché debe recalcularlo
   explícitamente (dos bugs reales, sesión `2026-09-10-context-mkdocs-site-imagenes`, nacieron de

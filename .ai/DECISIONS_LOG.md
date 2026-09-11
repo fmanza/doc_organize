@@ -122,7 +122,13 @@ esa propia decisión.
 `.github/instructions/sync.instructions.md`). No asumir que `zensical` es una herramienta disponible
 en este proyecto.
 
-## Revisión 9 — Roles, gestión de usuarios y usuario admin por defecto
+## Revisión 9 (parcialmente reemplazada por la Revisión 16) — Roles, gestión de usuarios y usuario admin por defecto
+
+> El modelo de `Role` **por tenant** y el bootstrap automático en `create_tenant()` descritos aquí
+> dejaron de ser ciertos el 2026-09-11 (Revisión 16): `Role` es ahora global (`name` único en toda
+> la instalación) y solo el tenant `DEFAULT_TENANT_ID` recibe bootstrap automático. Se conserva esta
+> entrada íntegra como historial de la decisión original (por qué se introdujo `Role` en absoluto),
+> no como descripción del comportamiento actual.
 
 **Decisión**: `Role` (rol reutilizable por tenant, `is_admin` + lista de proyectos permitidos) en vez
 de flags sueltos en `User`, o un motor RBAC granular por acción; `AuthStore.create_tenant()` crea
@@ -167,7 +173,13 @@ opcional para no romper compatibilidad interna. `update_role` con `is_admin=Fals
 `project_names` ahora lanza `AuthError` en vez de vaciar la lista en silencio — cualquier integración
 existente que dependiera de ese vaciado implícito debe pasar `project_names=[]` explícitamente.
 
-## Revisión 13 — Auditoría de seguridad post-revisión 9: `allowed_scan_roots`, cookie `Secure`, rate limiting de login
+## Revisión 13 (hallazgo de `allowed_scan_roots` reemplazado por la Revisión 16) — Auditoría de seguridad post-revisión 9: `allowed_scan_roots`, cookie `Secure`, rate limiting de login
+
+> `Role.allowed_scan_roots` (la allow-list explícita descrita aquí) se retiró el 2026-09-11
+> (Revisión 16) en favor de un acceso de escaneo **implícito**: la única raíz permitida para un rol
+> restringido es `project.root_path` de cada proyecto en `project_names`, sin ninguna lista
+> configurable aparte. La cookie `Secure` y el `LoginRateLimiter` descritos en esta misma revisión
+> siguen vigentes tal cual, sin cambios.
 
 **Decisión**: `Role.allowed_scan_roots: list[str]` (default `[]`) como allow-list explícita de
 raíces del sistema de archivos que un rol no-admin puede escanear vía `WS
@@ -232,3 +244,46 @@ original de `.github/SHARED_INSTRUCTIONS.md` §"Plantillas Jinja2 (módulo web/)
 (no depende de la extensión); toda plantilla nueva debe usar `.html.j2` desde el principio. Ningún
 cambio de comportamiento en tiempo de ejecución — verificado con la suite de tests de `web/`
 (85 tests) tras el renombrado.
+
+## Revisión 16 — Rediseño Tenant/Role/User: bootstrap de fábrica, `Role` global, acceso de escaneo implícito, `is_instance_admin`
+
+**Decisión**: (1) `AuthStore` aprovisiona de fábrica, en `__aenter__()` y solo para
+`DEFAULT_TENANT_ID`, un rol `admin` + usuario `admin`/`admin` (`is_instance_admin=True`), sin
+aprovisionamiento manual previo por CLI — `create_tenant()` para cualquier otro tenant ya no crea
+ningún rol/usuario. (2) `Role` deja de tener `tenant_id`: `name` único **globalmente**, asignable a
+usuarios de tenants distintos. (3) `Role.allowed_scan_roots` se retira; el acceso de escaneo de un
+rol no-admin pasa a ser implícito (`project.root_path` de cada proyecto en `project_names`). (4)
+Nuevo `User.is_instance_admin`, independiente del `is_admin` de un rol: gestiona cualquier tenant
+(pantalla "Tenants y usuarios") y recursos de instancia (config de IA, plantillas de taxonomía).
+(5) La cuenta de fábrica no puede completar `POST /login` en modo no-loopback mientras conserve su
+contraseña — se rechaza el login en sí. (6) Nuevo `User.is_blocked`: invalida todas las sesiones
+activas del usuario en la misma transacción que lo fija.
+**Alternativas descartadas**: para (5), permitir el login y reforzar solo el bloqueo de rutas
+posteriores (`must_change_password`) — descartado porque `/change-password` ya exige sesión creada,
+así que un atacante que adivinara la contraseña de fábrica podría cambiarla él mismo (toma de
+control) antes de que el admin real completara su primer login. Para (2)/(7 más abajo), un ACL
+completo de "rol pertenece a tenant X" para impedir compartir un rol entre tenants — rechazado por
+sobre-ingeniería no pedida; se optó por visibilidad (usuarios asignados, filtrados por tenant en
+`/admin/roles`) en vez de un mecanismo de aislamiento nuevo.
+**Razón**: petición explícita del usuario (`.github/prompts/tenant_role_user_redesign.prompt.md`),
+con 3 decisiones de seguridad ya resueltas en el propio prompt de entrada (bootstrap de fábrica con
+bloqueo de login, acceso de escaneo implícito, nivel de instancia separado) y 4 puntos (1 Alto + 3
+Medio) cerrados en AUDIT_PLAN antes de IMPLEMENT — ver
+`.ai/sessions/2026-09-11-tenant-role-user-redesign/00_PLAN.md` para el detalle completo de ambas
+fases.
+**Impacto actual**: **breaking change** en la API pública de `AuthStore` —
+`create_role/get_role/update_role/delete_role/list_roles/can_access_project` pierden el parámetro
+`tenant_id`; `Role.allowed_scan_roots` desaparece del modelo y de `/api/roles*`. `tenant create`
+(CLI) ya no aprovisiona un usuario automático para tenants que no sean `DEFAULT_TENANT_ID` —
+cambio de comportamiento deliberado, no regresión. Migración de esquema idempotente en
+`AuthStore._migrate_schema()`: `roles` se reconstruye sin `tenant_id` (procedimiento oficial de
+SQLite para tablas con FK/UNIQUE compuesto — `foreign_keys=OFF`/tabla nueva/copia/`DROP`/`RENAME`/
+`foreign_keys=ON`), desambiguando por nombre si dos tenants tenían un rol homónimo; `is_instance_admin`
+se retro-asigna a los admins del tenant `default`, o al usuario más antiguo de la instalación si no
+había ninguno — nunca deja una instalación migrada sin ningún `is_instance_admin` (escape hatch de
+CLI si aun así hiciera falta corregirlo: `user set-instance-admin`). (7) Riesgo residual aceptado,
+no bloqueante: un rol global compartido entre tenants puede ser editado por el admin de cualquiera
+de ellos sin que el otro se entere — mitigado con visibilidad, no con un ACL nuevo (ver
+"Alternativas descartadas"). Detalle completo, hallazgos y evidencia:
+`.ai/sessions/2026-09-11-tenant-role-user-redesign/{00_PLAN,TRACEABILITY}.md`. Sigue sin cerrar
+version (`CHANGELOG.md` `[Unreleased]`, pendiente de bump de `pyproject.toml`).

@@ -21,8 +21,11 @@ pip install -e ".[dev,web,docs]"
 ```
 
 - `dev`: pytest, ruff, mypy y el resto de herramientas de calidad.
-- `web`: FastAPI/Uvicorn/Jinja2 — necesario para correr `tests/unit/test_web_*.py`.
+- `web`: FastAPI/Uvicorn/Jinja2 + `cryptography` (Fernet, cifrado de credenciales de IA en
+  `/admin/configuracion-ia`) — necesario para correr `tests/unit/test_web_*.py`.
 - `docs`: mkdocs + mkdocs-material + mkdocstrings — necesario para `mkdocs build`.
+- `ai`: `httpx` — clientes de IA (`ai/`, LiteLLM Proxy/GitHub Copilot Pro).
+- `context`: `pyyaml` — front matter de `taxonomy_manifest.md` y plantillas compartidas (`context/`).
 
 El núcleo (`pip install doc_organize` sin extras) **no** instala `fastapi`/`uvicorn`/`jinja2` —
 verificado, es una condición de seguridad/tamaño explícita (`§11` del PLAN).
@@ -48,8 +51,12 @@ python -m doc_organize project list
 python -m doc_organize scan --project "Mi Proyecto" --paths /ruta/a/documentos [--use-ocr] [--use-gpu]  # ya no deduplica
 python -m doc_organize deduplicate --project "Mi Proyecto" --paths /ruta/a/documentos  # accion aparte, a peticion del usuario
 python -m doc_organize web [--host 0.0.0.0] [--port 8000]
+# El tenant "default" y su usuario admin/admin se crean de fábrica al abrir auth.db por primera
+# vez (rediseño Tenant/Role/User, 2026-09-11) -- no hace falta lo de abajo para arrancar en
+# no-loopback, salvo que quieras un tenant propio en vez del de fábrica:
 python -m doc_organize tenant create "Mi Organización"
 python -m doc_organize user create alice --tenant mi-organizacion   # contraseña vía prompt interactivo
+python -m doc_organize user set-instance-admin alice --tenant mi-organizacion  # is_instance_admin
 ```
 
 ## CI real (`.github/workflows/`)
@@ -63,5 +70,9 @@ python -m doc_organize user create alice --tenant mi-organizacion   # contraseñ
 
 Ninguna es obligatoria para el uso local (loopback). No existe `DOC_ORGANIZE_API_TOKEN` (retirado en
 la revisión 8 — autenticación es multi-usuario, no un token compartido). Para exponer la web fuera
-de loopback, provisiona tenants/usuarios por CLI antes de arrancar (ver arriba); sin ellos, el
-servidor arranca pero queda inaccesible (nadie puede autenticarse).
+de loopback, ya no hace falta provisionar nada por CLI de antemano (rediseño Tenant/Role/User,
+2026-09-11): `AuthStore` crea de fábrica el tenant `default` + usuario `admin`/`admin` al primer
+arranque — pero esa cuenta no puede completar el login en modo no-loopback mientras conserve la
+contraseña de fábrica (cámbiala desde loopback primero, ver `docs/functional/access.md`).
+`DOC_ORGANIZE_SECRETS_KEY` (32 bytes en base64 urlsafe) es opcional: sin ella, el panel
+`/admin/configuracion-ia` sigue funcionando en modo "solo campos no-secretos".
