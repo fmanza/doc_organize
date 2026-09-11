@@ -107,6 +107,9 @@ en el placeholder `sin-clasificar` por no alcanzar el umbral en ese eje).
 
 ## Plantillas de Manifiesto (biblioteca compartida entre proyectos)
 
+> La gestión de esta biblioteca (crear/editar/borrar plantillas) se hace desde
+> `/admin/plantillas-taxonomia` — ver [Panel de Administración](admin.md).
+
 Además del `taxonomy_manifest.md` propio de un proyecto, `doc_organize` mantiene una
 **biblioteca de plantillas** reutilizables entre proyectos — mismo formato de fichero
 (front matter YAML + prosa libre), pero fuera de cualquier `project.root_path`:

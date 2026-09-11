@@ -30,6 +30,8 @@ nav:
       - Monitorización de uso IA: functional/ai_usage_monitoring.md
       - Organización documental (dominios y contextos): functional/context.md
       - Configuración de IA y plantillas: functional/ai_settings.md
+      - Acceso a la Aplicación: functional/access.md
+      - Panel de Administración: functional/admin.md
   - API:
       - Descripción general: api/index.md
       - Validadores: api/validators.md

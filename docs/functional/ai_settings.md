@@ -1,5 +1,8 @@
 # Configuración de IA y biblioteca de plantillas desde la web
 
+> Para una visión de conjunto de todo el panel `/admin` (incluyendo Roles y
+> Usuarios), ver [Panel de Administración](admin.md).
+
 Cierra los huecos detectados en la auditoría de parametrización de 2026-09-10:
 antes de esta funcionalidad, las 5 familias de credenciales de IA
 (`DOC_ORGANIZE_LITELLM_*`/`DOC_ORGANIZE_GITHUB_*`) solo eran configurables editando
