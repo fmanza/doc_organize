@@ -13,7 +13,8 @@ instalables desde fuera.
 
 | Versión | Python | Dependencias clave | Estado |
 |---|---|---|---|
-| 0.8.0 | `>=3.11` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0`; nuevos extras `[ai]`: `httpx>=0.24`, `[context]`: `pyyaml>=6.0` | ✅ Activa |
+| 0.9.0 | `>=3.11` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0`, nueva `cryptography>=41.0` (cifrado Fernet de credenciales de IA); `[ai]`: `httpx>=0.24`; `[context]`: `pyyaml>=6.0` | ✅ Activa |
+| 0.8.0 | `>=3.11` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0`; nuevos extras `[ai]`: `httpx>=0.24`, `[context]`: `pyyaml>=6.0` | ❌ EOL |
 | 0.7.0 | `>=3.11` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0` | ❌ EOL |
 | 0.6.0 | `>=3.11` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0` | ❌ EOL |
 | 0.5.0 | `>=3.11` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0` | ❌ EOL |
@@ -29,8 +30,11 @@ versión tal como quedó commiteado (`>=3.11`), no su estado inicial.
 
 Las dependencias clave (`docling`, `pydantic`, `aiosqlite`) no han cambiado de cota mínima en
 ninguna versión hasta la fecha — la columna se repite igual en la mayoría de filas porque es un
-hecho verificado (`git show <commit>:pyproject.toml`), no una omisión. La 0.8.0 es la primera en
-sumar cotas nuevas, vía dos extras opcionales (`ai`, `context`) que no afectan a la instalación base.
+hecho verificado (`git show <commit>:pyproject.toml`), no una omisión. La 0.8.0 fue la primera en
+sumar cotas nuevas, vía dos extras opcionales (`ai`, `context`) que no afectan a la instalación
+base. La 0.9.0 añade `cryptography>=41.0` al extra `[web]` (cifrado en reposo de credenciales de
+IA guardadas desde `/admin/configuracion-ia`) — sigue sin afectar a la instalación base
+(`pip install doc_organize` sin extras).
 
 ## Cómo mantener esta tabla
 

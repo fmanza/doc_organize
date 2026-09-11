@@ -6,6 +6,8 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-11
+
 ### Added
 
 - `src/doc_organize/context/taxonomy_manifest.py` (nuevo): `load_taxonomy_manifest()` lee
