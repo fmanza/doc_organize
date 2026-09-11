@@ -38,13 +38,45 @@
         <th class="text-left px-2.5 py-1.5 border-b border-gray-300"></th>
     </tr></thead>
     <tbody>
+    {% set admin_role_count = roles | selectattr("is_admin") | list | length %}
     {% for role in roles %}
         <tr data-role-id="{{ role.id }}">
             <td class="px-2.5 py-1.5 border-b border-gray-300">{{ role.name }}</td>
             <td class="px-2.5 py-1.5 border-b border-gray-300">{{ "Sí" if role.is_admin else "No" }}</td>
             <td class="px-2.5 py-1.5 border-b border-gray-300">{{ role.project_names | join(", ") if role.project_names else "—" }}</td>
             <td class="px-2.5 py-1.5 border-b border-gray-300">{{ assigned_usernames_by_role[role.id] | join(", ") if assigned_usernames_by_role[role.id] else "—" }}</td>
-            <td class="px-2.5 py-1.5 border-b border-gray-300"><button type="button" class="delete-role text-red-700 hover:underline bg-transparent border-0 cursor-pointer p-0" data-role-id="{{ role.id }}">Eliminar</button></td>
+            <td class="px-2.5 py-1.5 border-b border-gray-300 whitespace-nowrap">
+                <button type="button" class="edit-role text-blue-600 hover:underline bg-transparent border-0 cursor-pointer p-0 mr-3" data-role-id="{{ role.id }}">Editar</button>
+                <button type="button" class="delete-role text-red-700 hover:underline bg-transparent border-0 cursor-pointer p-0" data-role-id="{{ role.id }}">Eliminar</button>
+            </td>
+        </tr>
+        <tr class="edit-role-row" data-role-id="{{ role.id }}" hidden>
+            <td colspan="5" class="px-2.5 py-2 border-b border-gray-300 bg-gray-50">
+                <form class="edit-role-form flex gap-2 flex-wrap items-start" data-role-id="{{ role.id }}">
+                    <label class="sr-only" for="edit-role-name-{{ role.id }}">Nombre del rol</label>
+                    <input type="text" id="edit-role-name-{{ role.id }}" class="edit-role-name border border-gray-300 rounded px-2 py-1.5 flex-1 min-w-[200px]"
+                           value="{{ role.name }}" required maxlength="{{ role_name_max_length }}"
+                           title="Máx. {{ role_name_max_length }} caracteres; letras, números, espacio, punto, guion y guion bajo.">
+                    <label class="flex items-center gap-1">
+                        <input type="checkbox" class="edit-role-is-admin" {% if role.is_admin %}checked{% endif %}> Admin (ve todos los proyectos del tenant)
+                    </label>
+                    {% if role.is_admin and admin_role_count == 1 %}
+                    <p class="text-amber-700 text-xs w-full m-0">Este es el único rol con permisos de administración del sistema. Si le quitas "Admin", ninguna cuenta con este rol podrá seguir gestionando tenants o roles (a menos que ya exista otro rol admin).</p>
+                    {% endif %}
+                    <fieldset class="edit-role-projects-fieldset border border-gray-300 rounded p-3 w-full">
+                        <legend class="sr-only">Proyectos permitidos</legend>
+                        {% if projects %}
+                        {% for project in projects %}
+                        <label class="flex items-center gap-1 py-0.5"><input type="checkbox" class="role-project-checkbox" value="{{ project.name }}" {% if project.name in role.project_names %}checked{% endif %}> {{ project.name }}</label>
+                        {% endfor %}
+                        {% else %}
+                        <span>No hay proyectos todavía.</span>
+                        {% endif %}
+                    </fieldset>
+                    <button type="submit" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Guardar</button>
+                    <button type="button" class="cancel-edit-role px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-white hover:bg-gray-100" data-role-id="{{ role.id }}">Cancelar</button>
+                </form>
+            </td>
         </tr>
     {% endfor %}
     </tbody>
@@ -52,17 +84,18 @@
 
 {% include "_shared_scripts.html.j2" %}
 <script>
-const roleIsAdminCheckbox = document.getElementById("role-is-admin");
-const roleProjectsFieldset = document.getElementById("role-projects-fieldset");
-
-function syncRoleProjectsFieldset() {
-    const disabled = roleIsAdminCheckbox.checked;
-    roleProjectsFieldset.querySelectorAll(".role-project-checkbox").forEach((checkbox) => {
+function syncProjectsFieldset(isAdminCheckbox, projectsFieldset) {
+    const disabled = isAdminCheckbox.checked;
+    projectsFieldset.querySelectorAll(".role-project-checkbox").forEach((checkbox) => {
         checkbox.disabled = disabled;
         if (disabled) checkbox.checked = false;
     });
 }
-roleIsAdminCheckbox.addEventListener("change", syncRoleProjectsFieldset);
+
+const roleIsAdminCheckbox = document.getElementById("role-is-admin");
+const roleProjectsFieldset = document.getElementById("role-projects-fieldset");
+roleIsAdminCheckbox.addEventListener("change", () => syncProjectsFieldset(roleIsAdminCheckbox, roleProjectsFieldset));
+syncProjectsFieldset(roleIsAdminCheckbox, roleProjectsFieldset);
 
 document.getElementById("create-role-form").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -90,6 +123,51 @@ document.querySelectorAll(".delete-role").forEach((button) => {
     });
 });
 
-syncRoleProjectsFieldset();
+function closeEditRoleRow(roleId) {
+    const row = document.querySelector(`.edit-role-row[data-role-id="${roleId}"]`);
+    const form = row.querySelector(".edit-role-form");
+    const isAdminCheckbox = form.querySelector(".edit-role-is-admin");
+    const projectsFieldset = form.querySelector(".edit-role-projects-fieldset");
+    form.querySelector(".edit-role-name").value = form.querySelector(".edit-role-name").defaultValue;
+    isAdminCheckbox.checked = isAdminCheckbox.defaultChecked;
+    projectsFieldset.querySelectorAll(".role-project-checkbox").forEach((checkbox) => {
+        checkbox.checked = checkbox.defaultChecked;
+    });
+    syncProjectsFieldset(isAdminCheckbox, projectsFieldset);
+    row.hidden = true;
+}
+
+document.querySelectorAll(".edit-role").forEach((button) => {
+    button.addEventListener("click", () => {
+        document.querySelector(`.edit-role-row[data-role-id="${button.dataset.roleId}"]`).hidden = false;
+    });
+});
+
+document.querySelectorAll(".cancel-edit-role").forEach((button) => {
+    button.addEventListener("click", () => closeEditRoleRow(button.dataset.roleId));
+});
+
+document.querySelectorAll(".edit-role-form").forEach((form) => {
+    const isAdminCheckbox = form.querySelector(".edit-role-is-admin");
+    const projectsFieldset = form.querySelector(".edit-role-projects-fieldset");
+    isAdminCheckbox.addEventListener("change", () => syncProjectsFieldset(isAdminCheckbox, projectsFieldset));
+    syncProjectsFieldset(isAdminCheckbox, projectsFieldset);
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const roleId = form.dataset.roleId;
+        const name = form.querySelector(".edit-role-name").value;
+        const is_admin = isAdminCheckbox.checked;
+        const project_names = Array.from(projectsFieldset.querySelectorAll(".role-project-checkbox:checked")).map(
+            (checkbox) => checkbox.value
+        );
+        try {
+            await postJson(`/api/roles/${roleId}`, "PATCH", { name, is_admin, project_names });
+            window.location.reload();
+        } catch (err) {
+            document.getElementById("role-error").textContent = err.message;
+        }
+    });
+});
 </script>
 {% endblock %}
