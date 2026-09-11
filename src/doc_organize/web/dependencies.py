@@ -135,12 +135,22 @@ async def authorize_project_websocket(websocket: WebSocket, project_name: str) -
         return tenant_id, None
 
     async with get_auth_store(websocket) as store:
-        allowed = await store.can_access_project(tenant_id, authenticated.role_id, project_name)
-        if not allowed:
+        allowed = await store.can_access_project(authenticated.role_id, project_name)
+    if not allowed:
+        await websocket.close(code=1008, reason=_WS_REASON_PROJECT_NOT_FOUND)
+        return None
+
+    # Acceso de escaneo implícito (rediseño Tenant/Role/User, retirada de
+    # `Role.allowed_scan_roots`): la única raíz permitida para un rol restringido
+    # es la carpeta de trabajo del propio proyecto al que ya se confirmó acceso
+    # arriba -- no hay ninguna lista de rutas configurable aparte.
+    async with get_project_registry(websocket) as registry:
+        try:
+            project = await registry.get_project(project_name, tenant_id=tenant_id)
+        except ProjectNotFoundError:
             await websocket.close(code=1008, reason=_WS_REASON_PROJECT_NOT_FOUND)
             return None
-        role = await store.get_role(tenant_id, authenticated.role_id)
-        return tenant_id, role.allowed_scan_roots
+    return tenant_id, [project.root_path]
 
 
 async def resolve_ws_project(websocket: WebSocket, registry: ProjectRegistry, name: str, tenant_id: str) -> Project | None:
@@ -238,30 +248,67 @@ def require_admin(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Esta operación requiere un rol admin.")
 
 
-async def get_allowed_scan_roots(request: Request) -> list[str] | None:
-    """Resuelve las raíces de escaneo permitidas para la sesión de `request`, o `None` si no hay restricción.
+def require_admin_or_instance_admin(request: Request) -> None:
+    """Bloquea la ruta salvo que la sesión tenga `is_admin` (de su propio tenant)
+    o `is_instance_admin` (de cualquiera) -- usada por `/admin/roles`/`/admin/users`
+    (rol global + usuarios del PROPIO tenant de quien pregunta): un
+    `is_instance_admin` gestiona con naturalidad su propio tenant igual que
+    cualquier otro, sin necesitar además `is_admin` en él (rediseño Tenant/Role/User).
 
-    Equivalente HTTP de la comprobación que `authorize_project_websocket()` hace a
-    mano para los WebSocket de escaneo/deduplicación/contexto (`BaseHTTPMiddleware`
-    no cubre WebSocket, así que esos handlers no pueden depender de
-    `AuthMiddleware`/`request.state`). Usado
-    por los endpoints REST del explorador de carpetas y de la lista persistente
-    de carpetas (`web/routes/filesystem.py`, `web/routes/scan.py`), que sí pasan
-    por `AuthMiddleware` y ya tienen `request.state.is_admin`/`role_id` resueltos.
+    En loopback/sin auth no hay sesión que resolver: no se aplica ninguna
+    restricción (mismo criterio que `require_admin`/`require_instance_admin`).
+    """
+    is_admin = getattr(request.state, "is_admin", None)
+    if is_admin is None:
+        return
+    is_instance_admin = getattr(request.state, "is_instance_admin", False)
+    if not is_admin and not is_instance_admin:
+        raise HTTPException(status_code=403, detail="Esta operación requiere un rol admin o nivel de administrador de instancia.")
+
+
+def require_instance_admin(request: Request) -> None:
+    """Bloquea la ruta si la sesión activa no tiene `is_instance_admin=True`
+    (rediseño Tenant/Role/User).
+
+    Gatea la pantalla cruzada "Tenants y usuarios" y la gestión de recursos *de
+    instancia* (afectan a todos los tenants, no a uno solo): configuración de IA
+    (`InstanceSecretsStore`) y biblioteca de plantillas de taxonomía
+    (`TaxonomyTemplateRegistry`) -- un `is_admin` de un único tenant no debe poder
+    tocar una credencial o una plantilla compartida por el resto de tenants del
+    despliegue.
+
+    En loopback/sin auth no hay sesión que resolver (mismo criterio que
+    `require_admin`): no se aplica ninguna restricción.
+    """
+    is_instance_admin = getattr(request.state, "is_instance_admin", None)
+    if is_instance_admin is None:
+        return
+    if not is_instance_admin:
+        raise HTTPException(status_code=403, detail="Esta operación requiere nivel de administrador de instancia.")
+
+
+def get_allowed_scan_roots(request: Request, project: Project | None) -> list[str] | None:
+    """Resuelve las raíces de escaneo permitidas para la sesión de `request` dado
+    el proyecto sobre el que se opera, o `None` si no hay restricción.
+
+    Acceso de escaneo implícito por proyecto (rediseño Tenant/Role/User, retirada
+    de `Role.allowed_scan_roots`): la única raíz permitida para un rol restringido
+    es `project.root_path` -- no hay ninguna lista de rutas configurable aparte.
+    Asume que el llamador ya confirmó acceso a `project` (vía `require_project_access`
+    o equivalente) antes de invocar esta función; no vuelve a comprobarlo.
 
     `None` (sin restricción) para: sesión no resuelta (loopback/sin auth, mismo
-    criterio que `get_tenant_id`) o rol `is_admin`. Una lista (posiblemente
-    vacía) para un rol restringido, tomada de `Role.allowed_scan_roots`.
+    criterio que `get_tenant_id`) o rol `is_admin`. Sin `project` (rol restringido
+    sin contexto de un proyecto concreto, p.ej. `/api/fs/browse` sin `?project=`),
+    devuelve `[]` (no `None`): ninguna ruta es aceptable sin saber a qué proyecto
+    pertenece.
     """
     is_admin = getattr(request.state, "is_admin", None)
     if is_admin is None or is_admin:
         return None
-
-    role_id = request.state.role_id
-    tenant_id = get_tenant_id(request)
-    async with get_auth_store(request) as store:
-        role = await store.get_role(tenant_id, role_id)
-    return role.allowed_scan_roots
+    if project is None:
+        return []
+    return [project.root_path]
 
 
 async def require_project_access(name: str, request: Request) -> None:
@@ -281,9 +328,8 @@ async def require_project_access(name: str, request: Request) -> None:
         return
 
     role_id = request.state.role_id
-    tenant_id = get_tenant_id(request)
     async with get_auth_store(request) as store:
-        allowed = await store.can_access_project(tenant_id, role_id, name)
+        allowed = await store.can_access_project(role_id, name)
     if not allowed:
         raise HTTPException(status_code=404, detail=str(ProjectNotFoundError(name)))
 
@@ -300,6 +346,8 @@ __all__ = [
     "project_operation_key",
     "release_project_operation_lock",
     "require_admin",
+    "require_admin_or_instance_admin",
+    "require_instance_admin",
     "require_project_access",
     "resolve_ws_project",
 ]

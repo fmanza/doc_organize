@@ -61,20 +61,37 @@ deduplicaciones); y descargar un export ZIP.
 ### Exponer la web fuera de tu máquina
 
 En un host no-loopback (`--host 0.0.0.0`), la web exige que los usuarios inicien
-sesión. Antes de exponerla, crea al menos un tenant y un usuario:
+sesión. No hace falta provisionar nada por CLI de antemano: al abrir `auth.db`
+por primera vez, `doc_organize` crea de fábrica el tenant `default` con un
+usuario `admin`/`admin`. Esa cuenta, sin embargo, no puede completar el login
+mientras el servidor esté en modo no-loopback y conserve la contraseña de
+fábrica — cámbiala primero desde loopback:
+
+```bash
+# 1. En loopback (por defecto), entra con admin/admin y cambia la contraseña
+python -m doc_organize web
+# http://127.0.0.1:8000/login -> te redirige a /change-password tras entrar
+
+# 2. Ahora sí, expón el servidor
+python -m doc_organize web --host 0.0.0.0 --port 8000
+# entra con admin / la contraseña nueva
+```
+
+Para un tenant y usuario propios (en vez de usar el de fábrica), sigue
+disponible `tenant create`/`user create` por CLI, o la pantalla "Tenants y
+usuarios" del panel `/admin` (solo visible para un usuario `is_instance_admin`,
+como el `admin` de fábrica):
 
 ```bash
 python -m doc_organize tenant create "Mi Organización"     # -> tenant_id, p.ej. "mi-organizacion"
 python -m doc_organize user create alice --tenant mi-organizacion
 # La contraseña se pide de forma interactiva (nunca como argumento de CLI)
-
-python -m doc_organize web --host 0.0.0.0 --port 8000
 ```
 
-Sin ningún usuario provisionado, el servidor arranca igual pero queda
-inaccesible: nadie puede autenticarse en `/login`. No expongas `--host 0.0.0.0`
-a una red no confiable sin un proxy TLS delante — `doc_organize` no termina TLS
-por sí mismo.
+No expongas `--host 0.0.0.0` a una red no confiable sin un proxy TLS delante —
+`doc_organize` no termina TLS por sí mismo. Ver
+[Acceso a la Aplicación](../functional/access.md) para el detalle completo del
+bloqueo de la cuenta de fábrica y el resto del modelo de autenticación.
 
 ## 4. Uso avanzado sin proyecto
 

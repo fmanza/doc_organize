@@ -9,6 +9,7 @@ import httpx
 import pytest
 
 from doc_organize.auth import AuthStore
+from doc_organize.core.constants import DEFAULT_ADMIN_PASSWORD, DEFAULT_ADMIN_USERNAME, DEFAULT_TENANT_ID
 from doc_organize.core.models import SecurityConfig
 from doc_organize.web import create_app
 from doc_organize.web.auth import SESSION_COOKIE_NAME
@@ -375,3 +376,72 @@ async def test_users_of_different_tenants_only_see_their_own_projects(tmp_path) 
 
     assert [p["name"] for p in alice_projects] == ["Proyecto Acme"]
     assert [p["name"] for p in bob_projects] == ["Proyecto Globex"]
+
+
+# ===== Bloqueo de la cuenta de fábrica en modo no-loopback (decisión de diseño 1,
+# rediseño Tenant/Role/User) =====
+
+
+@pytest.mark.asyncio
+async def test_factory_admin_login_rejected_in_non_loopback_mode(tmp_path) -> None:
+    """La cuenta de fábrica (`DEFAULT_TENANT_ID`/`DEFAULT_ADMIN_USERNAME`) no puede
+    completar el login en modo no-loopback mientras conserve la contraseña de
+    fábrica -- ni siquiera queda una sesión a medias: se rechaza el login en sí,
+    no solo el resto de rutas tras entrar."""
+    app = _non_loopback_app(tmp_path)  # AuthStore la aprovisiona de fábrica al abrir
+    async with _client(app) as client:
+        response = await client.post(
+            "/login", data={"tenant_id": DEFAULT_TENANT_ID, "username": DEFAULT_ADMIN_USERNAME, "password": DEFAULT_ADMIN_PASSWORD}
+        )
+    assert response.status_code == 403
+    assert SESSION_COOKIE_NAME not in response.cookies
+
+
+@pytest.mark.asyncio
+async def test_factory_admin_login_failure_does_not_count_against_rate_limiter(tmp_path) -> None:
+    """Las credenciales eran correctas -- no es una señal de adivinación, así que
+    no debe consumir el contador de `LoginRateLimiter` (que sí protege el
+    adivinado de esta misma cuenta con OTRAS contraseñas)."""
+    app = _non_loopback_app(tmp_path)
+    async with _client(app) as client:
+        for _ in range(5):
+            response = await client.post(
+                "/login", data={"tenant_id": DEFAULT_TENANT_ID, "username": DEFAULT_ADMIN_USERNAME, "password": DEFAULT_ADMIN_PASSWORD}
+            )
+            assert response.status_code == 403  # nunca 429: no se acumula como fallo
+
+        wrong_password = await client.post(
+            "/login", data={"tenant_id": DEFAULT_TENANT_ID, "username": DEFAULT_ADMIN_USERNAME, "password": "adivinando"}
+        )
+    assert wrong_password.status_code == 401  # sigue libre para fallos "de verdad"
+
+
+@pytest.mark.asyncio
+async def test_factory_admin_login_succeeds_in_loopback_mode(tmp_path) -> None:
+    """En loopback no hay `AuthMiddleware` que exija sesión en absoluto -- el
+    bloqueo de la decisión 1 solo tiene sentido (y solo se aplica) en modo
+    no-loopback, donde la sesión sí importa."""
+    app = create_app(registry_path=tmp_path / "projects.json", auth_db_path=tmp_path / "auth.db")
+    async with _client(app) as client:
+        response = await client.post(
+            "/login", data={"tenant_id": DEFAULT_TENANT_ID, "username": DEFAULT_ADMIN_USERNAME, "password": DEFAULT_ADMIN_PASSWORD}
+        )
+    assert response.status_code == 303
+
+
+@pytest.mark.asyncio
+async def test_other_user_with_pending_password_change_is_not_locked_out(tmp_path) -> None:
+    """El bloqueo es exclusivo de la identidad exacta de fábrica -- un usuario
+    cualquiera con `must_change_password=True` (p.ej. tras un reseteo de un admin)
+    sigue pudiendo iniciar sesión en modo no-loopback con normalidad, porque su
+    contraseña temporal no es pública."""
+    auth_db_path = tmp_path / "auth.db"
+    async with AuthStore(auth_db_path) as store:
+        tenant = await store.create_tenant(_TENANT_NAME)
+        await store.create_user(tenant.id, "carol", "temp-password", must_change_password=True)
+
+    app = create_app(security=SecurityConfig(bind_host="0.0.0.0"), registry_path=tmp_path / "projects.json", auth_db_path=auth_db_path)
+    async with _client(app) as client:
+        response = await client.post("/login", data={"tenant_id": _TENANT_ID, "username": "carol", "password": "temp-password"})
+    assert response.status_code == 303
+    assert SESSION_COOKIE_NAME in response.cookies

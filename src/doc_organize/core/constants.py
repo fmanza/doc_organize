@@ -151,6 +151,12 @@ PROJECT_NAME_RESERVED_PATTERN = re.compile(
 #: Nombre por defecto de la base de datos de autenticacion (revision 8, §2.7.2).
 DEFAULT_AUTH_DB_NAME = "auth.db"
 
+#: Id del tenant implicito, creado de fabrica sin aprovisionamiento manual previo
+#: (rediseno Tenant/Role/User): lo usan el CLI y la web en modo loopback/sin
+#: autenticacion (`get_tenant_id()`), y es el unico tenant que
+#: `AuthStore._ensure_default_tenant_bootstrap()` aprovisiona automaticamente.
+DEFAULT_TENANT_ID = "default"
+
 #: Longitud maxima del identificador (slug) de un tenant (revision 8, §2.7.2).
 TENANT_ID_MAX_LENGTH = 63
 
@@ -210,6 +216,7 @@ __all__ = [
     "DEFAULT_ADMIN_USERNAME",
     "DEFAULT_AUTH_DB_NAME",
     "DEFAULT_CACHE_DB_NAME",
+    "DEFAULT_TENANT_ID",
     "DEDUP_HISTORY_JSONL_NAME",
     "DEDUP_REPORT_JSON_NAME",
     "DUPLICATES_FOLDER_NAME",

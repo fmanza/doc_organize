@@ -1,16 +1,26 @@
 """Tests del explorador de carpetas del servidor (botón "Buscar…" del menú Escaneo)."""
 
+from pathlib import Path
+
 import httpx
 import pytest
 
 from doc_organize.auth import AuthStore
 from doc_organize.core.models import SecurityConfig
+from doc_organize.projects import ProjectRegistry
 from doc_organize.web import create_app
 from doc_organize.web.auth import SESSION_COOKIE_NAME
 
 
 def _client(app, base_url: str = "http://testserver") -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=base_url)
+
+
+async def _create_project(tmp_path, registry_path, name: str = "Proyecto A", tenant_id: str = "acme-corp"):
+    base = tmp_path / "workspaces"
+    base.mkdir(exist_ok=True)
+    async with ProjectRegistry(registry_path) as registry:
+        return await registry.create_project(name, base, tenant_id=tenant_id)
 
 
 @pytest.mark.asyncio
@@ -63,26 +73,48 @@ async def test_browse_defaults_to_home_directory(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_browse_non_admin_role_rejects_path_outside_allowed_roots(tmp_path) -> None:
-    """Misma restricción `allowed_scan_roots` que el escaneo: un rol restringido
-    no puede explorar fuera de sus raíces permitidas."""
+async def test_browse_non_admin_role_without_project_param_rejects_everything(tmp_path) -> None:
+    """Acceso implícito por proyecto (rediseño Tenant/Role/User): sin `?project=`
+    en la petición, un rol restringido no tiene ninguna raíz permitida — no hay
+    ninguna lista de rutas configurable aparte de la carpeta del proyecto."""
     auth_db_path = tmp_path / "auth.db"
     async with AuthStore(auth_db_path) as store:
         tenant = await store.create_tenant("Acme Corp")
-        allowed_root = tmp_path / "allowed-root"
-        allowed_root.mkdir()
-        role = await store.create_role(tenant.id, "Lector", allowed_scan_roots=[str(allowed_root)])
+        role = await store.create_role("Lector")
         alice = await store.create_user(tenant.id, "alice", "s3cr3t-password", role_id=role.id)
         session = await store.create_session(alice)
 
-    outside = tmp_path / "outside"
-    outside.mkdir()
     security = SecurityConfig(bind_host="0.0.0.0")
     app = create_app(security=security, registry_path=tmp_path / "projects.json", auth_db_path=auth_db_path)
 
     async with _client(app) as client:
         client.cookies.set(SESSION_COOKIE_NAME, session.token)
-        response = await client.get("/api/fs/browse", params={"path": str(outside)})
+        response = await client.get("/api/fs/browse", params={"path": str(tmp_path)})
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_browse_non_admin_role_rejects_path_outside_allowed_roots(tmp_path) -> None:
+    """Con `?project=`, la única raíz permitida es `project.root_path` — una ruta
+    fuera de ella se rechaza aunque el rol tenga acceso al proyecto."""
+    auth_db_path = tmp_path / "auth.db"
+    async with AuthStore(auth_db_path) as store:
+        tenant = await store.create_tenant("Acme Corp")
+        role = await store.create_role("Lector", project_names=["Proyecto A"])
+        alice = await store.create_user(tenant.id, "alice", "s3cr3t-password", role_id=role.id)
+        session = await store.create_session(alice)
+
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path, tenant_id=tenant.id)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    security = SecurityConfig(bind_host="0.0.0.0")
+    app = create_app(security=security, registry_path=registry_path, auth_db_path=auth_db_path)
+
+    async with _client(app) as client:
+        client.cookies.set(SESSION_COOKIE_NAME, session.token)
+        response = await client.get("/api/fs/browse", params={"path": str(outside), "project": project.name})
 
     assert response.status_code == 403
 
@@ -92,26 +124,51 @@ async def test_browse_non_admin_role_allows_path_inside_allowed_roots(tmp_path) 
     auth_db_path = tmp_path / "auth.db"
     async with AuthStore(auth_db_path) as store:
         tenant = await store.create_tenant("Acme Corp")
-        allowed_root = tmp_path / "allowed-root"
-        allowed_root.mkdir()
-        role = await store.create_role(tenant.id, "Lector", allowed_scan_roots=[str(allowed_root)])
+        role = await store.create_role("Lector", project_names=["Proyecto A"])
         alice = await store.create_user(tenant.id, "alice", "s3cr3t-password", role_id=role.id)
         session = await store.create_session(alice)
 
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path, tenant_id=tenant.id)
+    inside = Path(project.root_path) / "entrada"
+    inside.mkdir()
     security = SecurityConfig(bind_host="0.0.0.0")
-    app = create_app(security=security, registry_path=tmp_path / "projects.json", auth_db_path=auth_db_path)
+    app = create_app(security=security, registry_path=registry_path, auth_db_path=auth_db_path)
 
     async with _client(app) as client:
         client.cookies.set(SESSION_COOKIE_NAME, session.token)
-        response = await client.get("/api/fs/browse", params={"path": str(allowed_root)})
+        response = await client.get("/api/fs/browse", params={"path": str(inside), "project": project.name})
 
     assert response.status_code == 200
 
 
 @pytest.mark.asyncio
+async def test_browse_non_admin_role_without_project_access_returns_404(tmp_path) -> None:
+    """`?project=` de un proyecto fuera de `project_names` del rol -- `404`, mismo
+    criterio de no-enumeración que `require_project_access` en el resto de la app."""
+    auth_db_path = tmp_path / "auth.db"
+    async with AuthStore(auth_db_path) as store:
+        tenant = await store.create_tenant("Acme Corp")
+        role = await store.create_role("Lector", project_names=["Otro Proyecto"])
+        alice = await store.create_user(tenant.id, "alice", "s3cr3t-password", role_id=role.id)
+        session = await store.create_session(alice)
+
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path, tenant_id=tenant.id)
+    security = SecurityConfig(bind_host="0.0.0.0")
+    app = create_app(security=security, registry_path=registry_path, auth_db_path=auth_db_path)
+
+    async with _client(app) as client:
+        client.cookies.set(SESSION_COOKIE_NAME, session.token)
+        response = await client.get("/api/fs/browse", params={"path": str(tmp_path), "project": project.name})
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_browse_non_admin_role_rejects_nonexistent_path_outside_allowed_roots_with_403_not_404(tmp_path) -> None:
     """AUDIT_CODE (sesión 2026-09-03/04): antes se comprobaba `is_dir()` antes que
-    `allowed_scan_roots` — un rol restringido podía distinguir "existe pero no
+    la restricción de acceso — un rol restringido podía distinguir "existe pero no
     tengo acceso" (403) de "no existe" (404) para CUALQUIER ruta del servidor,
     incluidas las que ni siquiera existen. Ahora la autorización se comprueba
     primero, así que una ruta inexistente fuera del ámbito del rol da 403, no 404
@@ -119,18 +176,18 @@ async def test_browse_non_admin_role_rejects_nonexistent_path_outside_allowed_ro
     auth_db_path = tmp_path / "auth.db"
     async with AuthStore(auth_db_path) as store:
         tenant = await store.create_tenant("Acme Corp")
-        allowed_root = tmp_path / "allowed-root"
-        allowed_root.mkdir()
-        role = await store.create_role(tenant.id, "Lector", allowed_scan_roots=[str(allowed_root)])
+        role = await store.create_role("Lector", project_names=["Proyecto A"])
         alice = await store.create_user(tenant.id, "alice", "s3cr3t-password", role_id=role.id)
         session = await store.create_session(alice)
 
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path, tenant_id=tenant.id)
     nonexistent_outside = tmp_path / "no-existe-y-fuera-de-ambito"
     security = SecurityConfig(bind_host="0.0.0.0")
-    app = create_app(security=security, registry_path=tmp_path / "projects.json", auth_db_path=auth_db_path)
+    app = create_app(security=security, registry_path=registry_path, auth_db_path=auth_db_path)
 
     async with _client(app) as client:
         client.cookies.set(SESSION_COOKIE_NAME, session.token)
-        response = await client.get("/api/fs/browse", params={"path": str(nonexistent_outside)})
+        response = await client.get("/api/fs/browse", params={"path": str(nonexistent_outside), "project": project.name})
 
     assert response.status_code == 403

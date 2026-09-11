@@ -108,6 +108,17 @@ def build_parser() -> argparse.ArgumentParser:
     user_create_parser.add_argument("--tenant", required=True, help="Id del tenant al que pertenece")
     user_create_parser.add_argument("username", help="Nombre de usuario, único dentro del tenant")
 
+    set_instance_admin_parser = user_subparsers.add_parser(
+        "set-instance-admin",
+        help="Conceder o retirar is_instance_admin a un usuario existente (rediseño Tenant/Role/User)",
+        parents=[auth_db_flag],
+    )
+    set_instance_admin_parser.add_argument("--tenant", required=True, help="Id del tenant al que pertenece el usuario")
+    set_instance_admin_parser.add_argument("username", help="Nombre de usuario existente")
+    set_instance_admin_parser.add_argument(
+        "--revoke", action="store_true", help="Retirar is_instance_admin en vez de concederlo (por defecto se concede)"
+    )
+
     return parser
 
 
@@ -179,10 +190,16 @@ async def _run_project_create(args: argparse.Namespace) -> int:
 
 
 async def _run_tenant_create(args: argparse.Namespace) -> int:
-    """Crea un tenant (revisión 8, §2.7.2). El id se deriva de `args.name` (slug)."""
+    """Crea un tenant (revisión 8, §2.7.2). El id se deriva de `args.name` (slug).
+
+    Rediseño Tenant/Role/User: ya NO aprovisiona automáticamente un rol ni un
+    usuario admin (`Role` ya no está ligado a un tenant) — usa `user create
+    --tenant <id>` a continuación, o la pantalla "Tenants y usuarios" de un
+    `is_instance_admin`, para dar de alta su primer usuario.
+    """
     async with _auth_store(args) as store:
         tenant = await store.create_tenant(args.name)
-    print(f"Tenant creado: '{tenant.id}' ({tenant.name})")
+    print(f"Tenant creado: '{tenant.id}' ({tenant.name}), sin usuarios todavía.")
     return 0
 
 
@@ -198,6 +215,28 @@ async def _run_user_create(args: argparse.Namespace) -> int:
     async with _auth_store(args) as store:
         user = await store.create_user(args.tenant, args.username, password)
     print(f"Usuario creado: '{user.username}' en tenant '{user.tenant_id}'")
+    return 0
+
+
+async def _run_user_set_instance_admin(args: argparse.Namespace) -> int:
+    """Concede o retira `is_instance_admin` a un usuario existente (rediseño
+    Tenant/Role/User).
+
+    Escape hatch de CLI: una instalación con varios tenants (creados con
+    `tenant create` antes de esta revisión) puede quedar, tras migrar, con
+    ningún `is_instance_admin` en un tenant que no sea el por defecto — sin
+    este comando, la única forma de recuperarse sería editar `auth.db` a mano.
+    """
+    async with _auth_store(args) as store:
+        users = await store.list_users(args.tenant)
+        user = next((candidate for candidate in users if candidate.username.lower() == args.username.lower()), None)
+        if user is None:
+            raise DocOrganizeError(f"No existe ningún usuario '{args.username}' en el tenant '{args.tenant}'.")
+        value = not args.revoke
+        updated = await store.set_instance_admin(args.tenant, user.id, value)
+
+    action = "concedido" if value else "retirado"
+    print(f"is_instance_admin {action} para '{updated.username}' en tenant '{updated.tenant_id}'.")
     return 0
 
 
@@ -261,9 +300,13 @@ def _run_web(args: argparse.Namespace) -> int:
 
     Revisión 8 (§2.7.2): ya no exige `DOC_ORGANIZE_API_TOKEN` para arrancar en un
     host no-loopback — la autenticación es multi-usuario (login usuario+contraseña
-    vía `/login`), no hay un único secreto compartido que validar al inicio. Sin
-    usuarios provisionados (`tenant create`/`user create`), un host no-loopback
-    simplemente queda inaccesible: nadie puede autenticarse.
+    vía `/login`), no hay un único secreto compartido que validar al inicio.
+    Rediseño Tenant/Role/User: ya no hace falta aprovisionar nada por CLI antes de
+    exponer el host — `AuthStore` crea de fábrica el tenant por defecto y su
+    usuario `admin` en el primer arranque, pero esa cuenta no puede completar el
+    login en modo no-loopback mientras conserve la contraseña de fábrica (ver
+    `web/routes/auth.py::_FACTORY_ADMIN_LOCKOUT_MESSAGE`) — hay que cambiarla
+    desde loopback antes de exponer el servidor de verdad.
     """
     from doc_organize.core.models import SecurityConfig
 
@@ -313,6 +356,8 @@ def main(argv: list[str] | None = None) -> int:
             return asyncio.run(_run_tenant_create(args))
         if args.command == "user" and args.user_command == "create":
             return asyncio.run(_run_user_create(args))
+        if args.command == "user" and args.user_command == "set-instance-admin":
+            return asyncio.run(_run_user_set_instance_admin(args))
     except DocOrganizeError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

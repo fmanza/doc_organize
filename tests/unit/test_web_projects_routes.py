@@ -5,12 +5,13 @@ import httpx
 import pytest
 
 from doc_organize.auth import AuthStore
-from doc_organize.core.constants import DEFAULT_ADMIN_PASSWORD, DEFAULT_ADMIN_USERNAME
 from doc_organize.core.models import SecurityConfig
 from doc_organize.web import create_app
 
 _TENANT_NAME = "Acme Corp"
 _TENANT_ID = "acme-corp"
+_ADMIN_USERNAME = "admin"
+_ADMIN_PASSWORD = "admin-s3cret-pw"
 
 
 def _client(app, base_url: str = "http://testserver") -> httpx.AsyncClient:
@@ -23,35 +24,37 @@ def _non_loopback_app(tmp_path):
 
 
 async def _setup(tmp_path):
-    """Crea el tenant, 'Proyecto A' (con contenido dentro), y un usuario 'reader'
-    restringido con acceso a 'Proyecto A' pero sin rol admin. Devuelve (app, base)."""
+    """Crea el tenant (con un usuario admin propio -- `create_tenant()` ya no
+    aprovisiona ninguno, rediseño Tenant/Role/User), 'Proyecto A' (con contenido
+    dentro), y un usuario 'reader' restringido con acceso a 'Proyecto A' pero sin
+    rol admin. Devuelve (app, base)."""
     base = tmp_path / "workspaces"
     base.mkdir()
     app = _non_loopback_app(tmp_path)
 
     async with AuthStore(tmp_path / "auth.db") as store:
-        await store.create_tenant(_TENANT_NAME)
+        tenant = await store.create_tenant(_TENANT_NAME)
+        admin_role = next((role for role in await store.list_roles() if role.is_admin), None)
+        if admin_role is None:
+            admin_role = await store.create_role("admin", is_admin=True)
+        await store.create_user(tenant.id, _ADMIN_USERNAME, _ADMIN_PASSWORD, role_id=admin_role.id)
 
     async with _client(app) as admin_client:
-        await admin_client.post("/login", data={"tenant_id": _TENANT_ID, "username": DEFAULT_ADMIN_USERNAME, "password": DEFAULT_ADMIN_PASSWORD})
-        await admin_client.post(
-            "/change-password",
-            data={"current_password": DEFAULT_ADMIN_PASSWORD, "new_password": "nueva-admin-pw", "confirm_password": "nueva-admin-pw"},
-        )
+        await admin_client.post("/login", data={"tenant_id": _TENANT_ID, "username": _ADMIN_USERNAME, "password": _ADMIN_PASSWORD})
         await admin_client.post("/api/projects", json={"name": "Proyecto A", "base_location": str(base)})
 
     root = base / "Proyecto A"
     (root / "cache.db").write_text("x", encoding="utf-8")
 
     async with AuthStore(tmp_path / "auth.db") as store:
-        role = await store.create_role(_TENANT_ID, "Lector", project_names=["Proyecto A"])
+        role = await store.create_role("Lector", project_names=["Proyecto A"])
         await store.create_user(_TENANT_ID, "reader", "s3cr3t-password", role_id=role.id)
 
     return app, base
 
 
 async def _login_admin(client: httpx.AsyncClient) -> None:
-    await client.post("/login", data={"tenant_id": _TENANT_ID, "username": DEFAULT_ADMIN_USERNAME, "password": "nueva-admin-pw"})
+    await client.post("/login", data={"tenant_id": _TENANT_ID, "username": _ADMIN_USERNAME, "password": _ADMIN_PASSWORD})
 
 
 async def _login_reader(client: httpx.AsyncClient) -> None:

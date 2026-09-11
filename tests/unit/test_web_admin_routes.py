@@ -1,15 +1,17 @@
-"""Tests de gestión de roles y usuarios vía HTTP (revisión 9)."""
+"""Tests de gestión de roles y usuarios vía HTTP (revisión 9; rediseño Tenant/Role/User:
+Role global sin tenant_id/allowed_scan_roots, User con is_blocked/is_instance_admin)."""
 
 import httpx
 import pytest
 
 from doc_organize.auth import AuthStore
-from doc_organize.core.constants import DEFAULT_ADMIN_PASSWORD, DEFAULT_ADMIN_USERNAME
 from doc_organize.core.models import SecurityConfig
 from doc_organize.web import create_app
 
 _TENANT_NAME = "Acme Corp"
 _TENANT_ID = "acme-corp"
+_ADMIN_USERNAME = "admin"
+_ADMIN_PASSWORD = "admin-s3cret-pw"
 
 
 def _client(app, base_url: str = "http://testserver") -> httpx.AsyncClient:
@@ -21,38 +23,36 @@ def _non_loopback_app(tmp_path):
     return create_app(security=security, registry_path=tmp_path / "projects.json", auth_db_path=tmp_path / "auth.db")
 
 
-async def _create_tenant(tmp_path) -> None:
+async def _create_tenant_with_admin(tmp_path) -> None:
+    """Tenant + un usuario admin propio, con contraseña ya elegida (`must_change_password=False`).
+
+    `AuthStore.create_tenant()` ya no aprovisiona ningún usuario (rediseño
+    Tenant/Role/User) — este helper reemplaza el bootstrap antiguo para que las
+    pruebas de este fichero (CRUD admin vía API, no el bootstrap en sí) no
+    dependan de la cuenta de fábrica, que además ya no puede completar el login
+    en modo no-loopback (`test_web_auth.py` cubre esa cuenta específicamente).
+    """
     async with AuthStore(tmp_path / "auth.db") as store:
-        await store.create_tenant(_TENANT_NAME)
+        tenant = await store.create_tenant(_TENANT_NAME)
+        admin_role = next((role for role in await store.list_roles() if role.is_admin), None)
+        if admin_role is None:
+            admin_role = await store.create_role("admin", is_admin=True)
+        await store.create_user(tenant.id, _ADMIN_USERNAME, _ADMIN_PASSWORD, role_id=admin_role.id)
 
 
 async def _create_restricted_user(tmp_path, username: str, password: str, project_names=None) -> None:
     async with AuthStore(tmp_path / "auth.db") as store:
-        role = await store.create_role(_TENANT_ID, f"role-{username}", project_names=project_names or [])
+        role = await store.create_role(f"role-{username}", project_names=project_names or [])
         await store.create_user(_TENANT_ID, username, password, role_id=role.id)
 
 
 async def _login_admin(client: httpx.AsyncClient) -> httpx.Response:
-    return await client.post("/login", data={"tenant_id": _TENANT_ID, "username": DEFAULT_ADMIN_USERNAME, "password": DEFAULT_ADMIN_PASSWORD})
-
-
-@pytest.mark.asyncio
-async def test_default_admin_user_can_login_and_is_forced_to_change_password(tmp_path) -> None:
-    await _create_tenant(tmp_path)
-    app = _non_loopback_app(tmp_path)
-    async with _client(app) as client:
-        await _login_admin(client)
-        blocked = await client.get("/api/projects")
-        redirected_page = await client.get("/", follow_redirects=False)
-
-    assert blocked.status_code == 403
-    assert redirected_page.status_code == 303
-    assert redirected_page.headers["location"] == "/change-password"
+    return await client.post("/login", data={"tenant_id": _TENANT_ID, "username": _ADMIN_USERNAME, "password": _ADMIN_PASSWORD})
 
 
 @pytest.mark.asyncio
 async def test_non_admin_user_gets_403_on_admin_routes(tmp_path) -> None:
-    await _create_tenant(tmp_path)
+    await _create_tenant_with_admin(tmp_path)
     await _create_restricted_user(tmp_path, "alice", "s3cr3t-password")
     app = _non_loopback_app(tmp_path)
     async with _client(app) as client:
@@ -68,18 +68,10 @@ async def test_non_admin_user_gets_403_on_admin_routes(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_admin_can_create_role_and_user_via_api(tmp_path) -> None:
-    await _create_tenant(tmp_path)
+    await _create_tenant_with_admin(tmp_path)
     app = _non_loopback_app(tmp_path)
     async with _client(app) as client:
         await _login_admin(client)
-        await client.post(
-            "/change-password",
-            data={
-                "current_password": DEFAULT_ADMIN_PASSWORD,
-                "new_password": "nueva-admin-pw",
-                "confirm_password": "nueva-admin-pw",
-            },
-        )
 
         create_role = await client.post("/api/roles", json={"name": "Lector", "is_admin": False, "project_names": ["Proyecto A"]})
         assert create_role.status_code == 201
@@ -89,69 +81,45 @@ async def test_admin_can_create_role_and_user_via_api(tmp_path) -> None:
         assert create_user.status_code == 201
         assert create_user.json()["role_id"] == role_id
         assert create_user.json()["must_change_password"] is False
+        assert create_user.json()["is_blocked"] is False
+        assert create_user.json()["is_instance_admin"] is False
 
         list_users = await client.get("/api/users")
 
     usernames = {user["username"] for user in list_users.json()["users"]}
-    assert {"admin", "carol"} == usernames
+    assert {_ADMIN_USERNAME, "carol"} == usernames
 
 
 @pytest.mark.asyncio
-async def test_create_role_with_allowed_scan_roots(tmp_path) -> None:
-    await _create_tenant(tmp_path)
+async def test_role_response_has_no_allowed_scan_roots_field(tmp_path) -> None:
+    """Rediseño Tenant/Role/User: `allowed_scan_roots` se retira por completo del
+    contrato de `/api/roles` -- el acceso de escaneo pasa a ser implícito por
+    proyecto (ver `test_web_filesystem.py`/`test_web_scan.py`)."""
+    await _create_tenant_with_admin(tmp_path)
     app = _non_loopback_app(tmp_path)
     async with _client(app) as client:
-        await _login_admin_and_change_password(client)
-        create_role = await client.post(
-            "/api/roles",
-            json={"name": "Lector", "is_admin": False, "project_names": ["Proyecto A"], "allowed_scan_roots": ["/repo/entrada"]},
-        )
-    assert create_role.status_code == 201
-    assert create_role.json()["allowed_scan_roots"] == ["/repo/entrada"]
-
-
-@pytest.mark.asyncio
-async def test_create_role_admin_with_scan_roots_returns_422(tmp_path) -> None:
-    await _create_tenant(tmp_path)
-    app = _non_loopback_app(tmp_path)
-    async with _client(app) as client:
-        await _login_admin_and_change_password(client)
-        response = await client.post("/api/roles", json={"name": "Super", "is_admin": True, "allowed_scan_roots": ["/repo/entrada"]})
-    assert response.status_code == 422
+        await _login_admin(client)
+        created = await client.post("/api/roles", json={"name": "Lector", "is_admin": False, "project_names": ["Proyecto A"]})
+    assert created.status_code == 201
+    assert "allowed_scan_roots" not in created.json()
 
 
 @pytest.mark.asyncio
 async def test_create_role_admin_with_projects_returns_422(tmp_path) -> None:
-    await _create_tenant(tmp_path)
+    await _create_tenant_with_admin(tmp_path)
     app = _non_loopback_app(tmp_path)
     async with _client(app) as client:
         await _login_admin(client)
-        await client.post(
-            "/change-password",
-            data={
-                "current_password": DEFAULT_ADMIN_PASSWORD,
-                "new_password": "nueva-admin-pw",
-                "confirm_password": "nueva-admin-pw",
-            },
-        )
         response = await client.post("/api/roles", json={"name": "Super", "is_admin": True, "project_names": ["Proyecto A"]})
     assert response.status_code == 422
 
 
 @pytest.mark.asyncio
-async def test_delete_last_admin_role_returns_409(tmp_path) -> None:
-    await _create_tenant(tmp_path)
+async def test_delete_last_admin_role_in_the_system_returns_409(tmp_path) -> None:
+    await _create_tenant_with_admin(tmp_path)
     app = _non_loopback_app(tmp_path)
     async with _client(app) as client:
         await _login_admin(client)
-        await client.post(
-            "/change-password",
-            data={
-                "current_password": DEFAULT_ADMIN_PASSWORD,
-                "new_password": "nueva-admin-pw",
-                "confirm_password": "nueva-admin-pw",
-            },
-        )
         roles = (await client.get("/api/roles")).json()["roles"]
         admin_role_id = next(r["id"] for r in roles if r["is_admin"])
         response = await client.delete(f"/api/roles/{admin_role_id}")
@@ -160,36 +128,61 @@ async def test_delete_last_admin_role_returns_409(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_admin_users_page_loads_for_admin(tmp_path) -> None:
-    await _create_tenant(tmp_path)
+    await _create_tenant_with_admin(tmp_path)
     app = _non_loopback_app(tmp_path)
     async with _client(app) as client:
-        await _login_admin_and_change_password(client)
+        await _login_admin(client)
         response = await client.get("/admin/users")
     assert response.status_code == 200
-    assert "admin" in response.text
+    assert _ADMIN_USERNAME in response.text
     assert "Crear rol" not in response.text
 
 
 @pytest.mark.asyncio
 async def test_admin_roles_page_loads_for_admin_with_projects(tmp_path) -> None:
-    await _create_tenant(tmp_path)
+    await _create_tenant_with_admin(tmp_path)
     app = _non_loopback_app(tmp_path)
     async with _client(app) as client:
-        await _login_admin_and_change_password(client)
+        await _login_admin(client)
         await client.post("/api/projects", json={"name": "Proyecto A", "base_location": str(tmp_path)})
         response = await client.get("/admin/roles")
     assert response.status_code == 200
     assert "Crear rol" in response.text
     assert "Proyecto A" in response.text
     assert "Crear usuario" not in response.text
+    assert "Raíces de escaneo" not in response.text  # retirado (acceso implícito por proyecto)
+
+
+@pytest.mark.asyncio
+async def test_admin_roles_page_shows_assigned_usernames_filtered_to_own_tenant(tmp_path) -> None:
+    """Un rol es global y puede estar en uso en otro tenant a la vez -- `/admin/roles`
+    solo debe listar, por rol, los usernames del PROPIO tenant de quien consulta
+    (AUDIT_PLAN, condición de no-enumeración cross-tenant)."""
+    async with AuthStore(tmp_path / "auth.db") as store:
+        acme = await store.create_tenant(_TENANT_NAME)
+        globex = await store.create_tenant("Globex Inc")
+        shared_role = await store.create_role("Lector", project_names=[])
+        admin_role = next(role for role in await store.list_roles() if role.is_admin)
+        await store.create_user(acme.id, _ADMIN_USERNAME, _ADMIN_PASSWORD, role_id=admin_role.id)
+        await store.create_user(acme.id, "alice-acme", "s3cr3t-password", role_id=shared_role.id)
+        await store.create_user(globex.id, "bob-globex", "s3cr3t-password", role_id=shared_role.id)
+
+    app = _non_loopback_app(tmp_path)
+    async with _client(app) as client:
+        await _login_admin(client)
+        response = await client.get("/admin/roles")
+
+    assert response.status_code == 200
+    assert "alice-acme" in response.text
+    assert "bob-globex" not in response.text
 
 
 @pytest.mark.asyncio
 async def test_create_user_with_must_change_password_checkbox(tmp_path) -> None:
-    await _create_tenant(tmp_path)
+    await _create_tenant_with_admin(tmp_path)
     app = _non_loopback_app(tmp_path)
     async with _client(app) as client:
-        await _login_admin_and_change_password(client)
+        await _login_admin(client)
         role = (await client.post("/api/roles", json={"name": "Lector", "is_admin": False, "project_names": []})).json()
 
         forced = await client.post(
@@ -207,24 +200,12 @@ async def test_create_user_with_must_change_password_checkbox(tmp_path) -> None:
         assert not_forced.json()["must_change_password"] is False
 
 
-async def _login_admin_and_change_password(client: httpx.AsyncClient) -> None:
-    await _login_admin(client)
-    await client.post(
-        "/change-password",
-        data={
-            "current_password": DEFAULT_ADMIN_PASSWORD,
-            "new_password": "nueva-admin-pw",
-            "confirm_password": "nueva-admin-pw",
-        },
-    )
-
-
 @pytest.mark.asyncio
 async def test_get_update_and_delete_role_via_api(tmp_path) -> None:
-    await _create_tenant(tmp_path)
+    await _create_tenant_with_admin(tmp_path)
     app = _non_loopback_app(tmp_path)
     async with _client(app) as client:
-        await _login_admin_and_change_password(client)
+        await _login_admin(client)
 
         created = await client.post("/api/roles", json={"name": "Lector", "is_admin": False, "project_names": []})
         role_id = created.json()["id"]
@@ -246,10 +227,10 @@ async def test_get_update_and_delete_role_via_api(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_get_update_and_delete_user_via_api(tmp_path) -> None:
-    await _create_tenant(tmp_path)
+    await _create_tenant_with_admin(tmp_path)
     app = _non_loopback_app(tmp_path)
     async with _client(app) as client:
-        await _login_admin_and_change_password(client)
+        await _login_admin(client)
 
         role = (await client.post("/api/roles", json={"name": "Lector", "is_admin": False, "project_names": []})).json()
         created = await client.post("/api/users", json={"username": "carol", "password": "s3cr3t-password", "role_id": role["id"]})
@@ -271,11 +252,48 @@ async def test_get_update_and_delete_user_via_api(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_delete_role_in_use_returns_409(tmp_path) -> None:
-    await _create_tenant(tmp_path)
+async def test_update_user_can_block_and_unblock_via_api(tmp_path) -> None:
+    await _create_tenant_with_admin(tmp_path)
     app = _non_loopback_app(tmp_path)
     async with _client(app) as client:
-        await _login_admin_and_change_password(client)
+        await _login_admin(client)
+        role = (await client.post("/api/roles", json={"name": "Lector", "is_admin": False, "project_names": []})).json()
+        created = await client.post("/api/users", json={"username": "carol", "password": "s3cr3t-password", "role_id": role["id"]})
+        user_id = created.json()["id"]
+
+        blocked = await client.patch(f"/api/users/{user_id}", json={"is_blocked": True})
+        assert blocked.status_code == 200
+        assert blocked.json()["is_blocked"] is True
+
+        unblocked = await client.patch(f"/api/users/{user_id}", json={"is_blocked": False})
+        assert unblocked.json()["is_blocked"] is False
+
+
+@pytest.mark.asyncio
+async def test_update_user_cannot_set_is_instance_admin_via_this_router(tmp_path) -> None:
+    """Solo `PATCH /api/tenants/{tenant_id}/users/{user_id}` (instance-admin) puede
+    tocar `is_instance_admin` -- `/api/users/{id}` (este router) ni siquiera acepta
+    ese campo en el payload (decisión de diseño 3)."""
+    await _create_tenant_with_admin(tmp_path)
+    app = _non_loopback_app(tmp_path)
+    async with _client(app) as client:
+        await _login_admin(client)
+        role = (await client.post("/api/roles", json={"name": "Lector", "is_admin": False, "project_names": []})).json()
+        created = await client.post("/api/users", json={"username": "carol", "password": "s3cr3t-password", "role_id": role["id"]})
+        user_id = created.json()["id"]
+
+        response = await client.patch(f"/api/users/{user_id}", json={"is_instance_admin": True})
+
+    assert response.status_code == 200
+    assert response.json()["is_instance_admin"] is False  # el campo desconocido se ignora, no escala privilegios
+
+
+@pytest.mark.asyncio
+async def test_delete_role_in_use_returns_409(tmp_path) -> None:
+    await _create_tenant_with_admin(tmp_path)
+    app = _non_loopback_app(tmp_path)
+    async with _client(app) as client:
+        await _login_admin(client)
         role = (await client.post("/api/roles", json={"name": "Lector", "is_admin": False, "project_names": []})).json()
         await client.post("/api/users", json={"username": "carol", "password": "s3cr3t-password", "role_id": role["id"]})
 
@@ -286,9 +304,16 @@ async def test_delete_role_in_use_returns_409(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_loopback_mode_has_no_admin_restrictions(tmp_path) -> None:
     """En loopback/sin auth no hay sesión ni rol que resolver: sin restricciones,
-    mismo comportamiento que el resto de la app en ese modo (revisión 8)."""
+    mismo comportamiento que el resto de la app en ese modo (revisión 8).
+
+    El único rol que existe en una base recién creada es el de fábrica del tenant
+    por defecto (rediseño Tenant/Role/User: `AuthStore` lo aprovisiona en cada
+    apertura), así que la lista ya no está vacía como antes de ese rediseño.
+    """
     app = create_app(registry_path=tmp_path / "projects.json", auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         response = await client.get("/api/roles")
     assert response.status_code == 200
-    assert response.json() == {"roles": []}
+    roles = response.json()["roles"]
+    assert len(roles) == 1
+    assert roles[0]["is_admin"] is True

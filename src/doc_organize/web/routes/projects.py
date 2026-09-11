@@ -138,7 +138,7 @@ async def list_projects(request: Request) -> ProjectListResponse:
 
     if getattr(request.state, "is_admin", None) is False:
         async with get_auth_store(request) as store:
-            role = await store.get_role(get_tenant_id(request), request.state.role_id)
+            role = await store.get_role(request.state.role_id)
         allowed_names = {allowed.lower() for allowed in role.project_names}
         projects = [project for project in projects if project.name.lower() in allowed_names]
 

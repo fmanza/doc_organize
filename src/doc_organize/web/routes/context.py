@@ -74,7 +74,7 @@ from doc_organize.web.dependencies import (
     get_tenant_id,
     project_operation_key,
     release_project_operation_lock,
-    require_admin,
+    require_instance_admin,
     require_project_access,
     resolve_ws_project,
 )
@@ -443,7 +443,7 @@ async def get_taxonomy_template(template_name: str, request: Request) -> Taxonom
 @router.put(
     "/api/taxonomy-templates/{template_name}",
     response_model=TaxonomyTemplateResponse,
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_instance_admin)],
 )
 async def save_taxonomy_template(template_name: str, payload: TaxonomyTemplateSaveRequest, request: Request) -> TaxonomyTemplateResponse:
     """Crea (o sobrescribe) la plantilla `template_name` en la biblioteca de usuario -- admin-only,
@@ -470,7 +470,7 @@ async def save_taxonomy_template(template_name: str, payload: TaxonomyTemplateSa
 @router.delete(
     "/api/taxonomy-templates/{template_name}",
     status_code=204,
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_instance_admin)],
 )
 async def delete_taxonomy_template(template_name: str, payload: ConfirmedActionRequest, request: Request) -> None:
     """Elimina la plantilla de usuario `template_name` -- admin-only.
@@ -495,10 +495,11 @@ async def delete_taxonomy_template(template_name: str, payload: ConfirmedActionR
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.get("/admin/plantillas-taxonomia", response_class=HTMLResponse, dependencies=[Depends(require_admin)])
+@router.get("/admin/plantillas-taxonomia", response_class=HTMLResponse, dependencies=[Depends(require_instance_admin)])
 async def taxonomy_templates_admin_page(request: Request) -> HTMLResponse:
-    """Biblioteca de plantillas de taxonomía (crear/editar/borrar) -- admin-only, config de
-    instancia (no de un proyecto concreto), mismo criterio que `/admin/roles`/`/admin/users`."""
+    """Biblioteca de plantillas de taxonomía (crear/editar/borrar) -- config de instancia
+    (no de un proyecto concreto, ni de un tenant concreto), por eso exige
+    `is_instance_admin` y no solo `is_admin` de tenant (rediseño Tenant/Role/User)."""
     template_registry = get_taxonomy_template_registry(request)
     templates_list = await template_registry.list_templates()
     return _templates.TemplateResponse(

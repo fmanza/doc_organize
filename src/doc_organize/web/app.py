@@ -15,6 +15,7 @@ from doc_organize.core.exceptions import (
     ContextError,
     ContextNotFoundError,
     DomainNotFoundError,
+    InstanceAdminRequiredError,
     InvalidPathError,
     ProjectAlreadyExistsError,
     ProjectError,
@@ -26,6 +27,9 @@ from doc_organize.core.exceptions import (
     RoleNotFoundError,
     ScannedFolderInUseError,
     ScannedFolderNotFoundError,
+    TenantAlreadyExistsError,
+    TenantInUseError,
+    TenantNotFoundError,
     UserAlreadyExistsError,
     UserNotFoundError,
 )
@@ -52,6 +56,7 @@ from doc_organize.web.routes.filesystem import router as filesystem_router
 from doc_organize.web.routes.projects import router as projects_router
 from doc_organize.web.routes.scan import router as scan_router
 from doc_organize.web.routes.scan_errors import router as scan_errors_router
+from doc_organize.web.routes.tenants import router as tenants_router
 from doc_organize.web.templating import create_templates
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -80,6 +85,10 @@ _EXCEPTION_STATUS_CODES: dict[type[Exception], int] = {
     RoleInUseError: 409,
     UserNotFoundError: 404,
     UserAlreadyExistsError: 409,
+    TenantNotFoundError: 404,
+    TenantAlreadyExistsError: 409,
+    TenantInUseError: 409,
+    InstanceAdminRequiredError: 409,
     AuthError: 422,
     InvalidPathError: 422,
     ScannedFolderNotFoundError: 404,
@@ -159,6 +168,7 @@ def create_app(
     app.include_router(auth_router)
     app.include_router(change_password_router)
     app.include_router(admin_router)
+    app.include_router(tenants_router)
     app.include_router(ai_settings_router)
     app.include_router(projects_router)
     app.include_router(scan_router)
@@ -183,7 +193,7 @@ def create_app(
 
         if getattr(request.state, "is_admin", None) is False:
             async with get_auth_store(request) as store:
-                role = await store.get_role(get_tenant_id(request), request.state.role_id)
+                role = await store.get_role(request.state.role_id)
             allowed_names = {allowed.lower() for allowed in role.project_names}
             projects = [project for project in projects if project.name.lower() in allowed_names]
 

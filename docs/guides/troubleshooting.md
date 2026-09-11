@@ -144,13 +144,21 @@ entrada extremadamente profundas hasta que se aborde (ver el PLAN de la Fase 1,
 
 Comprueba, en este orden:
 
-1. ¿Existe al menos un tenant y un usuario? (`python -m doc_organize tenant create
-   ...` / `user create ...`). Sin ellos, `/login` rechaza cualquier credencial.
+1. ¿Estás usando `tenant_id="default"`, `username="admin"` y la contraseña de
+   fábrica (`admin`)? Ese login se rechaza a propósito (`403` explícito) en
+   modo no-loopback mientras esa contraseña siga sin cambiar — cambia la
+   contraseña arrancando el servidor en modo loopback primero (`python -m
+   doc_organize web`, sin `--host`), entra ahí, y solo entonces expón el host.
+   No hace falta provisionar nada por CLI antes: ese tenant/usuario ya existen
+   de fábrica.
 2. ¿El `tenant_id`/usuario/contraseña son exactos? El formulario devuelve el mismo
-   mensaje de error genérico tanto si el tenant no existe como si la contraseña es
-   incorrecta (deliberado, evita revelar cuál de los tres campos falló).
+   mensaje de error genérico tanto si el tenant no existe, el usuario está
+   bloqueado, o la contraseña es incorrecta (deliberado, evita revelar cuál de
+   esos motivos fue).
 3. ¿El navegador acepta cookies de este origen? La sesión depende de la cookie
    `doc_organize_session` (`HttpOnly`, `SameSite=Strict`).
+
+Ver [Acceso a la Aplicación](../functional/access.md) para el detalle completo.
 
 ## Cerrar sesión en una pestaña me desconecta de las demás
 

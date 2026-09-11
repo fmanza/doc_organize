@@ -7,20 +7,35 @@ from pathlib import Path
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
+from doc_organize.auth import is_factory_admin_account
 from doc_organize.core.constants import SESSION_LIFETIME_HOURS
-from doc_organize.web.auth import SESSION_COOKIE_NAME, LoginRateLimiter
+from doc_organize.web.auth import SESSION_COOKIE_NAME, LoginRateLimiter, requires_auth
 from doc_organize.web.dependencies import get_auth_store
 from doc_organize.web.templating import create_templates
 
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 _templates = create_templates(_TEMPLATES_DIR)
+_LOGIN_TEMPLATE = "login.html.j2"
+
+#: Mensaje mostrado cuando la cuenta de fábrica ('admin' del tenant por defecto)
+#: intenta iniciar sesión en modo no-loopback con su contraseña todavía sin
+#: cambiar (decisión de diseño 1, rediseño Tenant/Role/User): se rechaza el login
+#: en sí -- no basta con redirigir tras entrar, `/change-password` ya exige una
+#: sesión creada, así que permitir el login equivaldría a dejar tomar la cuenta a
+#: quien conozca la contraseña de fábrica (pública, documentada).
+_FACTORY_ADMIN_LOCKOUT_MESSAGE = (
+    "La cuenta de fábrica 'admin' no puede iniciar sesión mientras el servidor esté expuesto "
+    "(modo no-loopback) y su contraseña siga siendo la de fábrica. Arranca "
+    "`python -m doc_organize web` sin --host (modo loopback), inicia sesión ahí y cambia la "
+    "contraseña antes de volver a exponer el servidor."
+)
 
 router = APIRouter(tags=["auth"])
 
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_form(request: Request) -> HTMLResponse:
-    return _templates.TemplateResponse(request, "login.html.j2", {"error": None})
+    return _templates.TemplateResponse(request, _LOGIN_TEMPLATE, {"error": None})
 
 
 @router.post("/login", response_class=HTMLResponse)
@@ -45,7 +60,7 @@ async def login_submit(
     if limiter.is_locked(tenant_id, username):
         return _templates.TemplateResponse(
             request,
-            "login.html.j2",
+            _LOGIN_TEMPLATE,
             {"error": "Demasiados intentos fallidos. Inténtalo de nuevo en un minuto."},
             status_code=429,
         )
@@ -56,10 +71,23 @@ async def login_submit(
             limiter.record_failure(tenant_id, username)
             return _templates.TemplateResponse(
                 request,
-                "login.html.j2",
+                _LOGIN_TEMPLATE,
                 {"error": "Tenant, usuario o contraseña incorrectos."},
                 status_code=401,
             )
+
+        # Decisión de diseño 1 (rediseño Tenant/Role/User): la contraseña era
+        # correcta (no cuenta como fallo del limitador), pero es la cuenta de
+        # fábrica sin rotar en un servidor expuesto -- se rechaza el login en sí,
+        # ver `_FACTORY_ADMIN_LOCKOUT_MESSAGE`.
+        if requires_auth(request.app.state.security) and is_factory_admin_account(user):
+            return _templates.TemplateResponse(
+                request,
+                _LOGIN_TEMPLATE,
+                {"error": _FACTORY_ADMIN_LOCKOUT_MESSAGE},
+                status_code=403,
+            )
+
         session = await store.create_session(user)
 
     limiter.record_success(tenant_id, username)

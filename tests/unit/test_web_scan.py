@@ -723,12 +723,13 @@ async def test_deduplicate_websocket_history_accumulates_across_runs(tmp_path) -
 
 @pytest.mark.asyncio
 async def test_deduplicate_websocket_rejects_path_outside_allowed_roots(tmp_path) -> None:
+    """Acceso implícito por proyecto (rediseño Tenant/Role/User): la única raíz
+    permitida para un rol restringido es `project.root_path` — una carpeta fuera
+    de ella, aunque ya esté guardada en el store, debe seguir rechazándose."""
     auth_db_path = tmp_path / "auth.db"
     async with AuthStore(auth_db_path) as store:
         tenant = await store.create_tenant("Acme Corp")
-        allowed_root = tmp_path / "allowed-root"
-        allowed_root.mkdir()
-        role = await store.create_role(tenant.id, "Lector", project_names=["Proyecto Scan"], allowed_scan_roots=[str(allowed_root)])
+        role = await store.create_role("Lector", project_names=["Proyecto Scan"])
         alice = await store.create_user(tenant.id, "alice", "s3cr3t-password", role_id=role.id)
         session = await store.create_session(alice)
 
@@ -737,6 +738,10 @@ async def test_deduplicate_websocket_rejects_path_outside_allowed_roots(tmp_path
     security = SecurityConfig(bind_host="0.0.0.0")
     app = create_app(security=security, registry_path=registry_path, auth_db_path=auth_db_path)
 
+    # Fuera de `project.root_path` (hermana de la carpeta del proyecto, no dentro):
+    # guardada directamente en el store (no vía API), simulando una carpeta dada de
+    # alta antes de que el rol quedara restringido — la propia API de guardado ya
+    # rechazaría este alta para este rol.
     outside_path = tmp_path / "outside-root"
     outside_path.mkdir()
     await ScannedFoldersStore().add_folder(project, str(outside_path))
@@ -1273,14 +1278,13 @@ async def test_scan_websocket_non_loopback_with_valid_session_succeeds(tmp_path)
 
 @pytest.mark.asyncio
 async def test_scan_websocket_non_admin_role_rejects_path_outside_allowed_roots(tmp_path) -> None:
-    """Revisión de seguridad (revisión 9): un rol restringido a `allowed_scan_roots`
-    no puede escanear una ruta fuera de esas raíces, aunque tenga acceso al proyecto."""
+    """Acceso implícito por proyecto (rediseño Tenant/Role/User): un rol restringido
+    no puede escanear una ruta fuera de `project.root_path`, aunque tenga acceso
+    al proyecto."""
     auth_db_path = tmp_path / "auth.db"
     async with AuthStore(auth_db_path) as store:
         tenant = await store.create_tenant("Acme Corp")
-        allowed_root = tmp_path / "allowed-root"
-        allowed_root.mkdir()
-        role = await store.create_role(tenant.id, "Lector", project_names=["Proyecto Scan"], allowed_scan_roots=[str(allowed_root)])
+        role = await store.create_role("Lector", project_names=["Proyecto Scan"])
         alice = await store.create_user(tenant.id, "alice", "s3cr3t-password", role_id=role.id)
         session = await store.create_session(alice)
 
@@ -1292,8 +1296,8 @@ async def test_scan_websocket_non_admin_role_rejects_path_outside_allowed_roots(
     outside_path = tmp_path / "outside-root"
     outside_path.mkdir()
     # Se guarda directamente en el store (no vía API): simula una carpeta guardada
-    # antes de que el rol quedara restringido a `allowed_root` — la propia API de
-    # guardado ya rechazaría este alta para este rol.
+    # antes de que el proyecto se moviera, o dada de alta por un admin — la propia
+    # API de guardado ya rechazaría este alta para este rol (fuera de root_path).
     await ScannedFoldersStore().add_folder(project, str(outside_path))
 
     client = TestClient(app, cookies={SESSION_COOKIE_NAME: session.token})
@@ -1308,9 +1312,7 @@ async def test_scan_websocket_non_admin_role_allows_path_inside_allowed_roots(tm
     auth_db_path = tmp_path / "auth.db"
     async with AuthStore(auth_db_path) as store:
         tenant = await store.create_tenant("Acme Corp")
-        allowed_root = tmp_path / "allowed-root"
-        allowed_root.mkdir()
-        role = await store.create_role(tenant.id, "Lector", project_names=["Proyecto Scan"], allowed_scan_roots=[str(allowed_root)])
+        role = await store.create_role("Lector", project_names=["Proyecto Scan"])
         alice = await store.create_user(tenant.id, "alice", "s3cr3t-password", role_id=role.id)
         session = await store.create_session(alice)
 
@@ -1319,8 +1321,14 @@ async def test_scan_websocket_non_admin_role_allows_path_inside_allowed_roots(tm
     security = SecurityConfig(bind_host="0.0.0.0")
     app = create_app(security=security, registry_path=registry_path, auth_db_path=auth_db_path)
 
+    # Dentro de `project.root_path` (acceso implícito, rediseño Tenant/Role/User):
+    # un rol restringido con acceso al proyecto puede escanear cualquier
+    # subcarpeta de su propia carpeta de trabajo.
+    inside_path = Path(project.root_path) / "entrada"
+    inside_path.mkdir()
+
     client = TestClient(app, cookies={SESSION_COOKIE_NAME: session.token})
-    add_response = client.post(f"/api/projects/{project.name}/folders/library", json={"path": str(allowed_root)})
+    add_response = client.post(f"/api/projects/{project.name}/folders/library", json={"path": str(inside_path)})
     assert add_response.status_code == 200
 
     with client.websocket_connect(f"/api/projects/{project.name}/scan") as websocket:
@@ -1336,47 +1344,16 @@ async def test_scan_websocket_non_admin_role_allows_path_inside_allowed_roots(tm
 
 
 @pytest.mark.asyncio
-async def test_scan_websocket_non_admin_role_without_allowed_roots_rejects_any_path(tmp_path) -> None:
-    """Un rol restringido sin `allowed_scan_roots` configuradas no puede escanear
-    ninguna ruta externa (por defecto, no la lista vacía == sin restricción)."""
-    auth_db_path = tmp_path / "auth.db"
-    async with AuthStore(auth_db_path) as store:
-        tenant = await store.create_tenant("Acme Corp")
-        role = await store.create_role(tenant.id, "Lector", project_names=["Proyecto Scan"])
-        alice = await store.create_user(tenant.id, "alice", "s3cr3t-password", role_id=role.id)
-        session = await store.create_session(alice)
-
-    registry_path = tmp_path / "projects.json"
-    project = await _create_project(tmp_path, registry_path, tenant_id=tenant.id)
-    security = SecurityConfig(bind_host="0.0.0.0")
-    app = create_app(security=security, registry_path=registry_path, auth_db_path=auth_db_path)
-
-    somewhere = tmp_path / "somewhere"
-    somewhere.mkdir()
-    # Igual que en el test de arriba: se guarda directamente en el store, ya que
-    # este rol (sin `allowed_scan_roots`) tampoco podría darla de alta vía API.
-    await ScannedFoldersStore().add_folder(project, str(somewhere))
-
-    client = TestClient(app, cookies={SESSION_COOKIE_NAME: session.token})
-    with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect(f"/api/projects/{project.name}/scan") as websocket:
-        websocket.send_json({"use_ocr": False, "use_gpu": False})
-        websocket.receive_json()
-    assert exc_info.value.code == 1008
-
-
-@pytest.mark.asyncio
 async def test_folder_library_get_filters_out_folders_outside_allowed_roots(tmp_path) -> None:
-    """AUDIT_CODE (sesión 2026-09-03/04): antes `GET .../folders/library` devolvía
-    la lista completa sin filtrar por `allowed_scan_roots` — un rol restringido
-    con acceso al proyecto podía ver rutas absolutas del servidor guardadas por
-    otro usuario/admin fuera de su ámbito permitido. Ahora se filtran, mismo
-    criterio que ya se exigía al dar de alta una carpeta."""
+    """AUDIT_CODE (sesión 2026-09-03/04); rediseño Tenant/Role/User: antes
+    `GET .../folders/library` devolvía la lista completa sin filtrar — un rol
+    restringido con acceso al proyecto podía ver rutas absolutas del servidor
+    guardadas por otro usuario/admin fuera de `project.root_path`. Ahora se
+    filtran, mismo criterio que ya se exigía al dar de alta una carpeta."""
     auth_db_path = tmp_path / "auth.db"
     async with AuthStore(auth_db_path) as store:
         tenant = await store.create_tenant("Acme Corp")
-        allowed_root = tmp_path / "allowed-root"
-        allowed_root.mkdir()
-        role = await store.create_role(tenant.id, "Lector", project_names=["Proyecto Scan"], allowed_scan_roots=[str(allowed_root)])
+        role = await store.create_role("Lector", project_names=["Proyecto Scan"])
         alice = await store.create_user(tenant.id, "alice", "s3cr3t-password", role_id=role.id)
         session = await store.create_session(alice)
 
@@ -1385,32 +1362,33 @@ async def test_folder_library_get_filters_out_folders_outside_allowed_roots(tmp_
     security = SecurityConfig(bind_host="0.0.0.0")
     app = create_app(security=security, registry_path=registry_path, auth_db_path=auth_db_path)
 
+    inside_path = Path(project.root_path) / "entrada"
+    inside_path.mkdir()
     outside_path = tmp_path / "outside-root"
     outside_path.mkdir()
     # Guardadas directamente en el store (no vía API), simulando carpetas dadas
     # de alta por un admin (u otro rol) antes/fuera de esta restricción.
     await ScannedFoldersStore().add_folder(project, str(outside_path))
-    await ScannedFoldersStore().add_folder(project, str(allowed_root))
+    await ScannedFoldersStore().add_folder(project, str(inside_path))
 
     client = TestClient(app, cookies={SESSION_COOKIE_NAME: session.token})
     response = client.get(f"/api/projects/{project.name}/folders/library")
 
     assert response.status_code == 200
     paths = {entry["path"] for entry in response.json()}
-    assert paths == {str(allowed_root.resolve())}  # la de fuera de ambito no aparece
+    assert paths == {str(inside_path.resolve())}  # la de fuera de ambito no aparece
 
 
 @pytest.mark.asyncio
 async def test_folder_library_delete_rejects_folder_outside_allowed_roots(tmp_path) -> None:
-    """AUDIT_CODE (sesión 2026-09-03/04): antes `DELETE .../folders/library`
-    borraba cualquier entrada no usada sin exigir acceso a esa ruta. Ahora
-    aplica la misma restricción `allowed_scan_roots` que `add_folder_to_library`."""
+    """AUDIT_CODE (sesión 2026-09-03/04); rediseño Tenant/Role/User: antes
+    `DELETE .../folders/library` borraba cualquier entrada no usada sin exigir
+    acceso a esa ruta. Ahora aplica la misma restricción implícita
+    (`project.root_path`) que `add_folder_to_library`."""
     auth_db_path = tmp_path / "auth.db"
     async with AuthStore(auth_db_path) as store:
         tenant = await store.create_tenant("Acme Corp")
-        allowed_root = tmp_path / "allowed-root"
-        allowed_root.mkdir()
-        role = await store.create_role(tenant.id, "Lector", project_names=["Proyecto Scan"], allowed_scan_roots=[str(allowed_root)])
+        role = await store.create_role("Lector", project_names=["Proyecto Scan"])
         alice = await store.create_user(tenant.id, "alice", "s3cr3t-password", role_id=role.id)
         session = await store.create_session(alice)
 

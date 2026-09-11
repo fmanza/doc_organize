@@ -6,22 +6,49 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 
-from doc_organize.core.models import DirectoryListing
+from doc_organize.core.exceptions import ProjectNotFoundError
+from doc_organize.core.models import DirectoryListing, Project
 from doc_organize.utils.path_utils import paths_within_roots
-from doc_organize.web.dependencies import get_allowed_scan_roots
+from doc_organize.web.dependencies import get_allowed_scan_roots, get_project_registry, get_tenant_id, require_project_access
 
 router = APIRouter(tags=["filesystem"])
 
 
+async def _resolve_browse_project(request: Request, project: str | None) -> Project | None:
+    """Resuelve `project` (query param opcional de `browse_directory`) a su
+    `Project`, confirmando primero el acceso del rol de la sesión — extraído para
+    mantener la complejidad de `browse_directory` bajo control."""
+    if project is None:
+        return None
+    await require_project_access(project, request)
+    async with get_project_registry(request) as registry:
+        try:
+            return await registry.get_project(project, tenant_id=get_tenant_id(request))
+        except ProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.get("/api/fs/browse", response_model=DirectoryListing)
-async def browse_directory(request: Request, path: str | None = None) -> DirectoryListing:
+async def browse_directory(request: Request, path: str | None = None, project: str | None = None) -> DirectoryListing:
     """Lista las subcarpetas inmediatas de `path` (por defecto, la carpeta personal del usuario del servidor).
 
-    Sujeto a la misma restricción `allowed_scan_roots` que el WebSocket de
-    escaneo (`web/routes/scan.py::scan_websocket`): un rol restringido no puede
-    explorar fuera de sus raíces permitidas — no es un privilegio nuevo, ya
-    podía escribir cualquiera de esas rutas a mano en el formulario de escaneo.
+    Sujeto a la misma restricción de acceso implícito que el WebSocket de escaneo
+    (`web/routes/scan.py::scan_websocket`): un rol restringido no puede explorar
+    fuera de la carpeta de trabajo de un proyecto al que tenga acceso — no es un
+    privilegio nuevo, ya podía escribir cualquiera de esas rutas a mano en el
+    formulario de escaneo.
+
+    Args:
+        project: Nombre del proyecto en cuyo contexto se explora (páginas que ya
+            saben para qué proyecto es, p.ej. "Carpetas guardadas" del dashboard).
+            Para un rol restringido es obligatorio explorar dentro de este
+            parámetro: sin él, no hay ninguna ruta permitida (`404` si el rol no
+            tiene acceso a `project`; ver `require_project_access`). Un admin o
+            una sesión sin restricción (loopback/sin auth) puede omitirlo — mismo
+            comportamiento que antes de este parámetro (p.ej. al elegir la
+            ubicación de un proyecto nuevo, que todavía no existe).
     """
+    resolved_project = await _resolve_browse_project(request, project)
     candidate = Path(path).expanduser().resolve() if path else Path.home().resolve()
 
     # Autorización ANTES que existencia (AUDIT_CODE, sesión 2026-09-03/04): si el
@@ -29,7 +56,7 @@ async def browse_directory(request: Request, path: str | None = None) -> Directo
     # podría distinguir "existe pero no tengo acceso" de "no existe" para
     # cualquier ruta absoluta del servidor — un oráculo de existencia de
     # directorios sin necesidad de tener acceso a ellos.
-    allowed_roots = await get_allowed_scan_roots(request)
+    allowed_roots = get_allowed_scan_roots(request, resolved_project)
     if not paths_within_roots([str(candidate)], allowed_roots):
         raise HTTPException(status_code=403, detail="No tienes acceso a esa carpeta.")
 

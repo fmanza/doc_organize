@@ -19,10 +19,15 @@
         </nav>
         {% if request.state.user_id is defined %}
         <div class="mt-4 px-4 pt-3 border-t border-gray-300 text-sm whitespace-nowrap space-y-1">
-            {% if request.state.is_admin %}
+            {% if request.state.is_admin or request.state.is_instance_admin %}
             <div class="px-0 py-1 text-xs font-semibold text-gray-500 uppercase">Admin</div>
+            {% endif %}
+            {% if request.state.is_admin or request.state.is_instance_admin %}
             <a class="block text-blue-600 underline" href="/admin/roles">Roles</a>
             <a class="block text-blue-600 underline" href="/admin/users">Usuarios</a>
+            {% endif %}
+            {% if request.state.is_instance_admin %}
+            <a class="block text-blue-600 underline" href="/admin/tenants">Tenants y usuarios</a>
             <a class="block text-blue-600 underline" href="/admin/configuracion-ia">Configuración IA</a>
             <a class="block text-blue-600 underline" href="/admin/plantillas-taxonomia">Plantillas de taxonomía</a>
             {% endif %}

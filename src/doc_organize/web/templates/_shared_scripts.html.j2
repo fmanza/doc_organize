@@ -18,20 +18,24 @@ function apiError(data, fallback) {
 
 // Explorador de carpetas del servidor ("Buscar…"), compartido por cualquier página
 // que necesite elegir una carpeta del sistema de archivos del servidor (Carpetas
-// guardadas de un proyecto, Raíces de escaneo permitidas de un rol, ubicación al
-// crear un proyecto, destino al mover uno...). `idPrefix` namespacea los ids del
-// markup emitido por las macros de `_folder_browser_macros.html.j2`;
-// `onSelect(path, close)` es lo único que varía entre páginas: persistir de
-// inmediato (Carpetas guardadas), añadir a una lista en memoria (Raíces de
-// escaneo) o escribir en un campo y cerrar el panel (ubicación/destino) —
-// initFolderBrowser() no sabe ni le importa cuál de las tres hace. `close()` deja
-// en manos de quien llama decidir si el panel se cierra tras seleccionar (los dos
-// primeros casos deliberadamente NO llaman a `close()`, para poder añadir varias
-// carpetas seguidas sin reabrir "Buscar…"). Si `onSelect` lanza un `Error`, su
-// `message` se muestra en el propio panel (mismo sitio que los errores de
-// navegación) en vez de perderse o tener que exponer el `<p>` de error a quien
-// llama.
-function initFolderBrowser(idPrefix, onSelect) {
+// guardadas de un proyecto, ubicación al crear un proyecto, destino al mover
+// uno...). `idPrefix` namespacea los ids del markup emitido por las macros de
+// `_folder_browser_macros.html.j2`; `onSelect(path, close)` es lo único que varía
+// entre páginas: persistir de inmediato (Carpetas guardadas) o escribir en un
+// campo y cerrar el panel (ubicación/destino) — initFolderBrowser() no sabe ni le
+// importa cuál de las dos hace. `close()` deja en manos de quien llama decidir si
+// el panel se cierra tras seleccionar (el primer caso deliberadamente NO llama a
+// `close()`, para poder añadir varias carpetas seguidas sin reabrir "Buscar…").
+// Si `onSelect` lanza un `Error`, su `message` se muestra en el propio panel
+// (mismo sitio que los errores de navegación) en vez de perderse o tener que
+// exponer el `<p>` de error a quien llama.
+//
+// `extraQuery` (opcional): parámetros añadidos a cada petición a `/api/fs/browse`,
+// p.ej. `{ project: projectName }` en una página de un proyecto concreto -- un rol
+// restringido solo puede explorar dentro de la carpeta de ese proyecto (acceso de
+// escaneo implícito, rediseño Tenant/Role/User); sin este parámetro no hay ninguna
+// ruta permitida para ese rol (ver `web/routes/filesystem.py::browse_directory`).
+function initFolderBrowser(idPrefix, onSelect, extraQuery) {
     const browseBtn = document.getElementById(idPrefix + "-btn");
     const browsePanel = document.getElementById(idPrefix + "-panel");
     const browseCurrent = document.getElementById(idPrefix + "-current");
@@ -47,7 +51,13 @@ function initFolderBrowser(idPrefix, onSelect) {
     async function browseTo(path) {
         const requestId = ++browseRequestId;
         browseError.textContent = "";
-        const url = path ? "/api/fs/browse?path=" + encodeURIComponent(path) : "/api/fs/browse";
+        const params = new URLSearchParams();
+        if (path) params.set("path", path);
+        for (const [key, value] of Object.entries(extraQuery || {})) {
+            if (value !== undefined && value !== null) params.set(key, value);
+        }
+        const query = params.toString();
+        const url = "/api/fs/browse" + (query ? "?" + query : "");
         const response = await fetch(url);
         const data = await response.json();
         if (requestId !== browseRequestId) return; // navegación obsoleta: ya se pidió otra carpeta después

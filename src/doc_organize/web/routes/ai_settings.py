@@ -16,13 +16,16 @@ from pydantic import BaseModel, Field
 from doc_organize.auth import InstanceSecretsStore, is_secrets_encryption_configured
 from doc_organize.core.exceptions import SecretsCipherError
 from doc_organize.web.ai_settings_config import AI_SETTINGS_FAMILIES, AiSettingsFamily, AiSettingsField, get_family, is_family_configured
-from doc_organize.web.dependencies import get_instance_secrets_store, require_admin
+from doc_organize.web.dependencies import get_instance_secrets_store, require_instance_admin
 from doc_organize.web.templating import create_templates
 
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 _templates = create_templates(_TEMPLATES_DIR)
 
-router = APIRouter(tags=["ai-settings"], dependencies=[Depends(require_admin)])
+#: `InstanceSecretsStore` es de instancia, no por tenant (ver su docstring) -- un
+#: `is_admin` de un solo tenant no debe poder tocar una credencial de IA
+#: compartida por el resto de tenants del despliegue (rediseño Tenant/Role/User).
+router = APIRouter(tags=["ai-settings"], dependencies=[Depends(require_instance_admin)])
 
 #: Nº de caracteres finales de un secreto ya guardado que se muestran en `masked_hint`
 #: (p.ej. "sk-...ab12") -- suficiente para que un admin reconozca CUÁL credencial es

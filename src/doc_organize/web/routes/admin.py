@@ -1,10 +1,20 @@
 """
-Gestión de roles y usuarios (revisión 9): CRUD admin-only sobre `AuthStore`.
+Gestión de roles y usuarios (revisión 9; rediseño Tenant/Role/User): CRUD
+admin-only sobre `AuthStore`, con `Role` ya global (sin tenant) y `User` con
+`is_blocked`/`is_instance_admin`.
 
-Todas las rutas de este router exigen `require_admin` (declarado a nivel de
-`APIRouter`, no por endpoint — imposible olvidarlo en una ruta nueva). En
-loopback/sin auth no hay sesión que resolver, así que `require_admin` no aplica
-ninguna restricción ahí (mismo criterio que el resto de la app).
+Todas las rutas de este router exigen `require_admin_or_instance_admin`
+(declarado a nivel de `APIRouter`, no por endpoint — imposible olvidarlo en una
+ruta nueva): basta `is_admin` del propio tenant, o `is_instance_admin` de
+cualquiera. En loopback/sin auth no hay sesión que resolver, así que no se
+aplica ninguna restricción ahí (mismo criterio que el resto de la app).
+
+`Role` ya no está ligado a un tenant, así que `/api/roles*` opera sobre el
+catálogo global completo (mismo catálogo que ve la pantalla cruzada de
+`web/routes/tenants.py`) — lo único filtrado por el tenant de la sesión es la
+lista de "usuarios asignados" que muestra `/admin/roles` (AUDIT_PLAN, condición
+de no-enumeración cross-tenant: un admin de un solo tenant no debe ver
+usernames de otro tenant a través de un rol compartido).
 """
 
 from pathlib import Path
@@ -16,13 +26,13 @@ from pydantic import BaseModel
 from doc_organize.core.constants import ROLE_NAME_MAX_LENGTH, USERNAME_MAX_LENGTH
 from doc_organize.core.exceptions import RoleNotFoundError
 from doc_organize.core.models import Role, User
-from doc_organize.web.dependencies import get_auth_store, get_project_registry, get_tenant_id, require_admin
+from doc_organize.web.dependencies import get_auth_store, get_project_registry, get_tenant_id, require_admin_or_instance_admin
 from doc_organize.web.templating import create_templates
 
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 _templates = create_templates(_TEMPLATES_DIR)
 
-router = APIRouter(tags=["admin"], dependencies=[Depends(require_admin)])
+router = APIRouter(tags=["admin"], dependencies=[Depends(require_admin_or_instance_admin)])
 
 
 class RoleResponse(BaseModel):
@@ -30,7 +40,6 @@ class RoleResponse(BaseModel):
     name: str
     is_admin: bool
     project_names: list[str]
-    allowed_scan_roots: list[str]
     created_at: str
 
 
@@ -42,14 +51,12 @@ class CreateRoleRequest(BaseModel):
     name: str
     is_admin: bool = False
     project_names: list[str] = []
-    allowed_scan_roots: list[str] = []
 
 
 class UpdateRoleRequest(BaseModel):
     name: str | None = None
     is_admin: bool | None = None
     project_names: list[str] | None = None
-    allowed_scan_roots: list[str] | None = None
 
 
 class UserResponse(BaseModel):
@@ -57,6 +64,8 @@ class UserResponse(BaseModel):
     username: str
     role_id: str
     must_change_password: bool
+    is_blocked: bool
+    is_instance_admin: bool
     created_at: str
 
 
@@ -74,17 +83,11 @@ class CreateUserRequest(BaseModel):
 class UpdateUserRequest(BaseModel):
     role_id: str | None = None
     password: str | None = None
+    is_blocked: bool | None = None
 
 
 def _role_response(role: Role) -> RoleResponse:
-    return RoleResponse(
-        id=role.id,
-        name=role.name,
-        is_admin=role.is_admin,
-        project_names=role.project_names,
-        allowed_scan_roots=role.allowed_scan_roots,
-        created_at=role.created_at,
-    )
+    return RoleResponse(id=role.id, name=role.name, is_admin=role.is_admin, project_names=role.project_names, created_at=role.created_at)
 
 
 def _user_response(user: User) -> UserResponse:
@@ -93,6 +96,8 @@ def _user_response(user: User) -> UserResponse:
         username=user.username,
         role_id=user.role_id,
         must_change_password=user.must_change_password,
+        is_blocked=user.is_blocked,
+        is_instance_admin=user.is_instance_admin,
         created_at=user.created_at,
     )
 
@@ -101,13 +106,25 @@ def _user_response(user: User) -> UserResponse:
 async def admin_roles_page(request: Request) -> HTMLResponse:
     tenant_id = get_tenant_id(request)
     async with get_auth_store(request) as store:
-        roles = await store.list_roles(tenant_id)
+        roles = await store.list_roles()
+        # "Usuarios asignados" por rol, filtrado al tenant de la sesión: un rol es
+        # global y puede estar en uso en varios tenants a la vez (ver docstring del
+        # módulo) -- mostrar aquí usernames de OTRO tenant sería una fuga nueva que
+        # este propio rediseño introduciría si no se filtrara.
+        assigned_usernames_by_role = {
+            role.id: sorted(user.username for user in await store.users_for_role(role.id) if user.tenant_id == tenant_id) for role in roles
+        }
     async with get_project_registry(request) as registry:
         projects = await registry.list_projects(tenant_id=tenant_id)
     return _templates.TemplateResponse(
         request,
         "admin_roles.html.j2",
-        {"roles": roles, "projects": projects, "role_name_max_length": ROLE_NAME_MAX_LENGTH},
+        {
+            "roles": roles,
+            "projects": projects,
+            "role_name_max_length": ROLE_NAME_MAX_LENGTH,
+            "assigned_usernames_by_role": assigned_usernames_by_role,
+        },
     )
 
 
@@ -116,7 +133,7 @@ async def admin_users_page(request: Request) -> HTMLResponse:
     tenant_id = get_tenant_id(request)
     async with get_auth_store(request) as store:
         users = await store.list_users(tenant_id)
-        roles = await store.list_roles(tenant_id)
+        roles = await store.list_roles()
     roles_by_id = {role.id: role for role in roles}
     return _templates.TemplateResponse(
         request,
@@ -128,7 +145,7 @@ async def admin_users_page(request: Request) -> HTMLResponse:
 @router.get("/api/roles", response_model=RoleListResponse)
 async def list_roles(request: Request) -> RoleListResponse:
     async with get_auth_store(request) as store:
-        roles = await store.list_roles(get_tenant_id(request))
+        roles = await store.list_roles()
     return RoleListResponse(roles=[_role_response(role) for role in roles])
 
 
@@ -137,13 +154,7 @@ async def create_role(payload: CreateRoleRequest, request: Request) -> RoleRespo
     # RoleAlreadyExistsError/AuthError se propagan sin capturar: el handler
     # global de web/app.py (_EXCEPTION_STATUS_CODES) las traduce a 409/422.
     async with get_auth_store(request) as store:
-        role = await store.create_role(
-            get_tenant_id(request),
-            payload.name,
-            is_admin=payload.is_admin,
-            project_names=payload.project_names,
-            allowed_scan_roots=payload.allowed_scan_roots,
-        )
+        role = await store.create_role(payload.name, is_admin=payload.is_admin, project_names=payload.project_names)
     return _role_response(role)
 
 
@@ -152,7 +163,7 @@ async def get_role(role_id: str, request: Request) -> RoleResponse:
     # RoleNotFoundError se propaga sin capturar: el handler global de
     # web/app.py (_EXCEPTION_STATUS_CODES) la traduce a 404.
     async with get_auth_store(request) as store:
-        role = await store.get_role(get_tenant_id(request), role_id)
+        role = await store.get_role(role_id)
     return _role_response(role)
 
 
@@ -162,14 +173,7 @@ async def update_role(role_id: str, payload: UpdateRoleRequest, request: Request
     # capturar: el handler global de web/app.py (_EXCEPTION_STATUS_CODES)
     # las traduce a 404/409/422 respectivamente.
     async with get_auth_store(request) as store:
-        role = await store.update_role(
-            get_tenant_id(request),
-            role_id,
-            name=payload.name,
-            is_admin=payload.is_admin,
-            project_names=payload.project_names,
-            allowed_scan_roots=payload.allowed_scan_roots,
-        )
+        role = await store.update_role(role_id, name=payload.name, is_admin=payload.is_admin, project_names=payload.project_names)
     return _role_response(role)
 
 
@@ -178,7 +182,7 @@ async def delete_role(role_id: str, request: Request) -> None:
     # RoleNotFoundError/RoleInUseError se propagan sin capturar: el handler
     # global de web/app.py (_EXCEPTION_STATUS_CODES) las traduce a 404/409.
     async with get_auth_store(request) as store:
-        await store.delete_role(get_tenant_id(request), role_id)
+        await store.delete_role(role_id)
 
 
 @router.get("/api/users", response_model=UserListResponse)
@@ -225,16 +229,24 @@ async def get_user(user_id: str, request: Request) -> UserResponse:
 
 @router.patch("/api/users/{user_id}", response_model=UserResponse)
 async def update_user(user_id: str, payload: UpdateUserRequest, request: Request) -> UserResponse:
-    """Actualiza el rol y/o restablece la contraseña de un usuario.
+    """Actualiza rol, contraseña y/o bloqueo de un usuario.
 
     Mismo matiz que `create_user`: `RoleNotFoundError` se captura aquí y se
     remapea a 422 porque `role_id` es una referencia en el payload, no el
     recurso de la URL. `UserNotFoundError`/`RoleInUseError`/`AuthError` se
     propagan sin capturar (404/409/422 vía el handler global).
+
+    `is_blocked`, si se pasa, se aplica en una segunda llamada a `AuthStore`
+    (`set_user_blocked`, que invalida sesiones activas al bloquear) — no forma
+    parte de `update_user` porque es una preocupación distinta (revocación
+    inmediata de acceso, no reasignación de rol/contraseña).
     """
+    tenant_id = get_tenant_id(request)
     try:
         async with get_auth_store(request) as store:
-            user = await store.update_user(get_tenant_id(request), user_id, role_id=payload.role_id, password=payload.password)
+            user = await store.update_user(tenant_id, user_id, role_id=payload.role_id, password=payload.password)
+            if payload.is_blocked is not None:
+                user = await store.set_user_blocked(tenant_id, user_id, payload.is_blocked)
     except RoleNotFoundError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _user_response(user)

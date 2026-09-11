@@ -1,0 +1,149 @@
+{% extends "base.html.j2" %}
+{% block title %}doc_organize — Tenants y usuarios{% endblock %}
+{% block content %}
+<p><a class="text-blue-600 underline" href="/">&larr; Proyectos</a></p>
+<h1 class="text-xl font-semibold mb-4">Tenants y usuarios</h1>
+<p class="text-sm text-gray-600 mb-4">
+    Vista cruzada de todos los tenants de la instalación y sus usuarios —
+    solo visible para un administrador de instancia (<code>is_instance_admin</code>).
+</p>
+
+<form id="create-tenant-form" class="my-4 flex gap-2 flex-wrap items-center">
+    <label for="tenant-name" class="sr-only">Nombre del tenant</label>
+    <input type="text" id="tenant-name" placeholder="Nombre del tenant" required
+           class="border border-gray-300 rounded px-2 py-1.5 flex-1 min-w-[200px]">
+    <button type="submit" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Crear tenant</button>
+</form>
+<p id="tenant-error" class="text-red-700 my-2 min-h-[1.2em]"></p>
+
+{% for tenant in tenants %}
+<section class="border border-gray-300 rounded p-4 my-4" data-tenant-id="{{ tenant.id }}">
+    <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-semibold">{{ tenant.name }} <span class="text-sm text-gray-500 font-normal">({{ tenant.id }})</span></h2>
+        <button type="button" class="delete-tenant text-red-700 hover:underline bg-transparent border-0 cursor-pointer p-0 text-sm" data-tenant-id="{{ tenant.id }}">Eliminar tenant</button>
+    </div>
+
+    <form class="create-user-form flex gap-2 flex-wrap items-center mb-3" data-tenant-id="{{ tenant.id }}">
+        <label class="sr-only">Usuario</label>
+        <input type="text" class="user-username border border-gray-300 rounded px-2 py-1.5" placeholder="Usuario" required>
+        <label class="sr-only">Contraseña</label>
+        <input type="password" class="user-password border border-gray-300 rounded px-2 py-1.5" placeholder="Contraseña" required>
+        <label class="sr-only">Rol</label>
+        <select class="user-role border border-gray-300 rounded px-2 py-1.5" required>
+            {% for role in roles %}
+            <option value="{{ role.id }}">{{ role.name }}</option>
+            {% endfor %}
+        </select>
+        <label class="flex items-center gap-1 text-sm"><input type="checkbox" class="user-must-change-password"> Debe cambiar contraseña</label>
+        <button type="submit" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Añadir usuario</button>
+    </form>
+
+    <table class="w-full border-collapse">
+        <thead><tr>
+            <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Usuario</th>
+            <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Rol</th>
+            <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Estado</th>
+            <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Admin de instancia</th>
+            <th class="text-left px-2.5 py-1.5 border-b border-gray-300"></th>
+        </tr></thead>
+        <tbody>
+        {% for user in users_by_tenant[tenant.id] %}
+            <tr data-user-id="{{ user.id }}" data-tenant-id="{{ tenant.id }}">
+                <td class="px-2.5 py-1.5 border-b border-gray-300">{{ user.username }}</td>
+                <td class="px-2.5 py-1.5 border-b border-gray-300">{{ roles_by_id[user.role_id].name if user.role_id in roles_by_id else "—" }}</td>
+                <td class="px-2.5 py-1.5 border-b border-gray-300">{{ "Bloqueado" if user.is_blocked else "Activo" }}</td>
+                <td class="px-2.5 py-1.5 border-b border-gray-300">
+                    <label class="flex items-center gap-1"><input type="checkbox" class="toggle-instance-admin" data-user-id="{{ user.id }}" data-tenant-id="{{ tenant.id }}" {% if user.is_instance_admin %}checked{% endif %}> </label>
+                </td>
+                <td class="px-2.5 py-1.5 border-b border-gray-300 whitespace-nowrap">
+                    <button type="button" class="toggle-block text-blue-600 hover:underline bg-transparent border-0 cursor-pointer p-0 mr-3" data-user-id="{{ user.id }}" data-tenant-id="{{ tenant.id }}" data-blocked="{{ user.is_blocked | lower }}">{{ "Desbloquear" if user.is_blocked else "Bloquear" }}</button>
+                    <button type="button" class="delete-user text-red-700 hover:underline bg-transparent border-0 cursor-pointer p-0" data-user-id="{{ user.id }}" data-tenant-id="{{ tenant.id }}">Eliminar</button>
+                </td>
+            </tr>
+        {% else %}
+            <tr><td class="px-2.5 py-1.5 text-gray-500" colspan="5">Sin usuarios todavía.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% else %}
+<p>No hay ningún tenant registrado.</p>
+{% endfor %}
+
+{% include "_shared_scripts.html.j2" %}
+<script>
+document.getElementById("create-tenant-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = document.getElementById("tenant-name").value;
+    try {
+        await postJson("/api/tenants", "POST", { name });
+        window.location.reload();
+    } catch (err) {
+        document.getElementById("tenant-error").textContent = err.message;
+    }
+});
+
+document.querySelectorAll(".delete-tenant").forEach((button) => {
+    button.addEventListener("click", async () => {
+        try {
+            await postJson(`/api/tenants/${button.dataset.tenantId}`, "DELETE");
+            window.location.reload();
+        } catch (err) {
+            document.getElementById("tenant-error").textContent = err.message;
+        }
+    });
+});
+
+document.querySelectorAll(".create-user-form").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const tenantId = form.dataset.tenantId;
+        const username = form.querySelector(".user-username").value;
+        const password = form.querySelector(".user-password").value;
+        const role_id = form.querySelector(".user-role").value;
+        const must_change_password = form.querySelector(".user-must-change-password").checked;
+        try {
+            await postJson(`/api/tenants/${tenantId}/users`, "POST", { username, password, role_id, must_change_password });
+            window.location.reload();
+        } catch (err) {
+            document.getElementById("tenant-error").textContent = err.message;
+        }
+    });
+});
+
+document.querySelectorAll(".delete-user").forEach((button) => {
+    button.addEventListener("click", async () => {
+        try {
+            await postJson(`/api/tenants/${button.dataset.tenantId}/users/${button.dataset.userId}`, "DELETE");
+            window.location.reload();
+        } catch (err) {
+            document.getElementById("tenant-error").textContent = err.message;
+        }
+    });
+});
+
+document.querySelectorAll(".toggle-block").forEach((button) => {
+    button.addEventListener("click", async () => {
+        const is_blocked = button.dataset.blocked !== "true";
+        try {
+            await postJson(`/api/tenants/${button.dataset.tenantId}/users/${button.dataset.userId}`, "PATCH", { is_blocked });
+            window.location.reload();
+        } catch (err) {
+            document.getElementById("tenant-error").textContent = err.message;
+        }
+    });
+});
+
+document.querySelectorAll(".toggle-instance-admin").forEach((checkbox) => {
+    checkbox.addEventListener("change", async () => {
+        const is_instance_admin = checkbox.checked;
+        try {
+            await postJson(`/api/tenants/${checkbox.dataset.tenantId}/users/${checkbox.dataset.userId}`, "PATCH", { is_instance_admin });
+        } catch (err) {
+            checkbox.checked = !checkbox.checked;
+            document.getElementById("tenant-error").textContent = err.message;
+        }
+    });
+});
+</script>
+{% endblock %}

@@ -444,29 +444,25 @@ class Tenant(BaseModel):
 
 
 class Role(BaseModel):
-    """Un conjunto de permisos con nombre dentro de un tenant (revisión 9, roles y gestión de usuarios).
+    """Un conjunto de permisos con nombre, vinculado solo a usuarios, no a un tenant
+    (revisión 9, roles y gestión de usuarios; rediseño Tenant/Role/User: se retira
+    `tenant_id` — un mismo rol puede asignarse a usuarios de tenants distintos).
 
-    `is_admin=True` ve todos los proyectos del tenant, presentes y futuros —
-    `project_names` debe entonces estar vacío (impuesto por `AuthStore.create_role`/
-    `update_role`, no por este modelo, para que el modelo siga siendo un simple
-    contenedor de datos). Un rol no-admin solo ve los proyectos listados en
-    `project_names`.
+    `is_admin=True` ve todos los proyectos del tenant **del usuario que lo tiene
+    asignado** (presentes y futuros) — `project_names` debe entonces estar vacío
+    (impuesto por `AuthStore.create_role`/`update_role`, no por este modelo, para
+    que el modelo siga siendo un simple contenedor de datos). Un rol no-admin solo
+    ve los proyectos de su propio tenant listados en `project_names`.
+
+    El acceso de escaneo ya no se declara aquí (`allowed_scan_roots` retirado):
+    es implícito — la raíz de cada proyecto en `project_names` (ver
+    `web/dependencies.py::get_allowed_scan_roots`).
     """
 
     id: str = Field(..., description="UUID4 del rol")
-    tenant_id: str = Field(..., description="Tenant al que pertenece este rol")
-    name: str = Field(..., description="Único dentro del tenant (no globalmente)")
-    is_admin: bool = Field(default=False, description="Si este rol ve todos los proyectos del tenant")
+    name: str = Field(..., description="Único globalmente (no por tenant, ver docstring de la clase)")
+    is_admin: bool = Field(default=False, description="Si este rol ve todos los proyectos del tenant del usuario que lo tiene")
     project_names: list[str] = Field(default_factory=list, description="Proyectos a los que este rol puede acceder (se ignora si is_admin)")
-    allowed_scan_roots: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Raíces del sistema de ficheros que este rol puede escanear vía /api/projects/{name}/scan "
-            "(se ignora si is_admin, que puede escanear cualquier ruta). Vacío significa que no puede "
-            "escanear ninguna carpeta externa — un rol restringido no puede eludir su project_names "
-            "apuntando el escaneo a una ruta arbitraria del servidor."
-        ),
-    )
     created_at: str = Field(..., description=_ISO_TIMESTAMP_DESC)
 
 
@@ -484,6 +480,21 @@ class User(BaseModel):
     role_id: str = Field(..., description="Rol asignado a este usuario (revisión 9)")
     must_change_password: bool = Field(
         default=False, description="True hasta que el usuario cambie una contraseña asignada por bootstrap (revisión 9)"
+    )
+    is_blocked: bool = Field(
+        default=False,
+        description=(
+            "Si `True`, no puede autenticarse (`AuthStore.authenticate` devuelve `None`) y sus sesiones "
+            "activas ya se invalidaron en el momento en que se marcó (rediseño Tenant/Role/User)"
+        ),
+    )
+    is_instance_admin: bool = Field(
+        default=False,
+        description=(
+            "Nivel de instancia, independiente de `Role.is_admin` (que solo da acceso a los proyectos del "
+            "propio tenant): solo un `is_instance_admin=True` puede ver la pantalla cruzada de tenants, "
+            "crear/eliminar tenants, y gestionar roles/usuarios de cualquier tenant (rediseño Tenant/Role/User)"
+        ),
     )
     created_at: str = Field(..., description=_ISO_TIMESTAMP_DESC)
 

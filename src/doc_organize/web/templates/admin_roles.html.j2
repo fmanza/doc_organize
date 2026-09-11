@@ -1,16 +1,20 @@
 {% extends "base.html.j2" %}
-{% from "_folder_browser_macros.html.j2" import folder_browser_button, folder_browser_panel %}
 {% block title %}doc_organize — Roles{% endblock %}
 {% block content %}
 <p><a class="text-blue-600 underline" href="/">&larr; Proyectos</a></p>
 <h1 class="text-xl font-semibold mb-4">Roles</h1>
+<p class="text-sm text-gray-600 mb-4">
+    Los roles son globales (no pertenecen a un tenant): un mismo rol puede estar
+    asignado a usuarios de tenants distintos. La columna "Usuarios asignados"
+    solo muestra los de tu propio tenant.
+</p>
 
 <form id="create-role-form" class="my-4 flex gap-2 flex-wrap items-start">
     <label for="role-name" class="sr-only">Nombre del rol</label>
     <input type="text" id="role-name" placeholder="Nombre del rol" required maxlength="{{ role_name_max_length }}"
            title="Máx. {{ role_name_max_length }} caracteres; letras, números, espacio, punto, guion y guion bajo."
            class="border border-gray-300 rounded px-2 py-1.5 flex-1 min-w-[200px]">
-    <label class="flex items-center gap-1"><input type="checkbox" id="role-is-admin"> Admin (ve todos los proyectos)</label>
+    <label class="flex items-center gap-1"><input type="checkbox" id="role-is-admin"> Admin (ve todos los proyectos del tenant)</label>
     <fieldset id="role-projects-fieldset" class="border border-gray-300 rounded p-3 w-full">
         <legend class="sr-only">Proyectos permitidos</legend>
         {% if projects %}
@@ -21,21 +25,6 @@
         <span>No hay proyectos todavía.</span>
         {% endif %}
     </fieldset>
-    <fieldset id="role-scan-roots-fieldset" class="border border-gray-300 rounded p-3 w-full">
-        <legend class="sr-only">Raíces de escaneo permitidas</legend>
-        <p class="text-sm mb-2">Raíces de escaneo permitidas (vacío = no puede escanear carpetas externas)</p>
-        <ul id="role-scan-roots-list" class="border border-gray-200 rounded divide-y divide-gray-100 mb-2">
-            <li class="px-2.5 py-1.5 text-gray-500" id="role-scan-roots-empty">Ninguna todavía.</li>
-        </ul>
-        <div class="flex gap-2 flex-wrap items-start">
-            <label for="role-scan-root-path" class="sr-only">Ruta de la nueva raíz de escaneo</label>
-            <input type="text" id="role-scan-root-path" placeholder="Ruta de la carpeta"
-                   class="border border-gray-300 rounded px-2 py-1.5 flex-1 min-w-[240px]">
-            <button type="button" id="role-scan-root-add-btn" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Guardar carpeta</button>
-            {{ folder_browser_button("role-scan-root-browse") }}
-        </div>
-        {{ folder_browser_panel("role-scan-root-browse") }}
-    </fieldset>
     <button type="submit" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Crear rol</button>
 </form>
 <p id="role-error" class="text-red-700 my-2 min-h-[1.2em]"></p>
@@ -45,7 +34,7 @@
         <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Nombre</th>
         <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Admin</th>
         <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Proyectos</th>
-        <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Raíces de escaneo</th>
+        <th class="text-left px-2.5 py-1.5 border-b border-gray-300">Usuarios asignados (tu tenant)</th>
         <th class="text-left px-2.5 py-1.5 border-b border-gray-300"></th>
     </tr></thead>
     <tbody>
@@ -54,7 +43,7 @@
             <td class="px-2.5 py-1.5 border-b border-gray-300">{{ role.name }}</td>
             <td class="px-2.5 py-1.5 border-b border-gray-300">{{ "Sí" if role.is_admin else "No" }}</td>
             <td class="px-2.5 py-1.5 border-b border-gray-300">{{ role.project_names | join(", ") if role.project_names else "—" }}</td>
-            <td class="px-2.5 py-1.5 border-b border-gray-300">{{ role.allowed_scan_roots | join(", ") if role.allowed_scan_roots else "—" }}</td>
+            <td class="px-2.5 py-1.5 border-b border-gray-300">{{ assigned_usernames_by_role[role.id] | join(", ") if assigned_usernames_by_role[role.id] else "—" }}</td>
             <td class="px-2.5 py-1.5 border-b border-gray-300"><button type="button" class="delete-role text-red-700 hover:underline bg-transparent border-0 cursor-pointer p-0" data-role-id="{{ role.id }}">Eliminar</button></td>
         </tr>
     {% endfor %}
@@ -65,7 +54,6 @@
 <script>
 const roleIsAdminCheckbox = document.getElementById("role-is-admin");
 const roleProjectsFieldset = document.getElementById("role-projects-fieldset");
-const roleScanRootsFieldset = document.getElementById("role-scan-roots-fieldset");
 
 function syncRoleProjectsFieldset() {
     const disabled = roleIsAdminCheckbox.checked;
@@ -73,60 +61,8 @@ function syncRoleProjectsFieldset() {
         checkbox.disabled = disabled;
         if (disabled) checkbox.checked = false;
     });
-    roleScanRootsFieldset.querySelectorAll("input, button").forEach((el) => { el.disabled = disabled; });
-    if (disabled) scanRoots = [];
-    renderScanRootsList();
 }
 roleIsAdminCheckbox.addEventListener("change", syncRoleProjectsFieldset);
-
-// --- Lista en memoria de raíces de escaneo permitidas (rol aún no existe: no hay API que persista cada ruta) ---
-
-let scanRoots = [];
-const scanRootsList = document.getElementById("role-scan-roots-list");
-const scanRootsEmpty = document.getElementById("role-scan-roots-empty");
-
-function renderScanRootsList() {
-    scanRootsList.querySelectorAll("li[data-path]").forEach((li) => li.remove());
-    scanRootsEmpty.hidden = scanRoots.length > 0;
-    for (const path of scanRoots) {
-        const li = document.createElement("li");
-        li.className = "flex items-center gap-2 px-2.5 py-1.5";
-        li.dataset.path = path;
-        const span = document.createElement("span");
-        span.className = "truncate flex-1 min-w-0";
-        span.textContent = path;
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "shrink-0 text-red-700 underline cursor-pointer text-sm";
-        button.textContent = "Eliminar";
-        button.addEventListener("click", () => {
-            scanRoots = scanRoots.filter((existing) => existing !== path);
-            renderScanRootsList();
-        });
-        li.appendChild(span);
-        li.appendChild(button);
-        scanRootsList.appendChild(li);
-    }
-}
-
-function addScanRoot(path) {
-    const trimmed = path.trim();
-    if (!trimmed || scanRoots.includes(trimmed)) return;
-    scanRoots.push(trimmed);
-    renderScanRootsList();
-}
-
-document.getElementById("role-scan-root-add-btn").addEventListener("click", () => {
-    const input = document.getElementById("role-scan-root-path");
-    addScanRoot(input.value);
-    input.value = "";
-});
-
-// --- Explorador de carpetas del servidor ("Buscar…"): al elegir una carpeta,
-// se añade a la lista en memoria (mismo patrón que "Carpetas guardadas", pero
-// sin persistir de inmediato porque el rol todavía no existe) ---
-
-initFolderBrowser("role-scan-root-browse", (path) => addScanRoot(path));
 
 document.getElementById("create-role-form").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -135,9 +71,8 @@ document.getElementById("create-role-form").addEventListener("submit", async (ev
     const project_names = Array.from(roleProjectsFieldset.querySelectorAll(".role-project-checkbox:checked")).map(
         (checkbox) => checkbox.value
     );
-    const allowed_scan_roots = scanRoots.slice();
     try {
-        await postJson("/api/roles", "POST", { name, is_admin, project_names, allowed_scan_roots });
+        await postJson("/api/roles", "POST", { name, is_admin, project_names });
         window.location.reload();
     } catch (err) {
         document.getElementById("role-error").textContent = err.message;

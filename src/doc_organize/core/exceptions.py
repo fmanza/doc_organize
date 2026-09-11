@@ -90,6 +90,11 @@ class TenantNotFoundError(AuthError):
         super().__init__(f"No existe ningún tenant con id '{tenant_id}'.")
 
 
+class TenantInUseError(AuthError):
+    """El tenant no se puede eliminar: tiene usuarios y/o proyectos asociados
+    (rediseno Tenant/Role/User: un tenant solo se borra vacio en ambos sentidos)."""
+
+
 class UserAlreadyExistsError(AuthError):
     """Ya existe un usuario con ese nombre dentro del tenant."""
 
@@ -105,21 +110,28 @@ class UserNotFoundError(AuthError):
 
 
 class RoleAlreadyExistsError(AuthError):
-    """Ya existe un rol con ese nombre dentro del tenant."""
+    """Ya existe un rol con ese nombre (global, revision Tenant/Role/User: `Role`
+    ya no esta ligado a un tenant, `name` es unico en toda la instalacion)."""
 
-    def __init__(self, name: str, tenant_id: str) -> None:
-        super().__init__(f"Ya existe un rol '{name}' en el tenant '{tenant_id}'.")
+    def __init__(self, name: str) -> None:
+        super().__init__(f"Ya existe un rol '{name}'.")
 
 
 class RoleNotFoundError(AuthError):
-    """No hay ningun rol registrado con ese id dentro del tenant."""
+    """No hay ningun rol registrado con ese id."""
 
-    def __init__(self, role_id: str, tenant_id: str) -> None:
-        super().__init__(f"No existe ningún rol '{role_id}' en el tenant '{tenant_id}'.")
+    def __init__(self, role_id: str) -> None:
+        super().__init__(f"No existe ningún rol '{role_id}'.")
 
 
 class RoleInUseError(AuthError):
-    """El rol no se puede eliminar: lo usan usuarios, o es el ultimo rol admin del tenant."""
+    """El rol/usuario no se puede eliminar o modificar: lo usan otros usuarios, o
+    es el ultimo rol/usuario admin (del tenant, o del sistema segun el caso)."""
+
+
+class InstanceAdminRequiredError(AuthError):
+    """No se puede retirar `is_instance_admin` al ultimo usuario que lo tiene
+    (guarda global, no por tenant -- revision Tenant/Role/User)."""
 
 
 class SecretsCipherError(AuthError):
@@ -232,6 +244,7 @@ __all__ = [
     "DomainClassificationError",
     "DomainNotFoundError",
     "IncompleteConversionArtifactsError",
+    "InstanceAdminRequiredError",
     "InvalidPathError",
     "ProjectAlreadyExistsError",
     "ProjectError",
@@ -255,6 +268,7 @@ __all__ = [
     "TaxonomyManifestError",
     "TaxonomyTemplateError",
     "TenantAlreadyExistsError",
+    "TenantInUseError",
     "TenantNotFoundError",
     "UsageSourceAuthError",
     "UsageSourceConnectionError",

@@ -211,6 +211,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         request.state.tenant_id = authenticated.session.tenant_id
         request.state.role_id = authenticated.role_id
         request.state.is_admin = authenticated.is_admin
+        request.state.is_instance_admin = authenticated.is_instance_admin
 
     @staticmethod
     def _check_password_change_required(request: Request, authenticated: AuthenticatedSession) -> Response | None:

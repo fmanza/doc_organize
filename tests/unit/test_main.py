@@ -1004,3 +1004,69 @@ def test_main_user_create_then_authenticate_succeeds(tmp_path, monkeypatch) -> N
     user = asyncio.run(_authenticate())
     assert user is not None
     assert user.username == "alice"
+
+
+# ===== `user set-instance-admin` (rediseño Tenant/Role/User, escape hatch de migración) =====
+
+
+def test_build_parser_user_set_instance_admin_requires_tenant_and_username() -> None:
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["user", "set-instance-admin", "alice"])  # falta --tenant
+
+
+def test_main_user_set_instance_admin_grants_by_default(tmp_path, monkeypatch, capsys) -> None:
+    import asyncio
+
+    from doc_organize.auth import AuthStore
+
+    auth_db_path = str(tmp_path / "auth.db")
+    monkeypatch.setattr("doc_organize.main.getpass.getpass", lambda prompt="": "s3cr3t-password")
+    main(["tenant", "create", "Acme Corp", "--auth-db-path", auth_db_path])
+    main(["user", "create", "alice", "--tenant", "acme-corp", "--auth-db-path", auth_db_path])
+
+    exit_code = main(["user", "set-instance-admin", "alice", "--tenant", "acme-corp", "--auth-db-path", auth_db_path])
+
+    assert exit_code == 0
+    assert "concedido" in capsys.readouterr().out
+
+    async def _get_user() -> object:
+        async with AuthStore(tmp_path / "auth.db") as store:
+            return next(u for u in await store.list_users("acme-corp") if u.username == "alice")
+
+    user = asyncio.run(_get_user())
+    assert user.is_instance_admin is True
+
+
+def test_main_user_set_instance_admin_revoke_flag(tmp_path, monkeypatch, capsys) -> None:
+    import asyncio
+
+    from doc_organize.auth import AuthStore
+
+    auth_db_path = str(tmp_path / "auth.db")
+    monkeypatch.setattr("doc_organize.main.getpass.getpass", lambda prompt="": "s3cr3t-password")
+    main(["tenant", "create", "Acme Corp", "--auth-db-path", auth_db_path])
+    main(["user", "create", "alice", "--tenant", "acme-corp", "--auth-db-path", auth_db_path])
+    main(["user", "set-instance-admin", "alice", "--tenant", "acme-corp", "--auth-db-path", auth_db_path])
+
+    exit_code = main(["user", "set-instance-admin", "alice", "--tenant", "acme-corp", "--revoke", "--auth-db-path", auth_db_path])
+
+    assert exit_code == 0
+    assert "retirado" in capsys.readouterr().out
+
+    async def _get_user() -> object:
+        async with AuthStore(tmp_path / "auth.db") as store:
+            return next(u for u in await store.list_users("acme-corp") if u.username == "alice")
+
+    user = asyncio.run(_get_user())
+    assert user.is_instance_admin is False
+
+
+def test_main_user_set_instance_admin_unknown_username_reports_error(tmp_path, capsys) -> None:
+    auth_db_path = str(tmp_path / "auth.db")
+    main(["tenant", "create", "Acme Corp", "--auth-db-path", auth_db_path])
+
+    exit_code = main(["user", "set-instance-admin", "no-existe", "--tenant", "acme-corp", "--auth-db-path", auth_db_path])
+
+    assert exit_code == 1
+    assert "Error" in capsys.readouterr().err

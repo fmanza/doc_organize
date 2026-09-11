@@ -1,6 +1,6 @@
 """Autenticacion multi-usuario, multi-tenant y roles (revision 8 §2.7.2, revision 9)."""
 
-from doc_organize.auth.auth_store import AuthenticatedSession, AuthStore
+from doc_organize.auth.auth_store import AuthenticatedSession, AuthStore, is_factory_admin_account
 from doc_organize.auth.instance_secrets_store import InstanceSecretRecord, InstanceSecretsStore
 from doc_organize.auth.secrets_cipher import decrypt_secret, encrypt_secret, is_secrets_encryption_configured
 
@@ -11,5 +11,6 @@ __all__ = [
     "InstanceSecretsStore",
     "decrypt_secret",
     "encrypt_secret",
+    "is_factory_admin_account",
     "is_secrets_encryption_configured",
 ]
