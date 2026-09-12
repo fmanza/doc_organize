@@ -153,6 +153,36 @@ async def test_admin_roles_page_loads_for_admin_with_projects(tmp_path) -> None:
     assert "Raíces de escaneo" not in response.text  # retirado (acceso implícito por proyecto)
 
 
+_PROYECTOS_ADMIN_LINK = '<a class="block text-blue-600 underline" href="/">Proyectos</a>'
+
+
+@pytest.mark.asyncio
+async def test_admin_sidebar_shows_proyectos_shortcut(tmp_path) -> None:
+    """El bloque Admin del sidebar enlaza a la gestión de proyectos (`/`), antes
+    solo alcanzable vía el logo -- ver docs/functional/admin.md."""
+    await _create_tenant_with_admin(tmp_path)
+    app = _non_loopback_app(tmp_path)
+    async with _client(app) as client:
+        await _login_admin(client)
+        response = await client.get("/admin/roles")
+    assert response.status_code == 200
+    assert _PROYECTOS_ADMIN_LINK in response.text
+
+
+@pytest.mark.asyncio
+async def test_non_admin_sidebar_does_not_show_proyectos_shortcut(tmp_path) -> None:
+    """Sin `is_admin`/`is_instance_admin` no se ve el bloque Admin -- por tanto
+    tampoco el atajo "Proyectos" -- aunque siga llegando a `/` por el logo."""
+    await _create_tenant_with_admin(tmp_path)
+    await _create_restricted_user(tmp_path, "alice", "s3cr3t-password")
+    app = _non_loopback_app(tmp_path)
+    async with _client(app) as client:
+        await client.post("/login", data={"tenant_id": _TENANT_ID, "username": "alice", "password": "s3cr3t-password"})
+        response = await client.get("/")
+    assert response.status_code == 200
+    assert _PROYECTOS_ADMIN_LINK not in response.text
+
+
 @pytest.mark.asyncio
 async def test_admin_roles_page_shows_assigned_usernames_filtered_to_own_tenant(tmp_path) -> None:
     """Un rol es global y puede estar en uso en otro tenant a la vez -- `/admin/roles`
@@ -317,3 +347,24 @@ async def test_loopback_mode_has_no_admin_restrictions(tmp_path) -> None:
     roles = response.json()["roles"]
     assert len(roles) == 1
     assert roles[0]["is_admin"] is True
+
+
+@pytest.mark.asyncio
+async def test_loopback_mode_shows_full_admin_sidebar(tmp_path) -> None:
+    """`AuthMiddleware` no fija `request.state.is_admin`/`is_instance_admin` en
+    loopback (mismo motivo que el test anterior) -- el sidebar debe interpretar
+    esa ausencia como "sin restricción" (igual que `require_admin`/
+    `require_instance_admin`) y mostrar el bloque Admin completo, no ocultarlo.
+    Antes de este fix el bloque entero desaparecía por depender de
+    `request.state.user_id is defined`, que tampoco se fija en loopback."""
+    app = create_app(registry_path=tmp_path / "projects.json", auth_db_path=tmp_path / "auth.db")
+    async with _client(app) as client:
+        response = await client.get("/admin/roles")
+    assert response.status_code == 200
+    assert '<a class="block text-blue-600 underline" href="/admin/roles">Roles</a>' in response.text
+    assert '<a class="block text-blue-600 underline" href="/admin/users">Usuarios</a>' in response.text
+    assert _PROYECTOS_ADMIN_LINK in response.text
+    assert '<a class="block text-blue-600 underline" href="/admin/tenants">Tenants y usuarios</a>' in response.text
+    assert '<a class="block text-blue-600 underline" href="/admin/configuracion-ia">Configuración IA</a>' in response.text
+    assert '<a class="block text-blue-600 underline" href="/admin/plantillas-taxonomia">Plantillas de taxonomía</a>' in response.text
+    assert "Cerrar sesión" not in response.text

@@ -17,21 +17,29 @@
         <nav class="px-2 space-y-1 whitespace-nowrap text-sm">
             {% block sidebar_items %}{% endblock %}
         </nav>
-        {% if request.state.user_id is defined %}
+        {% set is_admin_state = request.state.is_admin if request.state.is_admin is defined else none %}
+        {% set is_instance_admin_state = request.state.is_instance_admin if request.state.is_instance_admin is defined else none %}
+        {# Loopback/sin auth: `AuthMiddleware` no fija ninguno de los dos (ver `web/auth.py`), y esa
+           ausencia ya significa "sin restricción" en el resto de la app (`web/dependencies.py`:
+           `require_admin`/`require_instance_admin`) -- el sidebar debe reflejar el mismo acceso real
+           en vez de ocultar el menú Admin solo porque no hay sesión que resolver. #}
+        {% set unrestricted = is_admin_state is none and is_instance_admin_state is none %}
+        {% if request.state.user_id is defined or unrestricted %}
         <div class="mt-4 px-4 pt-3 border-t border-gray-300 text-sm whitespace-nowrap space-y-1">
-            {% if request.state.is_admin or request.state.is_instance_admin %}
+            {% if unrestricted or is_admin_state or is_instance_admin_state %}
             <div class="px-0 py-1 text-xs font-semibold text-gray-500 uppercase">Admin</div>
-            {% endif %}
-            {% if request.state.is_admin or request.state.is_instance_admin %}
             <a class="block text-blue-600 underline" href="/admin/roles">Roles</a>
             <a class="block text-blue-600 underline" href="/admin/users">Usuarios</a>
+            <a class="block text-blue-600 underline" href="/">Proyectos</a>
             {% endif %}
-            {% if request.state.is_instance_admin %}
+            {% if unrestricted or is_instance_admin_state %}
             <a class="block text-blue-600 underline" href="/admin/tenants">Tenants y usuarios</a>
             <a class="block text-blue-600 underline" href="/admin/configuracion-ia">Configuración IA</a>
             <a class="block text-blue-600 underline" href="/admin/plantillas-taxonomia">Plantillas de taxonomía</a>
             {% endif %}
+            {% if request.state.user_id is defined %}
             <form method="post" action="/logout"><button type="submit" class="bg-transparent border-0 p-0 cursor-pointer text-blue-600 underline">Cerrar sesión</button></form>
+            {% endif %}
         </div>
         {% endif %}
     </aside>

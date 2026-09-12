@@ -25,7 +25,11 @@ oculto solo en código o en un fichero editado fuera de la aplicación.
 reposo, `is_instance_admin`-only
 ✅ `/admin/plantillas-taxonomia` — biblioteca compartida de catálogos de
 taxonomía, `is_instance_admin`-only
-❌ No gestiona proyectos ni su contenido (eso vive en `/projects/{name}/*`)
+✅ Enlace "Proyectos" en el bloque Admin del sidebar — no es una página de
+`/admin`, sino un atajo a `/` (crear/mover/vaciar histórico/eliminar
+proyectos), ver [Proyectos (atajo desde Admin)](#proyectos-atajo-desde-admin)
+❌ No gestiona el contenido de un proyecto ya creado (escaneo, deduplicación,
+contexto — eso vive en `/projects/{name}/*`)
 ❌ No sustituye `.env` — lo complementa: un despliegue que ya configura variables
 por entorno sigue funcionando igual sin tocar el panel
 
@@ -35,7 +39,9 @@ El panel son **5 páginas HTML** servidas con FastAPI + Jinja2
 (`src/doc_organize/web/routes/admin.py`, `tenants.py`, `ai_settings.py`,
 `context.py`), enlazadas desde un bloque "Admin" en el sidebar
 (`templates/base.html.j2`) que se renderiza según `request.state.is_admin`/
-`is_instance_admin`.
+`is_instance_admin`. Ese mismo bloque incluye un enlace "Proyectos" que no es
+una página de `/admin`, sino un atajo a `/` — ver
+[Proyectos (atajo desde Admin)](#proyectos-atajo-desde-admin) más abajo.
 
 | Página | Ruta | Router | Requiere |
 |---|---|---|---|
@@ -44,6 +50,20 @@ El panel son **5 páginas HTML** servidas con FastAPI + Jinja2
 | Tenants y usuarios | `/admin/tenants` | `routes/tenants.py` | `is_instance_admin` |
 | Configuración IA | `/admin/configuracion-ia` | `routes/ai_settings.py` | `is_instance_admin` |
 | Plantillas de taxonomía | `/admin/plantillas-taxonomia` | `routes/context.py` | `is_instance_admin` |
+
+### Proyectos (atajo desde Admin)
+
+El bloque "Admin" del sidebar incluye también un enlace **"Proyectos"** a `/`
+(`web/app.py`, no `routes/admin.py`) — no es una página nueva ni una sexta
+página de `/admin`: es la misma pantalla de creación/listado de proyectos que
+ya usa cualquier usuario para elegir con qué proyecto trabajar, documentada en
+[Projects — Registro y Gestión de Proyectos](projects.md). Se enlaza también
+desde aquí porque ahí mismo viven las acciones de mantenimiento restringidas a
+`is_admin`/`is_instance_admin` (crear, mover, vaciar histórico y eliminar un
+proyecto — `/api/projects/*`, con confirmación explícita e irreversibles salvo
+"vaciar histórico"). A diferencia de las otras 5 páginas, el acceso a `/` en sí
+no exige ningún nivel de administración — solo las acciones destructivas lo
+exigen, a nivel de endpoint (`require_admin` en `web/routes/projects.py`).
 
 ### Dos niveles de administración (rediseño Tenant/Role/User)
 
@@ -63,7 +83,12 @@ El panel son **5 páginas HTML** servidas con FastAPI + Jinja2
   `SecurityConfig.require_auth_if_not_loopback=False`): **sin ninguna
   restricción** — cualquiera con acceso a esa máquina ve y usa todo `/admin/*`,
   igual que el resto de la aplicación. Es un comportamiento intencional
-  (pensado para uso local de un único usuario), no un descuido.
+  (pensado para uso local de un único usuario), no un descuido. El bloque
+  "Admin" del sidebar (`base.html.j2`) refleja este acceso y se muestra
+  completo también en este modo, aunque no haya sesión (`AuthMiddleware` no
+  fija `request.state.user_id`/`is_admin`/`is_instance_admin` en loopback —
+  el sidebar trata esa ausencia como "sin restricción", el mismo criterio que
+  ya usan `require_admin`/`require_instance_admin`).
 - **Modo no-loopback**: requiere sesión válida (`POST /login`) **y** el nivel
   que exija cada página (tabla de arriba). Sin sesión → 401 JSON (`/api/*`) o
   redirect 303 a `/login` (páginas HTML). Con sesión pero nivel insuficiente →
@@ -524,6 +549,8 @@ contexto.
   esta funcionalidad, con las notas de la sesión que la introdujo.
 - [Organización documental (dominios y contextos)](context.md) — modo
   manifiesto de taxonomía desde la perspectiva de un proyecto.
+- [Projects — Registro y Gestión de Proyectos](projects.md) — la página `/`
+  enlazada como "Proyectos" desde el sidebar Admin.
 - [Desplegar un LiteLLM Proxy](../guides/litellm_proxy_setup.md) — guía
   complementaria para las familias `litellm_*`.
 - `.env.example` — variables `DOC_ORGANIZE_*` equivalentes a cada campo.
