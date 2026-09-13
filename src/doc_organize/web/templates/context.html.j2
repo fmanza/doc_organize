@@ -31,7 +31,7 @@
 {% elif taxonomy_templates %}
 <label class="block mb-3 text-sm">
     Plantilla de taxonomía (opcional — catálogo de dominios + tipos de material de una biblioteca compartida entre proyectos):
-    <select id="taxonomy-template-select" class="block mt-1 px-2 py-1 border border-gray-300 rounded text-sm w-full max-w-md">
+    <select id="taxonomy-template-select" class="block mt-1 px-2 py-1 border border-gray-300 rounded text-sm w-full">
         <option value="">Ninguna (modo de un eje)</option>
         {% for template in taxonomy_templates %}
         <option value="{{ template.name }}" {% if context and context.taxonomy_template_name == template.name %}selected{% endif %}>
