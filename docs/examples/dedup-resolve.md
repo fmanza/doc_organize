@@ -110,6 +110,30 @@ Grupos detectados: 2
 4. **Auditoría**: Se escribe `DEDUP_REPORT.json` con decisiones
 5. **Estructura**: Se preserva la ruta original bajo `duplicates_dir`
 
+## Similitud aproximada de nombre (opcional)
+
+Pasando `fuzzy_threshold` (0-100), `find_duplicates()` añade una tercera pasada sobre los
+documentos que no quedaron agrupados por hash ni por versión, comparando `display_name` con
+RapidFuzz:
+
+```python
+from doc_organize.core.models import DuplicateReason
+
+groups = manager.find_duplicates(docs, fuzzy_threshold=90)
+
+for group in groups:
+    if group.reason == DuplicateReason.FUZZY_NAME_MATCH:
+        print(f"Posibles duplicados por nombre: {[d.display_name for d in group.duplicates]}")
+        # canonical_doc es solo una propuesta -- nunca se resuelve sin
+        # confirmación explícita del usuario (ver web/routes/duplicates.py,
+        # POST /api/projects/{name}/duplicates/resolve).
+```
+
+**Importante**: los grupos `FUZZY_NAME_MATCH` nunca se mueven vía `resolve_duplicates()` llamado
+desde la acción masiva "Buscar duplicados" (`ScanCommand.deduplicate_streaming()`, que no pasa
+`fuzzy_threshold`) — solo desde una resolución donde el usuario elige explícitamente `user_choice`
+por grupo.
+
 ## Referencias
 
 - [Documentación funcional: Deduplicación](../functional/dedup.md)

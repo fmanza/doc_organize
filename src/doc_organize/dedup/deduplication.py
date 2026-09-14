@@ -9,6 +9,10 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+import numpy as np
+
+from rapidfuzz import fuzz, process
+
 from doc_organize.core.constants import DEDUP_HISTORY_JSONL_NAME, DEDUP_REPORT_JSON_NAME, VERSION_SUFFIX_PATTERN
 from doc_organize.core.models import DeduplicationReport, DocumentMetadata, DuplicateGroup, DuplicateReason
 from doc_organize.utils.logging import get_logger
@@ -53,9 +57,29 @@ class DeduplicationManager:
     def __init__(self) -> None:
         self.logger = get_logger(__name__)
 
-    def find_duplicates(self, docs: list[DocumentMetadata]) -> list[DuplicateGroup]:
-        """Agrupa `docs` en duplicados exactos (mismo hash) o conflictos de
-        version (mismo nombre base + extension, hash distinto)."""
+    def find_duplicates(self, docs: list[DocumentMetadata], fuzzy_threshold: int | None = None) -> list[DuplicateGroup]:
+        """Agrupa `docs` en duplicados exactos (mismo hash), conflictos de
+        version (mismo nombre base + extension, hash distinto) y, si se indica
+        `fuzzy_threshold`, similitud aproximada de nombre sobre lo que quede sin
+        agrupar tras las dos pasadas anteriores.
+
+        `fuzzy_threshold` es `None` por defecto (retrocompatible, cero
+        regresiones): sin él, el comportamiento es idéntico al de antes de esta
+        tercera pasada. Cuando se indica (0-100, score RapidFuzz normalizado),
+        cada documento aun sin agrupar se compara por `display_name` contra el
+        resto vía `rapidfuzz.process.cdist` (vectorizado en C, no un doble bucle
+        Python) y se agrupan por componentes conexas del grafo de similitud
+        (pares con score >= `fuzzy_threshold`), sin exigir que TODOS los pares
+        de un grupo superen el umbral entre sí -- ver `_build_fuzzy_groups()`.
+
+        Los grupos `FUZZY_NAME_MATCH` resultantes nunca deben pasar por la
+        resolución automática masiva de "Buscar duplicados"
+        (`ScanCommand.deduplicate_streaming`, que llama a este método sin
+        `fuzzy_threshold`): al ser coincidencias probabilísticas por nombre,
+        solo se resuelven desde el formulario interactivo de "Revisar
+        Duplicados", donde el usuario elige explícitamente qué archivo
+        conservar por grupo.
+        """
         groups: list[DuplicateGroup] = []
         by_hash: dict[str, list[DocumentMetadata]] = {}
         for doc in docs:
@@ -76,6 +100,11 @@ class DeduplicationManager:
         for base_docs in by_base.values():
             if len(base_docs) > 1:
                 groups.append(self._build_group(base_docs, DuplicateReason.VERSION_CONFLICT))
+
+        if fuzzy_threshold is not None:
+            grouped_paths = {doc.full_path for group in groups for doc in [group.canonical_doc, *group.duplicates]}
+            remaining = [doc for doc in unique_hash_docs if doc.full_path not in grouped_paths]
+            groups.extend(self._build_fuzzy_groups(remaining, fuzzy_threshold))
 
         self.logger.info(f"Deduplicación: {len(groups)} grupos detectados sobre {len(docs)} documentos")
         return groups
@@ -217,6 +246,51 @@ class DeduplicationManager:
         match = VERSION_SUFFIX_PATTERN.match(stem)
         base = match.group("base") if match else stem
         return base.lower()
+
+    @staticmethod
+    def _build_fuzzy_groups(docs: list[DocumentMetadata], fuzzy_threshold: int) -> list[DuplicateGroup]:
+        """Agrupa `docs` (ya sin duplicados exactos ni conflictos de versión) por
+        similitud aproximada de `display_name`, comparando en minúsculas (mismo
+        criterio que `_extract_base_name`) para no perder coincidencias que solo
+        difieren en mayúsculas/minúsculas.
+
+        Usa `rapidfuzz.process.cdist` para calcular la matriz de scores completa
+        de una vez (vectorizado en C), y `numpy` para extraer de ella, también
+        vectorizado, los pares con score >= `fuzzy_threshold` -- ningún doble
+        bucle Python sobre pares de nombres, solo sobre las aristas ya filtradas.
+        Esos pares se agrupan por componentes conexas (union-find): dos
+        documentos terminan en el mismo grupo si hay una cadena de pares que los
+        conecta, sin exigir que absolutamente todos los pares del grupo superen
+        el umbral entre sí (REQ de negocio: no asumir transitividad estricta).
+        """
+        if len(docs) < 2:
+            return []
+
+        names = [doc.display_name.lower() for doc in docs]
+        score_matrix = process.cdist(names, names, scorer=fuzz.ratio, score_cutoff=fuzzy_threshold, workers=-1)
+
+        parent = list(range(len(docs)))
+
+        def find(index: int) -> int:
+            while parent[index] != index:
+                parent[index] = parent[parent[index]]
+                index = parent[index]
+            return index
+
+        def union(a: int, b: int) -> None:
+            root_a, root_b = find(a), find(b)
+            if root_a != root_b:
+                parent[root_a] = root_b
+
+        above_threshold = np.triu(score_matrix >= fuzzy_threshold, k=1)
+        for i, j in np.argwhere(above_threshold).tolist():
+            union(i, j)
+
+        components: dict[int, list[DocumentMetadata]] = {}
+        for index, doc in enumerate(docs):
+            components.setdefault(find(index), []).append(doc)
+
+        return [DeduplicationManager._build_group(members, DuplicateReason.FUZZY_NAME_MATCH) for members in components.values() if len(members) > 1]
 
     @staticmethod
     def _build_group(docs: list[DocumentMetadata], reason: DuplicateReason) -> DuplicateGroup:

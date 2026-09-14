@@ -9,13 +9,13 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from doc_organize.core.constants import DEDUP_HISTORY_JSONL_NAME, DUPLICATES_FOLDER_NAME, SCAN_FOLDERS_JSON_NAME
 from doc_organize.core.exceptions import ProjectNotScannedError
-from doc_organize.core.models import DeduplicationReport, DuplicateGroup, Project
+from doc_organize.core.models import DeduplicationReport, DuplicateGroup, DuplicateReason, Project
 from doc_organize.dedup import DeduplicationManager
 from doc_organize.scanner import DocumentScanner
 from doc_organize.utils.logging import get_logger
@@ -62,12 +62,20 @@ class DuplicatesResponse(BaseModel):
 
 class ResolveDuplicatesRequest(BaseModel):
     resolutions: dict[str, str]  # group_key -> full_path elegido por el usuario
+    fuzzy_threshold: int | None = Field(default=None, ge=0, le=100)
+    # group_key -> activado, SOLO para grupos con reason=fuzzy_name_match (ver
+    # resolve_duplicates()). `None` (ausente) = comportamiento anterior a este
+    # campo, sin cambios: todos los grupos detectados se resuelven. Con un dict
+    # presente, una clave ausente se trata como "no activado" (fail-safe) --
+    # nunca se usa para afectar a grupos exact_duplicate/version_conflict.
+    fuzzy_group_toggles: dict[str, bool] | None = None
 
 
 class ResolveDuplicatesResponse(BaseModel):
     moved: int
     groups_resolved: int
     failed_paths: list[str] = []
+    groups_excluded: int = 0  # grupos fuzzy detectados pero no activados en este envío
 
 
 def _group_key(group: DuplicateGroup) -> str:
@@ -89,11 +97,25 @@ async def _get_project(request: Request, name: str) -> Project:
         return await registry.get_project(name, tenant_id=get_tenant_id(request))
 
 
-async def _detect_duplicates(project: Project) -> list[DuplicateGroup]:
+async def _detect_duplicates(project: Project, fuzzy_threshold: int | None = None) -> list[DuplicateGroup]:
     """Relee `folders.json` (escrito por `ScanCommand`, Fase D-1) y vuelve a escanear
     en vivo — sin mover nada. No usa `cache.db`: `CacheEntry` no guarda suficientes
     campos (nombre, tamaño) para reconstruir el `DocumentMetadata` que necesita
     `DeduplicationManager.find_duplicates()`.
+
+    `fuzzy_threshold` se reenvía tal cual a `find_duplicates()` (`None` por
+    defecto: sin pasada de similitud aproximada, igual que antes de esa
+    funcionalidad). Solo se usa aquí y en `get_duplicates`/`duplicates_resolver_page`
+    -- `ScanCommand.deduplicate_streaming()` (acción masiva "Buscar duplicados")
+    llama a `find_duplicates()` por su cuenta sin este parámetro, para que los
+    grupos por similitud aproximada nunca se resuelvan automáticamente.
+
+    `find_duplicates()` se ejecuta en un hilo aparte (`asyncio.to_thread`, AUDIT_CODE):
+    las dos pasadas originales son O(n) y baratas, pero la pasada por similitud
+    aproximada (activada por `fuzzy_threshold`) es O(n²) sobre los documentos aún
+    sin agrupar -- en un proyecto con miles de ficheros sin agrupar, ejecutarla
+    directamente en el hilo del event loop bloquearía el servidor entero (todas
+    las conexiones, no solo esta petición) durante esa pasada.
     """
     root = Path(project.root_path)
     folders_json = root / SCAN_FOLDERS_JSON_NAME
@@ -107,14 +129,12 @@ async def _detect_duplicates(project: Project) -> list[DuplicateGroup]:
 
     paths = await asyncio.to_thread(_read_scanned_paths)
     if paths is None:
-        raise ProjectNotScannedError(
-            f"Este proyecto todavía no se ha escaneado ni deduplicado nunca (no existe {SCAN_FOLDERS_JSON_NAME})."
-        )
+        raise ProjectNotScannedError(f"Este proyecto todavía no se ha escaneado ni deduplicado nunca (no existe {SCAN_FOLDERS_JSON_NAME}).")
 
     async with DocumentScanner() as scanner:
         scan_result = await scanner.scan_folders(paths)
 
-    return DeduplicationManager().find_duplicates(scan_result.documents)
+    return await asyncio.to_thread(DeduplicationManager().find_duplicates, scan_result.documents, fuzzy_threshold=fuzzy_threshold)
 
 
 def _load_dedup_history(project: Project) -> list[DeduplicationReport]:
@@ -152,7 +172,9 @@ def _load_dedup_history(project: Project) -> list[DeduplicationReport]:
 
 
 @router.get("/projects/{name}/duplicates", response_class=HTMLResponse, dependencies=[Depends(require_project_access)])
-async def duplicates_resolver_page(name: str, request: Request, tab: str = "resolve") -> HTMLResponse:
+async def duplicates_resolver_page(
+    name: str, request: Request, tab: str = "resolve", fuzzy_threshold: int | None = Query(default=None, ge=0, le=100)
+) -> HTMLResponse:
     """Muestra los duplicados pendientes de resolver (re-escaneo en vivo, con
     formulario interactivo) y el histórico completo de deduplicaciones — cada
     ejecución con su propio detalle de archivos (conservado/movido), no solo
@@ -163,6 +185,14 @@ async def duplicates_resolver_page(name: str, request: Request, tab: str = "reso
     Incluye también la acción masiva "Buscar duplicados" (antes en la página
     Escanear, ahora en la pestaña "Buscar duplicados" de esta página, tras la
     reestructuración de navegación).
+
+    `fuzzy_threshold` (opcional, 0-100) activa la tercera pasada de detección
+    por similitud aproximada de nombre (`DuplicateReason.FUZZY_NAME_MATCH`) --
+    ver `_detect_duplicates()`. Se reenvía a la plantilla para precargar el
+    control numérico y para que el formulario de resolución lo reenvíe de
+    vuelta en `POST /duplicates/resolve` (mismo umbral con el que se detectaron
+    los grupos mostrados, o la resolución no encontraría esos grupos al
+    re-escanear).
     """
     project = await _get_project(request, name)
     # `ProjectNotScannedError` se captura aquí (a diferencia de `get_duplicates`
@@ -172,7 +202,7 @@ async def duplicates_resolver_page(name: str, request: Request, tab: str = "reso
     # global se renderiza un estado informativo dentro del layout habitual.
     never_scanned = False
     try:
-        groups = await _detect_duplicates(project)
+        groups = await _detect_duplicates(project, fuzzy_threshold=fuzzy_threshold)
     except ProjectNotScannedError:
         never_scanned = True
         groups = []
@@ -207,14 +237,15 @@ async def duplicates_resolver_page(name: str, request: Request, tab: str = "reso
             "has_saved_folders": bool(saved_folders),
             "never_scanned": never_scanned,
             "active_tab": "history" if tab == "history" else "resolve",
+            "fuzzy_threshold": fuzzy_threshold,
         },
     )
 
 
 @router.get("/api/projects/{name}/duplicates", response_model=DuplicatesResponse, dependencies=[Depends(require_project_access)])
-async def get_duplicates(name: str, request: Request) -> DuplicatesResponse:
+async def get_duplicates(name: str, request: Request, fuzzy_threshold: int | None = Query(default=None, ge=0, le=100)) -> DuplicatesResponse:
     project = await _get_project(request, name)
-    groups = await _detect_duplicates(project)
+    groups = await _detect_duplicates(project, fuzzy_threshold=fuzzy_threshold)
     return DuplicatesResponse(groups=groups)
 
 
@@ -231,16 +262,42 @@ async def resolve_duplicates(name: str, payload: ResolveDuplicatesRequest, reque
     **detectado aquí mismo** se conserva. Una elección que no coincide con ningún
     miembro real del grupo correspondiente se ignora (se loguea, no se aplica) — ver
     AUDIT_PLAN de `§2.7.4` para el hallazgo de seguridad que motiva este diseño.
+
+    `payload.fuzzy_threshold` debe ser el mismo umbral con el que el cliente
+    detectó (`GET`) los grupos que ahora resuelve: el re-escaneo de esta ruta
+    es independiente del `GET` anterior, así que sin este mismo valor los
+    grupos `FUZZY_NAME_MATCH` mostrados no reaparecerían aquí y la resolución
+    del usuario para esos grupos se ignoraría en silencio (mismo mecanismo de
+    "clave no coincide" que ya aplica a manipulaciones del `group_key`).
+
+    `payload.fuzzy_group_toggles` decide, SOLO para grupos `fuzzy_name_match`,
+    si ese grupo concreto se resuelve en este envío o queda pendiente (activado
+    por el usuario grupo a grupo en la plantilla, desactivado por defecto: una
+    coincidencia por nombre es probabilística y no debe moverse sin que el
+    usuario la revise una a una). Un grupo excluido no se toca -- sigue
+    apareciendo en el siguiente `GET` con el mismo `fuzzy_threshold`, como si
+    este envío no hubiera existido para él. Nunca afecta a grupos
+    `exact_duplicate`/`version_conflict`, se envíe lo que se envíe en el dict:
+    solo se consulta para grupos cuyo `reason` sea `fuzzy_name_match`.
     """
     started_at = datetime.now(UTC)
     project = await _get_project(request, name)
-    groups = await _detect_duplicates(project)
+    groups = await _detect_duplicates(project, fuzzy_threshold=payload.fuzzy_threshold)
 
     if not groups:
         return ResolveDuplicatesResponse(moved=0, groups_resolved=0)
 
-    resolved_count = 0
+    groups_to_resolve: list[DuplicateGroup] = []
+    groups_excluded = 0
     for group in groups:
+        if payload.fuzzy_group_toggles is not None and group.reason == DuplicateReason.FUZZY_NAME_MATCH:
+            if not payload.fuzzy_group_toggles.get(_group_key(group), False):
+                groups_excluded += 1
+                continue
+        groups_to_resolve.append(group)
+
+    resolved_count = 0
+    for group in groups_to_resolve:
         chosen_path = payload.resolutions.get(_group_key(group))
         if chosen_path is None:
             continue
@@ -255,9 +312,9 @@ async def resolve_duplicates(name: str, payload: ResolveDuplicatesRequest, reque
         resolved_count += 1
 
     duplicates_dir = Path(project.root_path) / DUPLICATES_FOLDER_NAME
-    report = await DeduplicationManager().resolve_duplicates(groups, duplicates_dir, started_at=started_at)
+    report = await DeduplicationManager().resolve_duplicates(groups_to_resolve, duplicates_dir, started_at=started_at)
     moved = report.total_exact_duplicates + report.total_version_conflicts
-    return ResolveDuplicatesResponse(moved=moved, groups_resolved=resolved_count, failed_paths=report.failed_paths)
+    return ResolveDuplicatesResponse(moved=moved, groups_resolved=resolved_count, failed_paths=report.failed_paths, groups_excluded=groups_excluded)
 
 
 __all__ = ["router"]

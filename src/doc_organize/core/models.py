@@ -47,6 +47,7 @@ class DuplicateReason(str, Enum):
 
     EXACT_DUPLICATE = "exact_duplicate"
     VERSION_CONFLICT = "version_conflict"
+    FUZZY_NAME_MATCH = "fuzzy_name_match"
 
 
 class OcrMode(str, Enum):

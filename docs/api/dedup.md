@@ -8,7 +8,7 @@ API Reference para detección y resolución de duplicados.
 classDiagram
     class DeduplicationManager {
         -logger: Logger
-        +find_duplicates(docs: list[DocumentMetadata]) list[DuplicateGroup]
+        +find_duplicates(docs: list[DocumentMetadata], fuzzy_threshold: int | None) list[DuplicateGroup]
         +resolve_duplicates(groups: list[DuplicateGroup], duplicates_dir: Path) DeduplicationReport
     }
     
@@ -41,7 +41,8 @@ classDiagram
 class DeduplicationManager:
     def find_duplicates(
         self,
-        docs: list[DocumentMetadata]
+        docs: list[DocumentMetadata],
+        fuzzy_threshold: int | None = None
     ) -> list[DuplicateGroup]
     
     async def resolve_duplicates(
@@ -53,11 +54,13 @@ class DeduplicationManager:
 
 #### find_duplicates (Síncrono)
 
-Agrupa documentos por duplicado exacto y conflicto de versión.
+Agrupa documentos por duplicado exacto, conflicto de versión y, opcionalmente, similitud
+aproximada de nombre.
 
 | Parámetro | Tipo | Descripción |
 |---|---|---|
 | `docs` | `list[DocumentMetadata]` | Documentos escaneados |
+| `fuzzy_threshold` | `int \| None` | Score mínimo RapidFuzz (0-100) para la 3ª pasada; `None` (por defecto) la desactiva — retrocompatible |
 
 | Retorno | Tipo | Descripción |
 |---|---|---|
@@ -66,9 +69,16 @@ Agrupa documentos por duplicado exacto y conflicto de versión.
 **Agrupación**:
 1. Por SHA-256 exacto → `reason=exact_duplicate`
 2. Por nombre base (sin extensión, sin versión) → `reason=version_conflict`
+3. (opcional, si `fuzzy_threshold` no es `None`) Por similitud aproximada de `display_name` entre
+   los documentos que no quedaron agrupados en 1-2, usando `rapidfuzz.process.cdist` (vectorizado)
+   y componentes conexas del grafo de similitud (score ≥ `fuzzy_threshold`, sin exigir
+   transitividad estricta par a par) → `reason=fuzzy_name_match`. Excluido siempre de la
+   resolución automática masiva ("Buscar duplicados"); solo se resuelve desde el formulario
+   interactivo de "Revisar Duplicados" (elección manual del usuario por grupo).
 
 **Selección de canónico**:
-- Documento más antiguo (mínimo `modified_time`)
+- Documento más antiguo (mínimo `modified_time`) — en grupos `fuzzy_name_match` es una propuesta,
+  no se aplica sin que el usuario la confirme (o la sobrescriba) explícitamente
 
 ---
 
@@ -114,7 +124,7 @@ class DuplicateGroup:
     group_id: str
     canonical_doc: DocumentMetadata
     duplicates: list[DocumentMetadata]
-    reason: DuplicateReason  # exact_duplicate | version_conflict
+    reason: DuplicateReason  # exact_duplicate | version_conflict | fuzzy_name_match
     user_choice: DocumentMetadata | None = None
 
 @dataclass
@@ -136,6 +146,8 @@ class DeduplicationReport:
 | `core.exceptions.ProjectError` | Excepciones |
 | `utils.path_utils.is_subpath()`, `safe_path_join()` | Manipulación segura de rutas |
 | `utils.logging` | Logging |
+| `rapidfuzz.process.cdist`, `rapidfuzz.fuzz.ratio` | Matriz de scores de similitud de nombre (3ª pasada, vectorizado) |
+| `numpy` (transitivo vía `pandas`) | Extrae, vectorizado, los pares de la matriz de scores por encima del umbral |
 
 ## Notas Internas
 

@@ -100,6 +100,397 @@ async def test_duplicates_api_detects_exact_duplicate(tmp_path) -> None:
     assert len(group["duplicates"]) == 1
 
 
+# ===== fuzzy_threshold (FUZZY_NAME_MATCH, tercera pasada opcional) =====
+
+
+@pytest.mark.asyncio
+async def test_duplicates_api_without_fuzzy_threshold_ignores_similar_names(tmp_path) -> None:
+    # Nombres parecidos (ratio ~85.7) pero contenido y base distintos: sin
+    # fuzzy_threshold no deben agruparse -- mismo comportamiento que antes de
+    # esta funcionalidad (retrocompatibilidad, regla de negocio 4).
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "informe_ventas.pdf").write_bytes(b"contenido a")
+    (input_dir / "informe_ventas_anual.pdf").write_bytes(b"contenido b")
+    _write_folders_json(project_root, [str(input_dir)])
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/api/projects/{project.name}/duplicates")
+
+    assert response.status_code == 200
+    assert response.json()["groups"] == []
+
+
+@pytest.mark.asyncio
+async def test_duplicates_api_fuzzy_threshold_detects_similar_names(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "informe_ventas.pdf").write_bytes(b"contenido a")
+    (input_dir / "informe_ventas_anual.pdf").write_bytes(b"contenido b")
+    _write_folders_json(project_root, [str(input_dir)])
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/api/projects/{project.name}/duplicates", params={"fuzzy_threshold": 80})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["groups"]) == 1
+    assert payload["groups"][0]["reason"] == "fuzzy_name_match"
+
+
+@pytest.mark.asyncio
+async def test_duplicates_resolver_page_shows_fuzzy_threshold_control(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+    _write_folders_json(project_root, [])
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/duplicates", params={"fuzzy_threshold": 80})
+
+    assert response.status_code == 200
+    html = response.text
+    assert 'id="fuzzy-threshold-input"' in html
+    assert 'value="80"' in html
+    assert 'id="fuzzy-threshold-clear-btn"' in html
+
+
+@pytest.mark.asyncio
+async def test_duplicates_resolve_moves_fuzzy_group_with_explicit_user_choice(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    keep_path = input_dir / "informe_ventas.pdf"
+    discard_path = input_dir / "informe_ventas_anual.pdf"
+    keep_path.write_bytes(b"contenido a")
+    discard_path.write_bytes(b"contenido b")
+    _write_folders_json(project_root, [str(input_dir)])
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        detected = (await client.get(f"/api/projects/{project.name}/duplicates", params={"fuzzy_threshold": 80})).json()
+        group = detected["groups"][0]
+        assert group["reason"] == "fuzzy_name_match"
+
+        import hashlib
+
+        paths = sorted([group["canonical_doc"]["full_path"], *[d["full_path"] for d in group["duplicates"]]])
+        group_key = hashlib.sha256("|".join(paths).encode("utf-8")).hexdigest()
+
+        response = await client.post(
+            f"/api/projects/{project.name}/duplicates/resolve",
+            json={"resolutions": {group_key: str(keep_path.resolve())}, "fuzzy_threshold": 80},
+        )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["groups_resolved"] == 1
+    assert result["moved"] == 1
+    assert keep_path.exists()  # el elegido explicitamente se conserva
+    assert not discard_path.exists()  # el otro se movio
+
+
+# ===== fuzzy_group_toggles (activar/desactivar la resolucion por grupo fuzzy) =====
+
+
+@pytest.mark.asyncio
+async def test_duplicates_resolve_fuzzy_group_toggled_off_stays_pending(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    keep_path = input_dir / "informe_ventas.pdf"
+    other_path = input_dir / "informe_ventas_anual.pdf"
+    keep_path.write_bytes(b"contenido a")
+    other_path.write_bytes(b"contenido b")
+    _write_folders_json(project_root, [str(input_dir)])
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        detected = (await client.get(f"/api/projects/{project.name}/duplicates", params={"fuzzy_threshold": 80})).json()
+        group = detected["groups"][0]
+        assert group["reason"] == "fuzzy_name_match"
+
+        import hashlib
+
+        paths = sorted([group["canonical_doc"]["full_path"], *[d["full_path"] for d in group["duplicates"]]])
+        group_key = hashlib.sha256("|".join(paths).encode("utf-8")).hexdigest()
+
+        response = await client.post(
+            f"/api/projects/{project.name}/duplicates/resolve",
+            json={
+                "resolutions": {group_key: str(keep_path.resolve())},
+                "fuzzy_threshold": 80,
+                "fuzzy_group_toggles": {group_key: False},
+            },
+        )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["moved"] == 0
+    assert result["groups_resolved"] == 0
+    assert result["groups_excluded"] == 1
+    assert keep_path.exists()
+    assert other_path.exists()  # nada se movio: el grupo fuzzy quedo pendiente
+
+
+@pytest.mark.asyncio
+async def test_duplicates_resolve_fuzzy_group_missing_from_toggles_defaults_excluded(tmp_path) -> None:
+    # Fail-safe: si el dict de toggles esta presente pero no trae la clave de
+    # este grupo, se trata igual que "no activado" -- no "se resuelve por
+    # defecto".
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    keep_path = input_dir / "informe_ventas.pdf"
+    other_path = input_dir / "informe_ventas_anual.pdf"
+    keep_path.write_bytes(b"contenido a")
+    other_path.write_bytes(b"contenido b")
+    _write_folders_json(project_root, [str(input_dir)])
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.post(
+            f"/api/projects/{project.name}/duplicates/resolve",
+            json={"resolutions": {}, "fuzzy_threshold": 80, "fuzzy_group_toggles": {}},
+        )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["moved"] == 0
+    assert result["groups_excluded"] == 1
+    assert keep_path.exists()
+    assert other_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_duplicates_resolve_fuzzy_group_toggled_on_is_moved(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    keep_path = input_dir / "informe_ventas.pdf"
+    discard_path = input_dir / "informe_ventas_anual.pdf"
+    keep_path.write_bytes(b"contenido a")
+    discard_path.write_bytes(b"contenido b")
+    _write_folders_json(project_root, [str(input_dir)])
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        detected = (await client.get(f"/api/projects/{project.name}/duplicates", params={"fuzzy_threshold": 80})).json()
+        group = detected["groups"][0]
+
+        import hashlib
+
+        paths = sorted([group["canonical_doc"]["full_path"], *[d["full_path"] for d in group["duplicates"]]])
+        group_key = hashlib.sha256("|".join(paths).encode("utf-8")).hexdigest()
+
+        response = await client.post(
+            f"/api/projects/{project.name}/duplicates/resolve",
+            json={
+                "resolutions": {group_key: str(keep_path.resolve())},
+                "fuzzy_threshold": 80,
+                "fuzzy_group_toggles": {group_key: True},
+            },
+        )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["moved"] == 1
+    assert result["groups_resolved"] == 1
+    assert result["groups_excluded"] == 0
+    assert keep_path.exists()
+    assert not discard_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_duplicates_resolve_excludes_fuzzy_group_while_still_resolving_exact_duplicate_group(tmp_path) -> None:
+    # Coexistencia en el MISMO envio: un grupo exact_duplicate y un grupo fuzzy
+    # (desactivado, por defecto) en el mismo proyecto -- el filtro de toggles
+    # no debe interferir con la resolucion del grupo no-fuzzy.
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    exact_keep = input_dir / "a.pdf"
+    exact_discard = input_dir / "a_copy.pdf"
+    exact_keep.write_bytes(b"contenido identico")
+    exact_discard.write_bytes(b"contenido identico")
+    fuzzy_a = input_dir / "informe_ventas.pdf"
+    fuzzy_b = input_dir / "informe_ventas_anual.pdf"
+    fuzzy_a.write_bytes(b"contenido a")
+    fuzzy_b.write_bytes(b"contenido b")
+    _write_folders_json(project_root, [str(input_dir)])
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        detected = (await client.get(f"/api/projects/{project.name}/duplicates", params={"fuzzy_threshold": 80})).json()
+        assert len(detected["groups"]) == 2
+        reasons = {group["reason"] for group in detected["groups"]}
+        assert reasons == {"exact_duplicate", "fuzzy_name_match"}
+
+        import hashlib
+
+        def _key(group: dict) -> str:
+            paths = sorted([group["canonical_doc"]["full_path"], *[d["full_path"] for d in group["duplicates"]]])
+            return hashlib.sha256("|".join(paths).encode("utf-8")).hexdigest()
+
+        exact_group = next(g for g in detected["groups"] if g["reason"] == "exact_duplicate")
+        fuzzy_group = next(g for g in detected["groups"] if g["reason"] == "fuzzy_name_match")
+
+        response = await client.post(
+            f"/api/projects/{project.name}/duplicates/resolve",
+            json={
+                "resolutions": {_key(exact_group): str(exact_keep.resolve()), _key(fuzzy_group): str(fuzzy_a.resolve())},
+                "fuzzy_threshold": 80,
+                "fuzzy_group_toggles": {_key(fuzzy_group): False},
+            },
+        )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["moved"] == 1  # solo el grupo exact_duplicate
+    assert result["groups_resolved"] == 1
+    assert result["groups_excluded"] == 1
+    assert exact_keep.exists()
+    assert not exact_discard.exists()  # el duplicado exacto SI se movio
+    assert fuzzy_a.exists()
+    assert fuzzy_b.exists()  # el grupo fuzzy quedo intacto, pendiente
+
+
+@pytest.mark.asyncio
+async def test_duplicates_resolve_fuzzy_group_toggles_never_exclude_exact_duplicate_group(tmp_path) -> None:
+    # Un intento (malicioso o por error) de poner a False la clave de un grupo
+    # exact_duplicate/version_conflict en fuzzy_group_toggles se ignora: el
+    # filtro solo aplica a grupos con reason=fuzzy_name_match.
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    keep_path = input_dir / "keep.pdf"
+    discard_path = input_dir / "discard.pdf"
+    keep_path.write_bytes(b"contenido identico")
+    discard_path.write_bytes(b"contenido identico")
+    _write_folders_json(project_root, [str(input_dir)])
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        detected = (await client.get(f"/api/projects/{project.name}/duplicates")).json()
+        group = detected["groups"][0]
+        assert group["reason"] == "exact_duplicate"
+
+        import hashlib
+
+        paths = sorted([group["canonical_doc"]["full_path"], *[d["full_path"] for d in group["duplicates"]]])
+        group_key = hashlib.sha256("|".join(paths).encode("utf-8")).hexdigest()
+
+        response = await client.post(
+            f"/api/projects/{project.name}/duplicates/resolve",
+            json={
+                "resolutions": {group_key: str(keep_path.resolve())},
+                "fuzzy_group_toggles": {group_key: False},
+            },
+        )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["moved"] == 1  # el grupo exact_duplicate se resolvio igualmente
+    assert result["groups_resolved"] == 1
+    assert result["groups_excluded"] == 0
+    assert keep_path.exists()
+    assert not discard_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_duplicates_resolver_page_fuzzy_group_checkbox_unchecked_by_default(tmp_path) -> None:
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    (input_dir / "informe_ventas.pdf").write_bytes(b"contenido a")
+    (input_dir / "informe_ventas_anual.pdf").write_bytes(b"contenido b")
+    _write_folders_json(project_root, [str(input_dir)])
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/duplicates", params={"fuzzy_threshold": 80})
+
+    assert response.status_code == 200
+    html = response.text
+    assert 'class="fuzzy-toggle-checkbox' in html
+    # El checkbox no debe llevar `checked`: desactivado por defecto.
+    checkbox_tag = html.split('class="fuzzy-toggle-checkbox')[1].split(">")[0]
+    assert "checked" not in checkbox_tag
+
+
+@pytest.mark.asyncio
+async def test_duplicates_resolve_without_fuzzy_threshold_does_not_move_fuzzy_group(tmp_path) -> None:
+    # Sin fuzzy_threshold en el POST, el re-escaneo propio de esta ruta no
+    # vuelve a encontrar el grupo fuzzy detectado en el GET anterior -- la
+    # resolucion para ese group_key se ignora (mismo mecanismo que una
+    # group_key que no coincide con ningun grupo real).
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    project_root = tmp_path / "workspaces" / project.name
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    keep_path = input_dir / "informe_ventas.pdf"
+    discard_path = input_dir / "informe_ventas_anual.pdf"
+    keep_path.write_bytes(b"contenido a")
+    discard_path.write_bytes(b"contenido b")
+    _write_folders_json(project_root, [str(input_dir)])
+
+    app = create_app(registry_path=registry_path)
+    async with _client(app) as client:
+        detected = (await client.get(f"/api/projects/{project.name}/duplicates", params={"fuzzy_threshold": 80})).json()
+        group = detected["groups"][0]
+
+        import hashlib
+
+        paths = sorted([group["canonical_doc"]["full_path"], *[d["full_path"] for d in group["duplicates"]]])
+        group_key = hashlib.sha256("|".join(paths).encode("utf-8")).hexdigest()
+
+        response = await client.post(
+            f"/api/projects/{project.name}/duplicates/resolve",
+            json={"resolutions": {group_key: str(keep_path.resolve())}},
+        )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["groups_resolved"] == 0
+    assert result["moved"] == 0
+    assert keep_path.exists()
+    assert discard_path.exists()  # nada se movio: el grupo fuzzy no reaparecio sin el umbral
+
+
 @pytest.mark.asyncio
 async def test_duplicates_resolve_moves_non_chosen_member(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
@@ -383,7 +774,7 @@ async def test_duplicates_resolve_no_duplicates_is_noop(tmp_path) -> None:
 
     assert response.status_code == 200
     result = response.json()
-    assert result == {"moved": 0, "groups_resolved": 0, "failed_paths": []}
+    assert result == {"moved": 0, "groups_resolved": 0, "failed_paths": [], "groups_excluded": 0}
 
 
 @pytest.mark.asyncio

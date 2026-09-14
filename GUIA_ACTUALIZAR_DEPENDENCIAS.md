@@ -138,6 +138,7 @@ ruff check src tests
 - `aiosqlite>=0.19` — SQLite asincrónico
 - `pillow>=10.0` — Procesamiento de imágenes
 - `pandas>=2.0` — Análisis de datos
+- `rapidfuzz>=3.0` — Similitud aproximada de nombres de archivo (deduplicación difusa, `DuplicateReason.FUZZY_NAME_MATCH`)
 - `python-magic-bin>=0.4` (Windows) / `python-magic>=0.4` (Unix)
 - `tzdata>=2024.1` — Información de zonas horarias
 

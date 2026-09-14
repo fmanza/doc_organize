@@ -32,6 +32,22 @@
 
 <div id="resolve-results-container">
 <h2 class="text-lg font-medium mt-4 mb-2">Resultado de los duplicados</h2>
+{% if not never_scanned %}
+<div class="my-3 px-3 py-2 rounded bg-gray-50 border border-gray-200 flex flex-wrap items-end gap-2">
+    <div>
+        <label for="fuzzy-threshold-input" class="block text-sm font-medium mb-1">Similitud aproximada de nombre (opcional)</label>
+        <input type="number" id="fuzzy-threshold-input" min="0" max="100" step="1"
+               value="{{ fuzzy_threshold if fuzzy_threshold is not none else '' }}"
+               placeholder="ej. 90"
+               class="border border-gray-300 rounded px-2 py-1.5 w-28">
+    </div>
+    <button type="button" id="fuzzy-threshold-apply-btn" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-gray-100 hover:bg-gray-200">Aplicar</button>
+    {% if fuzzy_threshold is not none %}
+    <button type="button" id="fuzzy-threshold-clear-btn" class="px-3 py-1.5 cursor-pointer border border-gray-300 rounded bg-white hover:bg-gray-100">Quitar (umbral: {{ fuzzy_threshold }}%)</button>
+    {% endif %}
+    <p class="text-xs text-gray-500 w-full">Detecta también grupos por nombre de archivo parecido (0-100% de similitud). Estos grupos nunca se resuelven con "Buscar duplicados": el usuario elige qué archivo conservar en el formulario de abajo.</p>
+</div>
+{% endif %}
 {% if never_scanned %}
 <p class="my-2 px-3 py-2 rounded bg-amber-50 border border-amber-300 text-amber-900 text-sm">
     Este proyecto todavía no se ha escaneado ni deduplicado nunca: no hay documentos catalogados
@@ -41,10 +57,21 @@
     para escanear el proyecto por primera vez.
 </p>
 {% elif groups %}
-<form id="resolve-form" class="my-4">
+<form id="resolve-form" class="my-4" data-fuzzy-threshold="{{ fuzzy_threshold if fuzzy_threshold is not none else '' }}">
     {% for item in groups %}
     <fieldset class="border border-gray-300 rounded p-3 mb-3">
-        <legend class="px-1 font-medium">Grupo {{ loop.index }} ({{ item.group.reason.value }})</legend>
+        <legend class="px-1 font-medium">
+            Grupo {{ loop.index }} ({{ item.group.reason.value }})
+            {% if item.group.reason.value == "fuzzy_name_match" %}
+            <label class="ml-2 font-normal text-sm text-gray-700">
+                <input type="checkbox" class="fuzzy-toggle-checkbox align-middle" data-group-key="{{ item.key }}">
+                Incluir este grupo en esta resolución
+            </label>
+            {% endif %}
+        </legend>
+        {% if item.group.reason.value == "fuzzy_name_match" %}
+        <p class="text-xs text-gray-500 mb-2">Coincidencia probabilística por nombre: no se resuelve salvo que actives esta casilla.</p>
+        {% endif %}
         <table class="w-full text-sm border-collapse">
             <thead>
                 <tr class="text-left text-gray-600">
@@ -222,6 +249,14 @@ function lockDedupControls() {
     deduplicateBtn.disabled = true;
     const resolveSubmitBtn = form ? form.querySelector('button[type="submit"]') : null;
     if (resolveSubmitBtn) resolveSubmitBtn.disabled = true;
+    // El control de umbral de similitud aproximada navega (recarga completa) al
+    // aplicarse -- si se pulsara mientras una operación de dedup sigue en curso,
+    // abandonaria esa operación desde el cliente (el WebSocket/fetch en vuelo se
+    // pierde) sin esperar a que termine, igual que el resto de controles aqui.
+    const fuzzyApplyBtn = document.getElementById("fuzzy-threshold-apply-btn");
+    const fuzzyClearBtn = document.getElementById("fuzzy-threshold-clear-btn");
+    if (fuzzyApplyBtn) fuzzyApplyBtn.disabled = true;
+    if (fuzzyClearBtn) fuzzyClearBtn.disabled = true;
 }
 
 function unlockDedupControls() {
@@ -231,6 +266,10 @@ function unlockDedupControls() {
     deduplicateBtn.disabled = false;
     const resolveSubmitBtn = form ? form.querySelector('button[type="submit"]') : null;
     if (resolveSubmitBtn) resolveSubmitBtn.disabled = false;
+    const fuzzyApplyBtn = document.getElementById("fuzzy-threshold-apply-btn");
+    const fuzzyClearBtn = document.getElementById("fuzzy-threshold-clear-btn");
+    if (fuzzyApplyBtn) fuzzyApplyBtn.disabled = false;
+    if (fuzzyClearBtn) fuzzyClearBtn.disabled = false;
 }
 
 // --- Semáforo de estado (Inicio / Ejecución / Finalización / Error) ---
@@ -313,7 +352,10 @@ function extractElementHtml(htmlText, elementId) {
 }
 
 async function refreshDynamicPanels() {
-    const response = await fetch(window.location.pathname);
+    // Incluye la querystring (p.ej. "?fuzzy_threshold=90"): sin ella, el
+    // re-fetch perdería el umbral de similitud aproximada activo y el panel
+    // refrescado volvería a mostrar la detección por defecto (sin esa pasada).
+    const response = await fetch(window.location.pathname + window.location.search);
     const html = await response.text();
     const resolveHtml = extractElementHtml(html, "resolve-results-container");
     const historyHtml = extractElementHtml(html, "tab-panel-history");
@@ -327,7 +369,43 @@ async function refreshDynamicPanels() {
     // que volver a enlazar sus listeners, los del DOM original ya no aplican.
     setupResolveForm();
     setupHistorySearch();
+    setupFuzzyThresholdControl();
 }
+
+// --- Control de umbral de similitud aproximada (fuzzy_threshold) ---
+// "Aplicar"/"Quitar" navegan (recarga completa) en vez de re-fetch AJAX: cambiar
+// el umbral cambia qué grupos se detectan, así que es una navegación real de la
+// página, igual que el query param "tab" ya existente (ver test
+// test_duplicates_page_history_tab_active_via_query_param).
+function setupFuzzyThresholdControl() {
+    const input = document.getElementById("fuzzy-threshold-input");
+    const applyBtn = document.getElementById("fuzzy-threshold-apply-btn");
+    const clearBtn = document.getElementById("fuzzy-threshold-clear-btn");
+    if (applyBtn && input) {
+        applyBtn.addEventListener("click", () => {
+            if (dedupOperationInProgress) return;
+            const value = input.value.trim();
+            const url = new URL(window.location.href);
+            url.searchParams.set("tab", "resolve");
+            if (value === "") {
+                url.searchParams.delete("fuzzy_threshold");
+            } else {
+                url.searchParams.set("fuzzy_threshold", value);
+            }
+            window.location.href = url.toString();
+        });
+    }
+    if (clearBtn) {
+        clearBtn.addEventListener("click", () => {
+            if (dedupOperationInProgress) return;
+            const url = new URL(window.location.href);
+            url.searchParams.set("tab", "resolve");
+            url.searchParams.delete("fuzzy_threshold");
+            window.location.href = url.toString();
+        });
+    }
+}
+setupFuzzyThresholdControl();
 
 const DEDUP_RUNNING_EVENTS = new Set(["duplicates_found", "group_started", "group_resolved"]);
 
@@ -409,13 +487,30 @@ function setupResolveForm() {
         for (const [fieldName, value] of formData.entries()) {
             resolutions[fieldName.replace("group-", "")] = value;
         }
+        // Mismo umbral con el que se detectaron (GET) los grupos que este
+        // formulario muestra -- sin él, un grupo "fuzzy_name_match" no
+        // reaparecería en el re-escaneo propio de esta ruta y su resolución
+        // se ignoraría en silencio (ver docstring de resolve_duplicates()).
+        const rawFuzzyThreshold = form.dataset.fuzzyThreshold;
+        const fuzzyThreshold = rawFuzzyThreshold ? Number(rawFuzzyThreshold) : null;
+        // Estado real de "incluir este grupo" por grupo fuzzy -- no se puede leer
+        // de FormData (una casilla sin marcar no aparece ahí en absoluto, no hay
+        // forma de distinguir "false" de "ausente"), así que se recorre el DOM
+        // explícitamente. Se envía siempre (aunque quede {} sin grupos fuzzy en
+        // pantalla): refleja el estado real de esta página, a diferencia del
+        // `None` de compatibilidad que solo es para llamadores directos de la
+        // API que no conozcan este campo (ver ResolveDuplicatesRequest).
+        const fuzzyGroupToggles = {};
+        form.querySelectorAll(".fuzzy-toggle-checkbox").forEach((checkbox) => {
+            fuzzyGroupToggles[checkbox.dataset.groupKey] = checkbox.checked;
+        });
         try {
             const response = await fetch(
                 "/api/projects/" + encodeURIComponent(projectName) + "/duplicates/resolve",
                 {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ resolutions: resolutions }),
+                    body: JSON.stringify({ resolutions: resolutions, fuzzy_threshold: fuzzyThreshold, fuzzy_group_toggles: fuzzyGroupToggles }),
                 }
             );
             if (response.ok) {
@@ -431,13 +526,21 @@ function setupResolveForm() {
                 // concreto no aborta la resolución -- se avisa en vez de perder
                 // esa información en silencio.
                 const failedPaths = data.failed_paths || [];
+                const resultMessages = [];
                 if (failedPaths.length > 0) {
+                    resultMessages.push(
+                        "No se pudieron mover " + failedPaths.length + " fichero(s) (el resto se movió con normalidad): " +
+                        failedPaths.join(", ")
+                    );
+                }
+                if (data.groups_excluded) {
+                    resultMessages.push(
+                        data.groups_excluded + " grupo(s) por similitud aproximada siguen pendientes (no se activaron en este envío)."
+                    );
+                }
+                if (resultMessages.length > 0) {
                     const resultEl = document.getElementById("resolve-result");
-                    if (resultEl) {
-                        resultEl.textContent =
-                            "No se pudieron mover " + failedPaths.length + " fichero(s) (el resto se movió con normalidad): " +
-                            failedPaths.join(", ");
-                    }
+                    if (resultEl) resultEl.textContent = resultMessages.join(" ");
                 }
                 return;
             }
@@ -497,4 +600,4 @@ function setupHistorySearch() {
 }
 setupHistorySearch();
 </script>
-{% endblock %}
+{% endblock content %}

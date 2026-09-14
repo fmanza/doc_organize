@@ -674,6 +674,38 @@ async def test_deduplicate_websocket_moves_exact_duplicates(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_deduplicate_websocket_never_groups_by_fuzzy_name_match(tmp_path) -> None:
+    # Regla de negocio CRITICA: "Buscar duplicados" (esta accion masiva, WS
+    # /scan/deduplicate) llama a find_duplicates() SIN fuzzy_threshold -- nunca
+    # debe mover nada por similitud aproximada de nombre, solo por hash exacto
+    # o conflicto de version. Los nombres de este test son deliberadamente muy
+    # parecidos (ratio RapidFuzz ~85.7) pero con contenido y base distintos, para
+    # que la unica forma de que groups_found > 0 sea que la pasada fuzzy se
+    # hubiera colado aqui por error.
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    folder = tmp_path / "datos"
+    folder.mkdir()
+    (folder / "informe_ventas.pdf").write_bytes(b"contenido a")
+    (folder / "informe_ventas_anual.pdf").write_bytes(b"contenido b")
+
+    client = TestClient(app)
+    add_response = client.post(f"/api/projects/{project.name}/folders/library", json={"path": str(folder)})
+    assert add_response.status_code == 200
+
+    events = _run_dedup_websocket(client, project.name)
+
+    duplicates_found = next(event for event in events if event["event"] == "duplicates_found")
+    assert duplicates_found["data"]["groups_found"] == 0
+    completed = events[-1]
+    assert completed["data"]["moved"] == 0
+    assert (folder / "informe_ventas.pdf").exists()
+    assert (folder / "informe_ventas_anual.pdf").exists()
+
+
+@pytest.mark.asyncio
 async def test_deduplicate_websocket_rejects_when_no_saved_folders(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)

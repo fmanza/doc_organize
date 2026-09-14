@@ -62,6 +62,102 @@ def test_different_base_names_are_not_grouped(manager: DeduplicationManager) -> 
     assert manager.find_duplicates([a, b]) == []
 
 
+# ===== fuzzy_threshold (FUZZY_NAME_MATCH, tercera pasada opcional) =====
+
+
+def _named_doc(display_name: str, sha256_hash: str, modified_time: float) -> DocumentMetadata:
+    return DocumentMetadata(
+        full_path=f"/repo/{display_name}",
+        display_name=display_name,
+        extension="pdf",
+        size_bytes=100,
+        modified_time=modified_time,
+        sha256_hash=sha256_hash,
+    )
+
+
+def test_fuzzy_threshold_none_keeps_current_behavior(manager: DeduplicationManager) -> None:
+    # Nombres muy parecidos (ratio ~85.7, ver sesión de diseño) pero sin
+    # fuzzy_threshold: debe comportarse exactamente igual que antes de esta
+    # funcionalidad -- ningun grupo, ni siquiera por version_conflict (las
+    # bases normalizadas son distintas).
+    a = _named_doc("informe_ventas.pdf", "hash-a", modified_time=1.0)
+    b = _named_doc("informe_ventas_anual.pdf", "hash-b", modified_time=2.0)
+    assert manager.find_duplicates([a, b]) == []
+
+
+def test_fuzzy_match_groups_similar_names_above_threshold(manager: DeduplicationManager) -> None:
+    older = _named_doc("informe_ventas.pdf", "hash-a", modified_time=1.0)
+    newer = _named_doc("informe_ventas_anual.pdf", "hash-b", modified_time=2.0)
+
+    groups = manager.find_duplicates([newer, older], fuzzy_threshold=80)
+
+    assert len(groups) == 1
+    group = groups[0]
+    assert group.reason == DuplicateReason.FUZZY_NAME_MATCH
+    # Mismo criterio que las otras dos pasadas: canonico = mas antiguo.
+    assert group.canonical_doc.full_path == older.full_path
+    assert [d.full_path for d in group.duplicates] == [newer.full_path]
+
+
+def test_fuzzy_match_below_threshold_not_grouped(manager: DeduplicationManager) -> None:
+    a = _named_doc("informe_ventas.pdf", "hash-a", modified_time=1.0)
+    b = _named_doc("informe_ventas_anual.pdf", "hash-b", modified_time=2.0)
+
+    # El ratio real de este par es ~85.7 -- un umbral de 95 no debe agruparlos.
+    assert manager.find_duplicates([a, b], fuzzy_threshold=95) == []
+
+
+def test_fuzzy_pass_excludes_docs_already_grouped_by_hash(manager: DeduplicationManager) -> None:
+    # doc1/doc2 son duplicado exacto (mismo hash) -- deben quedar fuera del pool
+    # de la pasada fuzzy aunque su nombre tambien se parezca a doc3, que se
+    # queda solo (sin pareja) y por tanto sin grupo fuzzy propio.
+    doc1 = _named_doc("informe_ventas.pdf", "hash-igual", modified_time=1.0)
+    doc2 = _named_doc("informe_ventas_copy.pdf", "hash-igual", modified_time=2.0)
+    doc3 = _named_doc("informe_ventas_anual.pdf", "hash-unica", modified_time=3.0)
+
+    groups = manager.find_duplicates([doc1, doc2, doc3], fuzzy_threshold=60)
+
+    assert len(groups) == 1
+    assert groups[0].reason == DuplicateReason.EXACT_DUPLICATE
+    assert {doc.full_path for doc in [groups[0].canonical_doc, *groups[0].duplicates]} == {doc1.full_path, doc2.full_path}
+
+
+def test_fuzzy_match_connected_components_without_strict_pairwise_transitivity(manager: DeduplicationManager) -> None:
+    # a-b (~84.2) y b-c (~83.0) superan el umbral 80, pero a-c (~68.1) no --
+    # deben terminar en el MISMO grupo (componente conexa via b), sin exigir
+    # que TODOS los pares superen el umbral entre si (regla de negocio 2).
+    a = _named_doc("factura_0001.pdf", "hash-a", modified_time=1.0)
+    b = _named_doc("factura_0001_copia.pdf", "hash-b", modified_time=2.0)
+    c = _named_doc("factura_0001_copia_revisada.pdf", "hash-c", modified_time=3.0)
+
+    groups = manager.find_duplicates([c, a, b], fuzzy_threshold=80)
+
+    assert len(groups) == 1
+    group = groups[0]
+    assert group.reason == DuplicateReason.FUZZY_NAME_MATCH
+    assert {doc.full_path for doc in [group.canonical_doc, *group.duplicates]} == {a.full_path, b.full_path, c.full_path}
+    assert group.canonical_doc.full_path == a.full_path  # el mas antiguo
+
+
+def test_fuzzy_match_is_case_insensitive(manager: DeduplicationManager) -> None:
+    # Sin normalizar a minusculas, el ratio de este par cae a ~23.8 (case
+    # sensible); en minusculas sube a ~85.7 -- mismo criterio que
+    # `_extract_base_name` (.lower()) para las otras dos pasadas.
+    a = _named_doc("INFORME_VENTAS.pdf", "hash-a", modified_time=1.0)
+    b = _named_doc("informe_ventas_anual.pdf", "hash-b", modified_time=2.0)
+
+    groups = manager.find_duplicates([a, b], fuzzy_threshold=80)
+
+    assert len(groups) == 1
+    assert groups[0].reason == DuplicateReason.FUZZY_NAME_MATCH
+
+
+def test_fuzzy_pass_no_groups_when_fewer_than_two_remaining(manager: DeduplicationManager) -> None:
+    single = _named_doc("unico.pdf", "hash-unica", modified_time=1.0)
+    assert manager.find_duplicates([single], fuzzy_threshold=50) == []
+
+
 @pytest.mark.asyncio
 async def test_resolve_duplicates_moves_files_and_writes_report(tmp_path) -> None:
     source_dir = tmp_path / "docs"
