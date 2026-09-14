@@ -4,7 +4,7 @@
 - **Fecha**: 2026-09-15
 - **Tipo**: `feature` (`/new-feature`)
 - **Rama**: `develop`
-- **Estado**: ✅ COMPLETADA (implementación) — commit pendiente de confirmación del usuario
+- **Estado**: ✅ COMPLETADA
 
 ## Objetivo
 Añadir una tercera estrategia de detección de duplicados por similitud aproximada
@@ -311,12 +311,12 @@ python -m mkdocs build --strict         → build limpio, sin warnings ni links
   envío (no solo por razonamiento sobre el código) con un test nuevo
 - ✅ Suite completa en verde (854 tests, 31 nuevos de esta sesión),
   `ruff`/`mypy`/`mkdocs build --strict` limpios
-- ⬜ Commit pendiente — el usuario no lo ha pedido todavía en esta sesión
+- ✅ Commit creado a petición explícita del usuario
 
 **Evidencia**:
 - Branch: `develop`
-- Commit: ninguno todavía (working tree con 12 archivos modificados sin
-  stagear/commitear a fecha de cierre de esta sesión)
+- Commit: `dcc35ec` — "feat: añadir deteccion de duplicados por similitud
+  aproximada de nombre (RapidFuzz)" (13 files changed, +1188/-38)
 - Tests: `tests/unit/test_deduplication.py` (+8),
   `tests/unit/test_web_duplicates.py` (+12: 5 de detección fuzzy + 6 del
   toggle por grupo + 1 de coexistencia fuzzy/no-fuzzy del segundo AUDIT_CODE),
