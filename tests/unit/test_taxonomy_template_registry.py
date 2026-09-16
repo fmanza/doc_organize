@@ -24,7 +24,7 @@ _INVALID_TEMPLATE = "# Sin front matter\n"
 
 
 @pytest.mark.asyncio
-async def test_list_templates_includes_the_two_builtin_templates(tmp_path):
+async def test_list_templates_includes_the_three_builtin_templates(tmp_path):
     registry = TaxonomyTemplateRegistry(tmp_path / "no-existe-todavia")
 
     summaries = await registry.list_templates()
@@ -33,9 +33,13 @@ async def test_list_templates_includes_the_two_builtin_templates(tmp_path):
     assert names == sorted(names)
     assert "sgi-iso27001" in names
     assert "calidad" in names
+    assert "sgi-integrado" in names
     sgi = next(summary for summary in summaries if summary.name == "sgi-iso27001")
     assert sgi.title == "SGI ISO 27001"
     assert sgi.description is not None
+    integrado = next(summary for summary in summaries if summary.name == "sgi-integrado")
+    assert integrado.title == "SGI Integrado"
+    assert integrado.description is not None
 
 
 @pytest.mark.asyncio
@@ -46,7 +50,7 @@ async def test_list_templates_includes_user_template_alongside_builtin(tmp_path)
     summaries = await registry.list_templates()
 
     names = {summary.name for summary in summaries}
-    assert names == {"sgi-iso27001", "calidad", "propia"}
+    assert names == {"sgi-iso27001", "calidad", "sgi-integrado", "propia"}
     propia = next(summary for summary in summaries if summary.name == "propia")
     assert propia.title == "Plantilla de Usuario"
     assert propia.description == "Una plantilla creada por el usuario, fuera del paquete."
@@ -96,6 +100,39 @@ async def test_load_template_returns_builtin_manifest(tmp_path):
     assert manifest.title == "SGI ISO 27001"
     assert "gobierno-seguridad" in [entry.slug for entry in manifest.domains]
     assert "politica" in [entry.slug for entry in manifest.material_types]
+
+
+@pytest.mark.asyncio
+async def test_load_template_returns_sgi_integrado_manifest(tmp_path):
+    registry = TaxonomyTemplateRegistry(tmp_path / "no-existe-todavia")
+
+    manifest = await registry.load_template("sgi-integrado")
+
+    assert manifest.title == "SGI Integrado"
+    domain_slugs = [entry.slug for entry in manifest.domains]
+    assert domain_slugs == [
+        "gobernanza",
+        "riesgos",
+        "incidencia",
+        "continuidad",
+        "cadena-suministro",
+        "tecnologia",
+        "compromiso-mejora-continua",
+    ]
+    material_type_slugs = [entry.slug for entry in manifest.material_types]
+    assert material_type_slugs == [
+        "normativa-legal",
+        "politica",
+        "manual",
+        "procedimiento",
+        "plan-estrategia",
+        "declaracion",
+        "registro-evidencia",
+        "informe-auditoria",
+        "certificado",
+    ]
+    assert all(entry.description and entry.keywords for entry in manifest.domains)
+    assert all(entry.description and entry.keywords for entry in manifest.material_types)
 
 
 @pytest.mark.asyncio

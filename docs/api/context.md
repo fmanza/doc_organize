@@ -195,7 +195,8 @@ mismo formato de fichero que `taxonomy_manifest.md` (front matter YAML + prosa
 libre), pero fuera de cualquier `project.root_path`. `load_template(name)` busca
 primero en `templates_dir` (plantillas de usuario) y, si no encuentra `name` ahí,
 en las plantillas de ejemplo empaquetadas con `doc_organize` (`sgi-iso27001`,
-`calidad`) — una plantilla de usuario con el mismo nombre siempre tiene prioridad.
+`calidad`, `sgi-integrado`) — una plantilla de usuario con el mismo nombre siempre
+tiene prioridad.
 `list_templates()` combina ambos orígenes sin duplicar nombres, omitiendo del
 listado (no del error) cualquier fichero de usuario con front matter inválido.
 
