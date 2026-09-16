@@ -4,7 +4,7 @@
 - **Fecha**: 2026-09-16
 - **Tipo**: `feature`
 - **Rama**: `develop`
-- **Estado**: EN CURSO (implementado y verificado; commit pendiente de confirmación explícita del usuario)
+- **Estado**: ✅ COMPLETADA
 
 ## Objetivo
 Añadir una plantilla de taxonomía documental nueva (`sgi-integrado`) a la biblioteca empaquetada de
@@ -104,16 +104,15 @@ keywords en vez de solo inspeccionar la lista.
 | El dominio `compromiso-mejora-continua` puede ganar sobre `gobernanza` en documentos "paraguas" muy extensos (p. ej. el Manual de Sistemas de Gestión, 146K caracteres) porque `score_catalog()` puntúa por presencia/longitud de lista sin ponderar relevancia temática | Es exactamente el escenario para el que existe la Sub-fase B (clasificación por IA); no corregible solo con keywords sin tocar `domain_classifier.py` (fuera de alcance) | Aceptado |
 | El tipo de material `registro-evidencia` (palabras "registro"/"evidencia", genéricas en cualquier texto administrativo) tiende a puntuar alto en documentos extensos | Mismo motivo que el anterior; las 2 plantillas preexistentes (`calidad`, `sgi-iso27001`) tampoco se han validado nunca contra documentos > 50K caracteres | Aceptado |
 | La plantilla no se ha probado end-to-end contra `ContextBuilder`/`context_build_websocket` reorganizando el corpus real completo de `sgi_calidad` | Documentado como siguiente paso | Abierto |
-| Commit pendiente de confirmación explícita del usuario | El propio usuario debe aprobar el mensaje de commit propuesto antes de crearlo | Abierto |
+| Commit pendiente de confirmación explícita del usuario | El propio usuario aprobó el mensaje de commit propuesto | ✅ Resuelto (commit `e3d3c29`) |
 
 ---
 
 ## Siguientes Pasos (Recomendado)
-1. Confirmar y crear el commit (`feat: añadir plantilla de taxonomía "sgi-integrado" (7 dominios + 9 tipos de material)`).
-2. Si se usa esta plantilla como `taxonomy_manifest.md` real del proyecto `sgi_calidad`, validar con
+1. Si se usa esta plantilla como `taxonomy_manifest.md` real del proyecto `sgi_calidad`, validar con
    un test end-to-end que reorganice el corpus completo y mida qué fracción de documentos cae en
    Sub-fase B (sin clasificar por reglas) frente a Sub-fase A.
-3. Revisar si conviene un dominio "Cumplimiento"/"Auditoría" independiente — el corpus real tiene una
+2. Revisar si conviene un dominio "Cumplimiento"/"Auditoría" independiente — el corpus real tiene una
    carpeta `Auditorias/` con ~15 documentos que hoy reparten su score entre `riesgos` y otros
    dominios sin un ganador claramente dedicado.
 
@@ -148,19 +147,19 @@ keywords en vez de solo inspeccionar la lista.
 
 ## Veredicto
 
-### 🟡 GO_CONDICIONAL
+### 🟢 COMPLETADA
 
 **Criterios**:
 - Código, docs y tests completos y verificados (`ruff`/`mypy`/`pytest`/`mkdocs build --strict` en
   verde; 865 tests, 0 fallos).
 - Catálogo calibrado empíricamente contra 10 documentos reales del corpus `sgi_calidad`, no solo por
   inspección de nombres de fichero — bug real encontrado y corregido durante la propia sesión.
-- **Condición pendiente**: commit explícito por parte del usuario (working tree con 3 ficheros
-  cambiados sin commitear: 1 nuevo, 2 modificados).
+- Commit confirmado explícitamente por el usuario. Working tree limpio tras el commit (`git status`
+  sin salida).
 
 **Evidencia**:
 - Branch: `develop`
-- Commits: ninguno todavía — pendiente de confirmación
+- Commits: `e3d3c29`
 - Tests: `pytest -q --no-cov` → 865 passed (252.94s)
 
-**Sesión cerrada**: pendiente — condicionada a la confirmación de commit del usuario.
+**Sesión cerrada**: 2026-09-16
