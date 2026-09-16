@@ -1,6 +1,7 @@
 {% extends "base.html.j2" %}
 {% from "_nav_macros.html.j2" import project_nav %}
 {% from "_semaforo_macros.html.j2" import semaforo_html, semaforo_script %}
+{% from "_status_banner_macros.html.j2" import status_banner %}
 {% block title %}doc_organize — Escanear: {{ project.name }}{% endblock %}
 {% block sidebar_items %}{{ project_nav(project, "scan") }}{% endblock %}
 {% block content %}
@@ -18,23 +19,23 @@
 <div id="tab-panel-scan" role="tabpanel" aria-labelledby="tab-btn-scan" {% if active_tab != 'scan' %}hidden{% endif %}>
 
 {% if gpu_status.gpu_active %}
-<p class="my-2 px-3 py-2 rounded bg-green-50 border border-green-300 text-green-800 text-sm">
-    GPU disponible y activa: el OCR acelerado por GPU se puede usar en este escaneo.
-</p>
+{{ status_banner("ok", "GPU disponible y activa: el OCR acelerado por GPU se puede usar en este escaneo.") }}
 {% elif gpu_status.gpu_support_installed %}
-<p class="my-2 px-3 py-2 rounded bg-yellow-50 border border-yellow-300 text-yellow-800 text-sm">
-    Hay soporte de GPU instalado, pero no está activo. {{ gpu_status.instructions }}
-</p>
+{{ status_banner("warn", "Hay soporte de GPU instalado, pero no está activo. " ~ gpu_status.instructions) }}
 {% else %}
-<p class="my-2 px-3 py-2 rounded bg-gray-50 border border-gray-300 text-gray-700 text-sm">
-    No hay soporte de GPU instalado en este entorno. {{ gpu_status.instructions }}
-</p>
+{{ status_banner("off", "No hay soporte de GPU instalado en este entorno. " ~ gpu_status.instructions) }}
 {% endif %}
 
-{% if not av_status.ready %}
-<p class="my-2 px-3 py-2 rounded bg-gray-50 border border-gray-300 text-gray-700 text-sm">
-    Audio/vídeo no disponible en este entorno. {{ av_status.instructions }}
-</p>
+{% if av_status.ready %}
+{{ status_banner("ok", "Audio/vídeo disponible: se puede activar \"Incluir audio/vídeo\" en este escaneo.") }}
+{% else %}
+{{ status_banner("off", "Audio/vídeo no disponible en este entorno. " ~ av_status.instructions) }}
+{% endif %}
+
+{% if office_status.libreoffice_installed %}
+{{ status_banner("ok", "LibreOffice disponible: los ficheros .xls (Excel legado) se pueden convertir en este escaneo.") }}
+{% else %}
+{{ status_banner("off", "LibreOffice no disponible en este entorno: los ficheros .xls (Excel legado) no se podrán convertir. " ~ office_status.instructions) }}
 {% endif %}
 
 <h2 class="text-lg font-medium mt-4 mb-2">Escanear</h2>

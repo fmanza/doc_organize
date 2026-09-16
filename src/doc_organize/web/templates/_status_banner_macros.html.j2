@@ -1,0 +1,24 @@
+{#
+Banner de estado de una capacidad opcional del entorno servidor (GPU, audio/
+vídeo, LibreOffice para .xls) — patrón compartido por Escanear
+(`folder_selector.html.j2`). Antes GPU tenía su propio markup con 3 estados
+(activa/instalada-no-activa/sin soporte) y audio/vídeo el suyo con 1 solo
+estado (aviso cuando no estaba listo, sin confirmación cuando sí) —
+unificado aquí (AUDIT_PLAN, sesión 2026-09-16) para que las tres capacidades
+(GPU, audio/vídeo, LibreOffice) muestren siempre su estado con el mismo
+estilo visual, incluida la confirmación positiva.
+
+`status_banner` no conoce `GpuStatus`/`AvStatus`/`OfficeStatus`: recibe el
+nivel (`"ok"`|`"warn"`|`"off"`) y el mensaje ya resueltos por la plantilla
+llamante, para no acoplar el macro a la forma de un modelo concreto.
+#}
+
+{% macro status_banner(level, message) %}
+{%- if level == "ok" %}
+<p class="my-2 px-3 py-2 rounded bg-green-50 border border-green-300 text-green-800 text-sm">{{ message }}</p>
+{%- elif level == "warn" %}
+<p class="my-2 px-3 py-2 rounded bg-yellow-50 border border-yellow-300 text-yellow-800 text-sm">{{ message }}</p>
+{%- else %}
+<p class="my-2 px-3 py-2 rounded bg-gray-50 border border-gray-300 text-gray-700 text-sm">{{ message }}</p>
+{%- endif %}
+{% endmacro %}

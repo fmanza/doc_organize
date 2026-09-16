@@ -83,6 +83,64 @@ async def test_folder_selector_page_shows_gpu_status(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_folder_selector_page_shows_av_status(tmp_path) -> None:
+    """El banner de audio/vídeo debe verse siempre (disponible o no), no solo
+    cuando falta algo -- mismo patron que el banner de GPU."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/scan")
+
+    assert response.status_code == 200
+    assert "Audio/vídeo" in response.text
+
+
+@pytest.mark.asyncio
+async def test_folder_selector_page_shows_office_status(tmp_path) -> None:
+    """Regresion (sesion 2026-09-16): LibreOffice (necesario para convertir
+    .xls) no tenia ninguna representacion en la UI -- debe verse siempre,
+    igual que GPU y audio/video."""
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/scan")
+
+    assert response.status_code == 200
+    assert "LibreOffice" in response.text
+
+
+@pytest.mark.asyncio
+async def test_folder_selector_gpu_banner_unchanged_after_status_banner_macro(tmp_path, monkeypatch) -> None:
+    """AUDIT_PLAN (sesion 2026-09-16): el banner de GPU paso a usar el macro
+    `status_banner` compartido con audio/video y LibreOffice -- debe seguir
+    mostrando exactamente las mismas clases y el mismo texto que antes del
+    refactor, para los 3 estados posibles."""
+    from doc_organize.core.models import GpuStatus
+
+    registry_path = tmp_path / "projects.json"
+    project = await _create_project(tmp_path, registry_path)
+    app = create_app(registry_path=registry_path)
+
+    monkeypatch.setattr(
+        "doc_organize.web.routes.scan.detect_gpu_status",
+        lambda: GpuStatus(gpu_support_installed=True, gpu_active=False, instructions="Instala CUDA."),
+    )
+
+    async with _client(app) as client:
+        response = await client.get(f"/projects/{project.name}/scan")
+
+    assert response.status_code == 200
+    assert (
+        'bg-yellow-50 border border-yellow-300 text-yellow-800 text-sm">Hay soporte de GPU instalado, pero no está activo. Instala CUDA.</p>'
+        in response.text
+    )
+
+
+@pytest.mark.asyncio
 async def test_folder_selector_page_no_longer_shows_saved_folders_section(tmp_path) -> None:
     """ "Carpetas guardadas" se trasladó al Dashboard (reestructuración de
     navegación, tabs Escanear/Caché + Duplicados) -- ya no debe aparecer en la

@@ -32,6 +32,7 @@ from doc_organize.scan import ScanCommand, list_scan_runs
 from doc_organize.utils.av_detector import detect_av_status
 from doc_organize.utils.gpu_detector import detect_gpu_status
 from doc_organize.utils.logging import get_logger
+from doc_organize.utils.office_detector import detect_office_status
 from doc_organize.utils.path_utils import paths_within_roots
 from doc_organize.validators import FolderValidator
 from doc_organize.web.dependencies import (
@@ -132,6 +133,7 @@ async def folder_selector(
     # Mismo motivo que gpu_status: find_spec/shutil.which son baratos, pero se
     # mantiene el mismo patrón (asyncio.to_thread) por consistencia.
     av_status = await asyncio.to_thread(detect_av_status)
+    office_status = await asyncio.to_thread(detect_office_status)
 
     # La pestaña Caché se renderiza siempre en la misma respuesta (igual que el
     # resto de la app: todo server-rendered, sin fragmentos cargados por AJAX) para
@@ -160,6 +162,7 @@ async def folder_selector(
             "folders": folders,
             "gpu_status": gpu_status,
             "av_status": av_status,
+            "office_status": office_status,
             "active_tab": active_tab,
             "last_scan_run": last_scan_run,
             "scan_history": scan_history,
