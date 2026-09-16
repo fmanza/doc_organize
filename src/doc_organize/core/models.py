@@ -600,6 +600,23 @@ class AvStatus(BaseModel):
     )
 
 
+class OfficeStatus(BaseModel):
+    """Estado de soporte de LibreOffice del entorno donde corre el servidor (menú Escaneo).
+
+    Mismo patron que `AvStatus`/`GpuStatus`: deteccion de entorno software, sin
+    permisos por usuario/rol. Necesario porque Docling delega en `soffice`/
+    `libreoffice` (via PATH) la conversion de Excel legado (`.xls`) a `.xlsx`
+    antes de poder parsearlo -- a diferencia de audio/video, `.xls` no es
+    opt-in (forma parte de `SUPPORTED_EXTENSIONS` siempre activo), asi que este
+    estado no bloquea el escaneo entero: solo evita el viaje de ida y vuelta
+    por Docling para un `.xls` concreto cuando ya se sabe que va a fallar (ver
+    `converter.py::convert_document`).
+    """
+
+    libreoffice_installed: bool = Field(..., description="Si el binario `soffice`/`libreoffice` esta disponible en el PATH del sistema")
+    instructions: str | None = Field(default=None, description="Instrucciones para instalar LibreOffice, si `libreoffice_installed` es `False`")
+
+
 class DirectoryListing(BaseModel):
     """Resultado de listar el contenido de una carpeta del servidor (explorador de carpetas de escaneo)."""
 
@@ -936,6 +953,7 @@ __all__ = [
     "LiteLLMTaxonomyManifestDraftConfig",
     "LiteLLMUsageConfig",
     "OcrMode",
+    "OfficeStatus",
     "Project",
     "ProjectNameValidation",
     "Role",

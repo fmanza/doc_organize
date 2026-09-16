@@ -24,6 +24,7 @@ from docling_core.types.doc.items.picture.picture import PictureDescriptionData,
 from doc_organize.core.exceptions import ConversionError
 from doc_organize.core.models import ConversionResult, DocumentMetadata
 from doc_organize.utils.logging import get_logger
+from doc_organize.utils.office_detector import detect_office_status
 
 
 class DocumentConverter:
@@ -173,6 +174,29 @@ class DocumentConverter:
             documento requiere OCR (para REQ-004).
         """
         start = time.monotonic()
+
+        # Corte temprano para .xls: Docling delega en LibreOffice (binario
+        # externo, no instalado via pip) la conversion a .xlsx antes de poder
+        # parsearlo, y sin el en el PATH esa conversion falla siempre (nunca
+        # es un problema transitorio del documento). Sin este corte, cada .xls
+        # agota los reintentos automaticos con el mismo mensaje generico de
+        # Docling (bug real: sesion 2026-09-16).
+        if source_doc.extension == "xls":
+            office_status = detect_office_status()
+            if not office_status.libreoffice_installed:
+                self.logger.warning(f"Omitiendo conversion de '{source_doc.full_path}': {office_status.instructions}")
+                return ConversionResult(
+                    source_path=source_doc.full_path,
+                    markdown_path=None,
+                    json_path=None,
+                    success=False,
+                    error=office_status.instructions,
+                    ocr_required=False,
+                    duration_seconds=time.monotonic() - start,
+                    images_dir=None,
+                    picture_description_applied=False,
+                )
+
         output_dir = Path(output_dir)
         # _get_docling() valida el uso como context manager; ese error de programacion
         # se propaga (no se atrapa como fallo de conversion de este documento).

@@ -235,6 +235,50 @@ async def test_convert_document_error_includes_root_cause_from_exception_chain(m
     assert "(causa: File is not a zip file)" in result.error
 
 
+@pytest.mark.asyncio
+async def test_convert_document_skips_xls_without_libreoffice(monkeypatch, tmp_path) -> None:
+    """Regresion (sesion 2026-09-16): un .xls sin LibreOffice instalado agotaba
+    los reintentos automaticos contra Docling con el mismo mensaje generico
+    cada vez (la comprobacion de Docling es un `shutil.which`, siempre falla
+    igual) -- debe cortar antes de invocar Docling, con el mensaje de
+    `detect_office_status()`."""
+    import doc_organize.converter.converter as converter_module
+
+    from doc_organize.core.models import OfficeStatus
+
+    xls_path = tmp_path / "legado.xls"
+    xls_path.write_bytes(b"contenido-irrelevante-no-se-llega-a-leer")
+    stat = xls_path.stat()
+    doc = DocumentMetadata(
+        full_path=str(xls_path),
+        display_name=xls_path.name,
+        extension="xls",
+        size_bytes=stat.st_size,
+        modified_time=stat.st_mtime,
+        sha256_hash="irrelevant",
+    )
+    output_dir = tmp_path / "Conversión"
+
+    monkeypatch.setattr(
+        converter_module,
+        "detect_office_status",
+        lambda: OfficeStatus(libreoffice_installed=False, instructions="Falta LibreOffice en el PATH"),
+    )
+
+    def _fail_if_called(*_args, **_kwargs):
+        raise AssertionError("no debe invocarse Docling cuando falta LibreOffice para un .xls")
+
+    monkeypatch.setattr(converter_module.DocumentConverter, "_get_docling", _fail_if_called)
+
+    async with DocumentConverter() as converter:
+        result = await converter.convert_document(doc, output_dir)
+
+    assert result.success is False
+    assert result.error == "Falta LibreOffice en el PATH"
+    assert result.markdown_path is None
+    assert result.json_path is None
+
+
 def test_resolve_output_paths_mirrors_source_tree_relative_to_scan_root(tmp_path) -> None:
     scan_root = tmp_path / "input"
     output_dir = tmp_path / "Conversión"

@@ -157,6 +157,53 @@ compatible), `--include-audio-video` se rechaza con un mensaje explícito antes
 de escanear (ver
 [Resolución de problemas](troubleshooting.md#scan-include-audio-video-falla-antes-de-escanear-nada)).
 
+## Excel legado (.xls): LibreOffice (opcional)
+
+`.xls` (el formato binario de Excel anterior a `.xlsx`) forma parte de
+`SUPPORTED_EXTENSIONS` sin ningún extra de Python ni flag — se escanea siempre,
+igual que `.xlsx`. Pero Docling necesita convertirlo primero a `.xlsx` con
+**LibreOffice**, que no se instala vía `pip`: hay que instalarlo con el gestor
+de paquetes del sistema operativo y dejarlo accesible en el `PATH` como
+`soffice` (o `libreoffice`).
+
+### Windows
+
+```powershell
+winget install TheDocumentFoundation.LibreOffice
+```
+
+Alternativa si no usas `winget`: Chocolatey (`choco install libreoffice-fresh`),
+o descarga directa desde [libreoffice.org](https://www.libreoffice.org/download/download/).
+Tras instalar, abre una **terminal nueva** para que recoja el `PATH`
+actualizado — si sigue sin detectarse, añade manualmente la carpeta
+`Program Files\LibreOffice\program` al `PATH` del sistema.
+
+### Linux
+
+```bash
+sudo apt install libreoffice        # Debian/Ubuntu
+sudo dnf install libreoffice        # Fedora
+sudo pacman -S libreoffice-fresh    # Arch
+```
+
+### macOS
+
+```bash
+brew install --cask libreoffice
+```
+
+### Verificar la instalación (cualquier SO)
+
+```bash
+soffice --version
+```
+
+Sin LibreOffice en el `PATH`, un `.xls` concreto falla con un mensaje
+explícito indicando qué instalar, sin gastar los reintentos automáticos del
+escaneo (ver
+[Resolución de problemas](troubleshooting.md#un-xls-falla-con-libreoffice-is-required)) —
+el resto de formatos (`.xlsx`, `.pdf`, `.docx`, etc.) no se ven afectados.
+
 ## Entorno de desarrollo
 
 ```bash

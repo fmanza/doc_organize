@@ -131,6 +131,25 @@ En la interfaz web el checkbox equivalente ("Incluir audio/vídeo") aparece
 deshabilitado con el mismo mensaje en el tooltip, en vez de fallar al enviar
 el formulario.
 
+## Un `.xls` falla con "LibreOffice is required"
+
+Es el pre-check de `detect_office_status()` (`utils/office_detector.py`, mismo
+patrón que `detect_av_status()`/`detect_gpu_status()`): Docling necesita
+LibreOffice (binario `soffice`/`libreoffice`) en el `PATH` para convertir
+Excel legado (`.xls`) a `.xlsx` antes de parsearlo, y sin él esa conversión
+falla garantizado en cada fichero. A diferencia de audio/vídeo, `.xls` no es
+opt-in (se escanea siempre), así que `doc_organize` no bloquea el escaneo
+entero: corta la conversión de ese `.xls` concreto con el mensaje de qué
+instalar, sin gastar los reintentos automáticos ni llegar a invocar Docling.
+El resto de formatos (`.xlsx` incluido) no se ve afectado. Instala LibreOffice
+con el gestor de paquetes de tu sistema operativo (ver
+[Instalación → Excel legado: LibreOffice](installation.md#excel-legado-xls-libreoffice-opcional))
+y verifica con:
+
+```bash
+soffice --version
+```
+
 ## Rutas de salida muy largas o error de ruta en Windows
 
 `DocumentConverter` replica la ruta **absoluta completa** del documento de origen
