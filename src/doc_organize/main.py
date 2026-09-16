@@ -323,7 +323,15 @@ def _run_web(args: argparse.Namespace) -> int:
     auth_db_path = getattr(args, "auth_db_path", None)
     templates_path = getattr(args, "templates_path", None)
     app = create_app(security=security, registry_path=registry_path, auth_db_path=auth_db_path, templates_path=templates_path)
-    uvicorn.run(app, host=args.host, port=args.port)
+    # ws_ping_timeout=None: un escaneo/OCR largo delega el trabajo pesado a un hilo
+    # (`asyncio.to_thread`), pero ese hilo compite por el GIL con el propio event
+    # loop -- si el pong tarda más de `ws_ping_timeout` (20s por defecto) en
+    # procesarse, uvicorn da la conexión por muerta y la cierra él mismo aunque el
+    # cliente siga ahí, apareciendo como "Cliente desconectado durante el escaneo"
+    # en pleno progreso. El ping (`ws_ping_interval`, sigue en 20s) se sigue
+    # enviando para no dejar el socket mudo ante NAT/firewalls intermedios; solo se
+    # desactiva el cierre automático por pong tardío.
+    uvicorn.run(app, host=args.host, port=args.port, ws_ping_timeout=None)
     return 0
 
 

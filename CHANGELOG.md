@@ -6,6 +6,13 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+### Fixed
+
+- `src/doc_organize/main.py` (`_run_web`): `uvicorn.run(..., ws_ping_timeout=None)` evita que
+  uvicorn cierre el WebSocket de escaneo/deduplicación por un pong tardío durante OCR largo
+  (el hilo de `asyncio.to_thread` compite por el GIL con el event loop), que antes se veía
+  como "Cliente desconectado durante el escaneo" en pleno progreso.
+
 ## [0.9.0] - 2026-09-11
 
 ### Added

@@ -894,7 +894,9 @@ def test_main_deduplicate_end_to_end(tmp_path, capsys) -> None:
 
 def test_main_web_starts_on_non_loopback_without_any_provisioned_user(tmp_path, monkeypatch) -> None:
     calls: list[dict] = []
-    monkeypatch.setattr("uvicorn.run", lambda app, host, port: calls.append({"app": app, "host": host, "port": port}))
+    monkeypatch.setattr(
+        "uvicorn.run", lambda app, host, port, **kwargs: calls.append({"app": app, "host": host, "port": port, **kwargs})
+    )
 
     exit_code = main(
         [
@@ -918,13 +920,31 @@ def test_main_web_starts_on_non_loopback_without_any_provisioned_user(tmp_path, 
 
 def test_main_web_starts_on_loopback(tmp_path, monkeypatch) -> None:
     calls: list[dict] = []
-    monkeypatch.setattr("uvicorn.run", lambda app, host, port: calls.append({"app": app, "host": host, "port": port}))
+    monkeypatch.setattr(
+        "uvicorn.run", lambda app, host, port, **kwargs: calls.append({"app": app, "host": host, "port": port, **kwargs})
+    )
 
     exit_code = main(["web", "--registry-path", str(tmp_path / "p.json"), "--auth-db-path", str(tmp_path / "auth.db")])
 
     assert exit_code == 0
     assert len(calls) == 1
     assert calls[0]["host"] == "127.0.0.1"
+
+
+def test_main_web_disables_ws_ping_timeout(tmp_path, monkeypatch) -> None:
+    """Regresión: un escaneo/OCR largo compite por el GIL con el event loop y puede
+    retrasar el pong más allá del `ws_ping_timeout` por defecto de uvicorn (20s),
+    que entonces cierra la conexión de forma prematura ("Cliente desconectado
+    durante el escaneo" en pleno progreso, sin que el cliente se haya ido)."""
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        "uvicorn.run", lambda app, host, port, **kwargs: calls.append({"app": app, "host": host, "port": port, **kwargs})
+    )
+
+    exit_code = main(["web", "--registry-path", str(tmp_path / "p.json"), "--auth-db-path", str(tmp_path / "auth.db")])
+
+    assert exit_code == 0
+    assert calls[0]["ws_ping_timeout"] is None
 
 
 # ===== `tenant create` / `user create` subcommands (revision 8, SS2.7.2, sub-paso 4/4) =====
