@@ -209,6 +209,9 @@ class DocumentConverter:
                 error_message = f"Memoria insuficiente durante la conversion (documento de {size_mb:.1f} MB)"
             else:
                 error_message = str(exc) or f"{type(exc).__name__} sin mensaje de error"
+                cause_hint = self._root_cause_hint(exc, error_message)
+                if cause_hint:
+                    error_message = f"{error_message} (causa: {cause_hint})"
             self.logger.warning(f"Error convirtiendo '{source_doc.full_path}': {error_message}", exc_info=True)
             return ConversionResult(
                 source_path=source_doc.full_path,
@@ -424,6 +427,31 @@ class DocumentConverter:
         es `NaN`) — señal confirmada empiricamente en el spike de REQ-004."""
         parse_score = docling_result.confidence.parse_score
         return math.isnan(parse_score)
+
+    @staticmethod
+    def _root_cause_hint(exc: BaseException, error_message: str) -> str | None:
+        """Busca en la cadena `exc.__cause__` (hasta 2 niveles) un mensaje que
+        no este ya incluido en `error_message`, para dar una pista mas
+        accionable que el envoltorio generico de Docling.
+
+        Docling encadena la excepcion original del backend via `raise ...
+        from ...` (ver `document_converter.py`, docling#1920) precisamente
+        para que el llamante pueda diagnosticar la causa real -- p.ej. un
+        `ConversionError` de `MsExcelDocumentBackend` cuyo primer `__cause__`
+        (`DocumentLoadError`) ya esta repetido en `error_message`, pero cuyo
+        segundo `__cause__` (`zipfile.BadZipFile: File is not a zip file`)
+        revela que el .xlsx fuente esta truncado/corrupto (bug real, sesion
+        2026-09-16).
+        """
+        cause = exc.__cause__
+        for _ in range(2):
+            if cause is None:
+                return None
+            cause_text = str(cause).strip()
+            if cause_text and cause_text not in error_message:
+                return cause_text
+            cause = cause.__cause__
+        return None
 
 
 __all__ = ["DocumentConverter"]

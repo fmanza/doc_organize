@@ -189,6 +189,52 @@ async def test_convert_document_memory_error_reports_size_in_message(monkeypatch
     assert "Memoria insuficiente" in result.error
 
 
+@pytest.mark.asyncio
+async def test_convert_document_error_includes_root_cause_from_exception_chain(monkeypatch, tmp_path) -> None:
+    """Regresion (sesion 2026-09-16): un .xlsx corrupto/truncado hace que Docling
+    lance `ConversionError` envolviendo `MsExcelDocumentBackend could not load
+    document with hash ...`, pero la causa real (`zipfile.BadZipFile: File is
+    not a zip file`) solo viaja en `exc.__cause__.__cause__` -- sin desenrollar
+    esa cadena, el usuario no tiene forma de saber si el fichero fuente esta
+    danado o si es un fallo de doc_organize."""
+    import doc_organize.converter.converter as converter_module
+
+    html_path = tmp_path / "page.html"
+    html_path.write_text("<html><body><p>Texto</p></body></html>", encoding="utf-8")
+    stat = html_path.stat()
+    doc = DocumentMetadata(
+        full_path=str(html_path),
+        display_name=html_path.name,
+        extension="html",
+        size_bytes=stat.st_size,
+        modified_time=stat.st_mtime,
+        sha256_hash="irrelevant",
+    )
+    output_dir = tmp_path / "Conversión"
+
+    def _boom(_docling_result: object) -> bool:
+        # Reproduce la cadena real de Docling (document_converter.py) para un
+        # .xlsx corrupto: ConversionError <- DocumentLoadError <- BadZipFile.
+        try:
+            try:
+                raise ValueError("File is not a zip file")
+            except ValueError as root_cause:
+                raise RuntimeError("MsExcelDocumentBackend could not load document with hash abc123") from root_cause
+        except RuntimeError as backend_error:
+            raise RuntimeError(f"Conversion failed for: doc.xlsx with status: failure. Errors: {backend_error}") from backend_error
+
+    monkeypatch.setattr(converter_module.DocumentConverter, "_needs_ocr", staticmethod(_boom))
+
+    async with DocumentConverter() as converter:
+        result = await converter.convert_document(doc, output_dir)
+
+    assert result.success is False
+    assert result.error
+    assert "MsExcelDocumentBackend could not load document with hash abc123" in result.error
+    assert result.error.count("MsExcelDocumentBackend could not load document with hash abc123") == 1
+    assert "(causa: File is not a zip file)" in result.error
+
+
 def test_resolve_output_paths_mirrors_source_tree_relative_to_scan_root(tmp_path) -> None:
     scan_root = tmp_path / "input"
     output_dir = tmp_path / "Conversión"
