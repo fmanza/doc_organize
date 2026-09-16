@@ -105,7 +105,7 @@ async def test_duplicates_api_detects_exact_duplicate(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_duplicates_api_without_fuzzy_threshold_ignores_similar_names(tmp_path) -> None:
-    # Nombres parecidos (ratio ~85.7) pero contenido y base distintos: sin
+    # Nombres parecidos (score RapidFuzz alto, WRatio+normalizado) pero contenido y base distintos: sin
     # fuzzy_threshold no deben agruparse -- mismo comportamiento que antes de
     # esta funcionalidad (retrocompatibilidad, regla de negocio 4).
     registry_path = tmp_path / "projects.json"

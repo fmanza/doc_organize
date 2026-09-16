@@ -146,7 +146,7 @@ class DeduplicationReport:
 | `core.exceptions.ProjectError` | Excepciones |
 | `utils.path_utils.is_subpath()`, `safe_path_join()` | Manipulación segura de rutas |
 | `utils.logging` | Logging |
-| `rapidfuzz.process.cdist`, `rapidfuzz.fuzz.ratio` | Matriz de scores de similitud de nombre (3ª pasada, vectorizado) |
+| `rapidfuzz.process.cdist`, `rapidfuzz.fuzz.WRatio`, `rapidfuzz.utils.default_process` | Matriz de scores de similitud de nombre (3ª pasada, vectorizado, con normalización previa) |
 | `numpy` (transitivo vía `pandas`) | Extrae, vectorizado, los pares de la matriz de scores por encima del umbral |
 
 ## Notas Internas

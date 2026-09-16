@@ -679,7 +679,7 @@ async def test_deduplicate_websocket_never_groups_by_fuzzy_name_match(tmp_path) 
     # /scan/deduplicate) llama a find_duplicates() SIN fuzzy_threshold -- nunca
     # debe mover nada por similitud aproximada de nombre, solo por hash exacto
     # o conflicto de version. Los nombres de este test son deliberadamente muy
-    # parecidos (ratio RapidFuzz ~85.7) pero con contenido y base distintos, para
+    # parecidos (score RapidFuzz alto, WRatio+normalizado) pero con contenido y base distintos, para
     # que la unica forma de que groups_found > 0 sea que la pasada fuzzy se
     # hubiera colado aqui por error.
     registry_path = tmp_path / "projects.json"

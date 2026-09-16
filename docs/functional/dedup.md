@@ -52,10 +52,11 @@ sequenceDiagram
 ### Similitud aproximada de nombre (`fuzzy_threshold`)
 
 Tercera pasada opcional de `find_duplicates()`, `None` por defecto (retrocompatible). Cuando se
-indica un entero 0-100, compara el `display_name` (en minúsculas) de los documentos que no
-quedaron agrupados por hash exacto ni por conflicto de versión, usando `rapidfuzz.process.cdist`
-(vectorizado), y agrupa por componentes conexas del grafo de similitud (pares con score ≥
-`fuzzy_threshold`), con `reason=DuplicateReason.FUZZY_NAME_MATCH`.
+indica un entero 0-100, compara el `display_name` (normalizado: sin extensión, minúsculas,
+separadores `_`/`-` unificados a espacio vía `rapidfuzz.utils.default_process`) de los documentos
+que no quedaron agrupados por hash exacto ni por conflicto de versión, usando
+`rapidfuzz.process.cdist` con `fuzz.WRatio` (vectorizado), y agrupa por componentes conexas del
+grafo de similitud (pares con score ≥ `fuzzy_threshold`), con `reason=DuplicateReason.FUZZY_NAME_MATCH`.
 
 **Nunca se resuelven automáticamente**: al ser coincidencias probabilísticas por nombre (no por
 contenido), los grupos `FUZZY_NAME_MATCH` quedan excluidos de "Buscar duplicados" (la acción

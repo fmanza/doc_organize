@@ -77,9 +77,9 @@ def _named_doc(display_name: str, sha256_hash: str, modified_time: float) -> Doc
 
 
 def test_fuzzy_threshold_none_keeps_current_behavior(manager: DeduplicationManager) -> None:
-    # Nombres muy parecidos (ratio ~85.7, ver sesión de diseño) pero sin
-    # fuzzy_threshold: debe comportarse exactamente igual que antes de esta
-    # funcionalidad -- ningun grupo, ni siquiera por version_conflict (las
+    # Nombres muy parecidos (WRatio+normalizado ~95.0, ver sesión de diseño)
+    # pero sin fuzzy_threshold: debe comportarse exactamente igual que antes de
+    # esta funcionalidad -- ningun grupo, ni siquiera por version_conflict (las
     # bases normalizadas son distintas).
     a = _named_doc("informe_ventas.pdf", "hash-a", modified_time=1.0)
     b = _named_doc("informe_ventas_anual.pdf", "hash-b", modified_time=2.0)
@@ -104,8 +104,10 @@ def test_fuzzy_match_below_threshold_not_grouped(manager: DeduplicationManager) 
     a = _named_doc("informe_ventas.pdf", "hash-a", modified_time=1.0)
     b = _named_doc("informe_ventas_anual.pdf", "hash-b", modified_time=2.0)
 
-    # El ratio real de este par es ~85.7 -- un umbral de 95 no debe agruparlos.
-    assert manager.find_duplicates([a, b], fuzzy_threshold=95) == []
+    # El score real de este par (WRatio + normalizado) es 95.0 exacto -- un
+    # umbral de 95 SI los agruparia (score_cutoff es inclusivo, score >= cutoff).
+    # Se usa 96 para quedar de forma inequivoca por encima del score real.
+    assert manager.find_duplicates([a, b], fuzzy_threshold=96) == []
 
 
 def test_fuzzy_pass_excludes_docs_already_grouped_by_hash(manager: DeduplicationManager) -> None:
@@ -124,12 +126,17 @@ def test_fuzzy_pass_excludes_docs_already_grouped_by_hash(manager: Deduplication
 
 
 def test_fuzzy_match_connected_components_without_strict_pairwise_transitivity(manager: DeduplicationManager) -> None:
-    # a-b (~84.2) y b-c (~83.0) superan el umbral 80, pero a-c (~68.1) no --
+    # a-b (95.0) y b-c (89.7) superan el umbral 80, pero a-c (73.7) no --
     # deben terminar en el MISMO grupo (componente conexa via b), sin exigir
     # que TODOS los pares superen el umbral entre si (regla de negocio 2).
-    a = _named_doc("factura_0001.pdf", "hash-a", modified_time=1.0)
-    b = _named_doc("factura_0001_copia.pdf", "hash-b", modified_time=2.0)
-    c = _named_doc("factura_0001_copia_revisada.pdf", "hash-c", modified_time=3.0)
+    # Nombres elegidos SIN relacion de prefijo anidado entre a y c (a diferencia
+    # de "factura_0001.pdf"/"factura_0001_copia.pdf"/"..._copia_revisada.pdf"
+    # de una version anterior de este test): con WRatio, si a es prefijo tanto
+    # de b como de c, partial_ratio(a, c) tambien satura a un score alto y el
+    # caso de "no transitividad" deja de poder probarse con esos datos.
+    a = _named_doc("contrato_2024_borrador.pdf", "hash-a", modified_time=1.0)
+    b = _named_doc("contrato_2024_borrador_revisado.pdf", "hash-b", modified_time=2.0)
+    c = _named_doc("acta_2024_borrador_revisado.pdf", "hash-c", modified_time=3.0)
 
     groups = manager.find_duplicates([c, a, b], fuzzy_threshold=80)
 
@@ -141,9 +148,10 @@ def test_fuzzy_match_connected_components_without_strict_pairwise_transitivity(m
 
 
 def test_fuzzy_match_is_case_insensitive(manager: DeduplicationManager) -> None:
-    # Sin normalizar a minusculas, el ratio de este par cae a ~23.8 (case
-    # sensible); en minusculas sube a ~85.7 -- mismo criterio que
-    # `_extract_base_name` (.lower()) para las otras dos pasadas.
+    # rapidfuzz.utils.default_process pliega a minusculas como parte de la
+    # normalizacion (no es un .lower() aparte): sin ese pliegue, WRatio de este
+    # par cae por debajo del umbral por la diferencia de mayusculas; con el
+    # pliegue, el score real es 95.0.
     a = _named_doc("INFORME_VENTAS.pdf", "hash-a", modified_time=1.0)
     b = _named_doc("informe_ventas_anual.pdf", "hash-b", modified_time=2.0)
 

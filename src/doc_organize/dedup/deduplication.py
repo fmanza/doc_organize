@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from rapidfuzz import fuzz, process
+from rapidfuzz import fuzz, process, utils
 
 from doc_organize.core.constants import DEDUP_HISTORY_JSONL_NAME, DEDUP_REPORT_JSON_NAME, VERSION_SUFFIX_PATTERN
 from doc_organize.core.models import DeduplicationReport, DocumentMetadata, DuplicateGroup, DuplicateReason
@@ -250,9 +250,20 @@ class DeduplicationManager:
     @staticmethod
     def _build_fuzzy_groups(docs: list[DocumentMetadata], fuzzy_threshold: int) -> list[DuplicateGroup]:
         """Agrupa `docs` (ya sin duplicados exactos ni conflictos de versión) por
-        similitud aproximada de `display_name`, comparando en minúsculas (mismo
-        criterio que `_extract_base_name`) para no perder coincidencias que solo
-        difieren en mayúsculas/minúsculas.
+        similitud aproximada de `display_name`, normalizando cada nombre antes de
+        comparar: se quita la extensión (`Path.stem`) y se pasa por
+        `rapidfuzz.utils.default_process` (pliega a minúsculas y convierte
+        cualquier separador no alfanumérico -- `_`, `-`, espacios repetidos -- en
+        un único espacio). Sin esto, dos nombres que solo difieren en el
+        separador (`informe-ventas` vs `informe_ventas`) o que comparten
+        extensión larga penalizan el score sin motivo real.
+
+        Usa `fuzz.WRatio` como scorer -- no `fuzz.ratio` (distancia Indel/
+        Levenshtein pura) -- porque `WRatio` combina ratio simple y
+        partial-ratio según la diferencia de longitud entre cadenas: capta el
+        caso común de nombres de fichero con sufijos añadidos (copias,
+        revisiones, fechas), donde uno es sustancialmente prefijo/substring del
+        otro y `ratio` penaliza fuerte solo por la diferencia de longitud.
 
         Usa `rapidfuzz.process.cdist` para calcular la matriz de scores completa
         de una vez (vectorizado en C), y `numpy` para extraer de ella, también
@@ -266,8 +277,8 @@ class DeduplicationManager:
         if len(docs) < 2:
             return []
 
-        names = [doc.display_name.lower() for doc in docs]
-        score_matrix = process.cdist(names, names, scorer=fuzz.ratio, score_cutoff=fuzzy_threshold, workers=-1)
+        names = [utils.default_process(Path(doc.display_name).stem) for doc in docs]
+        score_matrix = process.cdist(names, names, scorer=fuzz.WRatio, score_cutoff=fuzzy_threshold, workers=-1)
 
         parent = list(range(len(docs)))
 

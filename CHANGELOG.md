@@ -6,6 +6,19 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+### Added
+
+- `dedup/deduplication.py`: tercera pasada opcional de deduplicación por similitud aproximada de
+  nombre (`find_duplicates(fuzzy_threshold=0-100)`), usando `rapidfuzz.process.cdist` con
+  `fuzz.WRatio` sobre nombres normalizados (sin extensión, separadores unificados vía
+  `rapidfuzz.utils.default_process`) y agrupación por componentes conexas sin exigir
+  transitividad estricta. Los grupos resultantes (`DuplicateReason.FUZZY_NAME_MATCH`) nunca se
+  auto-resuelven: quedan excluidos de "Buscar duplicados" y solo se resuelven desde el
+  formulario interactivo de "Revisar Duplicados" (activación explícita por grupo).
+- `web/routes/duplicates.py`, `web/templates/duplicates_resolver.html.j2`: control de umbral de
+  similitud (`fuzzy_threshold`) y activación por grupo (`fuzzy_group_toggles`) en la pantalla de
+  Duplicados.
+
 ### Fixed
 
 - `src/doc_organize/main.py` (`_run_web`): `uvicorn.run(..., ws_ping_timeout=None)` evita que
