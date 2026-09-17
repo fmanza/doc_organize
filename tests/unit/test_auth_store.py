@@ -192,8 +192,8 @@ async def test_get_session_returns_none_when_expired(tmp_path) -> None:
         session = await store.create_session(user)
 
         expired = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
-        await store._connection.execute("UPDATE sessions SET expires_at = ? WHERE token = ?", (expired, session.token))
-        await store._connection.commit()
+        await store._session_store._connection.execute("UPDATE sessions SET expires_at = ? WHERE token = ?", (expired, session.token))
+        await store._session_store._connection.commit()
 
         result = await store.get_session(session.token)
 
@@ -838,7 +838,7 @@ async def test_create_tenant_race_condition_raises_clean_error_not_raw_integrity
         async def _lying_tenant_exists(_tenant_id: str) -> bool:
             return False
 
-        monkeypatch.setattr(store, "tenant_exists", _lying_tenant_exists)
+        monkeypatch.setattr(store._tenant_store, "tenant_exists", _lying_tenant_exists)
 
         with pytest.raises(TenantAlreadyExistsError):
             await store.create_tenant("Acme Corp")
@@ -852,7 +852,7 @@ async def test_create_role_race_condition_raises_clean_error_not_raw_integrity_e
         async def _lying_role_name_taken(_name: str, *, exclude_role_id=None) -> bool:
             return False
 
-        monkeypatch.setattr(store, "_role_name_taken", _lying_role_name_taken)
+        monkeypatch.setattr(store._role_store, "_role_name_taken", _lying_role_name_taken)
 
         with pytest.raises(RoleAlreadyExistsError):
             await store.create_role("Lector")
@@ -867,7 +867,7 @@ async def test_create_user_race_condition_raises_clean_error_not_raw_integrity_e
         async def _lying_username_taken(_tenant_id: str, _username: str) -> bool:
             return False
 
-        monkeypatch.setattr(store, "_username_taken", _lying_username_taken)
+        monkeypatch.setattr(store._user_store, "_username_taken", _lying_username_taken)
 
         with pytest.raises(UserAlreadyExistsError):
             await store.create_user(tenant.id, "alice", "otra-password")
