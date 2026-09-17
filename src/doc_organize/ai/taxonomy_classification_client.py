@@ -17,11 +17,11 @@ despliegue ambas apunten al mismo LiteLLM Proxy.
 import json
 import os
 
-from types import TracebackType
-from typing import Any, Self
+from typing import Any
 
 import httpx
 
+from doc_organize.ai._http_client_base import AiHttpClientBase
 from doc_organize.auth import InstanceSecretsStore
 from doc_organize.core.exceptions import TaxonomyClassificationAuthError, TaxonomyClassificationConnectionError, TaxonomyClassificationError
 from doc_organize.core.models import LiteLLMTaxonomyClassificationConfig, TaxonomyClassificationResult
@@ -97,7 +97,7 @@ async def litellm_taxonomy_classification_config_from_store_or_env(store: Instan
     return LiteLLMTaxonomyClassificationConfig(base_url=base_url, virtual_key=virtual_key)
 
 
-class TaxonomyClassificationClient:
+class TaxonomyClassificationClient(AiHttpClientBase):
     """Clasifica un documento en dominio + tipo de material (2 ejes) en una sola llamada, vía LiteLLM Proxy.
 
     Habla el mismo endpoint `chat/completions` OpenAI-compatible que `DomainClassificationClient`,
@@ -133,19 +133,15 @@ class TaxonomyClassificationClient:
                 el transporte HTTP real por defecto.
         """
         self.config = config
-        self.logger = logger
-        self._client = httpx.AsyncClient(base_url=config.base_url, timeout=config.timeout_s, transport=transport)
-
-    async def __aenter__(self) -> Self:
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        await self._client.aclose()
+        super().__init__(
+            base_url=config.base_url,
+            timeout_s=config.timeout_s,
+            logger=logger,
+            auth_error_cls=TaxonomyClassificationAuthError,
+            connection_error_cls=TaxonomyClassificationConnectionError,
+            generic_error_cls=TaxonomyClassificationError,
+            transport=transport,
+        )
 
     async def classify(
         self, *, chunks_text: str, title: str | None, candidate_domains: list[str], candidate_material_types: list[str]
@@ -180,31 +176,24 @@ class TaxonomyClassificationClient:
             f"Título: {title or '(sin título)'}\n"
             f"Contenido: {chunks_text[:_MAX_CONTENT_CHARS]}"
         )
-        try:
-            response = await self._client.post(
-                "/chat/completions",
-                json={
-                    "model": self.config.model,
-                    "messages": [
-                        {"role": "system", "content": _SYSTEM_PROMPT},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "response_format": {"type": "json_object"},
-                    "temperature": 0.0,
-                },
-                headers={"Authorization": f"Bearer {self.config.virtual_key}"},
-            )
-        except httpx.TimeoutException as exc:
-            raise TaxonomyClassificationConnectionError(f"Timeout consultando el LiteLLM Proxy en {self.config.base_url}") from exc
-        except httpx.HTTPError as exc:
-            raise TaxonomyClassificationConnectionError(f"Error de red consultando el LiteLLM Proxy en {self.config.base_url}") from exc
-
-        if response.status_code in (401, 403):
-            raise TaxonomyClassificationAuthError(
-                f"LiteLLM Proxy rechazó la virtual key de clasificación por manifiesto (HTTP {response.status_code})"
-            )
-        if response.is_error:
-            raise TaxonomyClassificationError(f"LiteLLM Proxy devolvió HTTP {response.status_code} clasificando un documento por manifiesto")
+        response = await self._request(
+            "POST",
+            "/chat/completions",
+            json={
+                "model": self.config.model,
+                "messages": [
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "response_format": {"type": "json_object"},
+                "temperature": 0.0,
+            },
+            headers={"Authorization": f"Bearer {self.config.virtual_key}"},
+            timeout_message=f"Timeout consultando el LiteLLM Proxy en {self.config.base_url}",
+            connection_message=f"Error de red consultando el LiteLLM Proxy en {self.config.base_url}",
+            auth_message="LiteLLM Proxy rechazó la virtual key de clasificación por manifiesto (HTTP {status_code})",
+            error_message="LiteLLM Proxy devolvió HTTP {status_code} clasificando un documento por manifiesto",
+        )
 
         return self._parse_result(response.json(), candidate_domains, candidate_material_types)
 

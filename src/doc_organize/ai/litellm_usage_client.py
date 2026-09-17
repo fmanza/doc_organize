@@ -9,11 +9,10 @@ alcance mientras no exista un consumidor real (PLAN/AUDIT_PLAN, sesión 2026-09-
 import os
 
 from datetime import date
-from types import TracebackType
-from typing import Self
 
 import httpx
 
+from doc_organize.ai._http_client_base import AiHttpClientBase
 from doc_organize.auth import InstanceSecretsStore
 from doc_organize.core.exceptions import UsageSourceAuthError, UsageSourceConnectionError, UsageSourceError
 from doc_organize.core.models import LiteLLMUsageConfig, UsageLineItem, UsageSnapshot, UsageSourceName
@@ -67,7 +66,7 @@ async def litellm_usage_config_from_store_or_env(store: InstanceSecretsStore) ->
     return LiteLLMUsageConfig(base_url=base_url, virtual_key=virtual_key)
 
 
-class LiteLLMUsageClient:
+class LiteLLMUsageClient(AiHttpClientBase):
     """Consulta el spend acumulado de una virtual key de LiteLLM Proxy (`GET /key/info`).
 
     Usar como context manager async para garantizar el cierre del cliente HTTP
@@ -95,19 +94,15 @@ class LiteLLMUsageClient:
                 el transporte HTTP real por defecto.
         """
         self.config = config
-        self.logger = logger
-        self._client = httpx.AsyncClient(base_url=config.base_url, timeout=config.timeout_s, transport=transport)
-
-    async def __aenter__(self) -> Self:
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        await self._client.aclose()
+        super().__init__(
+            base_url=config.base_url,
+            timeout_s=config.timeout_s,
+            logger=logger,
+            auth_error_cls=UsageSourceAuthError,
+            connection_error_cls=UsageSourceConnectionError,
+            generic_error_cls=UsageSourceError,
+            transport=transport,
+        )
 
     async def get_usage(self, *, key: str | None = None) -> UsageSnapshot:
         """Consulta el spend acumulado de `key` (por defecto, la virtual key configurada).
@@ -130,21 +125,16 @@ class LiteLLMUsageClient:
             UsageSourceError: Cualquier otro error de la API del proxy.
         """
         target_key = key or self.config.virtual_key
-        try:
-            response = await self._client.get(
-                "/key/info",
-                params={"key": target_key},
-                headers={"Authorization": f"Bearer {self.config.virtual_key}"},
-            )
-        except httpx.TimeoutException as exc:
-            raise UsageSourceConnectionError(f"Timeout consultando LiteLLM Proxy en {self.config.base_url}") from exc
-        except httpx.HTTPError as exc:
-            raise UsageSourceConnectionError(f"Error de red consultando LiteLLM Proxy en {self.config.base_url}") from exc
-
-        if response.status_code in (401, 403):
-            raise UsageSourceAuthError(f"LiteLLM Proxy rechazó la credencial (HTTP {response.status_code})")
-        if response.is_error:
-            raise UsageSourceError(f"LiteLLM Proxy devolvió HTTP {response.status_code} en /key/info")
+        response = await self._request(
+            "GET",
+            "/key/info",
+            params={"key": target_key},
+            headers={"Authorization": f"Bearer {self.config.virtual_key}"},
+            timeout_message=f"Timeout consultando LiteLLM Proxy en {self.config.base_url}",
+            connection_message=f"Error de red consultando LiteLLM Proxy en {self.config.base_url}",
+            auth_message="LiteLLM Proxy rechazó la credencial (HTTP {status_code})",
+            error_message="LiteLLM Proxy devolvió HTTP {status_code} en /key/info",
+        )
 
         payload = response.json()
         info = payload.get("info", payload)

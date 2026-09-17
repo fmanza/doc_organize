@@ -15,13 +15,13 @@ import json
 import os
 
 from dataclasses import dataclass
-from types import TracebackType
-from typing import Any, Self
+from typing import Any
 
 import httpx
 
 from pydantic import ValidationError
 
+from doc_organize.ai._http_client_base import AiHttpClientBase
 from doc_organize.auth import InstanceSecretsStore
 from doc_organize.core.exceptions import TaxonomyManifestDraftAuthError, TaxonomyManifestDraftConnectionError, TaxonomyManifestDraftError
 from doc_organize.core.models import LiteLLMTaxonomyManifestDraftConfig, TaxonomyCatalogEntry, TaxonomyManifestDraftResult
@@ -116,7 +116,7 @@ async def litellm_taxonomy_manifest_draft_config_from_store_or_env(store: Instan
     return LiteLLMTaxonomyManifestDraftConfig(base_url=base_url, virtual_key=virtual_key, **({"model": model} if model else {}))
 
 
-class TaxonomyManifestDraftClient:
+class TaxonomyManifestDraftClient(AiHttpClientBase):
     """Propone un borrador de manifiesto de taxonomía (dominios + tipos de material) a partir de
     una muestra de documentos, vía LiteLLM Proxy.
 
@@ -151,19 +151,15 @@ class TaxonomyManifestDraftClient:
                 real por defecto.
         """
         self.config = config
-        self.logger = logger
-        self._client = httpx.AsyncClient(base_url=config.base_url, timeout=config.timeout_s, transport=transport)
-
-    async def __aenter__(self) -> Self:
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        await self._client.aclose()
+        super().__init__(
+            base_url=config.base_url,
+            timeout_s=config.timeout_s,
+            logger=logger,
+            auth_error_cls=TaxonomyManifestDraftAuthError,
+            connection_error_cls=TaxonomyManifestDraftConnectionError,
+            generic_error_cls=TaxonomyManifestDraftError,
+            transport=transport,
+        )
 
     async def propose_manifest(self, *, documents: list[SampledDocument]) -> TaxonomyManifestDraftResult:
         """Propone un borrador de taxonomía (dominios + tipos de material) a partir de `documents`.
@@ -189,29 +185,24 @@ class TaxonomyManifestDraftClient:
             raise ValueError("No se puede proponer un borrador de manifiesto sin ningún documento de muestra.")
 
         user_prompt = self._build_user_prompt(documents)
-        try:
-            response = await self._client.post(
-                "/chat/completions",
-                json={
-                    "model": self.config.model,
-                    "messages": [
-                        {"role": "system", "content": _SYSTEM_PROMPT},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "response_format": {"type": "json_object"},
-                    "temperature": 0.0,
-                },
-                headers={"Authorization": f"Bearer {self.config.virtual_key}"},
-            )
-        except httpx.TimeoutException as exc:
-            raise TaxonomyManifestDraftConnectionError(f"Timeout consultando el LiteLLM Proxy en {self.config.base_url}") from exc
-        except httpx.HTTPError as exc:
-            raise TaxonomyManifestDraftConnectionError(f"Error de red consultando el LiteLLM Proxy en {self.config.base_url}") from exc
-
-        if response.status_code in (401, 403):
-            raise TaxonomyManifestDraftAuthError(f"LiteLLM Proxy rechazó la virtual key de propuesta de manifiesto (HTTP {response.status_code})")
-        if response.is_error:
-            raise TaxonomyManifestDraftError(f"LiteLLM Proxy devolvió HTTP {response.status_code} proponiendo un manifiesto de taxonomía")
+        response = await self._request(
+            "POST",
+            "/chat/completions",
+            json={
+                "model": self.config.model,
+                "messages": [
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "response_format": {"type": "json_object"},
+                "temperature": 0.0,
+            },
+            headers={"Authorization": f"Bearer {self.config.virtual_key}"},
+            timeout_message=f"Timeout consultando el LiteLLM Proxy en {self.config.base_url}",
+            connection_message=f"Error de red consultando el LiteLLM Proxy en {self.config.base_url}",
+            auth_message="LiteLLM Proxy rechazó la virtual key de propuesta de manifiesto (HTTP {status_code})",
+            error_message="LiteLLM Proxy devolvió HTTP {status_code} proponiendo un manifiesto de taxonomía",
+        )
 
         return self._parse_result(response.json())
 
