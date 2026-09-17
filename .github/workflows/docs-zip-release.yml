@@ -57,7 +57,7 @@ jobs:
           cat dist/*.sha256 || echo "No sha256 file yet"
 
       - name: Upload ZIP as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: docs-zip-build
           path: dist/doc_organize-docs-*.zip*
