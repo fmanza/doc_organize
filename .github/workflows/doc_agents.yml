@@ -128,7 +128,7 @@ jobs:
 
       - name: Crear Pull Request con cambios
         if: steps.check-secrets.outputs.provider != 'none' && env.DRY_RUN != 'true'
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "docs: auto-generated documentation for ${{ env.MODULE_PATH }}"
