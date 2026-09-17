@@ -19,6 +19,7 @@ from uuid import uuid4
 
 import aiosqlite
 
+from doc_organize.auth.migrations import apply_pending_migrations
 from doc_organize.core.constants import (
     DEFAULT_ADMIN_PASSWORD,
     DEFAULT_ADMIN_ROLE_NAME,
@@ -228,7 +229,7 @@ class AuthStore:
         await self._conn.execute("PRAGMA foreign_keys=ON")
         await self._conn.executescript(_SCHEMA)
         await self._conn.commit()
-        await self._migrate_schema()
+        await apply_pending_migrations(self._conn, logger=self.logger)
         await self._ensure_default_tenant_bootstrap()
         return self
 
@@ -246,37 +247,14 @@ class AuthStore:
     # ===== Migracion (bases de datos creadas antes de esta revision) =====
 
     async def _migrate_schema(self) -> None:
-        """Aplica, de forma idempotente, todas las migraciones de esquema pendientes:
-        columnas nuevas de `users`, reconstrucción de `roles` sin `tenant_id`, y
-        retro-asignación de rol/`is_instance_admin` a filas preexistentes.
+        """Wrapper for schema migrations (delegates to migrations.apply_pending_migrations).
 
-        Se ejecuta en cada apertura de `AuthStore` (mismo patron que el
-        `CREATE TABLE IF NOT EXISTS` de `_SCHEMA`). SQLite no soporta
-        `ADD COLUMN IF NOT EXISTS`, de ahi la comprobacion manual via
-        `PRAGMA table_info`.
+        This method is kept for backward compatibility. New code should call
+        apply_pending_migrations() directly.
         """
-        cursor = await self._connection.execute("PRAGMA table_info(users)")
-        columns = {row[1] for row in await cursor.fetchall()}
-
-        altered = False
-        if "role_id" not in columns:
-            await self._connection.execute("ALTER TABLE users ADD COLUMN role_id TEXT REFERENCES roles(id)")
-            altered = True
-        if "must_change_password" not in columns:
-            await self._connection.execute("ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0")
-            altered = True
-        if "is_blocked" not in columns:
-            await self._connection.execute("ALTER TABLE users ADD COLUMN is_blocked INTEGER NOT NULL DEFAULT 0")
-            altered = True
-        if "is_instance_admin" not in columns:
-            await self._connection.execute("ALTER TABLE users ADD COLUMN is_instance_admin INTEGER NOT NULL DEFAULT 0")
-            altered = True
-        if altered:
-            await self._connection.commit()
-
-        await self._migrate_roles_schema()
-        await self._backfill_missing_roles()
-        await self._backfill_instance_admins()
+        if self._conn is None:
+            raise RuntimeError("Cannot migrate schema: connection not initialized")
+        await apply_pending_migrations(self._conn, logger=self.logger)
 
     async def _migrate_roles_schema(self) -> None:
         """Reconstruye `roles` sin `tenant_id` (rediseño Tenant/Role/User: un rol ya
@@ -544,8 +522,11 @@ class AuthStore:
             # IntegrityError en bruto hasta la API.
             await self._connection.rollback()
             raise TenantAlreadyExistsError(slug) from exc
-        except Exception:
+        except Exception as exc:
+            # Rollback defensivo: cualquier otra excepción (OSError, etc.) aborta la transacción.
+            # Registramos para debugging futuro (no es fatal, reintento en próxima apertura).
             await self._connection.rollback()
+            self.logger.warning(f"Error inesperado al crear tenant '{slug}': {exc}", exc_info=True)
             raise
 
         self.logger.info(f"Tenant creado: '{tenant.id}' ({tenant.name}), sin usuarios (alta manual pendiente).")

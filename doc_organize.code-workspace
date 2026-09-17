@@ -17,7 +17,29 @@
         "source.organizeImports": "explicit"
       }
     },
-    "ruff.importStrategy": "fromEnvironment"
+    "ruff.importStrategy": "fromEnvironment",
+    "chat.tools.terminal.autoApprove": {
+      "/^powershell -Command \"Get-ChildItem -Path tests -Filter '\\*\\.py' -Recurse \\| Measure-Object \\| Select-Object -ExpandProperty Count\"$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/^python -m pytest tests/ -v --co -q 2>&1 \\| head -50$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/^which gh 2>&1 ; where gh 2>&1$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/^gh --version 2>&1$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/^python -m pytest tests/unit/auth/test_migrations\\.py -v$/": {
+        "approve": true,
+        "matchCommandLine": true
+      }
+    }
   },
   "extensions": {
     "recommendations": [

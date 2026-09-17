@@ -136,7 +136,14 @@ class ProjectRegistry:
                 )
                 projects.append(project)
                 await self._save(projects)
-            except Exception:
+            except Exception as exc:
+                # Rollback defensivo: si crear/guardar el proyecto falla, eliminamos la carpeta.
+                # Capturamos Exception amplia para robustecer ante errores inesperados
+                # (I/O, validación, JSON, etc.), pero siempre hacemos cleanup.
+                self.logger.warning(
+                    f"Error al crear proyecto '{normalized_name}' en '{project_root}': {exc}. Limpiando carpeta de creación incompleta...",
+                    exc_info=True,
+                )
                 await asyncio.to_thread(shutil.rmtree, project_root, ignore_errors=True)
                 raise
 
@@ -285,7 +292,13 @@ class ProjectRegistry:
             try:
                 projects[index] = updated
                 await self._save(projects)
-            except Exception:
+            except Exception as exc:
+                # Rollback defensivo: si fallar guardar el proyecto actualizado, revertimos
+                # la carpeta a su ubicación anterior. Captura Exception amplia para robustecer
+                # ante errores inesperados (I/O, JSON, etc.), pero siempre hace rollback.
+                self.logger.warning(
+                    f"Error al guardar proyecto '{name}' tras mover a '{new_root}': {exc}. Revirtiendo cambios de ubicación...", exc_info=True
+                )
                 await asyncio.to_thread(shutil.move, str(new_root), str(old_root))
                 raise
 

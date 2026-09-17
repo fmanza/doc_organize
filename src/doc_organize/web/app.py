@@ -139,20 +139,31 @@ def create_app(
     # `ProjectRegistry` con su propio lock inútil, perdiendo en silencio
     # proyectos creados en paralelo o reventando con un `OSError` crudo al
     # chocar sobre el mismo fichero temporal).
+    # Thread-safety: Per-project asyncio.Lock protects concurrent operations.
+    # See src/doc_organize/web/STATE.md § "app.state.project_registry"
     app.state.project_registry = ProjectRegistry(registry_path) if registry_path else ProjectRegistry()
+    # Thread-safety: Read-only immutable string, safe from initialization.
+    # See src/doc_organize/web/STATE.md § "app.state.auth_db_path"
     app.state.auth_db_path = str(auth_db_path) if auth_db_path else None
     # Sin `asyncio.Lock` interno (a diferencia de `project_registry`): esta clase
     # solo lee plantillas de disco, nunca escribe — la instancia única evita
     # resolver la ruta por defecto (`Path.home() / ...`) en cada petición, no
     # protege ninguna escritura concurrente (ver `TaxonomyTemplateRegistry`).
+    # Thread-safety: Read-only after initialization (disk templates cached in memory).
+    # See src/doc_organize/web/STATE.md § "app.state.taxonomy_template_registry"
     app.state.taxonomy_template_registry = TaxonomyTemplateRegistry(templates_path) if templates_path else TaxonomyTemplateRegistry()
     # Expuesto en app.state (no solo pasado al middleware): el handler WebSocket de
     # web/routes/scan.py necesita `security` para autenticar a mano (Fase D-2b,
     # §2.7.3 — BaseHTTPMiddleware no protege rutas WebSocket).
+    # Thread-safety: Read-only immutable security context.
+    # See src/doc_organize/web/STATE.md § "app.state.security"
     app.state.security = security
     # Compartido entre peticiones de /login (revision de seguridad, revision 9): un
     # objeto por app, no por peticion, para que el conteo de fallos sobreviva entre
     # llamadas.
+    # Thread-safety: GIL-protected dict mutations (read-modify-write is atomic under GIL).
+    # WARNING: Breaks in Python 3.13+ free-threading mode.
+    # See src/doc_organize/web/STATE.md § "app.state.login_rate_limiter" & ADR-004
     app.state.login_rate_limiter = LoginRateLimiter()
     # Claves (tenant_id, nombre de proyecto en minúsculas) con un escaneo o
     # deduplicación en curso ahora mismo -- `web/routes/scan.py` la usa para
@@ -161,6 +172,9 @@ def create_app(
     # sin ninguna otra coordinación entre sí, AUDIT_CODE sesión 2026-09-04).
     # Un `set` por app (no por petición, mismo criterio que `project_registry`
     # de arriba) para que sea compartido de verdad entre conexiones WebSocket.
+    # Thread-safety: GIL-protected set mutations (add/discard are atomic).
+    # Best-effort concurrency control; not strict serialization.
+    # See src/doc_organize/web/STATE.md § "app.state.active_project_operations" & ADR-004
     app.state.active_project_operations = set()
     app.add_middleware(AuthMiddleware, security=security, auth_db_path=auth_db_path)
     for exc_type, status_code in _EXCEPTION_STATUS_CODES.items():

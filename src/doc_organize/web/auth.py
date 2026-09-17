@@ -156,6 +156,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # `app` se tipa como `object` (no el ASGIApp de Starlette) porque FastAPI
         # invoca `add_middleware(AuthMiddleware, ...)` con su propio wrapper interno;
         # BaseHTTPMiddleware.__init__ exige un tipo mas preciso, de ahi el ignore.
+        # BaseHTTPMiddleware.__init__ espera Callable[[..], ...],
+        # pero Starlette acepta ASGIApp directamente. Mypy no lo entiende, ignoramos.
         super().__init__(app)  # type: ignore[arg-type]
         self.security = security
         self.auth_db_path = auth_db_path

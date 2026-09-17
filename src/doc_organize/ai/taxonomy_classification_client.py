@@ -67,7 +67,9 @@ def litellm_taxonomy_classification_config_from_env() -> LiteLLMTaxonomyClassifi
     if not base_url or not virtual_key:
         raise ValueError(f"Definir {_ENV_VAR_BASE_URL} y {_ENV_VAR_VIRTUAL_KEY} para usar litellm_taxonomy_classification_config_from_env().")
     model = os.environ.get(_ENV_VAR_MODEL)
-    return LiteLLMTaxonomyClassificationConfig(base_url=base_url, virtual_key=virtual_key, **({"model": model} if model else {}))
+    if model:
+        return LiteLLMTaxonomyClassificationConfig(base_url=base_url, virtual_key=virtual_key, model=model)
+    return LiteLLMTaxonomyClassificationConfig(base_url=base_url, virtual_key=virtual_key)
 
 
 async def litellm_taxonomy_classification_config_from_store_or_env(store: InstanceSecretsStore) -> LiteLLMTaxonomyClassificationConfig:
@@ -90,7 +92,9 @@ async def litellm_taxonomy_classification_config_from_store_or_env(store: Instan
             f"Definir {_ENV_VAR_BASE_URL} y {_ENV_VAR_VIRTUAL_KEY} (panel de configuración IA o entorno) para clasificar por manifiesto."
         )
     model = await store.get(_ENV_VAR_MODEL.lower()) or os.environ.get(_ENV_VAR_MODEL)
-    return LiteLLMTaxonomyClassificationConfig(base_url=base_url, virtual_key=virtual_key, **({"model": model} if model else {}))
+    if model:
+        return LiteLLMTaxonomyClassificationConfig(base_url=base_url, virtual_key=virtual_key, model=model)
+    return LiteLLMTaxonomyClassificationConfig(base_url=base_url, virtual_key=virtual_key)
 
 
 class TaxonomyClassificationClient:
@@ -241,6 +245,15 @@ class TaxonomyClassificationClient:
 
     @staticmethod
     def _clamp_confidence(raw: Any) -> float:
+        """Restringe confidencia del modelo al rango [0, 1] inclusivo.
+
+        Args:
+            raw: Valor de confidencia (tipo desconocido de Docling, que no proporciona type stubs).
+                 Típicamente float, int o string numérica.
+
+        Returns:
+            float en [0, 1].
+        """
         try:
             confidence = float(raw)
         except (TypeError, ValueError):

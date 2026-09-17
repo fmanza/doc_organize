@@ -56,6 +56,9 @@ async def login_submit(
     (revisión de seguridad, revisión 9).
     """
     tenant_id = tenant_id.strip()
+    # Thread-safety: LoginRateLimiter uses in-memory dict; protected by GIL in single-worker deployment.
+    # See docs/adr/ADR-004-GIL-Thread-Safety.md § Option A (v0.9.2): GIL-based approach.
+    # Future (v0.10+): Option B (explicit asyncio.Lock) or Option C (Redis for multi-worker).
     limiter: LoginRateLimiter = request.app.state.login_rate_limiter
     if limiter.is_locked(tenant_id, username):
         return _templates.TemplateResponse(
