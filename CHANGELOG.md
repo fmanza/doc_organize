@@ -69,6 +69,8 @@ hash. Recoge todo lo integrado en `develop` desde la 0.9.0.
   `Path.is_symlink()` propaga el error de `lstat()` (Linux); se omite como el resto de casos TOCTOU.
 - `projects/project_registry.py`: el doctest de `move_project_root` compara rutas resueltas (fallaba en Windows con
   nombres cortos de `tempfile`).
+- `tests/unit/test_scan_command.py`: la duración de un escaneo fallido se comprueba sin exigir `> 0` (en Windows
+  `time.monotonic()` tiene ~15,6 ms de resolución y el test fallaba de forma intermitente).
 
 ## [0.9.0] - 2026-09-11
 
