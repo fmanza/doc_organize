@@ -31,8 +31,9 @@ cp config.yaml.example config.yaml
 
 Edita **`.env`**:
 
-- `LITELLM_MASTER_KEY`: clave de administrador del proxy — genera una propia
-  (p. ej. `openssl rand -hex 32`), nunca uses el valor de ejemplo.
+- `LITELLM_MASTER_KEY`: clave de administrador del proxy — debe empezar por
+  `sk-`. Genera una propia (ver [Generar las claves](#generar-las-claves) más
+  abajo), nunca uses el valor de ejemplo.
 - `LITELLM_SALT_KEY`: cifra las credenciales que se añadan vía la UI del proxy.
   ⚠️ Fíjala una vez y no la cambies después del primer arranque — cambiarla
   invalida cualquier credencial ya cifrada en la base de datos.
@@ -41,6 +42,52 @@ Edita **`.env`**:
   presupuestos) — no cambies el host `postgres`, es el nombre del servicio
   dentro de la red de docker-compose, no un host real.
 - `ANTHROPIC_API_KEY`: tu API key real del proveedor.
+
+### Generar las claves
+
+`LITELLM_MASTER_KEY` y `LITELLM_SALT_KEY` son cadenas aleatorias que generas
+tú — no hay un valor "correcto", solo que sean únicas, impredecibles y
+distintas entre sí. La única diferencia de formato: `LITELLM_MASTER_KEY` debe
+empezar por `sk-`; `LITELLM_SALT_KEY` no necesita prefijo.
+
+**Linux / macOS** (bash/zsh, usa `openssl`):
+
+```bash
+echo "LITELLM_MASTER_KEY=sk-$(openssl rand -hex 32)"
+echo "LITELLM_SALT_KEY=$(openssl rand -hex 32)"
+```
+
+**Windows — Git Bash** (incluye `openssl`; viene con Git for Windows, mismos
+comandos que Linux/macOS):
+
+```bash
+echo "LITELLM_MASTER_KEY=sk-$(openssl rand -hex 32)"
+echo "LITELLM_SALT_KEY=$(openssl rand -hex 32)"
+```
+
+**Windows — PowerShell** (sin depender de `openssl`):
+
+```powershell
+$bytes = [byte[]]::new(32)
+[System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+$hex = ($bytes | ForEach-Object { $_.ToString('x2') }) -join ''
+"LITELLM_MASTER_KEY=sk-$hex"
+```
+
+```powershell
+$bytes = [byte[]]::new(32)
+[System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+"LITELLM_SALT_KEY=" + (($bytes | ForEach-Object { $_.ToString('x2') }) -join '')
+```
+
+**Cualquier plataforma con Python** (ya lo necesitas para usar doc_organize):
+
+```bash
+python -c "import secrets; print('LITELLM_MASTER_KEY=sk-' + secrets.token_hex(32))"
+python -c "import secrets; print('LITELLM_SALT_KEY=' + secrets.token_hex(32))"
+```
+
+Pega cada valor generado en la línea correspondiente de `.env`.
 
 Edita **`config.yaml`** si quieres otro modelo/proveedor — por defecto usa
 `claude-classifier` como alias apuntando a un modelo económico
@@ -130,6 +177,33 @@ DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_MODEL=claude-classifier   # opciona
 Requiere el extra `doc_organize[context]` instalado (`pip install
 doc_organize[context]`) para `pyyaml` (generación de `mkdocs.yml`) — el cliente
 de clasificación en sí solo usa `httpx`, ya incluido en el extra `ai`.
+
+## Parar el proxy
+
+```bash
+cd deploy/litellm
+docker compose stop
+```
+
+Detiene los contenedores (`litellm` y `postgres`) sin borrarlos — las virtual
+keys y la config ya generadas quedan intactas para el próximo `docker compose
+up -d` (usa `docker compose start` para reanudarlos sin recrearlos, o `up -d`
+si has tocado `.env`/`config.yaml`/`docker-compose.yml`).
+
+Si además quieres eliminar los contenedores (por ejemplo, antes de un `up -d`
+tras editar `docker-compose.yml`):
+
+```bash
+docker compose down
+```
+
+Esto **no** borra el volumen `litellm_postgres_data`: las virtual keys
+generadas en el paso 3 se conservan. Solo si necesitas empezar de cero (perder
+todas las virtual keys y tener que regenerarlas):
+
+```bash
+docker compose down -v   # ⚠️ borra también la Postgres con las virtual keys
+```
 
 ## Troubleshooting
 

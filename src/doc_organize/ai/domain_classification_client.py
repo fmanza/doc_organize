@@ -14,11 +14,11 @@ poder atribuir presupuesto/rate-limit por separado.
 import json
 import os
 
-from types import TracebackType
-from typing import Any, Self
+from typing import Any
 
 import httpx
 
+from doc_organize.ai._http_client_base import AiHttpClientBase
 from doc_organize.auth import InstanceSecretsStore
 from doc_organize.core.exceptions import DomainClassificationAuthError, DomainClassificationConnectionError, DomainClassificationError
 from doc_organize.core.models import DomainClassificationResult, LiteLLMClassificationConfig
@@ -93,7 +93,7 @@ async def litellm_classification_config_from_store_or_env(store: InstanceSecrets
     return LiteLLMClassificationConfig(base_url=base_url, virtual_key=virtual_key, **({"model": model} if model else {}))
 
 
-class DomainClassificationClient:
+class DomainClassificationClient(AiHttpClientBase):
     """Clasifica un documento entre un catálogo cerrado de dominios, vía LiteLLM Proxy.
 
     Habla el endpoint `chat/completions` OpenAI-compatible que expone LiteLLM
@@ -128,19 +128,15 @@ class DomainClassificationClient:
                 el transporte HTTP real por defecto.
         """
         self.config = config
-        self.logger = logger
-        self._client = httpx.AsyncClient(base_url=config.base_url, timeout=config.timeout_s, transport=transport)
-
-    async def __aenter__(self) -> Self:
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        await self._client.aclose()
+        super().__init__(
+            base_url=config.base_url,
+            timeout_s=config.timeout_s,
+            logger=logger,
+            auth_error_cls=DomainClassificationAuthError,
+            connection_error_cls=DomainClassificationConnectionError,
+            generic_error_cls=DomainClassificationError,
+            transport=transport,
+        )
 
     async def classify(self, *, chunks_text: str, title: str | None, candidate_domains: list[str]) -> DomainClassificationResult:
         """Clasifica un documento (`chunks_text`/`title`) entre `candidate_domains`.
@@ -168,29 +164,24 @@ class DomainClassificationClient:
         user_prompt = (
             f"Dominios candidatos: {', '.join(candidate_domains)}\nTítulo: {title or '(sin título)'}\nContenido: {chunks_text[:_MAX_CONTENT_CHARS]}"
         )
-        try:
-            response = await self._client.post(
-                "/chat/completions",
-                json={
-                    "model": self.config.model,
-                    "messages": [
-                        {"role": "system", "content": _SYSTEM_PROMPT},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "response_format": {"type": "json_object"},
-                    "temperature": 0.0,
-                },
-                headers={"Authorization": f"Bearer {self.config.virtual_key}"},
-            )
-        except httpx.TimeoutException as exc:
-            raise DomainClassificationConnectionError(f"Timeout consultando el LiteLLM Proxy en {self.config.base_url}") from exc
-        except httpx.HTTPError as exc:
-            raise DomainClassificationConnectionError(f"Error de red consultando el LiteLLM Proxy en {self.config.base_url}") from exc
-
-        if response.status_code in (401, 403):
-            raise DomainClassificationAuthError(f"LiteLLM Proxy rechazó la virtual key de clasificación (HTTP {response.status_code})")
-        if response.is_error:
-            raise DomainClassificationError(f"LiteLLM Proxy devolvió HTTP {response.status_code} clasificando un documento")
+        response = await self._request(
+            "POST",
+            "/chat/completions",
+            json={
+                "model": self.config.model,
+                "messages": [
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "response_format": {"type": "json_object"},
+                "temperature": 0.0,
+            },
+            headers={"Authorization": f"Bearer {self.config.virtual_key}"},
+            timeout_message=f"Timeout consultando el LiteLLM Proxy en {self.config.base_url}",
+            connection_message=f"Error de red consultando el LiteLLM Proxy en {self.config.base_url}",
+            auth_message="LiteLLM Proxy rechazó la virtual key de clasificación (HTTP {status_code})",
+            error_message="LiteLLM Proxy devolvió HTTP {status_code} clasificando un documento",
+        )
 
         return self._parse_result(response.json(), candidate_domains)
 

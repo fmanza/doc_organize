@@ -715,9 +715,7 @@ class ScanCommand:
         progress_queue: asyncio.Queue[ScanEvent | list[ConversionResult] | Exception] = asyncio.Queue()
 
         async def _on_progress(doc: DocumentMetadata, index: int, total: int) -> None:
-            await progress_queue.put(
-                ScanEvent(event=ScanEventType.OCR_FILE_STARTED, data={"path": doc.full_path, "index": index, "total": total})
-            )
+            await progress_queue.put(ScanEvent(event=ScanEventType.OCR_FILE_STARTED, data={"path": doc.full_path, "index": index, "total": total}))
 
         async def _run_batch() -> None:
             try:
@@ -730,7 +728,7 @@ class ScanCommand:
                     scan_roots=scan_roots,
                     progress_callback=_on_progress,
                 )
-            except Exception as exc:  # reenviado tal cual al consumidor de la cola; `asyncio.CancelledError`
+            except (OSError, ValueError, RuntimeError, TypeError) as exc:  # reenviado tal cual al consumidor de la cola; `asyncio.CancelledError`
                 # (BaseException, no Exception) se deja propagar sin capturar aquí a propósito: si esta tarea se
                 # cancela desde `_stream_ocr_batch` (cliente desconectado a mitad de OCR), debe completarse como
                 # "cancelada" de verdad, no como "terminada con éxito y un CancelledError metido en la cola".

@@ -11,7 +11,7 @@ from doc_organize.validators import FolderValidator, ProjectValidator
 
 # web/ se añade aquí cuando se implemente (Fase D del plan).
 
-__version__ = "0.1.0"
+__version__ = "0.9.3"
 
 __all__ = [
     "CacheManager",

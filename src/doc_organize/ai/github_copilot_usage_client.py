@@ -13,11 +13,11 @@ import calendar
 import os
 
 from datetime import date
-from types import TracebackType
-from typing import Any, Self
+from typing import Any
 
 import httpx
 
+from doc_organize.ai._http_client_base import AiHttpClientBase
 from doc_organize.auth import InstanceSecretsStore
 from doc_organize.core.exceptions import UsageSourceAuthError, UsageSourceConnectionError, UsageSourceError
 from doc_organize.core.models import GitHubCopilotUsageConfig, UsageLineItem, UsageSnapshot, UsageSourceName
@@ -73,7 +73,7 @@ async def github_copilot_usage_config_from_store_or_env(store: InstanceSecretsSt
     return GitHubCopilotUsageConfig(username=username, personal_access_token=pat)
 
 
-class GitHubCopilotUsageClient:
+class GitHubCopilotUsageClient(AiHttpClientBase):
     """Consulta el consumo de "premium requests" de un plan Copilot Pro individual.
 
     El scope exacto de PAT que autoriza este endpoint no está documentado
@@ -104,19 +104,15 @@ class GitHubCopilotUsageClient:
                 el transporte HTTP real por defecto.
         """
         self.config = config
-        self.logger = logger
-        self._client = httpx.AsyncClient(base_url=_GITHUB_API_BASE_URL, timeout=config.timeout_s, transport=transport)
-
-    async def __aenter__(self) -> Self:
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        await self._client.aclose()
+        super().__init__(
+            base_url=_GITHUB_API_BASE_URL,
+            timeout_s=config.timeout_s,
+            logger=logger,
+            auth_error_cls=UsageSourceAuthError,
+            connection_error_cls=UsageSourceConnectionError,
+            generic_error_cls=UsageSourceError,
+            transport=transport,
+        )
 
     async def get_usage(self, *, year: int | None = None, month: int | None = None) -> UsageSnapshot:
         """Consulta el consumo de premium requests de Copilot para `year`/`month`.
@@ -140,25 +136,20 @@ class GitHubCopilotUsageClient:
         if month is not None:
             params["month"] = month
 
-        try:
-            response = await self._client.get(
-                f"/users/{self.config.username}/settings/billing/premium_request/usage",
-                params=params,
-                headers={
-                    "Authorization": f"Bearer {self.config.personal_access_token}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": _GITHUB_API_VERSION,
-                },
-            )
-        except httpx.TimeoutException as exc:
-            raise UsageSourceConnectionError("Timeout consultando la API de Billing Usage de GitHub") from exc
-        except httpx.HTTPError as exc:
-            raise UsageSourceConnectionError("Error de red consultando la API de Billing Usage de GitHub") from exc
-
-        if response.status_code in (401, 403):
-            raise UsageSourceAuthError(f"GitHub rechazó el PAT (HTTP {response.status_code})")
-        if response.is_error:
-            raise UsageSourceError(f"La API de Billing Usage de GitHub devolvió HTTP {response.status_code}")
+        response = await self._request(
+            "GET",
+            f"/users/{self.config.username}/settings/billing/premium_request/usage",
+            params=params,
+            headers={
+                "Authorization": f"Bearer {self.config.personal_access_token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": _GITHUB_API_VERSION,
+            },
+            timeout_message="Timeout consultando la API de Billing Usage de GitHub",
+            connection_message="Error de red consultando la API de Billing Usage de GitHub",
+            auth_message="GitHub rechazó el PAT (HTTP {status_code})",
+            error_message="La API de Billing Usage de GitHub devolvió HTTP {status_code}",
+        )
 
         payload = response.json()
         items = [

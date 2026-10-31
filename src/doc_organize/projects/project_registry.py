@@ -257,7 +257,7 @@ class ProjectRegistry:
             ...     async with ProjectRegistry(base_location / "projects.json") as registry:
             ...         await registry.create_project("Movil", base_location)
             ...         moved = await registry.move_project_root("Movil", new_location)
-            ...         return moved.root_path == str(new_location / "Movil")
+            ...         return Path(moved.root_path).resolve() == (new_location / "Movil").resolve()
             >>> asyncio.run(main())
             True
         """

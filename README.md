@@ -21,7 +21,7 @@ proyectos, aisladas entre sí).
 
 ## Requisitos
 
-- Python 3.11+
+- Python 3.12+
 - Para convertir Excel legado (`.xls`, distinto de `.xlsx`): LibreOffice
   instalado y accesible en el `PATH` como `soffice` — ver
   [instalación](docs/guides/installation.md#excel-legado-xls-libreoffice-opcional).
