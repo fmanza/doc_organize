@@ -61,9 +61,9 @@ Estructura del Arquetipo 8 del DOCUMENTATION_STANDARD:
 - Normativa complementaria referenciada
 - Próximas acciones priorizadas (ordenadas por severidad)
 
-### Paso 5 — Actualizar mkdocs.yml
+### Paso 5 — Actualizar zensical.toml
 
-Verificar que existe la sección `Normativa` en `mkdocs.yml`:
+Verificar que existe la sección `Normativa` en `zensical.toml`:
 - Posición: entre la sección `Funcional` (o equivalente) y `Arquitectura`/`ADR`
 
 ```yaml
@@ -89,7 +89,7 @@ Verificar que existe la sección `Normativa` en `mkdocs.yml`:
 - Artículos analizados: N
 - ✅ Cubiertos: N | ⚠️ Parciales: N | ❌ Gaps: N | 🔍 A verificar: N
 
-## mkdocs.yml
+## zensical.toml
 - [Añadido/ya existía] sección Normativa → normativa/<archivo>.md
 
 ## Gaps Nivel 1 detectados

@@ -6,6 +6,54 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-31
+
+API pública estable para consumidores externos (separación librería/web, tareas L-1…L-6 y L-13b del plan de
+doc_organize_web; cierra los huecos G1–G7, G13 y G15 de ese repositorio). Todo cambio es aditivo o con
+`DeprecationWarning`: el CLI y la web integrada se comportan igual que en la 0.9.3.
+
+### Added
+
+- `__init__.py`: API pública con importación diferida (PEP 562, `_EXPORTS` + `__getattr__`); `import doc_organize`
+  ya no carga Docling (de ~49 s y ~4 300 módulos a ~0,5 s y ~300). Marcador `py.typed` y `docs/api/publica.md`
+  (L-1, G1, G15).
+- Extra `site` (`mkdocs`) para el sitio navegable del contexto de un proyecto, que antes dependía del extra
+  `docs`.
+- `ScanOptions` (`core/models.py`) y parámetro `options=` en `ScanCommand.run`/`run_streaming` como alternativa a
+  los indicadores posicionales (G13).
+- `ai/_secrets.py`: Protocol `SecretValueReader`; los clientes de IA ya no dependen de `auth` (L-3, G3).
+- `projects/layout.py`: `ProjectLayout` con `output_root` (Markdown, duplicados, sitio) y `state_root` (caché,
+  carpetas, logs, informes de deduplicación) separables; `report_dir=` en `finalize_report`, `resolve_duplicates` y
+  `deduplicate_streaming`; `ScannedFoldersStore(registry_path=)` y `ProjectHistoryCleaner.clear(state_root=)`
+  (L-4, L-5, G4, G5).
+- `core/progress.py`: `CancelToken`, `ProgressEvent`, `ProgressCallback`; `OperationCancelledError`; tipo de evento
+  `CANCELLED` en escaneo, deduplicación y contexto. La cancelación es cooperativa y conserva en caché lo ya
+  convertido; `ContextBuilder.build` acepta `on_progress` y `cancel_token` (L-2, G2).
+- Eventos con esquema versionado: base `VersionedEvent` (`schema_version`, `to_dict()`), `EVENT_SCHEMA_VERSION = 1`
+  y test de contrato (L-6b, G7).
+- Deduplicación en dos pasos: `group_id` estable entre ejecuciones (`DeduplicationManager.stable_group_id`) y
+  `DedupMode` (`move` por defecto, `copy`, `report_only`) en `move_group`, `resolve_duplicates`,
+  `finalize_report` y `deduplicate_streaming`; `DeduplicationReport.mode` (L-6, G6).
+- `.github/workflows/release.yml`: al publicar un tag `v*` comprueba versión, construye wheel y sdist con `.sha256`,
+  verifica que la importación no carga Docling y crea el GitHub Release (L-6d, G9).
+
+### Changed
+
+- Documentación con Zensical (`zensical.toml`, `zensical build --strict`) en lugar de mkdocs; extra `docs`:
+  `zensical` + `mkdocstrings-python` (L-13b). El sitio de contexto de los proyectos (`MkDocsGenerator`) no cambia.
+- `DuplicateGroup.group_id` deja de ser un UUID aleatorio: se deriva de la razón y de las rutas y hashes del grupo
+  (sigue teniendo forma de UUID).
+
+### Deprecated
+
+- `tenant_id` en `ProjectRegistry` y `Project` (los tenants los gestiona el consumidor); se retira en 1.0.0 (L-6c).
+- Las cinco funciones `*_from_store_or_env` de `ai/`: construir el `*Config` en el consumidor o usar
+  `*_config_from_env()`; se retiran en 1.0.0 (L-3).
+
+### Removed
+
+- `mkdocs.yml` y la opción `--builder mkdocs` de `scripts/build_docs_zip.py`.
+
 ## [0.9.3] - 2026-10-31
 
 Primera versión publicada en GitHub Releases con wheel y sdist, para que doc_organize_web pueda fijarla por URL y

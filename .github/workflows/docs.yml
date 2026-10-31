@@ -5,13 +5,13 @@ on:
     branches: [main, develop]
     paths:
       - "docs/**"
-      - "mkdocs.yml"
+      - "zensical.toml"
       - "src/**/*.py"
       - "pyproject.toml"
   pull_request:
     paths:
       - "docs/**"
-      - "mkdocs.yml"
+      - "zensical.toml"
       - "src/**/*.py"
   workflow_dispatch:
 
@@ -40,11 +40,9 @@ jobs:
         run: pip install -e ".[docs]"
 
       - name: Build docs (validate)
-        # mkdocs, no zensical: es lo que declara el extra [docs] en pyproject.toml
-        # (mkdocs/mkdocs-material/mkdocstrings) y lo que documenta CLAUDE.md/README.md
-        # -- zensical no es una dependencia instalada, este paso fallaria "command not
-        # found" en un runner limpio. --strict convierte links rotos en fallo de build.
-        run: mkdocs build --strict
+        # Zensical (L-13b, extra [docs]); --strict convierte enlaces y anclas rotos, y fallos de la
+        # referencia de API (mkdocstrings), en fallo del build.
+        run: zensical build --strict
         env:
           PYTHONPATH: src
 

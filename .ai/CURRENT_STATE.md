@@ -1,5 +1,9 @@
 # CURRENT STATE — doc_organize
 
+> **Nota (2026-10-31)**: este estado es de 2026-09-11. Desde entonces: 0.9.3 (primera release con wheel, Python
+> mínimo 3.12) y 0.10.0 (API pública para doc_organize_web, documentación con Zensical). Ver `CHANGELOG.md` y
+> `.ai/sessions/2026-10-31-api-publica-0.10.0/TRACEABILITY.md`; los comandos `mkdocs` de abajo son históricos.
+
 **Generado**: 2026-08-29 · **actualizado**: 2026-09-11
 **Fuente de esta actualización**: `git log`, `pyproject.toml`/`CHANGELOG.md`, y
 re-ejecución en vivo de `ruff`/`mypy`/`pytest`/`mkdocs build --strict`/`python -m build` — no una

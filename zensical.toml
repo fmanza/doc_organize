@@ -1,0 +1,105 @@
+# Sitio de documentación de doc_organize con Zensical (https://zensical.org), sustituye a mkdocs (L-13b).
+#   pip install -e ".[docs]"
+#   zensical serve                # http://127.0.0.1:8000, con recarga
+#   zensical build --strict       # lo que comprueba el CI (enlaces, anclas y referencia de API)
+# La referencia de API se genera desde los docstrings con mkdocstrings (directivas «::: módulo» en docs/api/).
+
+[project]
+site_name = "doc_organize"
+site_description = "Sistema de extracción de contenido de documentos en Markdown y JSON documentación y organización."
+site_author = "Paco Manzano"
+repo_url = "https://github.com/fmanza/doc_organize"
+repo_name = "fmanza/doc_organize"
+edit_uri = "edit/develop/docs/"
+docs_dir = "docs"
+site_dir = "site"
+copyright = "MIT — doc_organize"
+
+nav = [
+  { "Inicio" = "index.md" },
+  { "Guías" = [
+    { "Instalación" = "guides/installation.md" },
+    { "Inicio rápido" = "guides/quick_start.md" },
+    { "Resolución de problemas" = "guides/troubleshooting.md" },
+    { "Descarga Offline" = "guides/downloads.md" },
+    { "Desplegar un LiteLLM Proxy" = "guides/litellm_proxy_setup.md" },
+  ] },
+  { "Funcionalidad" = [
+    { "Descripción general" = "functional/index.md" },
+    { "Validadores" = "functional/validators.md" },
+    { "Scanner" = "functional/scanner.md" },
+    { "Converter" = "functional/converter.md" },
+    { "Deduplicación" = "functional/dedup.md" },
+    { "Cache" = "functional/cache.md" },
+    { "Projects" = "functional/projects.md" },
+    { "Monitorización de uso IA" = "functional/ai_usage_monitoring.md" },
+    { "Organización documental (dominios y contextos)" = "functional/context.md" },
+    { "Configuración de IA y plantillas" = "functional/ai_settings.md" },
+    { "Acceso a la Aplicación" = "functional/access.md" },
+    { "Panel de Administración" = "functional/admin.md" },
+  ] },
+  { "API" = [
+    { "Descripción general" = "api/index.md" },
+    { "API pública y compatibilidad" = "api/publica.md" },
+    { "Validadores" = "api/validators.md" },
+    { "Scanner" = "api/scanner.md" },
+    { "Converter" = "api/converter.md" },
+    { "Deduplicación" = "api/dedup.md" },
+    { "Cache" = "api/cache.md" },
+    { "Projects" = "api/projects.md" },
+    { "Monitorización de uso IA" = "api/ai_usage_monitoring.md" },
+    { "Organización documental (dominios y contextos)" = "api/context.md" },
+  ] },
+  { "Ejemplos" = [
+    { "Validadores" = "examples/validators-scan.md" },
+    { "Scanner" = "examples/scanner-scan.md" },
+    { "Converter" = "examples/converter-convert.md" },
+    { "Deduplicación" = "examples/dedup-resolve.md" },
+    { "Cache" = "examples/cache-changes.md" },
+    { "Projects" = "examples/projects-registry.md" },
+  ] },
+]
+
+[project.theme]
+language = "es"
+features = [
+  "navigation.tabs",
+  "navigation.sections",
+  "navigation.top",
+  "content.code.copy",
+  "search.highlight",
+]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Cambiar a modo oscuro"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Cambiar a modo claro"
+
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.attr_list]
+[project.markdown_extensions.md_in_html]
+[project.markdown_extensions.tables]
+[project.markdown_extensions.toc]
+permalink = true
+
+[project.markdown_extensions.pymdownx.highlight]
+[project.markdown_extensions.pymdownx.inlinehilite]
+
+[project.markdown_extensions.pymdownx.superfences]
+custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
+
+[project.plugins.mkdocstrings.handlers.python]
+paths = ["src"]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+show_source = true
+show_root_heading = true

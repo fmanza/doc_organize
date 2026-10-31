@@ -13,7 +13,7 @@ Modelos Pydantic v2 usados en todos los módulos:
 """
 
 from enum import Enum
-from typing import Any
+from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -70,6 +70,8 @@ class ScanEventType(str, Enum):
     OCR_FILE_STARTED = "ocr_file_started"
     OCR_PROCESSED = "ocr_processed"
     COMPLETED = "completed"
+    #: Parada a petición del llamador (L-2); es el último evento, en lugar de `COMPLETED`.
+    CANCELLED = "cancelled"
 
 
 class DedupEventType(str, Enum):
@@ -85,6 +87,8 @@ class DedupEventType(str, Enum):
     GROUP_STARTED = "group_started"
     GROUP_RESOLVED = "group_resolved"
     COMPLETED = "completed"
+    #: Parada a petición del llamador (L-2); es el último evento, en lugar de `COMPLETED`.
+    CANCELLED = "cancelled"
 
 
 class ContextBuildEventType(str, Enum):
@@ -103,6 +107,8 @@ class ContextBuildEventType(str, Enum):
     DOCUMENT_COPIED = "document_copied"
     MKDOCS_STARTED = "mkdocs_started"
     COMPLETED = "completed"
+    #: Parada a petición del llamador (L-2); es el último evento, en lugar de `COMPLETED`.
+    CANCELLED = "cancelled"
 
 
 class ContextDeleteEventType(str, Enum):
@@ -231,11 +237,16 @@ class DuplicateGroup(BaseModel):
     )
 
 
+#: Qué hacer con los descartados de cada grupo (L-6): moverlos, copiarlos (el origen no se toca) o solo informar.
+DedupMode = Literal["move", "copy", "report_only"]
+
+
 class DeduplicationReport(BaseModel):
     """Resultado del proceso de deduplicación."""
 
     timestamp: str = Field(..., description="Timestamp ISO 8601 de cuándo se ejecutó la deduplicación")
-    total_exact_duplicates: int = Field(..., description="Número de ficheros duplicados exactos movidos")
+    mode: DedupMode = Field(default="move", description="Modo aplicado: move, copy o report_only (L-6)")
+    total_exact_duplicates: int = Field(..., description="Número de ficheros duplicados exactos movidos (o copiados/señalados según `mode`)")
     total_version_conflicts: int = Field(..., description="Número de conflictos de versión resueltos")
     duplicates_folder_path: str = Field(..., description="Ruta a la carpeta donde se movieron los duplicados")
     audit_json_path: str = Field(..., description="Ruta al fichero DEDUP_REPORT.json")
@@ -362,7 +373,51 @@ class ScanResult(BaseModel):
     scan_duration_seconds: float = Field(..., description="Tiempo empleado en completar el escaneo")
 
 
-class ScanEvent(BaseModel):
+#: Versión del esquema de los eventos de progreso (L-6b). Sube cuando cambian los campos de `to_dict()` o el
+#: significado de un tipo de evento; añadir un tipo de evento nuevo no la cambia.
+EVENT_SCHEMA_VERSION: Final = 1
+
+
+class VersionedEvent(BaseModel):
+    """Base de los eventos de progreso con esquema versionado (L-6b, hueco G7 de doc_organize_web).
+
+    `to_dict()` es la forma estable para serializar un evento (JSON, SSE, ficheros): `{"schema_version", "event",
+    "data"}`, con `event` como su valor de texto y `data` en tipos JSON.
+
+    Example:
+        >>> ScanEvent(event=ScanEventType.STARTED).to_dict()
+        {'schema_version': 1, 'event': 'started', 'data': {}}
+    """
+
+    schema_version: Literal[1] = Field(default=EVENT_SCHEMA_VERSION, description="Versión del esquema del evento")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Representación estable y serializable en JSON."""
+        dumped = self.model_dump(mode="json")
+        return {"schema_version": dumped["schema_version"], "event": dumped["event"], "data": dumped["data"]}
+
+
+class ScanOptions(BaseModel):
+    """Opciones de un escaneo (G13): sustituyen a los indicadores sueltos de `ScanCommand.run`/`run_streaming`.
+
+    Pasarlas con `options=ScanOptions(...)` evita desordenar argumentos posicionales del mismo tipo.
+
+    Example:
+        >>> ScanOptions(use_ocr=True).use_gpu
+        False
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    use_ocr: bool = Field(default=True, description="Aplicar OCR a imágenes y PDF escaneados")
+    use_gpu: bool = Field(default=False, description="Usar la GPU para el OCR si está disponible")
+    force: bool = Field(default=False, description="Ignorar la caché y reconvertirlo todo")
+    include_audio_video: bool = Field(default=False, description="Incluir audio y vídeo (requiere el extra `av`)")
+    extract_images: bool = Field(default=False, description="Extraer las imágenes de los documentos")
+    use_picture_description: bool = Field(default=False, description="Describir las imágenes con un modelo de visión")
+
+
+class ScanEvent(VersionedEvent):
     """Un evento de progreso emitido por `ScanCommand.run_streaming()` (Fase D-2b, §2.7.3).
 
     Deliberadamente un payload `dict[str, Any]` laxo en vez de un modelo por tipo de
@@ -376,7 +431,7 @@ class ScanEvent(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict, description="Payload del evento; su forma depende de `event`")
 
 
-class DedupEvent(BaseModel):
+class DedupEvent(VersionedEvent):
     """Un evento de progreso emitido por `ScanCommand.deduplicate_streaming()`.
 
     Mismo criterio que `ScanEvent`: payload `dict[str, Any]` laxo en vez de un
@@ -387,7 +442,7 @@ class DedupEvent(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict, description="Payload del evento; su forma depende de `event`")
 
 
-class ContextBuildEvent(BaseModel):
+class ContextBuildEvent(VersionedEvent):
     """Un evento de progreso emitido por `context_build_websocket()`.
 
     Mismo criterio que `ScanEvent`/`DedupEvent`: payload `dict[str, Any]` laxo.
@@ -397,7 +452,7 @@ class ContextBuildEvent(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict, description="Payload del evento; su forma depende de `event`")
 
 
-class ContextDeleteEvent(BaseModel):
+class ContextDeleteEvent(VersionedEvent):
     """Un evento de progreso emitido por `context_delete_websocket()`.
 
     Mismo criterio que `ScanEvent`/`DedupEvent`: payload `dict[str, Any]` laxo.
@@ -429,7 +484,10 @@ class Project(BaseModel):
     name: str = Field(..., description="Nombre único del proyecto dentro de su tenant (validado por ProjectValidator)")
     root_path: str = Field(..., description="Ruta absoluta a la carpeta de trabajo del proyecto")
     created_at: str = Field(..., description="Timestamp ISO 8601 de creación del proyecto")
-    tenant_id: str = Field(default="default", description="Tenant propietario (por defecto el tenant implícito 'default')")
+    tenant_id: str = Field(
+        default="default",
+        description="Tenant propietario (por defecto el tenant implícito 'default'). Obsoleto: se retira en 1.0.0 (L-6c)",
+    )
 
 
 _ISO_TIMESTAMP_DESC = "Timestamp ISO 8601 de creación"

@@ -22,7 +22,7 @@ import httpx
 from pydantic import ValidationError
 
 from doc_organize.ai._http_client_base import AiHttpClientBase
-from doc_organize.auth import InstanceSecretsStore
+from doc_organize.ai._secrets import SecretValueReader, warn_store_config_deprecated
 from doc_organize.core.exceptions import TaxonomyManifestDraftAuthError, TaxonomyManifestDraftConnectionError, TaxonomyManifestDraftError
 from doc_organize.core.models import LiteLLMTaxonomyManifestDraftConfig, TaxonomyCatalogEntry, TaxonomyManifestDraftResult
 from doc_organize.utils.logging import get_logger
@@ -96,7 +96,7 @@ def litellm_taxonomy_manifest_draft_config_from_env() -> LiteLLMTaxonomyManifest
     return LiteLLMTaxonomyManifestDraftConfig(base_url=base_url, virtual_key=virtual_key, **({"model": model} if model else {}))
 
 
-async def litellm_taxonomy_manifest_draft_config_from_store_or_env(store: InstanceSecretsStore) -> LiteLLMTaxonomyManifestDraftConfig:
+async def litellm_taxonomy_manifest_draft_config_from_store_or_env(store: SecretValueReader) -> LiteLLMTaxonomyManifestDraftConfig:
     """Construye `LiteLLMTaxonomyManifestDraftConfig` con precedencia `store` (panel de
     configuración IA) > `DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_*` del entorno.
 
@@ -108,6 +108,7 @@ async def litellm_taxonomy_manifest_draft_config_from_store_or_env(store: Instan
     Raises:
         ValueError: Si, tras aplicar la precedencia, falta `base_url` o `virtual_key`.
     """
+    warn_store_config_deprecated("litellm_taxonomy_manifest_draft_config_from_store_or_env")
     base_url = await store.get(_ENV_VAR_BASE_URL.lower()) or os.environ.get(_ENV_VAR_BASE_URL)
     virtual_key = await store.get(_ENV_VAR_VIRTUAL_KEY.lower()) or os.environ.get(_ENV_VAR_VIRTUAL_KEY)
     if not base_url or not virtual_key:

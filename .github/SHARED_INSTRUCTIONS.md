@@ -14,7 +14,7 @@ Actúa como senior de ingeniería Python especializado en:
 - Diseño de librerías modulares con pipeline de procesamiento batch
 - Programación asíncrona con `asyncio` para operaciones de IO documento (lectura, conversión)
 - Testing determinista con `pytest` sin servicios externos (fixtures de documentos locales)
-- Documentación de librerías Python con MkDocs Material
+- Documentación de librerías Python con Zensical
 
 ---
 
@@ -249,9 +249,8 @@ python -m mypy src                          # type-check
 python -m pytest                            # tests
 python -m pytest -v -x                      # verbose, stop first failure
 python -m build                             # build distribution
-mkdocs serve                                # documentación local
-mkdocs build                                # genera sitio estático en /site
-mkdocs build --strict                       # build con validación de links
+zensical serve                              # documentación local
+zensical build --strict                     # sitio estático en /site, con validación de enlaces
 ```
 
 ### Estrategia de tests
@@ -271,7 +270,7 @@ mkdocs build --strict                       # build con validación de links
 - ✅ Nueva clase pública → docstring Google-style + ejemplo
 - ✅ Cambio de API pública → actualizar guías en `docs/`
 - ✅ Refactor con breaking changes → guía de migración en CHANGELOG.md
-- ✅ Antes de cerrar versión → `mkdocs build --strict` sin errores ni links rotos
+- ✅ Antes de cerrar versión → `zensical build --strict` sin errores ni links rotos
 - ✅ Cambios en instrucciones IA → sincronizar SHARED_INSTRUCTIONS.md, copilot-instructions.md, CLAUDE.md
 - ✅ Nuevo módulo → crear entrada en `docs/functional/` y `docs/api/`
 - ✅ Cambio de CLI → actualizar ejemplos en README y `docs/`
@@ -280,10 +279,10 @@ mkdocs build --strict                       # build con validación de links
 
 #### Configuración de documentación — cuándo actualizar
 
-> **Fuente única**: `mkdocs.yml`. MkDocs Material (`mkdocs serve` / `mkdocs build`) es el generador principal.
+> **Fuente única**: `zensical.toml`. Zensical (`zensical serve` / `zensical build --strict`) es el generador principal.
 
-- ✅ Módulo o clase pública nueva → entrada en `mkdocs.yml` bajo `nav:`
-- ✅ Página nueva, movida o eliminada en `docs/` → actualizar `mkdocs.yml`
+- ✅ Módulo o clase pública nueva → entrada en `zensical.toml` en el `nav`
+- ✅ Página nueva, movida o eliminada en `docs/` → actualizar `zensical.toml`
 
 #### Convención de nombres y estructura en `docs/`
 
@@ -296,7 +295,7 @@ mkdocs build --strict                       # build con validación de links
   - `docs/guides/` — Guías (instalación, quick start, solución de problemas)
 - **Guías** → siempre en `docs/guides/`, nunca en la raíz de `docs/`
 - **Conjunto mínimo obligatorio en `guides/`**: `installation.md` + `quick_start.md` + `troubleshooting.md`
-- Sección `Guías:` en `mkdocs.yml`: `quick_start.md` primero; `troubleshooting.md` en subsección "Errores y Diagnóstico"
+- Sección `Guías:` en `zensical.toml`: `quick_start.md` primero; `troubleshooting.md` en subsección "Errores y Diagnóstico"
 
 ### 📦 Distribución de documentación offline
 
@@ -321,7 +320,7 @@ mkdocs build --strict                       # build con validación de links
 
 **Comandos locales**:
 ```bash
-mkdocs build --strict && python scripts/build_docs_zip.py    # Build + ZIP
+zensical build --strict && python scripts/build_docs_zip.py    # Build + ZIP
 python scripts/build_docs_zip.py --no-build                  # ZIP sin build
 sha256sum -c dist/*.sha256                                    # Validar checksums
 ```
@@ -329,19 +328,19 @@ sha256sum -c dist/*.sha256                                    # Validar checksum
 **Bootstrap para otros proyectos**:
 - Ver `.github/prompts/bootstrap_ai_config.prompt.md`
 - Sección: "📦 Descarga de Documentación Offline (Capa B)"
-- Matriz de equivalencias: Python + MkDocs, Node.js + Docusaurus, Go + Hugo, Java + Sphinx
-- ✅ Reorganización funcional/técnica/ejemplos → validar que `nav:` mantiene apartados separados
-- ✅ Ejecutar `mkdocs serve` localmente antes de publicar
-- ✅ Verificar que `mkdocs build --strict` pase sin warnings ni links rotos
+- Matriz de equivalencias: Python + Zensical, Node.js + Docusaurus, Go + Hugo, Java + Sphinx
+- ✅ Reorganización funcional/técnica/ejemplos → validar que `nav` mantiene apartados separados
+- ✅ Ejecutar `zensical serve` localmente antes de publicar
+- ✅ Verificar que `zensical build --strict` pase sin warnings ni links rotos
 
 #### Estándar de generación documental
 
-- Usa MkDocs con Material for MkDocs como salida estática de referencia (`mkdocs build --strict`,
+- Usa Zensical con Zensical como salida estática de referencia (`zensical build --strict`,
   ver `.github/instructions/sync.instructions.md`). No `zensical`: se evaluó como alternativa más
   rápida y se descartó — no es una dependencia instalada en este proyecto (ver `.ai/DECISIONS_LOG.md`).
 - Usa Mermaid.js para diagramas de flujo, secuencia o clases cuando aporte claridad.
 - Unifica creación y actualización: busca primero documentación existente y actualízala si es el punto de entrada correcto.
-- Para documentación de proyecto completo, revisa README, `docs/`, `docs/examples/`, docstrings públicos, prompts/agentes IA y `mkdocs.yml`.
+- Para documentación de proyecto completo, revisa README, `docs/`, `docs/examples/`, docstrings públicos, prompts/agentes IA y `zensical.toml`.
 - Separa claramente documentación funcional, técnica y ejemplos.
 - No inventes capacidades, módulos, APIs, salidas, reglas ni dependencias. Si falta información, márcala como pendiente de verificación.
 - No uses ejemplos heredados de otros repositorios: valida nombres de proyecto, rutas, clases y tests contra el árbol real antes de documentarlos.
@@ -379,14 +378,14 @@ class CacheManager:
    - ❌ Incorrecto: `[archivo.zip](#)` → No descarga nada
    - ✅ Correcto: `[archivo.zip](../archivo.zip)` → Descarga desde `site/`
 
-3. **Archivos generados por plugins**: Entender que ZIP, PDFs y otros artefactos se crean en `site/` durante `mkdocs build`
+3. **Archivos generados por plugins**: Entender que ZIP, PDFs y otros artefactos se crean en `site/` durante `zensical build --strict`
    - Plugin: `src/doc_organize/docs_build_plugin.py` → genera `site/doc_organize.zip`
    - Links desde subpáginas (ej. `site/downloads/index.html`): usar `../doc_organize.zip`
 
 **Validación pre-commit**:
 ```bash
 # Build con --strict (sin errores de markdown)
-python -m mkdocs build --strict
+python -m zensical build --strict
 
 # Verificar visualmente que listas son verticales, no horizontales
 # Revisar site/downloads/index.html: deben haber <ul><li>, no <p><br /></p>

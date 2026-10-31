@@ -134,7 +134,7 @@ Lee pyproject.toml, README.md, CLAUDE.md y .github/SHARED_INSTRUCTIONS.md.
 Genera la guía de incorporación para desarrolladores usando
 .github/prompts/onboarding_dev.prompt.md.
 Guarda en docs/ONBOARDING_DEV.md.
-Actualiza mkdocs.yml si la página es nueva.
+Actualiza zensical.toml si la página es nueva.
 No inventes comandos ni configuraciones; verifica todo contra los ficheros reales.
 ```
 

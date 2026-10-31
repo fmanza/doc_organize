@@ -64,7 +64,7 @@ Restricciones:
 Documenta la decisión arquitectónica sobre [TEMA] usando el
 prompt en .github/prompts/architecture_doc.prompt.md.
 Guarda en docs/adr/ADR-[NNN]-[nombre-kebab-case].md.
-Actualiza mkdocs.yml bajo la sección "Arquitectura".
+Actualiza zensical.toml bajo la sección "Arquitectura".
 Basa el contenido en: [PR/issue/commit/discusión de referencia]
 ```
 

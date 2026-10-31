@@ -88,8 +88,8 @@ veracidad, afirmación por afirmación.
   citado (archivo + símbolo exacto, no "en algún sitio del módulo auth").
 - Señalar explícitamente cualquier frase que "suene a" funcionalidad no
   implementada (lenguaje aspiracional, futuro, o condicional sin base en código).
-- Confirmar que `mkdocs.yml` referencia `functional/access.md` bajo
-  "Funcionalidad" y que `python -m mkdocs build --strict` no falla.
+- Confirmar que `zensical.toml` referencia `functional/access.md` bajo
+  "Funcionalidad" y que `python -m zensical build --strict` no falla.
 - Confirmar que el documento no contradice `admin.md`, `quick_start.md` ni
   `.env.example`.
 - Prioriza Nivel 1 > Nivel 2 > Nivel 3; no bloquees por Nivel 3.

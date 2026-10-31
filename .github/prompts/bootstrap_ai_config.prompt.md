@@ -35,7 +35,7 @@ Origen (solo lectura): <ruta absoluta del repo origen, p.ej. c:\Desarrollo\pytho
 Destino: <raíz de este proyecto>
 Lenguaje/arquitectura destino: <p.ej. TypeScript + NestJS hexagonal, Go + Clean Architecture, Java + Spring>
 Plataformas IA activas: <Claude Code, Gemini, Copilot, Cursor, Codex — marca las que apliquen>
-Generador de documentación destino: <p.ej. Docusaurus, Typedoc, MkDocs, ninguno>
+Generador de documentación destino: <p.ej. Docusaurus, Typedoc, Zensical, ninguno>
 Fase: PLAN y AUDIT_PLAN únicamente.   # o "completa" para llegar hasta VERSION
 ```
 
@@ -101,7 +101,7 @@ Clasifica **cada** activo IA del origen en una de estas cuatro capas:
 - `.ai/sessions/TEMPLATE/`
 
 > ⚠️ **No es verbatim puro**: estos ficheros contienen comandos embebidos del origen
-> (p.ej. `python -m pytest`, `mkdocs build`, rutas `src/<paquete>/...`). Revisa y sustituye
+> (p.ej. `python -m pytest`, `zensical build --strict`, rutas `src/<paquete>/...`). Revisa y sustituye
 > por los equivalentes del destino usando la matriz de equivalencias del ANÁLISIS.
 
 ### Capa B — Copiar y reescribir dominio
@@ -183,7 +183,7 @@ Todos referencian a `.github/SHARED_INSTRUCTIONS.md` como **fuente canónica**.
 ## 📐 Sección Especial: Arquetipos Documentales (Capa B)
 
 **Aplica solo si** el destino publica documentación pública con un generador estático
-(MkDocs, Docusaurus, Hugo, Sphinx, etc.).
+(Zensical, Docusaurus, Hugo, Sphinx, etc.).
 
 ### Estructura de arquetipos (5 tipos + 1 variante)
 
@@ -210,8 +210,8 @@ Cada prompt de arquetipo (`functional_doc.prompt.md`, etc.) contiene:
 **En el destino, adaptar**:
 1. **Lenguaje de ejemplo en diagramas**: sustituir `Python` → lenguaje destino
 2. **Rutas de módulos**: reemplazar `src/doc_organize/` → estructura real del destino
-3. **Herramientas de documentación**: si destino usa Docusaurus en lugar de MkDocs,
-   adaptar referencias a `mkdocs.yml` → `docusaurus.config.js`, plugins, etc.
+3. **Herramientas de documentación**: si destino usa Docusaurus en lugar de Zensical,
+   adaptar referencias a `zensical.toml` → `docusaurus.config.js`, plugins, etc.
 4. **Comandos de construcción**: actualizar en instrucciones IA si destino usa otra herramienta
 
 **Regla de no-invención**: Los prompts generados deben describir **solo módulos y capacidades
@@ -230,7 +230,7 @@ Este enlace facilita navegación y retroalimentación de IA (agentes pueden vali
 ## 📦 Sección Especial: Descarga de Documentación Offline (Capa B)
 
 **Aplica solo si** el destino publica documentación pública con un generador estático
-(MkDocs, Docusaurus, Hugo, Sphinx, etc.) **y necesita ZIP offline distribuible**.
+(Zensical, Docusaurus, Hugo, Sphinx, etc.) **y necesita ZIP offline distribuible**.
 
 ### Archivos a copiar/adaptar
 
@@ -246,7 +246,7 @@ Este enlace facilita navegación y retroalimentación de IA (agentes pueden vali
        - Node.js: `package.json`
        - Go: `go.mod` (extraer versión del tag o var)
        - Java: `pom.xml`
-     - Comando build: `mkdocs build --strict` (Python) → equivalente del destino
+     - Comando build: `zensical build --strict` (Python) → equivalente del destino
        (Node.js: `docusaurus build` / `npm run build:docs`; Go: `hugo` / `make docs`)
      > **Nota**: `scripts/build_docs_zip.py` no existe todavía en este repo origen (herencia de un
      > experimento de migración a "Zensical" nunca completado, ver `.ai/DECISIONS_LOG.md`) — no
@@ -257,7 +257,7 @@ Este enlace facilita navegación y retroalimentación de IA (agentes pueden vali
    ver nota arriba — adaptar con cautela, no asumir que funciona)
    - **Copiar y adaptar**:
      - Setup Python/Node/Go según lenguaje destino
-     - Comando build: `mkdocs build --strict` → equivalente del destino
+     - Comando build: `zensical build --strict` → equivalente del destino
      - Script: `python scripts/build_docs_zip.py` → equivalente del destino (escribir desde cero)
      - Secrets: mantener `GITHUB_TOKEN` (nativo en GH Actions)
 
@@ -279,11 +279,11 @@ Este enlace facilita navegación y retroalimentación de IA (agentes pueden vali
 
 ### Matriz de equivalencias (Capa A → Capa B)
 
-| Componente | Python + MkDocs | Node.js + Docusaurus | Go + Hugo |
+| Componente | Python + Zensical | Node.js + Docusaurus | Go + Hugo |
 |---|---|---|---|
 | Versión desde | `pyproject.toml` | `package.json` | `git describe` o var |
 | Builder | `mkdocs` | `docusaurus` | `hugo` |
-| Build cmd | `mkdocs build --strict` | `docusaurus build` | `hugo` |
+| Build cmd | `zensical build --strict` | `docusaurus build` | `hugo` |
 | Output dir | `site/` | `build/` | `public/` |
 | ZIP script | `python scripts/build_docs_zip.py` | `node scripts/build-docs-zip.js` | `./scripts/build-docs-zip.sh` |
 | CI language | Python 3.12 | Node.js 20 | Go 1.22 |

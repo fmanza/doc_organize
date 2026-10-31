@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "keys": [
+    "schema_version",
+    "event",
+    "data"
+  ],
+  "events": {
+    "ScanEvent": [
+      "started",
+      "scanned",
+      "file_started",
+      "file_converted",
+      "ocr_started",
+      "ocr_file_started",
+      "ocr_processed",
+      "completed",
+      "cancelled"
+    ],
+    "DedupEvent": [
+      "started",
+      "duplicates_found",
+      "group_started",
+      "group_resolved",
+      "completed",
+      "cancelled"
+    ],
+    "ContextBuildEvent": [
+      "started",
+      "ai_classifying_started",
+      "ai_document_classified",
+      "reorganize_started",
+      "document_copied",
+      "mkdocs_started",
+      "completed",
+      "cancelled"
+    ],
+    "ContextDeleteEvent": [
+      "started",
+      "output_deleted",
+      "site_deleted",
+      "completed"
+    ]
+  }
+}

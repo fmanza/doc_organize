@@ -122,7 +122,7 @@ jobs:
 
       - name: Validar documentación generada
         if: steps.check-secrets.outputs.provider != 'none' && env.DRY_RUN != 'true'
-        run: mkdocs build
+        run: zensical build --strict
         env:
           PYTHONPATH: src
 
@@ -144,10 +144,10 @@ jobs:
             **Workflow run**: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
             ### Revisión requerida
-            - [ ] Diagramas Mermaid renderizan correctamente (`mkdocs serve`)
+            - [ ] Diagramas Mermaid renderizan correctamente (`zensical serve`)
             - [ ] Terminología de negocio es correcta
             - [ ] Reglas de negocio reflejan el comportamiento actual del código
-            - [ ] Entrada añadida en `mkdocs.yml` nav si es necesario
+            - [ ] Entrada añadida en el `nav` de `zensical.toml` si es necesario
 
             > Generado con [Documentation Generator](.github/agents/documentation-generator.agent.md)
           labels: |
