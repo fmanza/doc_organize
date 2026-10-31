@@ -449,7 +449,10 @@ class Project(BaseModel):
     name: str = Field(..., description="Nombre único del proyecto dentro de su tenant (validado por ProjectValidator)")
     root_path: str = Field(..., description="Ruta absoluta a la carpeta de trabajo del proyecto")
     created_at: str = Field(..., description="Timestamp ISO 8601 de creación del proyecto")
-    tenant_id: str = Field(default="default", description="Tenant propietario (por defecto el tenant implícito 'default')")
+    tenant_id: str = Field(
+        default="default",
+        description="Tenant propietario (por defecto el tenant implícito 'default'). Obsoleto: se retira en 1.0.0 (L-6c)",
+    )
 
 
 _ISO_TIMESTAMP_DESC = "Timestamp ISO 8601 de creación"
