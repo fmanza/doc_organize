@@ -17,6 +17,7 @@ operación separada que el usuario ejecuta antes de escanear.
 import asyncio
 import contextlib
 import json
+import logging
 import shutil
 import time
 import uuid
@@ -25,10 +26,12 @@ from collections.abc import AsyncGenerator, AsyncIterator, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from doc_organize.cache import CacheManager
 from doc_organize.converter import DocumentConverter, OCRScheduler
 from doc_organize.core.constants import MAX_AUTO_ERROR_RETRIES
+from doc_organize.core.exceptions import OperationCancelledError
 from doc_organize.core.models import (
     CacheEntry,
     ConversionResult,
@@ -45,6 +48,7 @@ from doc_organize.core.models import (
     ScanOptions,
     ScanRunReport,
 )
+from doc_organize.core.progress import CancelToken, ProgressCallback, ProgressEvent, checkpoint
 from doc_organize.dedup import DeduplicationManager
 from doc_organize.scan.scan_history_store import append_scan_run
 from doc_organize.scanner import DocumentScanner
@@ -149,6 +153,63 @@ def resolve_scan_options(
     )
 
 
+class _ProgressTracker:
+    """Traduce los eventos de una operación a `ProgressEvent` con unidades para `on_progress` (L-2).
+
+    Lee las claves comunes de `data` (`to_process`, `index`, `total`, `path`, `groups_found`); un fallo del callback se
+    registra y no interrumpe la operación.
+    """
+
+    _PHASES: dict[str, str] = {
+        "started": "started",
+        "scanned": "conversion",
+        "file_started": "conversion",
+        "file_converted": "conversion",
+        "ocr_started": "ocr",
+        "ocr_file_started": "ocr",
+        "ocr_processed": "ocr",
+        "duplicates_found": "deduplication",
+        "group_started": "deduplication",
+        "group_resolved": "deduplication",
+        "completed": "done",
+    }
+
+    def __init__(self, operation: str, callback: ProgressCallback | None, logger: logging.Logger) -> None:
+        self._operation = operation
+        self._callback = callback
+        self._logger = logger
+        self._phase = "started"
+        self._processed = 0
+        self._total: int | None = None
+
+    def feed(self, event: str, data: dict[str, Any]) -> None:
+        if self._callback is None or event == "cancelled":
+            return
+        phase = self._PHASES.get(event, self._phase)
+        if phase != self._phase:
+            self._phase, self._processed, self._total = phase, 0, None
+        total = data.get("to_process", data.get("groups_found", data.get("total")))
+        if isinstance(total, int):
+            self._total = total
+        current = data.get("path") if event in ("file_started", "ocr_file_started") else None
+        if event in ("file_converted", "ocr_processed", "group_resolved"):
+            self._processed += 1
+        if event == "completed":
+            self._processed = self._total or self._processed
+        try:
+            self._callback(
+                ProgressEvent(
+                    operation=self._operation,  # type: ignore[arg-type]
+                    phase=self._phase,  # type: ignore[arg-type]
+                    processed=self._processed,
+                    total=self._total,
+                    current=current if isinstance(current, str) else None,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - un callback del consumidor nunca debe parar la operación
+            self._logger.warning(f"El callback de progreso falló: {type(exc).__name__}: {exc}")
+
+
 class ScanCommand:
     """Orquesta escaneo + caché + conversión, y deduplicación bajo demanda (Fase D-1, Fase D-2b).
 
@@ -181,6 +242,8 @@ class ScanCommand:
         history_log_path: Path | None = None,
         *,
         options: ScanOptions | None = None,
+        on_progress: ProgressCallback | None = None,
+        cancel_token: CancelToken | None = None,
     ) -> ScanSummary:
         """Ejecuta el pipeline y devuelve solo el resumen final (contrato sin cambios,
         Fase D-1). Consume `run_streaming()` y se queda con su evento `completed` —
@@ -201,7 +264,11 @@ class ScanCommand:
             error_log_path,
             history_log_path,
             options=options,
+            on_progress=on_progress,
+            cancel_token=cancel_token,
         ):
+            if event.event is ScanEventType.CANCELLED:
+                raise OperationCancelledError("Escaneo cancelado")
             if event.event is ScanEventType.COMPLETED:
                 summary = ScanSummary(**event.data)
         return summary
@@ -222,7 +289,61 @@ class ScanCommand:
         history_log_path: Path | None = None,
         *,
         options: ScanOptions | None = None,
+        on_progress: ProgressCallback | None = None,
+        cancel_token: CancelToken | None = None,
     ) -> AsyncIterator[ScanEvent]:
+        """Orquesta escaneo + caché + conversión, emitiendo un `ScanEvent` por paso (detalle en `_run_pipeline`).
+
+        Args:
+            on_progress: Recibe un `ProgressEvent` (fase, `processed`/`total`, documento actual) por cada evento
+                (L-2). Un fallo del callback se registra y no para el escaneo.
+            cancel_token: Si se cancela, el escaneo para **entre documentos**: guarda en `cache_db` lo ya convertido
+                (un escaneo posterior continúa desde ahí), registra la ejecución como incompleta y emite `CANCELLED`
+                como último evento en lugar de `COMPLETED`.
+
+        El resto de argumentos se describe en `_run_pipeline`.
+        """
+        tracker = _ProgressTracker("scan", on_progress, self.logger)
+        async with contextlib.aclosing(
+            self._run_pipeline(
+                paths,
+                output_dir,
+                cache_db,
+                folders_json,
+                use_ocr,
+                use_gpu,
+                force,
+                include_audio_video,
+                extract_images,
+                use_picture_description,
+                error_log_path,
+                history_log_path,
+                options=options,
+                cancel_token=cancel_token,
+            )
+        ) as events:
+            async for event in events:
+                tracker.feed(event.event.value, event.data)
+                yield event
+
+    async def _run_pipeline(
+        self,
+        paths: list[str],
+        output_dir: Path,
+        cache_db: Path,
+        folders_json: Path,
+        use_ocr: bool | None = None,
+        use_gpu: bool | None = None,
+        force: bool = False,
+        include_audio_video: bool = False,
+        extract_images: bool = False,
+        use_picture_description: bool = False,
+        error_log_path: Path | None = None,
+        history_log_path: Path | None = None,
+        *,
+        options: ScanOptions | None = None,
+        cancel_token: CancelToken | None = None,
+    ) -> AsyncGenerator[ScanEvent, None]:
         """Orquesta escaneo + caché + conversión, emitiendo progreso.
 
         Fase D-2b (`§2.7.3`): misma orquestación que antes vivía solo en `run()`,
@@ -356,35 +477,45 @@ class ScanCommand:
                 entries: list[CacheEntry] = []
                 ocr_candidates: list[DocumentMetadata] = []
 
-                async for event in self._convert_documents(
-                    docs_to_process,
-                    output_dir,
-                    new_set,
-                    modified_set,
-                    cached_entries,
-                    summary,
-                    entries,
-                    ocr_candidates,
-                    extract_images,
-                    use_picture_description,
-                    clean_paths,
-                ):
-                    yield event
-
-                if use_ocr:
-                    self._collect_stale_ocr_candidates(cached_entries, docs_by_path, already_converting, ocr_candidates)
-                    async for event in self._process_ocr(
-                        ocr_candidates,
+                try:
+                    async for event in self._convert_documents(
+                        docs_to_process,
                         output_dir,
-                        use_gpu,
-                        entries,
+                        new_set,
+                        modified_set,
                         cached_entries,
                         summary,
+                        entries,
+                        ocr_candidates,
                         extract_images,
                         use_picture_description,
                         clean_paths,
+                        cancel_token=cancel_token,
                     ):
                         yield event
+
+                    if use_ocr:
+                        self._collect_stale_ocr_candidates(cached_entries, docs_by_path, already_converting, ocr_candidates)
+                        async for event in self._process_ocr(
+                            ocr_candidates,
+                            output_dir,
+                            use_gpu,
+                            entries,
+                            cached_entries,
+                            summary,
+                            extract_images,
+                            use_picture_description,
+                            clean_paths,
+                            cancel_token=cancel_token,
+                        ):
+                            yield event
+                except OperationCancelledError:
+                    # L-2: lo ya convertido se guarda (un escaneo posterior continúa desde ahí; los pendientes de OCR
+                    # quedan con `ocr_pending`); el `finally` registra la ejecución como incompleta.
+                    await cache.save_entries(entries)
+                    self.logger.info(f"Escaneo cancelado tras {summary.converted} documentos convertidos")
+                    yield ScanEvent(event=ScanEventType.CANCELLED, data=asdict(summary))
+                    return
 
                 await cache.save_entries(entries)
 
@@ -507,8 +638,39 @@ class ScanCommand:
                     logger.warning(f"No se pudo borrar '{images_dir}' (huérfana): {exc}")
 
     async def deduplicate_streaming(
-        self, paths: list[str], duplicates_dir: Path, folders_json: Path, *, report_dir: Path | None = None
+        self,
+        paths: list[str],
+        duplicates_dir: Path,
+        folders_json: Path,
+        *,
+        report_dir: Path | None = None,
+        on_progress: ProgressCallback | None = None,
+        cancel_token: CancelToken | None = None,
     ) -> AsyncIterator[DedupEvent]:
+        """Busca y mueve duplicados en `paths`, emitiendo progreso (detalle en `_dedup_pipeline`).
+
+        Args:
+            on_progress: Recibe un `ProgressEvent` por evento (L-2); un fallo del callback no para la operación.
+            cancel_token: Si se cancela, para **entre grupos**: los grupos ya movidos quedan en el informe
+                (`DEDUP_REPORT.json`) y el último evento es `CANCELLED` en lugar de `COMPLETED`.
+        """
+        tracker = _ProgressTracker("deduplicate", on_progress, self.logger)
+        async with contextlib.aclosing(
+            self._dedup_pipeline(paths, duplicates_dir, folders_json, report_dir=report_dir, cancel_token=cancel_token)
+        ) as events:
+            async for event in events:
+                tracker.feed(event.event.value, event.data)
+                yield event
+
+    async def _dedup_pipeline(
+        self,
+        paths: list[str],
+        duplicates_dir: Path,
+        folders_json: Path,
+        *,
+        report_dir: Path | None = None,
+        cancel_token: CancelToken | None = None,
+    ) -> AsyncGenerator[DedupEvent, None]:
         """Busca y mueve duplicados en `paths`, a petición explícita del usuario,
         emitiendo progreso (mismo criterio que `run_streaming()` para Escanear:
         un método de orquestación por evento, sin una variante síncrona
@@ -566,6 +728,11 @@ class ScanCommand:
 
             total = len(groups)
             for index, group in enumerate(groups, start=1):
+                if cancel_token is not None and cancel_token.cancelled:
+                    # L-2: parada entre grupos; el `finally` persiste el informe con los grupos ya movidos.
+                    self.logger.info(f"Deduplicación cancelada tras {index - 1} de {total} grupos")
+                    yield DedupEvent(event=DedupEventType.CANCELLED, data={"index": index - 1, "total": total})
+                    return
                 yield DedupEvent(event=DedupEventType.GROUP_STARTED, data={"index": index, "total": total, "reason": group.reason.value})
                 exact, version, group_failed = await dedup_manager.move_group(group, duplicates_dir)
                 exact_moved += exact
@@ -631,6 +798,8 @@ class ScanCommand:
         extract_images: bool = False,
         use_picture_description: bool = False,
         scan_roots: Sequence[str] = (),
+        *,
+        cancel_token: CancelToken | None = None,
     ) -> AsyncIterator[ScanEvent]:
         """Convierte cada documento, yieldeando `FILE_STARTED` (antes de convertirlo)
         y `FILE_CONVERTED` (al terminar) por unidad.
@@ -655,6 +824,7 @@ class ScanCommand:
         total = len(docs_to_process)
         async with DocumentConverter() as converter:
             for index, doc in enumerate(docs_to_process, start=1):
+                checkpoint(cancel_token)  # L-2: parada entre documentos
                 yield ScanEvent(
                     event=ScanEventType.FILE_STARTED,
                     data={"path": doc.full_path, "index": index, "total": total},
@@ -829,6 +999,8 @@ class ScanCommand:
         extract_images: bool = False,
         use_picture_description: bool = False,
         scan_roots: Sequence[str] = (),
+        *,
+        cancel_token: CancelToken | None = None,
     ) -> AsyncIterator[ScanEvent]:
         """Reprocesa `ocr_candidates` con OCR, yieldeando `OCR_STARTED`, un
         `OCR_FILE_STARTED`/`OCR_PROCESSED` por unidad, en ese orden relativo.
@@ -861,6 +1033,8 @@ class ScanCommand:
         ) as ocr_stream:
             async for item in ocr_stream:
                 if isinstance(item, ScanEvent):
+                    # L-2: el lote corre en un hilo; se para antes del siguiente documento (el actual termina).
+                    checkpoint(cancel_token)
                     yield item
                 else:
                     ocr_results = item

@@ -10,6 +10,7 @@ from doc_organize.context.context_registry import ContextRegistry
 from doc_organize.context.domain_classifier import DomainClassifier, MaterialTypeClassifier, read_conversion_json, resolve_title_and_type
 from doc_organize.core.exceptions import DomainClassificationError, TaxonomyClassificationError
 from doc_organize.core.models import Context, ConversionResult, Domain, DomainDocument, DomainStatus, Project, TaxonomyManifest
+from doc_organize.core.progress import CancelToken, ProgressCallback, ProgressEvent, checkpoint
 from doc_organize.utils.logging import get_logger
 
 _DEFAULT_THRESHOLD = 0.5
@@ -87,6 +88,9 @@ class ContextBuilder:
         taxonomy_manifest: TaxonomyManifest | None = None,
         taxonomy_classification_client: TaxonomyClassificationClient | None = None,
         taxonomy_template_name: str | None = None,
+        *,
+        on_progress: ProgressCallback | None = None,
+        cancel_token: CancelToken | None = None,
     ) -> Context:
         """Clasifica `documents` y persiste el contexto de `project`.
 
@@ -135,14 +139,42 @@ class ContextBuilder:
                 `Context.taxonomy_template_name` para que la UI pueda mostrar/preseleccionar qué
                 plantilla se usó; no afecta a la clasificación (ya resuelta en `taxonomy_manifest`).
 
+            on_progress: Recibe un `ProgressEvent` (`operation="context_build"`, fase `classification`) tras cada
+                documento de la Sub-fase B (L-2). Un fallo del callback se registra y no para la construcción.
+            cancel_token: Si se cancela, la construcción para **entre documentos** de la Sub-fase B (o antes de
+                empezar) con `OperationCancelledError`, **sin** persistir un contexto a medias (L-2).
+
         Returns:
             El `Context` construido y ya persistido vía `self.registry`.
+
+        Raises:
+            OperationCancelledError: Se canceló con `cancel_token`.
         """
+        checkpoint(cancel_token)
+
+        async def _ai_progress(index: int, total: int, source_path: str) -> None:
+            if on_ai_progress is not None:
+                await on_ai_progress(index, total, source_path)
+            if on_progress is not None:
+                try:
+                    on_progress(
+                        ProgressEvent(
+                            operation="context_build",
+                            phase="classification",
+                            processed=index,
+                            total=total,
+                            current=source_path,
+                        )
+                    )
+                except Exception as exc:  # noqa: BLE001 - un callback del consumidor nunca debe parar la operación
+                    self.logger.warning(f"El callback de progreso falló: {type(exc).__name__}: {exc}")
+            checkpoint(cancel_token)  # L-2: parada entre documentos de la Sub-fase B
+
         if taxonomy_manifest is not None:
             classified, unclassified = await self._classify_with_manifest(documents, taxonomy_manifest, threshold)
             if ai_classification_enabled and taxonomy_classification_client is not None:
                 classified = await self._classify_with_manifest_ai(
-                    taxonomy_classification_client, classified, taxonomy_manifest, on_progress=on_ai_progress
+                    taxonomy_classification_client, classified, taxonomy_manifest, on_progress=_ai_progress
                 )
         else:
             classifier = DomainClassifier(candidate_domains=candidate_domains, threshold=threshold)
@@ -150,7 +182,7 @@ class ContextBuilder:
 
             if ai_classification_enabled and ai_classification_client is not None and unclassified:
                 classified, unclassified = await self._classify_with_ai(
-                    ai_classification_client, classified, unclassified, classifier.candidate_domains, on_progress=on_ai_progress
+                    ai_classification_client, classified, unclassified, classifier.candidate_domains, on_progress=_ai_progress
                 )
 
         has_predefined_catalog = bool(candidate_domains) or taxonomy_manifest is not None
@@ -183,6 +215,7 @@ class ContextBuilder:
             created_at=now,
             updated_at=now,
         )
+        checkpoint(cancel_token)  # nunca se persiste un contexto a medias
         await self.registry.save_context(project, context)
         self.logger.info(f"Contexto construido para '{project.name}': {len(domains)} dominio(s), {len(unclassified)} documento(s) sin clasificar")
         return context

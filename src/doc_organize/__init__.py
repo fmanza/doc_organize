@@ -27,6 +27,8 @@ _EXPORTS: dict[str, str] = {
     "DocumentScanner": "doc_organize.scanner.document_scanner",
     "ScanCommand": "doc_organize.scan.scan_command",
     "ScanOptions": "doc_organize.core.models",
+    "CancelToken": "doc_organize.core.progress",
+    "ProgressEvent": "doc_organize.core.progress",
     "ScanSummary": "doc_organize.scan.scan_command",
     "DeduplicationSummary": "doc_organize.scan.scan_command",
     "ContextBuilder": "doc_organize.context.context_builder",
@@ -73,6 +75,7 @@ _EXPORTS: dict[str, str] = {
     "TaxonomyManifest": "doc_organize.core.models",
     # Errores
     "DocOrganizeError": "doc_organize.core.exceptions",
+    "OperationCancelledError": "doc_organize.core.exceptions",
     "InvalidPathError": "doc_organize.core.exceptions",
     "ConversionError": "doc_organize.core.exceptions",
     "CacheError": "doc_organize.core.exceptions",
@@ -113,6 +116,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         ConversionError,
         DocOrganizeError,
         InvalidPathError,
+        OperationCancelledError,
         ProjectError,
         ProjectNotFoundError,
     )
@@ -144,6 +148,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         ScanRunReport,
         TaxonomyManifest,
     )
+    from doc_organize.core.progress import CancelToken, ProgressEvent
     from doc_organize.dedup.deduplication import DeduplicationManager
     from doc_organize.projects.layout import ProjectLayout
     from doc_organize.projects.project_history_cleaner import ProjectHistoryCleaner

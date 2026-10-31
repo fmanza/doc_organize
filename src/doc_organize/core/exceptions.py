@@ -11,6 +11,10 @@ class DocOrganizeError(Exception):
     """Excepcion base para todos los errores de doc_organize."""
 
 
+class OperationCancelledError(DocOrganizeError):
+    """La operación se paró a petición del llamador (`CancelToken.cancel()`), entre dos documentos o grupos (L-2)."""
+
+
 class InvalidPathError(DocOrganizeError):
     """La ruta indicada no existe, no es accesible o no es del tipo esperado."""
 
@@ -232,6 +236,7 @@ class TaxonomyManifestDraftConnectionError(TaxonomyManifestDraftError):
 
 
 __all__ = [
+    "OperationCancelledError",
     "AuthError",
     "CacheError",
     "ContextError",

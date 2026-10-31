@@ -70,6 +70,8 @@ class ScanEventType(str, Enum):
     OCR_FILE_STARTED = "ocr_file_started"
     OCR_PROCESSED = "ocr_processed"
     COMPLETED = "completed"
+    #: Parada a petición del llamador (L-2); es el último evento, en lugar de `COMPLETED`.
+    CANCELLED = "cancelled"
 
 
 class DedupEventType(str, Enum):
@@ -85,6 +87,8 @@ class DedupEventType(str, Enum):
     GROUP_STARTED = "group_started"
     GROUP_RESOLVED = "group_resolved"
     COMPLETED = "completed"
+    #: Parada a petición del llamador (L-2); es el último evento, en lugar de `COMPLETED`.
+    CANCELLED = "cancelled"
 
 
 class ContextBuildEventType(str, Enum):
@@ -103,6 +107,8 @@ class ContextBuildEventType(str, Enum):
     DOCUMENT_COPIED = "document_copied"
     MKDOCS_STARTED = "mkdocs_started"
     COMPLETED = "completed"
+    #: Parada a petición del llamador (L-2); es el último evento, en lugar de `COMPLETED`.
+    CANCELLED = "cancelled"
 
 
 class ContextDeleteEventType(str, Enum):
