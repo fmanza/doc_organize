@@ -362,6 +362,26 @@ class ScanResult(BaseModel):
     scan_duration_seconds: float = Field(..., description="Tiempo empleado en completar el escaneo")
 
 
+class ScanOptions(BaseModel):
+    """Opciones de un escaneo (G13): sustituyen a los indicadores sueltos de `ScanCommand.run`/`run_streaming`.
+
+    Pasarlas con `options=ScanOptions(...)` evita desordenar argumentos posicionales del mismo tipo.
+
+    Example:
+        >>> ScanOptions(use_ocr=True).use_gpu
+        False
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    use_ocr: bool = Field(default=True, description="Aplicar OCR a imágenes y PDF escaneados")
+    use_gpu: bool = Field(default=False, description="Usar la GPU para el OCR si está disponible")
+    force: bool = Field(default=False, description="Ignorar la caché y reconvertirlo todo")
+    include_audio_video: bool = Field(default=False, description="Incluir audio y vídeo (requiere el extra `av`)")
+    extract_images: bool = Field(default=False, description="Extraer las imágenes de los documentos")
+    use_picture_description: bool = Field(default=False, description="Describir las imágenes con un modelo de visión")
+
+
 class ScanEvent(BaseModel):
     """Un evento de progreso emitido por `ScanCommand.run_streaming()` (Fase D-2b, §2.7.3).
 

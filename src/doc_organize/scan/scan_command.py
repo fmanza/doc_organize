@@ -42,6 +42,7 @@ from doc_organize.core.models import (
     ScanErrorReport,
     ScanEvent,
     ScanEventType,
+    ScanOptions,
     ScanRunReport,
 )
 from doc_organize.dedup import DeduplicationManager
@@ -116,6 +117,38 @@ class DeduplicationSummary:
         return "\n".join(lines)
 
 
+def resolve_scan_options(
+    options: ScanOptions | None,
+    *,
+    use_ocr: bool | None,
+    use_gpu: bool | None,
+    force: bool,
+    include_audio_video: bool,
+    extract_images: bool,
+    use_picture_description: bool,
+) -> ScanOptions:
+    """Opciones efectivas de un escaneo: `options` o, si no se pasa, los indicadores sueltos (forma anterior a G13).
+
+    Raises:
+        TypeError: Se pasan a la vez `options` e indicadores sueltos, o falta `use_ocr`/`use_gpu` sin `options`.
+    """
+    loose = (force, include_audio_video, extract_images, use_picture_description)
+    if options is not None:
+        if use_ocr is not None or use_gpu is not None or any(loose):
+            raise TypeError("Pasa las opciones del escaneo en `options` o como argumentos sueltos, no de las dos formas")
+        return options
+    if use_ocr is None or use_gpu is None:
+        raise TypeError("Indica `options=ScanOptions(...)` (o `use_ocr` y `use_gpu`)")
+    return ScanOptions(
+        use_ocr=use_ocr,
+        use_gpu=use_gpu,
+        force=force,
+        include_audio_video=include_audio_video,
+        extract_images=extract_images,
+        use_picture_description=use_picture_description,
+    )
+
+
 class ScanCommand:
     """Orquesta escaneo + caché + conversión, y deduplicación bajo demanda (Fase D-1, Fase D-2b).
 
@@ -138,14 +171,16 @@ class ScanCommand:
         output_dir: Path,
         cache_db: Path,
         folders_json: Path,
-        use_ocr: bool,
-        use_gpu: bool,
+        use_ocr: bool | None = None,
+        use_gpu: bool | None = None,
         force: bool = False,
         include_audio_video: bool = False,
         extract_images: bool = False,
         use_picture_description: bool = False,
         error_log_path: Path | None = None,
         history_log_path: Path | None = None,
+        *,
+        options: ScanOptions | None = None,
     ) -> ScanSummary:
         """Ejecuta el pipeline y devuelve solo el resumen final (contrato sin cambios,
         Fase D-1). Consume `run_streaming()` y se queda con su evento `completed` —
@@ -165,6 +200,7 @@ class ScanCommand:
             use_picture_description,
             error_log_path,
             history_log_path,
+            options=options,
         ):
             if event.event is ScanEventType.COMPLETED:
                 summary = ScanSummary(**event.data)
@@ -176,14 +212,16 @@ class ScanCommand:
         output_dir: Path,
         cache_db: Path,
         folders_json: Path,
-        use_ocr: bool,
-        use_gpu: bool,
+        use_ocr: bool | None = None,
+        use_gpu: bool | None = None,
         force: bool = False,
         include_audio_video: bool = False,
         extract_images: bool = False,
         use_picture_description: bool = False,
         error_log_path: Path | None = None,
         history_log_path: Path | None = None,
+        *,
+        options: ScanOptions | None = None,
     ) -> AsyncIterator[ScanEvent]:
         """Orquesta escaneo + caché + conversión, emitiendo progreso.
 
@@ -202,6 +240,9 @@ class ScanCommand:
         como dos pasos distintos que el usuario controla.
 
         Args:
+            options: Opciones del escaneo (`ScanOptions`, recomendado desde 0.10.0). Si se pasa,
+                no se pueden pasar también `use_ocr`, `use_gpu`, `force`, `include_audio_video`,
+                `extract_images` ni `use_picture_description` (`TypeError`).
             force: Si `True`, ignora la caché existente (se vacía antes de
                 comparar, así que `get_changes()` trata todos los documentos
                 como nuevos) y borra los `.md`/`.json` ya generados de
@@ -225,6 +266,18 @@ class ScanCommand:
                 cada ejecución, no gestiona errores. `None` (por defecto)
                 desactiva la persistencia del histórico de tiempos.
         """
+        opts = resolve_scan_options(
+            options,
+            use_ocr=use_ocr,
+            use_gpu=use_gpu,
+            force=force,
+            include_audio_video=include_audio_video,
+            extract_images=extract_images,
+            use_picture_description=use_picture_description,
+        )
+        use_ocr, use_gpu, force = opts.use_ocr, opts.use_gpu, opts.force
+        include_audio_video, extract_images = opts.include_audio_video, opts.extract_images
+        use_picture_description = opts.use_picture_description
         scan_run_id = uuid.uuid4().hex
         started_at = datetime.now(UTC).isoformat()
         start = time.monotonic()
