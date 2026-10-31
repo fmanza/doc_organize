@@ -63,6 +63,10 @@ hash. Recoge todo lo integrado en `develop` desde la 0.9.0.
 - `web/`: el alta de usuario exige elegir rol de forma explícita (antes se preseleccionaba `admin`); el bloque Admin se
   muestra en modo local sin autenticación; desplegable de plantilla de taxonomía a todo el ancho.
 - `auth/migrations.py`: `datetime.utcnow()` (obsoleto) sustituido por `datetime.now(UTC)` en las migraciones 004/005.
+- `scanner/document_scanner.py`: un fichero que desaparece durante el escaneo ya no aborta el recorrido cuando
+  `Path.is_symlink()` propaga el error de `lstat()` (Linux); se omite como el resto de casos TOCTOU.
+- `projects/project_registry.py`: el doctest de `move_project_root` compara rutas resueltas (fallaba en Windows con
+  nombres cortos de `tempfile`).
 
 ## [0.9.0] - 2026-09-11
 
