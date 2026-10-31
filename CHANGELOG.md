@@ -6,6 +6,16 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-10-31
+
+Primera versión publicada en GitHub Releases con wheel y sdist, para que doc_organize_web pueda fijarla por URL y
+hash. Recoge todo lo integrado en `develop` desde la 0.9.0.
+
+> **Nota de versión**: por SemVer estricto, las novedades de `Added` pedirían una MINOR. Se publica como PATCH porque
+> la 0.10.0 está reservada para la API pública de la separación librería/web (tareas L-1…L-6 del plan de
+> doc_organize_web). El tag `v0.9.2` (2026-09-17) marcó un estado intermedio sin subir la versión del paquete, que
+> seguía en 0.9.0; esta versión alinea `pyproject.toml`, `__version__` y el tag.
+
 ### Added
 
 - `dedup/deduplication.py`: tercera pasada opcional de deduplicación por similitud aproximada de
@@ -18,6 +28,24 @@ releases publicados antes de esa versión).
 - `web/routes/duplicates.py`, `web/templates/duplicates_resolver.html.j2`: control de umbral de
   similitud (`fuzzy_threshold`) y activación por grupo (`fuzzy_group_toggles`) en la pantalla de
   Duplicados.
+- `context/taxonomy_templates_builtin/sgi-integrado.md`: plantilla de taxonomía «sgi-integrado» (7 dominios + 9
+  tipos de material).
+- `utils/office_detector.py`: detección de LibreOffice (mismo patrón que `av_detector.py`/`gpu_detector.py`);
+  `web/templates/_status_banner_macros.html.j2` unifica los banners de GPU, audio/vídeo y LibreOffice en Escaneo.
+- `web/`: edición de rol y restablecimiento de contraseña en los paneles de usuarios y tenants; edición de nombre,
+  admin y proyectos de un rol; enlace «Proyectos» en el bloque Admin.
+- `auth/migrations.py`: migraciones de esquema SQLite centralizadas (protocolo `SchemaMigration`);
+  documentación del modelo de hilos (`web/STATE.md`, ADR-004) y pruebas de estrés concurrente de `ProjectRegistry` (estado `v0.9.2`).
+
+### Changed
+
+- `auth/`: `AuthStore` se descompone en `TenantStore`, `RoleStore`, `UserStore` y `SessionStore` (misma API pública
+  como fachada); se elimina código de migración muerto.
+- `ai/_http_client_base.py`: base HTTP compartida por los 5 clientes de IA, sin cambios de comportamiento.
+- `web/routes/taxonomy_templates.py`: la administración de plantillas de taxonomía se separa de las rutas de contexto.
+- `scan/scan_command.py`: la excepción capturada al reenviar fallos de OCR por la cola se acota a
+  `(OSError, ValueError, RuntimeError, TypeError)`.
+- `__version__` pasa de `"0.1.0"` a la versión real del paquete.
 
 ### Fixed
 
@@ -25,6 +53,13 @@ releases publicados antes de esa versión).
   uvicorn cierre el WebSocket de escaneo/deduplicación por un pong tardío durante OCR largo
   (el hilo de `asyncio.to_thread` compite por el GIL con el event loop), que antes se veía
   como "Cliente desconectado durante el escaneo" en pleno progreso.
+- `dedup/deduplication.py`: la similitud de nombres usa `fuzz.WRatio` sobre nombres normalizados (mejor precisión
+  con sufijos de copia/versión).
+- `converter/converter.py`: la conversión de `.xls` sin LibreOffice se corta con un mensaje claro en lugar de agotar
+  reintentos; el error de conversión muestra la causa raíz encadenada por Docling (hasta 2 niveles).
+- `web/`: el alta de usuario exige elegir rol de forma explícita (antes se preseleccionaba `admin`); el bloque Admin se
+  muestra en modo local sin autenticación; desplegable de plantilla de taxonomía a todo el ancho.
+- `auth/migrations.py`: `datetime.utcnow()` (obsoleto) sustituido por `datetime.now(UTC)` en las migraciones 004/005.
 
 ## [0.9.0] - 2026-09-11
 

@@ -6,6 +6,9 @@ Tabla de compatibilidad por versión de `doc_organize`. Generada a partir del hi
 `CHANGELOG.md`): todas las versiones listadas son estados internos del repositorio, no paquetes
 instalables desde fuera.
 
+> **Nota (2026-10-31)**: desde la 0.9.3 hay wheel y sdist publicados en GitHub Releases; las versiones
+> anteriores siguen siendo estados internos del repositorio.
+
 > **Nota de corrección (2026-09-10)**: esta tabla llevaba desde 0.4.0 sin una fila nueva pese a que
 > `pyproject.toml` ya iba por 0.7.0 — 3 versiones de diferencia. Las filas 0.5.0/0.6.0/0.7.0 se han
 > reconstruido ahora verificando `git show <commit-de-bump>:pyproject.toml` de cada una (mismas
@@ -13,7 +16,8 @@ instalables desde fuera.
 
 | Versión | Python | Dependencias clave | Estado |
 |---|---|---|---|
-| 0.9.0 | `>=3.11` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0`, nueva `cryptography>=41.0` (cifrado Fernet de credenciales de IA); `[ai]`: `httpx>=0.24`; `[context]`: `pyyaml>=6.0` | ✅ Activa |
+| 0.9.3 | `>=3.11` | Mismas cotas que 0.9.0 (sin cambios en `pyproject.toml` salvo la versión); primera versión con wheel en GitHub Releases | ✅ Activa |
+| 0.9.0 | `>=3.11` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0`, nueva `cryptography>=41.0` (cifrado Fernet de credenciales de IA); `[ai]`: `httpx>=0.24`; `[context]`: `pyyaml>=6.0` | ❌ EOL |
 | 0.8.0 | `>=3.11` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0`; nuevos extras `[ai]`: `httpx>=0.24`, `[context]`: `pyyaml>=6.0` | ❌ EOL |
 | 0.7.0 | `>=3.11` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0` | ❌ EOL |
 | 0.6.0 | `>=3.11` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0` | ❌ EOL |
