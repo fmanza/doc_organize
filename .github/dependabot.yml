@@ -1,18 +1,31 @@
 version: 2
+# Una vez al mes, PR agrupados contra develop, y solo versiones con ≥ 14 días (mismo criterio que doc_organize_web).
 updates:
   - package-ecosystem: pip
     directory: "/"
+    target-branch: develop
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 2
+    cooldown:
+      default-days: 14
     labels:
       - dependencies
+    groups:
+      python:
+        patterns: ["*"]
 
   - package-ecosystem: github-actions
     directory: "/"
+    target-branch: develop
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 2
+    cooldown:
+      default-days: 14
     labels:
       - dependencies
       - github-actions
+    groups:
+      github-actions:
+        patterns: ["*"]
