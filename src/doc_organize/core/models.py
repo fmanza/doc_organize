@@ -13,7 +13,7 @@ Modelos Pydantic v2 usados en todos los módulos:
 """
 
 from enum import Enum
-from typing import Any
+from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -368,6 +368,30 @@ class ScanResult(BaseModel):
     scan_duration_seconds: float = Field(..., description="Tiempo empleado en completar el escaneo")
 
 
+#: Versión del esquema de los eventos de progreso (L-6b). Sube cuando cambian los campos de `to_dict()` o el
+#: significado de un tipo de evento; añadir un tipo de evento nuevo no la cambia.
+EVENT_SCHEMA_VERSION: Final = 1
+
+
+class VersionedEvent(BaseModel):
+    """Base de los eventos de progreso con esquema versionado (L-6b, hueco G7 de doc_organize_web).
+
+    `to_dict()` es la forma estable para serializar un evento (JSON, SSE, ficheros): `{"schema_version", "event",
+    "data"}`, con `event` como su valor de texto y `data` en tipos JSON.
+
+    Example:
+        >>> ScanEvent(event=ScanEventType.STARTED).to_dict()
+        {'schema_version': 1, 'event': 'started', 'data': {}}
+    """
+
+    schema_version: Literal[1] = Field(default=EVENT_SCHEMA_VERSION, description="Versión del esquema del evento")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Representación estable y serializable en JSON."""
+        dumped = self.model_dump(mode="json")
+        return {"schema_version": dumped["schema_version"], "event": dumped["event"], "data": dumped["data"]}
+
+
 class ScanOptions(BaseModel):
     """Opciones de un escaneo (G13): sustituyen a los indicadores sueltos de `ScanCommand.run`/`run_streaming`.
 
@@ -388,7 +412,7 @@ class ScanOptions(BaseModel):
     use_picture_description: bool = Field(default=False, description="Describir las imágenes con un modelo de visión")
 
 
-class ScanEvent(BaseModel):
+class ScanEvent(VersionedEvent):
     """Un evento de progreso emitido por `ScanCommand.run_streaming()` (Fase D-2b, §2.7.3).
 
     Deliberadamente un payload `dict[str, Any]` laxo en vez de un modelo por tipo de
@@ -402,7 +426,7 @@ class ScanEvent(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict, description="Payload del evento; su forma depende de `event`")
 
 
-class DedupEvent(BaseModel):
+class DedupEvent(VersionedEvent):
     """Un evento de progreso emitido por `ScanCommand.deduplicate_streaming()`.
 
     Mismo criterio que `ScanEvent`: payload `dict[str, Any]` laxo en vez de un
@@ -413,7 +437,7 @@ class DedupEvent(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict, description="Payload del evento; su forma depende de `event`")
 
 
-class ContextBuildEvent(BaseModel):
+class ContextBuildEvent(VersionedEvent):
     """Un evento de progreso emitido por `context_build_websocket()`.
 
     Mismo criterio que `ScanEvent`/`DedupEvent`: payload `dict[str, Any]` laxo.
@@ -423,7 +447,7 @@ class ContextBuildEvent(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict, description="Payload del evento; su forma depende de `event`")
 
 
-class ContextDeleteEvent(BaseModel):
+class ContextDeleteEvent(VersionedEvent):
     """Un evento de progreso emitido por `context_delete_websocket()`.
 
     Mismo criterio que `ScanEvent`/`DedupEvent`: payload `dict[str, Any]` laxo.
