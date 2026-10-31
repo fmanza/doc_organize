@@ -47,7 +47,8 @@ hash. Recoge todo lo integrado en `develop` desde la 0.9.0.
   `(OSError, ValueError, RuntimeError, TypeError)`.
 - `__version__` pasa de `"0.1.0"` a la versión real del paquete.
 - CI: `ruff` fijado a `<0.16` (la 0.16 activa por defecto reglas DTZ/RUF/SIM y el CI estaba en rojo desde
-  septiembre con 11 avisos nuevos, pendientes de revisar) y `pandas` sin stubs ignorado por mypy.
+  septiembre con 11 avisos nuevos, pendientes de revisar), `pandas` sin stubs ignorado por mypy y `cryptography`
+  añadido al extra `dev` (lo importa `auth/secrets_cipher.py`; solo estaba en `web`).
 
 ### Fixed
 
