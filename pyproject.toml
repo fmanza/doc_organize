@@ -50,7 +50,9 @@ dev = [
     "pytest-cov>=3.0",
     "pytest-asyncio>=0.21",
     "httpx>=0.24",
-    "ruff>=0.1.0",
+    # ruff 0.16 amplía las reglas por defecto (DTZ, RUF, SIM) y el CI, que instala la última, falla con 11
+    # avisos nuevos; se fija por debajo hasta revisarlos (deuda registrada en el CHANGELOG 0.9.3).
+    "ruff>=0.1.0,<0.16",
     "mypy>=1.0",
     "types-aiofiles>=23.0",
     "types-PyYAML>=6.0",
@@ -115,6 +117,11 @@ ignore_missing_imports = false
 # Docling arrastra dependencias (via scipy-stubs) que usan sintaxis de
 # Python 3.12+ en sus stubs; no seguimos sus imports para que no rompan el
 # type-check de nuestro propio codigo (que sigue siendo compatible con 3.11+).
+# pandas no publica tipos (pandas-stubs es aparte) y solo lo usa web/routes/downloads.py, que se retira con web/.
+[[tool.mypy.overrides]]
+module = ["pandas", "pandas.*"]
+ignore_missing_imports = true
+
 [[tool.mypy.overrides]]
 module = ["docling.*"]
 follow_imports = "skip"
