@@ -145,7 +145,12 @@ class DocumentScanner:
         curso) — el llamador omite ese hijo del árbol en vez de dejar que la
         excepción aborte el escaneo completo por un único fichero (AUDIT_CODE,
         sesión 2026-09-03)."""
-        if path.is_symlink():
+        try:
+            is_symlink = path.is_symlink()
+        except OSError:
+            # Según la versión de Python, `is_symlink()` propaga el error de `lstat()` en vez de devolver False.
+            return None
+        if is_symlink:
             return DirectoryTreeNode(name=path.name, type="file", path=str(path))
         if path.is_dir():
             return self._build_dir_node(path, files, allowed_extensions, exclude_dir)

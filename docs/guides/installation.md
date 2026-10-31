@@ -2,7 +2,7 @@
 
 ## Requisitos
 
-- Python 3.11 o superior.
+- Python 3.12 o superior.
 
 ## Núcleo (CLI)
 
@@ -103,13 +103,13 @@ convertir audio y vídeo con `--include-audio-video`. `.txt` no necesita este
 extra ni ningún flag — es una extensión genérica que docling ya soporta,
 incluida en `SUPPORTED_EXTENSIONS` sin opt-in.
 
-⚠️ **Requiere Python 3.11–3.13.** El extra `[av]` arrastra `numba`/`llvmlite`
+⚠️ **Requiere Python 3.12–3.13.** El extra `[av]` arrastra `numba`/`llvmlite`
 (dependencias de Whisper) que, a fecha de esta revisión, todavía no publican
 wheels precompilados para Python 3.14 — `pip install doc_organize[av]` falla
 en ese intérprete al intentar resolver esas dependencias. No es un fallo de
 `doc_organize` (revisa el código: `av_detector.py` no importa ni depende de
-`numba`); si necesitas audio/vídeo, crea el entorno virtual con Python 3.11,
-3.12 o 3.13. Si no lo necesitas, simplemente no instales `[av]` ni actives
+`numba`); si necesitas audio/vídeo, crea el entorno virtual con Python 3.12
+o 3.13. Si no lo necesitas, simplemente no instales `[av]` ni actives
 `--include-audio-video` — el resto de la librería (scan, convert, dedup,
 cache, OCR) funciona sin restricción en Python 3.14 (ver
 [Resolución de problemas](troubleshooting.md#pip-install-av-falla-por-numballvmlite-en-python-314)).

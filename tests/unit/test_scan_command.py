@@ -213,7 +213,9 @@ async def test_run_streaming_persists_completed_false_on_pipeline_exception(tmp_
     assert len(runs) == 1
     assert runs[0].completed is False
     assert runs[0].total_scanned == 0
-    assert runs[0].duration_seconds > 0
+    # En Windows `time.monotonic()` tiene ~15,6 ms de resolución: un fallo inmediato puede medir 0.0.
+    assert runs[0].duration_seconds is not None and runs[0].duration_seconds >= 0
+    assert runs[0].finished_at is not None and runs[0].finished_at >= runs[0].started_at
 
 
 @pytest.mark.asyncio
