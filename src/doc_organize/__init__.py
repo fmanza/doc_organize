@@ -35,6 +35,7 @@ _EXPORTS: dict[str, str] = {
     "MkDocsGenerator": "doc_organize.context.mkdocs_generator",
     "TaxonomyTemplateRegistry": "doc_organize.context.taxonomy_template_registry",
     "ProjectRegistry": "doc_organize.projects.project_registry",
+    "ProjectLayout": "doc_organize.projects.layout",
     "ProjectHistoryCleaner": "doc_organize.projects.project_history_cleaner",
     "ScannedFoldersStore": "doc_organize.projects.scanned_folders_store",
     "FolderValidator": "doc_organize.validators.folder_validator",
@@ -144,6 +145,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         TaxonomyManifest,
     )
     from doc_organize.dedup.deduplication import DeduplicationManager
+    from doc_organize.projects.layout import ProjectLayout
     from doc_organize.projects.project_history_cleaner import ProjectHistoryCleaner
     from doc_organize.projects.project_registry import ProjectRegistry
     from doc_organize.projects.scanned_folders_store import ScannedFoldersStore

@@ -152,6 +152,7 @@ class DeduplicationManager:
         version_resolved: int,
         started_at: datetime | None = None,
         failed_paths: list[str] | None = None,
+        report_dir: Path | None = None,
     ) -> DeduplicationReport:
         """Construye el `DeduplicationReport` de una resolución ya completada
         (todos los grupos ya movidos vía `move_group`), escribe
@@ -173,9 +174,15 @@ class DeduplicationManager:
         Escanear. Si se omite, `DeduplicationReport.duration_seconds` queda en
         `None` (sin dato) en vez de medir solo el movimiento de ficheros, que
         sería una duración parcial engañosa.
+
+        `report_dir` (L-5) separa el estado de las salidas: `DEDUP_REPORT.json` y
+        `DEDUP_HISTORY.jsonl` se escriben ahí en lugar de en `duplicates_dir` (por
+        defecto). Ver `ProjectLayout.dedup_report_dir`.
         """
         finished_at = datetime.now(UTC)
-        audit_path = duplicates_dir / DEDUP_REPORT_JSON_NAME
+        target_dir = report_dir if report_dir is not None else duplicates_dir
+        await asyncio.to_thread(target_dir.mkdir, parents=True, exist_ok=True)
+        audit_path = target_dir / DEDUP_REPORT_JSON_NAME
         report = DeduplicationReport(
             timestamp=finished_at.isoformat(),
             total_exact_duplicates=exact_moved,
@@ -188,10 +195,17 @@ class DeduplicationManager:
             groups=groups,
         )
         await asyncio.to_thread(audit_path.write_text, report.model_dump_json(indent=2), encoding="utf-8")
-        await self._append_to_history(duplicates_dir, report)
+        await self._append_to_history(target_dir, report)
         return report
 
-    async def resolve_duplicates(self, groups: list[DuplicateGroup], duplicates_dir: Path, started_at: datetime | None = None) -> DeduplicationReport:
+    async def resolve_duplicates(
+        self,
+        groups: list[DuplicateGroup],
+        duplicates_dir: Path,
+        started_at: datetime | None = None,
+        *,
+        report_dir: Path | None = None,
+    ) -> DeduplicationReport:
         """Mueve los documentos descartados de cada grupo a `duplicates_dir`,
         preservando su estructura de directorios original, y escribe
         `DEDUP_REPORT.json` (solo el último run) y añade una línea a
@@ -217,7 +231,9 @@ class DeduplicationManager:
             version_resolved += version
             failed_paths.extend(group_failed)
 
-        report = await self.finalize_report(groups, duplicates_dir, exact_moved, version_resolved, started_at, failed_paths=failed_paths)
+        report = await self.finalize_report(
+            groups, duplicates_dir, exact_moved, version_resolved, started_at, failed_paths=failed_paths, report_dir=report_dir
+        )
         self.logger.info(
             f"Deduplicación resuelta: {exact_moved} duplicados exactos, {version_resolved} conflictos de versión"
             + (f", {len(failed_paths)} fallidos" if failed_paths else "")

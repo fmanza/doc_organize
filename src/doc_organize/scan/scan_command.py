@@ -506,7 +506,9 @@ class ScanCommand:
                 except OSError as exc:
                     logger.warning(f"No se pudo borrar '{images_dir}' (huérfana): {exc}")
 
-    async def deduplicate_streaming(self, paths: list[str], duplicates_dir: Path, folders_json: Path) -> AsyncIterator[DedupEvent]:
+    async def deduplicate_streaming(
+        self, paths: list[str], duplicates_dir: Path, folders_json: Path, *, report_dir: Path | None = None
+    ) -> AsyncIterator[DedupEvent]:
         """Busca y mueve duplicados en `paths`, a petición explícita del usuario,
         emitiendo progreso (mismo criterio que `run_streaming()` para Escanear:
         un método de orquestación por evento, sin una variante síncrona
@@ -575,7 +577,13 @@ class ScanCommand:
                 )
 
             report = await dedup_manager.finalize_report(
-                groups, duplicates_dir, exact_moved, version_resolved, started_at=started_at, failed_paths=failed_paths
+                groups,
+                duplicates_dir,
+                exact_moved,
+                version_resolved,
+                started_at=started_at,
+                failed_paths=failed_paths,
+                report_dir=report_dir,
             )
             completed_ok = True
             moved = report.total_exact_duplicates + report.total_version_conflicts
@@ -599,7 +607,13 @@ class ScanCommand:
                 try:
                     await asyncio.to_thread(duplicates_dir.mkdir, parents=True, exist_ok=True)
                     await dedup_manager.finalize_report(
-                        groups, duplicates_dir, exact_moved, version_resolved, started_at=started_at, failed_paths=failed_paths
+                        groups,
+                        duplicates_dir,
+                        exact_moved,
+                        version_resolved,
+                        started_at=started_at,
+                        failed_paths=failed_paths,
+                        report_dir=report_dir,
                     )
                 except OSError as exc:
                     self.logger.warning(f"No se pudo persistir el histórico de deduplicación tras un aborto: {exc}")

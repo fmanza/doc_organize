@@ -53,11 +53,13 @@ class ProjectHistoryCleaner:
     def __init__(self) -> None:
         self.logger = get_logger(__name__)
 
-    async def clear(self, project: Project) -> None:
+    async def clear(self, project: Project, *, state_root: Path | None = None) -> None:
         """Borra todo el contenido de `project.root_path` y regenera `project.json`.
 
         Args:
             project: Proyecto cuyo histórico se vacía.
+            state_root: Raíz de estado separada del proyecto (L-5, `ProjectLayout.state_root`): su contenido
+                (caché, historial, errores, informes) también se borra. Por defecto el estado vive en la propia raíz.
 
         Raises:
             ProjectError: Si `project.root_path` no existe, o si algún elemento
@@ -73,6 +75,13 @@ class ProjectHistoryCleaner:
                 await asyncio.to_thread(_remove_entry, entry)
             except OSError as exc:
                 raise ProjectError(f"No se pudo eliminar '{entry}' del histórico del proyecto: {exc}") from exc
+
+        if state_root is not None and Path(state_root).resolve() != root.resolve() and Path(state_root).is_dir():
+            for entry in await asyncio.to_thread(list, Path(state_root).iterdir()):
+                try:
+                    await asyncio.to_thread(_remove_entry, entry)
+                except OSError as exc:
+                    raise ProjectError(f"No se pudo eliminar '{entry}' del estado del proyecto: {exc}") from exc
 
         await asyncio.to_thread(
             (root / "project.json").write_text,

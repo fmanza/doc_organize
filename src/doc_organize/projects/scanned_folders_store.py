@@ -16,9 +16,8 @@ from doc_organize.core.exceptions import (
     ScannedFolderNotFoundError,
 )
 from doc_organize.core.models import Project, ScannedFolder
+from doc_organize.projects.layout import ProjectLayout
 from doc_organize.utils.logging import get_logger
-
-_FILE_NAME = "scanned_folders.json"
 
 
 class ScannedFoldersStore:
@@ -54,9 +53,14 @@ class ScannedFoldersStore:
         False
     """
 
-    def __init__(self) -> None:
+    def __init__(self, registry_path: Path | None = None) -> None:
+        """Args:
+        registry_path: Fichero del registro (L-5). Por defecto, `scanned_folders.json` en la raíz del proyecto;
+            un consumidor que separa el estado pasa `ProjectLayout.scanned_folders_json`.
+        """
         self.logger = get_logger(__name__)
         self._lock = asyncio.Lock()
+        self._fixed_path = registry_path
 
     async def list_folders(self, project: Project) -> list[ScannedFolder]:
         """Lista las carpetas guardadas de `project`, más recientes primero."""
@@ -131,7 +135,9 @@ class ScannedFoldersStore:
             await self._save(project, list(by_path.values()))
 
     def _registry_path(self, project: Project) -> Path:
-        return Path(project.root_path) / _FILE_NAME
+        if self._fixed_path is not None:
+            return self._fixed_path
+        return ProjectLayout.for_project(project).scanned_folders_json
 
     async def _load(self, project: Project) -> list[ScannedFolder]:
         registry_path = self._registry_path(project)
