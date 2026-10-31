@@ -1,7 +1,10 @@
 name: CI
 
+# La suite corre en cada PR y una vez en el commit de develop que resulta del squash. Ni las ramas de trabajo (ya la
+# corre su PR) ni main (avanza por fast-forward a un commit de develop que ya la pasó) la repiten.
 on:
   push:
+    branches: [develop]
   pull_request:
   workflow_dispatch:
 

@@ -6,6 +6,11 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+### Changed
+
+- CI: `tests.yml` corre en los PR y en `develop`, no en cada push ni en `main`. PR fusionados con squash y release por
+  fast-forward de `main` al commit de `develop` con el CI en verde (`SHARED_INSTRUCTIONS.md` § «Ramas y publicación»).
+
 ## [0.10.0] - 2026-10-31
 
 API pública estable para consumidores externos (separación librería/web, tareas L-1…L-6 y L-13b del plan de
