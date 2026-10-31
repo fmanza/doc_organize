@@ -111,7 +111,7 @@ class MkDocsGenerator:
         mkdocs_bin = await asyncio.to_thread(shutil.which, "mkdocs")
         if mkdocs_bin is None:
             self.logger.warning(
-                f"mkdocs no está instalado en este entorno (extra 'docs') — '{mkdocs_yml_path}' escrito, pero sin sitio navegable en disco."
+                f"mkdocs no está instalado en este entorno (extra 'site') — '{mkdocs_yml_path}' escrito, pero sin sitio navegable en disco."
             )
             return False
 

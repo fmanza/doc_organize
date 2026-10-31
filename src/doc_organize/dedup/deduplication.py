@@ -3,6 +3,7 @@ Deduplicacion y resolucion de conflictos de version (REQ-005).
 """
 
 import asyncio
+import hashlib
 import shutil
 import uuid
 
@@ -14,7 +15,7 @@ import numpy as np
 from rapidfuzz import fuzz, process, utils
 
 from doc_organize.core.constants import DEDUP_HISTORY_JSONL_NAME, DEDUP_REPORT_JSON_NAME, VERSION_SUFFIX_PATTERN
-from doc_organize.core.models import DeduplicationReport, DocumentMetadata, DuplicateGroup, DuplicateReason
+from doc_organize.core.models import DeduplicationReport, DedupMode, DocumentMetadata, DuplicateGroup, DuplicateReason
 from doc_organize.utils.logging import get_logger
 from doc_organize.utils.path_utils import safe_path_join
 
@@ -109,7 +110,7 @@ class DeduplicationManager:
         self.logger.info(f"Deduplicación: {len(groups)} grupos detectados sobre {len(docs)} documentos")
         return groups
 
-    async def move_group(self, group: DuplicateGroup, duplicates_dir: Path) -> tuple[int, int, list[str]]:
+    async def move_group(self, group: DuplicateGroup, duplicates_dir: Path, *, mode: DedupMode = "move") -> tuple[int, int, list[str]]:
         """Mueve los documentos descartados de un único `group` a `duplicates_dir`.
 
         Devuelve `(duplicados_exactos_movidos, conflictos_de_version_resueltos,
@@ -127,16 +128,25 @@ class DeduplicationManager:
         cascada, el resto del lote) por un único fichero -- mismo criterio que
         `DocumentConverter.convert_document()` aísla un documento del resto del
         batch de conversión.
+
+        `mode` (L-6): `move` (por defecto, como siempre), `copy` (copia a `duplicates_dir` sin tocar el origen, apto
+        para orígenes de solo lectura) o `report_only` (no toca ningún fichero; los descartados solo se cuentan).
         """
         keep = group.user_choice or group.canonical_doc
         to_move = [doc for doc in [group.canonical_doc, *group.duplicates] if doc.full_path != keep.full_path]
         moved = 0
         failed_paths: list[str] = []
         for doc in to_move:
+            if mode == "report_only":
+                moved += 1
+                continue
             try:
-                await self._move_to_duplicates(Path(doc.full_path), duplicates_dir, doc.sha256_hash)
+                if mode == "copy":
+                    await self._move_to_duplicates(Path(doc.full_path), duplicates_dir, doc.sha256_hash, copy=True)
+                else:
+                    await self._move_to_duplicates(Path(doc.full_path), duplicates_dir, doc.sha256_hash)
             except OSError as exc:
-                self.logger.warning(f"No se pudo mover '{doc.full_path}' a duplicados: {exc}")
+                self.logger.warning(f"No se pudo {'copiar' if mode == 'copy' else 'mover'} '{doc.full_path}' a duplicados: {exc}")
                 failed_paths.append(doc.full_path)
                 continue
             moved += 1
@@ -152,6 +162,8 @@ class DeduplicationManager:
         version_resolved: int,
         started_at: datetime | None = None,
         failed_paths: list[str] | None = None,
+        report_dir: Path | None = None,
+        mode: DedupMode = "move",
     ) -> DeduplicationReport:
         """Construye el `DeduplicationReport` de una resolución ya completada
         (todos los grupos ya movidos vía `move_group`), escribe
@@ -173,10 +185,17 @@ class DeduplicationManager:
         Escanear. Si se omite, `DeduplicationReport.duration_seconds` queda en
         `None` (sin dato) en vez de medir solo el movimiento de ficheros, que
         sería una duración parcial engañosa.
+
+        `report_dir` (L-5) separa el estado de las salidas: `DEDUP_REPORT.json` y
+        `DEDUP_HISTORY.jsonl` se escriben ahí en lugar de en `duplicates_dir` (por
+        defecto). Ver `ProjectLayout.dedup_report_dir`.
         """
         finished_at = datetime.now(UTC)
-        audit_path = duplicates_dir / DEDUP_REPORT_JSON_NAME
+        target_dir = report_dir if report_dir is not None else duplicates_dir
+        await asyncio.to_thread(target_dir.mkdir, parents=True, exist_ok=True)
+        audit_path = target_dir / DEDUP_REPORT_JSON_NAME
         report = DeduplicationReport(
+            mode=mode,
             timestamp=finished_at.isoformat(),
             total_exact_duplicates=exact_moved,
             total_version_conflicts=version_resolved,
@@ -188,10 +207,18 @@ class DeduplicationManager:
             groups=groups,
         )
         await asyncio.to_thread(audit_path.write_text, report.model_dump_json(indent=2), encoding="utf-8")
-        await self._append_to_history(duplicates_dir, report)
+        await self._append_to_history(target_dir, report)
         return report
 
-    async def resolve_duplicates(self, groups: list[DuplicateGroup], duplicates_dir: Path, started_at: datetime | None = None) -> DeduplicationReport:
+    async def resolve_duplicates(
+        self,
+        groups: list[DuplicateGroup],
+        duplicates_dir: Path,
+        started_at: datetime | None = None,
+        *,
+        report_dir: Path | None = None,
+        mode: DedupMode = "move",
+    ) -> DeduplicationReport:
         """Mueve los documentos descartados de cada grupo a `duplicates_dir`,
         preservando su estructura de directorios original, y escribe
         `DEDUP_REPORT.json` (solo el último run) y añade una línea a
@@ -204,20 +231,37 @@ class DeduplicationManager:
         eventos de progreso entre medias.
 
         `started_at` es opcional, ver `finalize_report()`.
+
+        Aplica **solo** los `groups` recibidos (p. ej. los confirmados de una vista previa de `find_duplicates`, que se
+        identifican por su `group_id` estable). `mode`: ver `move_group` (L-6); con `report_only` no se crea
+        `duplicates_dir` ni se toca ningún fichero, solo se escribe el informe.
         """
         duplicates_dir = Path(duplicates_dir)
-        await asyncio.to_thread(duplicates_dir.mkdir, parents=True, exist_ok=True)
+        if mode != "report_only":
+            await asyncio.to_thread(duplicates_dir.mkdir, parents=True, exist_ok=True)
 
         exact_moved = 0
         version_resolved = 0
         failed_paths: list[str] = []
         for group in groups:
-            exact, version, group_failed = await self.move_group(group, duplicates_dir)
+            # Con el modo por defecto, la misma llamada que antes de L-6 (compatibilidad con quien sustituye move_group).
+            exact, version, group_failed = await (
+                self.move_group(group, duplicates_dir) if mode == "move" else self.move_group(group, duplicates_dir, mode=mode)
+            )
             exact_moved += exact
             version_resolved += version
             failed_paths.extend(group_failed)
 
-        report = await self.finalize_report(groups, duplicates_dir, exact_moved, version_resolved, started_at, failed_paths=failed_paths)
+        report = await self.finalize_report(
+            groups,
+            duplicates_dir,
+            exact_moved,
+            version_resolved,
+            started_at,
+            failed_paths=failed_paths,
+            report_dir=report_dir,
+            mode=mode,
+        )
         self.logger.info(
             f"Deduplicación resuelta: {exact_moved} duplicados exactos, {version_resolved} conflictos de versión"
             + (f", {len(failed_paths)} fallidos" if failed_paths else "")
@@ -304,18 +348,28 @@ class DeduplicationManager:
         return [DeduplicationManager._build_group(members, DuplicateReason.FUZZY_NAME_MATCH) for members in components.values() if len(members) > 1]
 
     @staticmethod
+    def stable_group_id(docs: list[DocumentMetadata], reason: DuplicateReason) -> str:
+        """Id del grupo derivado de su razón y de las rutas y hashes de sus miembros (L-6).
+
+        Estable entre ejecuciones mientras el grupo no cambie: un consumidor puede pedir confirmación sobre una vista
+        previa y aplicar después solo los grupos confirmados. Tiene forma de UUID.
+        """
+        material = "\n".join([reason.value, *sorted(f"{doc.full_path}|{doc.sha256_hash}" for doc in docs)])
+        return str(uuid.UUID(hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]))
+
+    @staticmethod
     def _build_group(docs: list[DocumentMetadata], reason: DuplicateReason) -> DuplicateGroup:
         canonical = min(docs, key=lambda d: d.modified_time)
         duplicates = [doc for doc in docs if doc.full_path != canonical.full_path]
         return DuplicateGroup(
-            group_id=str(uuid.uuid4()),
+            group_id=DeduplicationManager.stable_group_id(docs, reason),
             canonical_doc=canonical,
             duplicates=duplicates,
             reason=reason,
             user_choice=None,
         )
 
-    async def _move_to_duplicates(self, source: Path, duplicates_dir: Path, sha256_hash: str) -> None:
+    async def _move_to_duplicates(self, source: Path, duplicates_dir: Path, sha256_hash: str, *, copy: bool = False) -> None:
         """Mueve `source` replicando su ruta absoluta (salvo la unidad/raiz)
         bajo `duplicates_dir`; si el destino ya existe, se le añade un
         sufijo con el hash para no sobrescribir nunca en silencio.
@@ -338,7 +392,10 @@ class DeduplicationManager:
                 )
 
         await asyncio.to_thread(target.parent.mkdir, parents=True, exist_ok=True)
-        await asyncio.to_thread(shutil.move, str(resolved_source), str(target))
+        if copy:
+            await asyncio.to_thread(shutil.copy2, str(resolved_source), str(target))
+        else:
+            await asyncio.to_thread(shutil.move, str(resolved_source), str(target))
 
 
 __all__ = ["DeduplicationManager"]

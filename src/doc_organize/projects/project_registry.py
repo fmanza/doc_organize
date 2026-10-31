@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import shutil
+import warnings
 
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +24,16 @@ from doc_organize.utils.path_utils import safe_path_join
 from doc_organize.validators.project_validator import ProjectValidator
 
 _DEFAULT_REGISTRY_PATH = Path.home() / ".doc_organize" / "projects.json"
+
+
+def _warn_if_tenant(tenant_id: str) -> None:
+    """``tenant_id`` está obsoleto (L-6c): los tenants los gestiona doc_organize_web en su BD; se retira en 1.0.0."""
+    if tenant_id != "default":
+        warnings.warn(
+            "El parámetro tenant_id de ProjectRegistry está obsoleto y se retirará en doc_organize 1.0.0",
+            DeprecationWarning,
+            stacklevel=3,
+        )
 
 
 class ProjectRegistry:
@@ -99,6 +110,7 @@ class ProjectRegistry:
                 colisiona.
             ProjectError: Si `base_location` no existe/no es carpeta, o falla la creación.
         """
+        _warn_if_tenant(tenant_id)
         validation = self._validator.validate_name(name)
         if not validation.is_valid or validation.normalized_name is None:
             raise ProjectNameError("; ".join(validation.warnings))
@@ -152,6 +164,7 @@ class ProjectRegistry:
 
     async def list_projects(self, tenant_id: str = "default") -> list[Project]:
         """Lista los proyectos de `tenant_id` (no verifica que sus carpetas sigan existiendo)."""
+        _warn_if_tenant(tenant_id)
         async with self._lock:
             projects = await self._load()
         return [p for p in projects if p.tenant_id == tenant_id]
@@ -166,6 +179,7 @@ class ProjectRegistry:
         Raises:
             ProjectNotFoundError: Si no hay ningún proyecto con ese nombre en `tenant_id`.
         """
+        _warn_if_tenant(tenant_id)
         async with self._lock:
             projects = await self._load()
         for project in projects:
@@ -202,6 +216,7 @@ class ProjectRegistry:
             >>> asyncio.run(main())
             []
         """
+        _warn_if_tenant(tenant_id)
         async with self._lock:
             projects = await self._load()
             project = next((p for p in projects if p.name.lower() == name.lower() and p.tenant_id == tenant_id), None)
@@ -261,6 +276,7 @@ class ProjectRegistry:
             >>> asyncio.run(main())
             True
         """
+        _warn_if_tenant(tenant_id)
         destination_base = Path(destination_parent)
         if not destination_base.is_dir():
             raise ProjectError(f"La carpeta de destino no existe o no es una carpeta: {destination_parent}")

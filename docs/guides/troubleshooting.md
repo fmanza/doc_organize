@@ -185,8 +185,8 @@ No debería — el logout es selectivo: solo invalida la sesión de la pestaña/
 dispositivo desde la que se pide. Si observas lo contrario, es un bug; abre un
 issue con los pasos para reproducirlo.
 
-## `mkdocs build` falla por links rotos
+## `zensical build --strict` falla por links rotos
 
-Añadiste una página nueva a `docs/` sin registrarla en `nav:` de `mkdocs.yml` (o
-al revés). `mkdocs build` valida todos los enlaces internos — corrige el `nav:`
+Añadiste una página nueva a `docs/` sin registrarla en `nav` de `zensical.toml` (o
+al revés). `zensical build --strict` valida todos los enlaces internos — corrige el `nav`
 o la ruta del fichero referenciado.

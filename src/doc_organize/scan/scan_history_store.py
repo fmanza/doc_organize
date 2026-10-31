@@ -28,8 +28,7 @@ async def append_scan_run(history_path: Path, report: ScanRunReport) -> None:
     """Añade `report` como una línea JSON a `history_path` (crea la carpeta
     contenedora si falta). Mismo patrón que `ScanCommand._persist_error_report`:
     el llamador ya resuelve la ruta completa (p. ej.
-    `project_root / SCAN_HISTORY_FOLDER_NAME / SCAN_HISTORY_JSONL_NAME`), esta
-    función solo la escribe.
+    `ProjectLayout.scan_history_log`), esta función solo la escribe.
 
     Example:
         >>> import asyncio, tempfile

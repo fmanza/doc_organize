@@ -50,9 +50,8 @@
 ## Documentación
 
 - Docstrings Google-style con ejemplo de uso en todo módulo público
-- `mkdocs build --strict` debe pasar sin errores ni warnings de links rotos — comando de validación
-  real (ver `.github/instructions/sync.instructions.md`); **no** `zensical build` (binario no
-  declarado como dependencia en este proyecto)
+- `zensical build --strict` debe pasar sin errores ni warnings de links rotos — comando de validación
+  real desde 0.10.0 (`zensical.toml`; ver `.ai/DECISIONS_LOG.md` revisión 17)
 - `docs/api/index.md` genera referencia desde los docstrings vía `mkdocstrings`, no se duplica a mano
 
 ## Verificación de este documento
@@ -61,5 +60,5 @@
 python -m ruff check src tests   → All checks passed
 python -m mypy src                → Success: no issues found in 40 source files
 python -m pytest                   → 182 passed, 97% cobertura
-mkdocs build --strict               → exit 0
+zensical build --strict             → exit 0
 ```

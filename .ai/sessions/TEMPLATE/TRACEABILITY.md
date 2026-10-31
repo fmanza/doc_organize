@@ -49,7 +49,7 @@ Checklist de validación antes de cerrar (sync.instructions.md §6):
 python -m ruff check src tests
 python -m mypy src
 python -m pytest
-mkdocs build --strict     # si se tocó docs/ o mkdocs.yml
+zensical build --strict   # si se tocó docs/ o zensical.toml
 ```
 
 ---

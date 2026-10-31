@@ -40,8 +40,8 @@ python -m ruff format src tests      # format
 python -m mypy src                   # type-check
 python -m pytest                     # todos los tests
 python -m build                      # build package
-mkdocs serve                         # documentación local (http://127.0.0.1:8000)
-mkdocs build                         # genera sitio estático en /site
+zensical serve                       # documentación local (http://127.0.0.1:8000)
+zensical build --strict              # genera sitio estático en /site
 ```
 
 ---
@@ -69,13 +69,13 @@ chore:    mantenimiento
 - ✅ Cambio de API pública → actualizar guías
 - ✅ Refactor con breaking changes → guía de migración
 
-### MkDocs — cuándo actualizar
+### Zensical — cuándo actualizar
 
-- ✅ Módulo o clase pública nueva → añadir entry en `mkdocs.yml` bajo `nav:`
-- ✅ Antes de cerrar una versión → `mkdocs build` debe pasar sin errores ni warnings de links rotos
-- ✅ Verificar localmente con `mkdocs serve` antes de publicar
+- ✅ Módulo o clase pública nueva → añadir entry en `zensical.toml` en el `nav`
+- ✅ Antes de cerrar una versión → `zensical build --strict` debe pasar sin errores ni warnings de links rotos
+- ✅ Verificar localmente con `zensical serve` antes de publicar
 
-**Bloquea PR/release**: `mkdocs build` falla o tiene links rotos.
+**Bloquea PR/release**: `zensical build --strict` falla o tiene links rotos.
 
 ### Estándares de Docstrings (Google-style)
 

@@ -13,7 +13,7 @@ from datetime import date
 import httpx
 
 from doc_organize.ai._http_client_base import AiHttpClientBase
-from doc_organize.auth import InstanceSecretsStore
+from doc_organize.ai._secrets import SecretValueReader, warn_store_config_deprecated
 from doc_organize.core.exceptions import UsageSourceAuthError, UsageSourceConnectionError, UsageSourceError
 from doc_organize.core.models import LiteLLMUsageConfig, UsageLineItem, UsageSnapshot, UsageSourceName
 from doc_organize.utils.logging import get_logger
@@ -47,7 +47,7 @@ def litellm_usage_config_from_env() -> LiteLLMUsageConfig:
     return LiteLLMUsageConfig(base_url=base_url, virtual_key=virtual_key)
 
 
-async def litellm_usage_config_from_store_or_env(store: InstanceSecretsStore) -> LiteLLMUsageConfig:
+async def litellm_usage_config_from_store_or_env(store: SecretValueReader) -> LiteLLMUsageConfig:
     """Construye `LiteLLMUsageConfig` con precedencia `store` (panel de configuración IA) >
     `DOC_ORGANIZE_LITELLM_BASE_URL`/`_VIRTUAL_KEY` del entorno.
 
@@ -59,6 +59,7 @@ async def litellm_usage_config_from_store_or_env(store: InstanceSecretsStore) ->
     Raises:
         ValueError: Si, tras aplicar la precedencia, falta `base_url` o `virtual_key`.
     """
+    warn_store_config_deprecated("litellm_usage_config_from_store_or_env")
     base_url = await store.get(_ENV_VAR_BASE_URL.lower()) or os.environ.get(_ENV_VAR_BASE_URL)
     virtual_key = await store.get(_ENV_VAR_VIRTUAL_KEY.lower()) or os.environ.get(_ENV_VAR_VIRTUAL_KEY)
     if not base_url or not virtual_key:

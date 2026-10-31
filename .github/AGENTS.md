@@ -70,7 +70,7 @@ Registro de agentes especializados en `.github/agents/` para orquestación del f
 ### 6b. **Documentation Generator** (`documentation-generator.agent.md`) ⭐ **NUEVO**
 - **Propósito**: GENERAR documentación funcional y técnica con diagramas Mermaid para módulos de doc_organize
 - **Entrada**: Módulo Python objetivo, tipo (`functional` | `technical` | `both`), directorio destino
-- **Salida**: Archivos `.md` en `docs/` + entrada sugerida para `mkdocs.yml`
+- **Salida**: Archivos `.md` en `docs/` + entrada sugerida para `zensical.toml`
 - **Herramientas**: read, write, search
 - **Invocable**: Sí (generación activa, escribe archivos)
 - **Diferencia con Reviewer**: Reviewer audita, Generator crea contenido nuevo
@@ -108,7 +108,7 @@ Registro de agentes especializados en `.github/agents/` para orquestación del f
 - **Validación requerida**: Revisar `.github/instructions/sync.instructions.md`
   - CHANGELOG.md ↔ docs/CHANGELOG.md sincronizados
   - .ai/COMPATIBILITY.md ↔ docs/COMPATIBILITY.md sincronizados
-  - `mkdocs build` pasa sin errores
+  - `zensical build --strict` pasa sin errores
 - **Herramientas**: read, search
 - **Invocable**: Sí (final de sesión)
 

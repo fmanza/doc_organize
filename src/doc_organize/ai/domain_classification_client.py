@@ -19,7 +19,7 @@ from typing import Any
 import httpx
 
 from doc_organize.ai._http_client_base import AiHttpClientBase
-from doc_organize.auth import InstanceSecretsStore
+from doc_organize.ai._secrets import SecretValueReader, warn_store_config_deprecated
 from doc_organize.core.exceptions import DomainClassificationAuthError, DomainClassificationConnectionError, DomainClassificationError
 from doc_organize.core.models import DomainClassificationResult, LiteLLMClassificationConfig
 from doc_organize.utils.logging import get_logger
@@ -65,7 +65,7 @@ def litellm_classification_config_from_env() -> LiteLLMClassificationConfig:
     return LiteLLMClassificationConfig(base_url=base_url, virtual_key=virtual_key, **({"model": model} if model else {}))
 
 
-async def litellm_classification_config_from_store_or_env(store: InstanceSecretsStore) -> LiteLLMClassificationConfig:
+async def litellm_classification_config_from_store_or_env(store: SecretValueReader) -> LiteLLMClassificationConfig:
     """Construye `LiteLLMClassificationConfig` con precedencia `store` (panel de
     configuración IA) > `DOC_ORGANIZE_LITELLM_CLASSIFICATION_*` del entorno.
 
@@ -85,6 +85,7 @@ async def litellm_classification_config_from_store_or_env(store: InstanceSecrets
     Example:
         >>> config = await litellm_classification_config_from_store_or_env(store)  # doctest: +SKIP
     """
+    warn_store_config_deprecated("litellm_classification_config_from_store_or_env")
     base_url = await store.get(_ENV_VAR_BASE_URL.lower()) or os.environ.get(_ENV_VAR_BASE_URL)
     virtual_key = await store.get(_ENV_VAR_VIRTUAL_KEY.lower()) or os.environ.get(_ENV_VAR_VIRTUAL_KEY)
     if not base_url or not virtual_key:

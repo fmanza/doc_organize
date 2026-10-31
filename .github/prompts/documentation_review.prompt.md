@@ -15,7 +15,7 @@
 - Changelog y release notes
 - Cross-references y linkability
 - Consistencia de lenguaje y tone
-- `mkdocs.yml`: navegación, páginas inexistentes, páginas huérfanas, tema Material, Mermaid
+- `zensical.toml`: navegación, páginas inexistentes, páginas huérfanas, tema Material, Mermaid
 - Prompts e instrucciones IA de documentación en `.github/prompts/`, `.github/agents/` y `.github/instructions/`
 - Separación clara entre documentación funcional, técnica y ejemplos
 
@@ -27,7 +27,7 @@
 - APIs sin type hints o sin documentación de parámetros/return/excepciones
 - Ejemplos rotos u obsoletos
 - Instalación no documentada
-- `mkdocs.yml` referencia páginas inexistentes o excluye páginas necesarias para onboarding
+- `zensical.toml` referencia páginas inexistentes o excluye páginas necesarias para onboarding
 
 ### Nivel 2: Alto
 - Features principales sin ejemplos
@@ -51,7 +51,7 @@
 - Sugiere formato y contenido mínimo para cerrar gaps.
 - Etiqueta claramente ejemplos faltantes y ubicación sugerida.
 - Verifica ejemplos en `docs/examples/` y docstrings en módulos `__init__.py` y archivos públicos.
-- Verifica que cada página nueva o existente esté publicada o excluida intencionalmente en `mkdocs.yml`.
+- Verifica que cada página nueva o existente esté publicada o excluida intencionalmente en `zensical.toml`.
 - Comprueba que Mermaid se use en bloques fenced y sin detalles sensibles.
 - Señala si se propone un único prompt masivo para todo el proyecto; recomienda dividir en fases.
 - Excluye por el momento recomendaciones para generación mediante APIs externas.
@@ -60,8 +60,8 @@
 
 Incluye estas subsecciones dentro de `AUDIT_CODE`:
 
-### MkDocs y navegación
-- Estado de `mkdocs.yml`
+### Zensical y navegación
+- Estado de `zensical.toml`
 - Páginas huérfanas o rotas
 - Secciones funcional/técnica/ejemplos
 
@@ -76,7 +76,7 @@ Devuelve el resultado en este orden y con estas secciones:
 
 ### PLAN
 - Alcance de la revisión (módulo concreto o proyecto completo)
-- Fuentes consultadas: README, `docs/`, `docs/examples/`, docstrings, `mkdocs.yml`, prompts IA
+- Fuentes consultadas: README, `docs/`, `docs/examples/`, docstrings, `zensical.toml`, prompts IA
 - Criterio de priorización: Nivel 1 > Nivel 2 > Nivel 3
 
 ### AUDIT_PLAN
@@ -99,8 +99,8 @@ Incluye las subsecciones:
 - Ejemplos existentes: ubicación, completitud, reproducibilidad
 - Módulos principales sin ejemplo verificable
 
-#### MkDocs y navegación
-- Estado de `mkdocs.yml` (separación funcional/técnica/ejemplos)
+#### Zensical y navegación
+- Estado de `zensical.toml` (separación funcional/técnica/ejemplos)
 - Páginas huérfanas (en disco, no en nav)
 - Páginas rotas (en nav, no en disco)
 

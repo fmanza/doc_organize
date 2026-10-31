@@ -18,11 +18,11 @@ Estandarizar instrucciones de documentación para asegurar:
 
 ## 2. Estado Actual
 
-### 2.1 Estructura MkDocs
-- **Site**: `mkdocs.yml` (v1.5+, Material theme)
+### 2.1 Estructura Zensical
+- **Site**: `zensical.toml` (v1.5+, Material theme)
 - **Webs de referencia oficial** (consultar con `--verify-tools` para validar versiones y plugins):
-  - MkDocs: `https://www.mkdocs.org/about/release-notes/`
-  - Material for MkDocs: `https://squidfunk.github.io/mkdocs-material/plugins/`
+  - Zensical: `https://zensical.org`
+  - Zensical: `https://squidfunk.github.io/zensical/plugins/`
 - **Secciones existentes**:
   - ✅ Guías (DUPLICATE_PROJECT_GUIDE, NEXT_STEPS, README_DUPLICADOR, ARCHITECTURE_VISUAL)
   - ✅ Funcional (`docs/functional/`) — 8 módulos
@@ -244,7 +244,7 @@ Documenta **una decisión concreta con trade-offs**, no la visión global del si
 
 **Prompt**: `.github/prompts/landing_doc.prompt.md` (tres variantes A/B/C, 5 secciones cada una).
 
-Estas páginas entran directamente en `nav:` (nivel raíz), no bajo `functional/`, `api/`, `examples/` ni `adr/`:
+Estas páginas entran directamente en `nav` (nivel raíz), no bajo `functional/`, `api/`, `examples/` ni `adr/`:
 
 - **Variante A — Inicio**: Identidad y Propósito → Capacidades → Quick Start → Mapa de la Documentación → Compatibilidad y Soporte.
 - **Variante B — Instalación**: Requisitos → Instalación del Paquete → Drivers por Motor → Verificación → Solución de Problemas.
@@ -349,7 +349,7 @@ Tabla: | Norma | Objeto | Cobertura en el sistema |
 | ❌ | Gap — no implementado o sin documentación verificable |
 | 🔍 | A verificar — evidencia insuficiente para determinar cobertura |
 
-**Sección MkDocs** (solo si el arquetipo aplica):
+**Sección Zensical** (solo si el arquetipo aplica):
 
 ```yaml
 - Normativa:                                                     # Entre "Funcional" y "Arquitectura"
@@ -402,7 +402,7 @@ Esta sección define el contrato mínimo y las reglas de nomenclatura para **tod
 | Aplicación con servidor (dpss) | `despliegue_docker.md` o `deployment_guide.md` |
 | Cualquier proyecto con herramientas IA | Subsección "Herramientas IA" en Guías: claude_code_guide.md, codex_guide.md, etc. |
 
-#### Estructura de la sección en `mkdocs.yml`
+#### Estructura de la sección en `zensical.toml`
 
 ```yaml
 - Guías:
@@ -424,7 +424,7 @@ Esta sección define el contrato mínimo y las reglas de nomenclatura para **tod
 
 ---
 
-## 4. Configuración Recomendada mkdocs.yml
+## 4. Configuración Recomendada zensical.toml
 
 La siguiente configuración es la **referencia estándar** para todos los proyectos.
 Adapta los valores de `site_*`, `extra.version` y `nav` a cada proyecto; el resto es la base común.
@@ -543,7 +543,7 @@ nav:
 ### 4.2 Navegación de doc_organize (Implementación Actual)
 
 Mapeo concreto del proyecto sobre la estructura anterior.
-La fuente canónica de la navegación es siempre `mkdocs.yml`; este bloque refleja
+La fuente canónica de la navegación es siempre `zensical.toml`; este bloque refleja
 los grupos principales como referencia rápida:
 
 ```yaml
@@ -558,7 +558,7 @@ nav:
       - Arquitectura y referencia: api/index.md
 ```
 
-Estado real (verificado con `mkdocs build --strict`, ver `.ai/CURRENT_STATE.md`). Si el árbol de
+Estado real (verificado con `zensical build --strict`, ver `.ai/CURRENT_STATE.md`). Si el árbol de
 módulos crece, `Funcionalidad`/`API` pueden subdividirse en subsecciones (una por módulo real de
 `src/doc_organize/`), siguiendo el mismo patrón que `§4.1` — nunca copiar aquí una jerarquía de otro
 proyecto sin verificarla contra el código actual.
@@ -588,12 +588,12 @@ proyecto sin verificarla contra el código actual.
 
 | Fase | Agente | Tarea | Entrada | Salida |
 |------|--------|-------|---------|--------|
-| **1. Planificación** | `Plan Architect` | Validar estructura actual vs propuesta | `mkdocs.yml` + código fuente | `PLAN` + `AUDIT_PLAN` |
+| **1. Planificación** | `Plan Architect` | Validar estructura actual vs propuesta | `zensical.toml` + código fuente | `PLAN` + `AUDIT_PLAN` |
 | **2. Validación IA** | `config-reviewer` | Revisar coherencia en `CLAUDE.md`, `copilot-instructions.md` | Archivos IA | Findings + recomendaciones |
 | **3. Exploración** | `Explore` | Mapear módulos existentes vs faltantes | `src/`, `docs/` | Matriz de cobertura |
-| **4. Generación** | `documentation-generator` | Crear/actualizar docs funcional + técnica | Código fuente + prompts | Archivos en `docs/` + `mkdocs.yml` |
+| **4. Generación** | `documentation-generator` | Crear/actualizar docs funcional + técnica | Código fuente + prompts | Archivos en `docs/` + `zensical.toml` |
 | **5. Auditoría** | `documentation-reviewer` | Validar completitud, ejemplos, coherencia | Docs generadas | Findings + mejoras |
-| **6. Verificación de config** (opt-in `--verify-tools`) | `documentation-generator` | Fetch webs oficiales — validar plugins y versiones en `mkdocs.yml` | Config + webs MkDocs/PyPI | Discrepancias por severidad |
+| **6. Verificación de config** (opt-in `--verify-tools`) | `documentation-generator` | Fetch webs oficiales — validar plugins y versiones en `zensical.toml` | Config + webs Zensical/PyPI | Discrepancias por severidad |
 | **6b. Verificación de build** (opt-in `--verify-build`) | `documentation-generator` | Build + inspección HTML generado — alias bug, snippets, Mermaid, nav | `site/` (Modo A) o `localhost:8000` (Modo B `--serve`) | Hallazgos por página + acciones recomendadas |
 | **7. Cierre** | `Version Closer` | Sincronizar `CHANGELOG.md` + `COMPATIBILITY.md` | Cambios completados | Release notes |
 
@@ -604,7 +604,7 @@ proyecto sin verificarla contra el código actual.
 | `documentation-generator` | Generar docs por primera vez o actualizar módulo completo | `/new-feature "generar doc [módulo]"` | `src/` → `docs/` |
 | `documentation-reviewer` | Auditar docs existentes (calidad, ejemplos, claridad) | `/audit-code` | `docs/functional/`, `docs/api/` |
 | `config-reviewer` | Sincronizar instrucciones IA entre archivos de configuración | `/config-review` | `CLAUDE.md`, `copilot-instructions.md` |
-| `Plan Architect` | Cambio estructural en `mkdocs.yml` o nuevo módulo importante | `/new-feature` o `/refactor` | `mkdocs.yml` |
+| `Plan Architect` | Cambio estructural en `zensical.toml` o nuevo módulo importante | `/new-feature` o `/refactor` | `zensical.toml` |
 
 ---
 
@@ -612,8 +612,8 @@ proyecto sin verificarla contra el código actual.
 
 ### Restricciones Generales
 
-- ✅ **MkDocs v1.5+** — No usar versiones antiguas, usar Material theme
-- ✅ **Diagramas Mermaid** — Agnóstico a Graphviz, integrado en mkdocs
+- ✅ **Zensical v1.5+** — No usar versiones antiguas, usar Material theme
+- ✅ **Diagramas Mermaid** — Agnóstico a Graphviz, integrado en Zensical
 - ✅ **Lenguaje agnóstico** — Ejemplos Python en carpetas separadas si hay múltiples lenguajes
 - ✅ **NO inventar código** — Todos los ejemplos deben validarse contra `src/`
 - ✅ **Encoding UTF-8** — Todos los archivos markdown
@@ -629,15 +629,15 @@ proyecto sin verificarla contra el código actual.
    - Funcional: `docs/functional/[módulo].md`
    - Técnica: `docs/api/[módulo].md`
    - Ejemplos: `docs/examples/[caso].md` (ficheros **planos en disco**, sin subcarpetas por tipo).
-     En `nav:` **se agrupan en subsecciones por área funcional**, igual que `Referencia Técnica`
+     En `nav` **se agrupan en subsecciones por área funcional**, igual que `Referencia Técnica`
      y `Documentación Funcional` (ver `docs.instructions.md` → "Agrupación en subsecciones por área").
    - Guías: `docs/guides/[nombre].md` (ficheros en carpeta `guides/`, **nombre siempre en minúsculas con guiones bajos**).
-     En `nav:` **se agrupan en subsecciones temáticas** (Incorporación, Conexión y Drivers, Errores y Diagnóstico,
+     En `nav` **se agrupan en subsecciones temáticas** (Incorporación, Conexión y Drivers, Errores y Diagnóstico,
      Rendimiento, Migración de Versión, Herramientas IA…), no por módulo.
 
-3. **Actualización de mkdocs.yml**: Automatizada con `mkdocstrings` + agente `documentation-generator`
+3. **Actualización de zensical.toml**: Automatizada con `mkdocstrings` + agente `documentation-generator`
 
-4. **Build CI/CD**: `mkdocs build` validado en cada PR, detecta links rotos
+4. **Build CI/CD**: `zensical build --strict` validado en cada PR, detecta links rotos
 
 5. **Versionamiento**: Sincronizar CHANGELOG.md + COMPATIBILITY.md según `.github/instructions/sync.instructions.md`
 
@@ -650,7 +650,7 @@ Los pasos corresponden 1:1 con las fases de §5.
 ### Paso 1: Planificar (20 min)
 ```text
 @Plan Architect
-Validar estructura docs/ vs mkdocs.yml real. Entregar PLAN + AUDIT_PLAN.
+Validar estructura docs/ vs zensical.toml real. Entregar PLAN + AUDIT_PLAN.
 ```
 
 ### Paso 2: Validar Configuración IA (30 min)
@@ -670,7 +670,7 @@ Mapear módulos en src/ vs docs/. Identificar faltantes. Solo lectura.
 ```text
 @documentation-generator
 Generar docs para módulo específico O proyecto completo.
-Actualiza mkdocs.yml automáticamente.
+Actualiza zensical.toml automáticamente.
 ```
 
 ### Paso 5: Auditar Documentación (30 min)
@@ -684,7 +684,7 @@ Reportar mejoras.
 ### Paso 6: Integración y Build (15 min)
 ```text
 @Code Auditor
-Ejecutar mkdocs build. Verificar links. Reportar errores de build.
+Ejecutar zensical build --strict. Verificar links. Reportar errores de build.
 ```
 
 ### Paso 7: Sincronizar Versión (20 min)
@@ -698,12 +698,12 @@ Generar release notes.
 
 La estandarización se considera **completa** cuando:
 
-- [ ] `mkdocs build --strict` finaliza sin errores ni warnings de links rotos
+- [ ] `zensical build --strict` finaliza sin errores ni warnings de links rotos
 - [ ] Todos los módulos en `src/` tienen doc funcional (`docs/functional/`) y técnica (`docs/api/`)
 - [ ] Todos los archivos referenciados en `docs/examples/` existen en disco
 - [ ] `CHANGELOG.md` y `COMPATIBILITY.md` reflejan la versión actual de `pyproject.toml`
 - [ ] Las instrucciones IA (`CLAUDE.md`, `copilot-instructions.md`) son coherentes con el código real
-- [ ] Todos los documentos en `nav:` (excepto `legacy-versions.md`) tienen exactamente las secciones numeradas de su arquetipo asignado (`index.md`, `INSTALLATION.md` y `ARCHITECTURE.md` se rigen por el Arquetipo 6)
+- [ ] Todos los documentos en `nav` (excepto `legacy-versions.md`) tienen exactamente las secciones numeradas de su arquetipo asignado (`index.md`, `INSTALLATION.md` y `ARCHITECTURE.md` se rigen por el Arquetipo 6)
 - [ ] Las secciones vacías contienen `*No aplica para este módulo.*` en lugar de estar omitidas
 - [ ] Los prompts `.github/prompts/guide_doc.prompt.md` y `example_doc.prompt.md` existen y son coherentes con Arquetipos 3 y 4
 
@@ -717,5 +717,5 @@ La estandarización se considera **completa** cuando:
 - [`.github/instructions/docs.instructions.md`](.github/instructions/docs.instructions.md) — Guía de estilo para documentación
 - [`pyproject.toml`](pyproject.toml) — Versión actual del proyecto
 - [`.ai/product.md`](.ai/product.md) — Contexto de producto
-- [`mkdocs.yml`](mkdocs.yml) — Configuración actual de MkDocs
+- [`zensical.toml`](zensical.toml) — Configuración actual de Zensical
 - [`.github/instructions/sync.instructions.md`](.github/instructions/sync.instructions.md) — Sincronización de versiones

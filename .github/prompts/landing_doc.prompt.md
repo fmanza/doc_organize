@@ -2,9 +2,9 @@
 
 Genera o actualiza las **páginas de navegación principal** de **doc_organize** —
 **Inicio**, **Instalación** y **Arquitectura**— usando solo información verificable del código,
-`pyproject.toml`, README, `mkdocs.yml`, `.github/SHARED_INSTRUCTIONS.md` y `docs/`.
+`pyproject.toml`, README, `zensical.toml`, `.github/SHARED_INSTRUCTIONS.md` y `docs/`.
 
-Estas páginas son de nivel superior (entran directamente en `nav:`, no bajo `functional/`, `api/`,
+Estas páginas son de nivel superior (entran directamente en `nav`, no bajo `functional/`, `api/`,
 `examples/` ni `adr/`). Cada una tiene su propia plantilla de 5 secciones; **elige la plantilla según
 la página solicitada** y respétala en el orden exacto.
 
@@ -17,7 +17,7 @@ Actúa como technical writer y arquitecto de software especializado en las pági
 de la documentación de una librería Python.
 
 Analiza el contexto real del repositorio. No asumas capacidades, módulos, comandos, motores
-ni outputs que no aparezcan en el código real, pyproject.toml, README, mkdocs.yml o docs/.
+ni outputs que no aparezcan en el código real, pyproject.toml, README, zensical.toml o docs/.
 
 Identifica cuál de las tres páginas debes generar y aplica SU plantilla:
 
@@ -155,7 +155,7 @@ Restricciones (todas las variantes):
 Genera/actualiza la página [Inicio | Instalación | Arquitectura] usando el
 prompt en .github/prompts/landing_doc.prompt.md (Variante A/B/C correspondiente).
 Verifica versión, extras y motores contra pyproject.toml y src/__init__.py.
-Actualiza mkdocs.yml si la página es nueva o cambia de ubicación.
+Actualiza zensical.toml si la página es nueva o cambia de ubicación.
 No inventes capacidades; marca como pendiente lo no verificable.
 ```
 
@@ -164,7 +164,7 @@ No inventes capacidades; marca como pendiente lo no verificable.
 ```
 #file:.github/prompts/landing_doc.prompt.md
 #file:pyproject.toml
-#file:mkdocs.yml
+#file:zensical.toml
 
 Genera la página [Inicio | Instalación | Arquitectura] aplicando la variante correspondiente.
 ```
@@ -173,7 +173,7 @@ Genera la página [Inicio | Instalación | Arquitectura] aplicando la variante c
 
 ## Páginas cubiertas por este arquetipo
 
-| Página | Archivo | Variante | Entrada en `nav:` |
+| Página | Archivo | Variante | Entrada en `nav` |
 |---|---|---|---|
 | Inicio | `docs/index.md` | A | `Inicio` (raíz) |
 | Instalación | `docs/INSTALLATION.md` | B | `Instalación` (raíz) |

@@ -1,5 +1,10 @@
 # ✅ Checklist: Descarga de Documentación ZIP
 
+> **Nota (2026-10-31, doc_organize 0.10.0, L-13b)**: la documentación se construye ahora con **Zensical**
+> (`zensical.toml`, `zensical build --strict`); `mkdocs.yml` y el extra de mkdocs se retiraron. El script usa
+> `python scripts/build_docs_zip.py --builder zensical` (único valor admitido). Lo que esta página diga de mkdocs,
+> plugins o `--builder mkdocs` es histórico.
+
 > **⚠️ Nota de verificación (2026-08-28)**: este checklist marca como `[x]` hecho varios artefactos
 > que **no existen en el repo real** — `docs_build_plugin.py`, el registro de entry point
 > `mkdocs.plugins` en `pyproject.toml`, y `scripts/build_docs_zip.py` (tampoco existe). El plugin

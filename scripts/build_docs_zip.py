@@ -2,7 +2,7 @@
 """Build the documentation site and package it as a ZIP for offline distribution.
 
 This script:
-1. Builds documentation using MkDocs (or alternative builder)
+1. Builds documentation using Zensical (`zensical build`)
 2. Creates a ZIP archive of the site/ directory
 3. Generates SHA256 checksums for integrity validation
 4. Maintains a CHECKSUMS.txt log for version tracking
@@ -21,7 +21,7 @@ Output:
 Examples:
     >>> # Full workflow: build docs + zip + checksums
     >>> python scripts/build_docs_zip.py
-    [build_docs_zip] Building with: /usr/bin/python -m mkdocs build --strict
+    [build_docs_zip] Building with: zensical build --strict
     [build_docs_zip] Building documentation...
     [build_docs_zip] Creating ZIP archive from site/...
     [build_docs_zip] ZIP created: doc_organize-docs-0.3.0.zip (2.45 MB)
@@ -98,14 +98,14 @@ def _build(builder: str, strict: bool) -> None:
     """Build documentation using specified builder.
 
     Args:
-        builder: Builder name ('mkdocs' or 'zensical')
+        builder: Builder name ('zensical'; mkdocs se retiró en 0.10.0, L-13b)
         strict: Whether to pass --strict flag to builder
 
     Raises:
         SystemExit: If build fails or builder not found
     """
     # Whitelist allowed builders (security: prevent shell injection)
-    allowed_builders = {"mkdocs", "zensical"}
+    allowed_builders = {"zensical"}
     if builder not in allowed_builders:
         print(
             f"[build_docs_zip] ERROR: Unknown builder '{builder}'. Allowed: {', '.join(sorted(allowed_builders))}",
@@ -114,10 +114,7 @@ def _build(builder: str, strict: bool) -> None:
         sys.exit(1)
 
     # Construct command
-    if builder == "mkdocs":
-        cmd = [sys.executable, "-m", "mkdocs", "build"]
-    else:
-        cmd = [builder, "build"]
+    cmd = [builder, "build"]
 
     if strict:
         cmd.append("--strict")
@@ -295,9 +292,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--builder",
-        choices=["mkdocs", "zensical"],
-        default="mkdocs",
-        help="Doc builder to use (default: mkdocs)",
+        choices=["zensical"],
+        default="zensical",
+        help="Doc builder to use (default: zensical)",
     )
     parser.add_argument(
         "--no-strict",

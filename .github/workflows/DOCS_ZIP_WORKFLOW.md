@@ -12,7 +12,7 @@ El workflow **`docs-zip-release.yml`** se dispara automáticamente cuando:
 2. **Manualmente** — Desde la pestaña "Actions" en GitHub UI
 
 **Tareas**:
-- 🏗️ Build documentación con MkDocs
+- 🏗️ Build documentación con Zensical
 - 📚 Generar ZIP comprimido
 - 🔐 Calcular SHA256 para integridad
 - 📤 Crear/actualizar GitHub Release
@@ -57,10 +57,10 @@ git push origin develop
    └─ Python 3.12 + cache de pip
 
 3. Install dependencies
-   └─ mkdocs, mkdocs-material, mkdocstrings
+   └─ mkdocs, zensical, mkdocstrings
 
 4. Build documentation
-   └─ mkdocs build --strict
+   └─ zensical build --strict
    └─ ✅ 150+ archivos HTML generados
 
 5. Generate ZIP + Checksums
@@ -133,7 +133,7 @@ on:
     branches: [main, develop]
     paths:
       - 'docs/**'
-      - 'mkdocs.yml'
+      - 'zensical.toml'
       - 'pyproject.toml'
       - '.github/workflows/docs-zip-release.yml'
   workflow_dispatch:  # Manual desde GitHub UI
@@ -141,7 +141,7 @@ on:
 
 **Explicación**:
 - ✅ Se ejecuta en **push a main/develop**
-- ✅ **Solo si hay cambios** en docs/, mkdocs.yml, etc.
+- ✅ **Solo si hay cambios** en docs/, zensical.toml, etc.
 - ✅ Se puede **ejecutar manualmente** sin cambios
 
 ### Permisos Necesarios
@@ -166,7 +166,7 @@ Este workflow necesita permiso de **escritura** para crear GitHub Releases.
 **Causa**: Cambios en rama no configurada o permisos insuficientes
 
 **Solución**:
-1. Verificar que cambios están en `docs/`, `mkdocs.yml`, etc.
+1. Verificar que cambios están en `docs/`, `zensical.toml`, etc.
 2. Ir a Settings → Actions → General
 3. Seleccionar "Read and write permissions" ✅
 

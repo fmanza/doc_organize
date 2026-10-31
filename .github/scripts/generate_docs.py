@@ -180,7 +180,7 @@ def write_output(results: dict[str, str], output_dir: str, module_name: str, dry
             out_path.mkdir(parents=True, exist_ok=True)
             file_path.write_text(content, encoding="utf-8")
             print(f"Generado: {file_path}")
-            print("  Entrada mkdocs.yml sugerida:")
+            print("  Entrada sugerida para el nav de zensical.toml:")
             title = stem.replace("-", " ").title()
             rel = str(file_path).replace("\\", "/").replace("docs/", "")
             print(f"      - {title}: {rel}")

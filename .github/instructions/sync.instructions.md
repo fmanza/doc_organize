@@ -4,7 +4,7 @@ applyTo: "CHANGELOG.md,docs/**,COMPATIBILITY.md,.ai/**"
 # Sincronización de versiones — CHANGELOG y COMPATIBILITY
 
 > **TL;DR** — Antes de cerrar una versión, verifica que CHANGELOG.md, docs/ y COMPATIBILITY.md
-> estén sincronizados. Ejecuta `mkdocs build` sin errores.
+> estén sincronizados. Ejecuta `zensical build --strict` sin errores.
 
 ---
 
@@ -45,11 +45,11 @@ Aplica este checklist en la fase **VERSION** de cualquier flujo:
 - [ ] `version = "X.Y.Z"` actualizado y coincide con el CHANGELOG.md
 - [ ] `requires-python = ">=3.11"` sin modificar (no incrementar sin decisión explícita)
 
-### 5. MkDocs
+### 5. Zensical
 
-- [ ] `mkdocs build` pasa sin errores ni warnings de links rotos
-- [ ] Si se crearon páginas nuevas, están en `mkdocs.yml` bajo `nav:`
-- [ ] Si se eliminaron páginas, se retiraron de `mkdocs.yml`
+- [ ] `zensical build --strict` pasa sin errores ni warnings de links rotos
+- [ ] Si se crearon páginas nuevas, están en `zensical.toml` en el `nav`
+- [ ] Si se eliminaron páginas, se retiraron de `zensical.toml`
 
 ---
 
@@ -92,11 +92,11 @@ Aplica este checklist en la fase **VERSION** de cualquier flujo:
 ## Comando de validación final
 
 ```bash
-mkdocs build --strict
+zensical build --strict
 ```
 
 El flag `--strict` convierte warnings en errores, garantizando que no queden links rotos
-ni referencias a páginas inexistentes en `mkdocs.yml`.
+ni referencias a páginas inexistentes en `zensical.toml`.
 
 ---
 

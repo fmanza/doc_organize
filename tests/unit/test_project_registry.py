@@ -3,6 +3,7 @@
 import asyncio
 import json
 import shutil
+import warnings
 
 from pathlib import Path
 
@@ -387,3 +388,14 @@ async def test_move_project_root_raises_when_not_found(tmp_path) -> None:
     async with ProjectRegistry(tmp_path / "projects.json") as registry:
         with pytest.raises(ProjectNotFoundError):
             await registry.move_project_root("No Existe", destination)
+
+
+@pytest.mark.asyncio
+async def test_tenant_id_other_than_default_is_deprecated(tmp_path: Path) -> None:
+    """L-6c: los tenants pasan a doc_organize_web; usar uno distinto de `default` avisa (se retira en 1.0.0)."""
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            await registry.create_project("Sin tenant", tmp_path)  # tenant por defecto: sin aviso
+        with pytest.warns(DeprecationWarning, match="tenant_id"):
+            await registry.list_projects(tenant_id="acme")

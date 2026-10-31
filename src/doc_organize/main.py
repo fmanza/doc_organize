@@ -10,19 +10,9 @@ import sys
 from pathlib import Path
 
 from doc_organize.auth import AuthStore
-from doc_organize.core.constants import (
-    CONVERSION_FOLDER_NAME,
-    DEFAULT_CACHE_DB_NAME,
-    DUPLICATES_FOLDER_NAME,
-    SCAN_ERRORS_FOLDER_NAME,
-    SCAN_ERRORS_HISTORY_JSONL_NAME,
-    SCAN_FOLDERS_JSON_NAME,
-    SCAN_HISTORY_FOLDER_NAME,
-    SCAN_HISTORY_JSONL_NAME,
-)
 from doc_organize.core.exceptions import DocOrganizeError
 from doc_organize.core.models import DedupEventType
-from doc_organize.projects import ProjectRegistry
+from doc_organize.projects import ProjectLayout, ProjectRegistry
 from doc_organize.scan import DeduplicationSummary, ScanCommand, ScanSummary
 from doc_organize.utils.av_detector import detect_av_status
 from doc_organize.utils.logging import configure_logging, get_logger
@@ -149,15 +139,16 @@ async def _resolve_scan_paths(args: argparse.Namespace) -> tuple[Path, Path, Pat
         root = Path(project.root_path)
         if explicit_any:
             logger.warning("Se combinó --project con flags explícitos; los flags explícitos tienen prioridad sobre las rutas derivadas del proyecto.")
-        output_dir = Path(args.output_dir) if args.output_dir else root / CONVERSION_FOLDER_NAME
-        cache_db = Path(args.cache_file) if args.cache_file else root / DEFAULT_CACHE_DB_NAME
-        return output_dir, cache_db, root / SCAN_FOLDERS_JSON_NAME
+        layout = ProjectLayout(root)
+        output_dir = Path(args.output_dir) if args.output_dir else layout.conversion_dir
+        cache_db = Path(args.cache_file) if args.cache_file else layout.cache_db
+        return output_dir, cache_db, layout.folders_json
 
     if not args.output_dir or not args.cache_file:
         raise DocOrganizeError("Sin --project, hay que indicar --output-dir y --cache-file explícitamente.")
     output_dir = Path(args.output_dir)
     cache_db = Path(args.cache_file)
-    return output_dir, cache_db, output_dir.parent / SCAN_FOLDERS_JSON_NAME
+    return output_dir, cache_db, ProjectLayout(output_dir.parent).folders_json
 
 
 async def _resolve_dedup_paths(args: argparse.Namespace) -> tuple[Path, Path]:
@@ -173,13 +164,14 @@ async def _resolve_dedup_paths(args: argparse.Namespace) -> tuple[Path, Path]:
         root = Path(project.root_path)
         if args.duplicates_dir:
             logger.warning("Se combinó --project con --duplicates-dir; el flag explícito tiene prioridad sobre la ruta derivada del proyecto.")
-        duplicates_dir = Path(args.duplicates_dir) if args.duplicates_dir else root / DUPLICATES_FOLDER_NAME
-        return duplicates_dir, root / SCAN_FOLDERS_JSON_NAME
+        layout = ProjectLayout(root)
+        duplicates_dir = Path(args.duplicates_dir) if args.duplicates_dir else layout.duplicates_dir
+        return duplicates_dir, layout.folders_json
 
     if not args.duplicates_dir:
         raise DocOrganizeError("Sin --project, hay que indicar --duplicates-dir explícitamente.")
     duplicates_dir = Path(args.duplicates_dir)
-    return duplicates_dir, duplicates_dir.parent / SCAN_FOLDERS_JSON_NAME
+    return duplicates_dir, ProjectLayout(duplicates_dir.parent).folders_json
 
 
 async def _run_project_create(args: argparse.Namespace) -> int:
@@ -263,8 +255,9 @@ async def _run_scan(args: argparse.Namespace) -> int:
             raise DocOrganizeError(av_status.instructions)
 
     output_dir, cache_db, folders_json = await _resolve_scan_paths(args)
-    error_log_path = folders_json.parent / SCAN_ERRORS_FOLDER_NAME / SCAN_ERRORS_HISTORY_JSONL_NAME
-    history_log_path = folders_json.parent / SCAN_HISTORY_FOLDER_NAME / SCAN_HISTORY_JSONL_NAME
+    state = ProjectLayout(folders_json.parent)
+    error_log_path = state.scan_errors_log
+    history_log_path = state.scan_history_log
     summary = await ScanCommand().run(
         paths=args.paths,
         output_dir=output_dir,

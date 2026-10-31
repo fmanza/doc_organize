@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_organize"
-version = "0.9.3"
+version = "0.10.0"
 description = "Sistema de extracción de contenido de documentos en Markdown y JSON documentación y organización."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -67,9 +67,13 @@ dev = [
     "matplotlib>=3.5",
 ]
 docs = [
+    # Sitio con Zensical (L-13b); la referencia de API sale de los docstrings con mkdocstrings.
+    "zensical>=0.0.71",
+    "mkdocstrings-python>=2.0",
+]
+# Sitio navegable del contexto de un proyecto (`MkDocsGenerator` ejecuta `mkdocs build`); antes venía con `docs`.
+site = [
     "mkdocs>=1.4",
-    "mkdocs-material>=9.0",
-    "mkdocstrings[python]>=0.20",
 ]
 web = [
     "fastapi>=0.100",

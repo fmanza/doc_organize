@@ -13,7 +13,7 @@ Puedes descargar toda la documentación como ZIP para acceso offline:
 El ZIP se genera automáticamente después de cada build:
 
 ```bash
-mkdocs build --strict
+zensical build --strict
 python scripts/build_docs_zip.py
 ```
 

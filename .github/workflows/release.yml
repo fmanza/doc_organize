@@ -1,0 +1,64 @@
+name: Release
+
+# Publica el wheel y el sdist en la GitHub Release del tag (L-6d, hueco G9 de doc_organize_web).
+# Los consumidores (doc_organize_web) fijan la URL del wheel y su SHA-256 en uv.lock.
+#   git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # crear la release y subir los ficheros
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: El tag coincide con la versión del paquete
+        run: |
+          version=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::El tag ${GITHUB_REF_NAME} no coincide con version = ${version} de pyproject.toml"
+            exit 1
+          fi
+
+      - name: Construir wheel y sdist
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+          cd dist && for f in *.whl *.tar.gz; do sha256sum "$f" > "$f.sha256"; done && cat *.sha256
+
+      - name: Comprobar que el wheel se instala e importa sin cargar Docling
+        run: |
+          python -m venv /tmp/check
+          /tmp/check/bin/pip install --no-deps dist/*.whl
+          /tmp/check/bin/python -c "import sys, doc_organize; print(doc_organize.__version__); assert 'docling' not in sys.modules"
+
+      - name: Notas de la versión desde el CHANGELOG
+        run: |
+          python - <<'PY'
+          import os, re
+          version = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          match = re.search(rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[)", text, re.S | re.M)
+          open("RELEASE_NOTES.md", "w", encoding="utf-8").write(match.group(1).strip() if match else f"Versión {version}")
+          PY
+
+      - name: Crear la release o añadirle los ficheros
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md --verify-tag
+          fi

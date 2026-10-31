@@ -123,7 +123,7 @@ Si no hay términos específicos: "*No aplica para este módulo.*"
 Lee [ruta_del_módulo] y genera la documentación funcional usando
 .github/prompts/functional_doc.prompt.md.
 Actualiza docs/functional/[nombre_módulo].md si existe, o crea la página si no hay equivalente.
-Actualiza mkdocs.yml si se crea o mueve una página.
+Actualiza zensical.toml si se crea o mueve una página.
 No inventes capacidades; si falta información, márcala como pendiente.
 ```
 
@@ -148,7 +148,7 @@ Fase 2 — Para cada módulo (o área), aplica functional_doc.prompt.md:
   "Lee [ruta] y genera docs/functional/[nombre].md.
    Marca como pendiente cualquier sección no verificable."
 
-Fase 3 — Actualizar mkdocs.yml:
+Fase 3 — Actualizar zensical.toml:
   Añade o actualiza entradas en la sección docs/functional/ del nav.
 
 Fase 4 — Revisión cruzada:

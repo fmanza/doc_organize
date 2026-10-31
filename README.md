@@ -77,8 +77,8 @@ python -m mypy src
 ## Documentación
 
 ```bash
-mkdocs serve    # documentación local (http://127.0.0.1:8000)
-mkdocs build    # sitio estático en ./site
+zensical serve    # documentación local (http://127.0.0.1:8000)
+zensical build --strict    # sitio estático en ./site
 ```
 
 ### Descarga Offline
