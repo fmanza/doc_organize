@@ -2,5 +2,6 @@ recursive-include src/doc_organize/data *.json
 recursive-include src/doc_organize/doc/data *.json *.js *.css
 recursive-include src/doc_organize/doc/templates *.j2
 recursive-include src/doc_organize/context/taxonomy_templates_builtin *.md
+include src/doc_organize/py.typed
 include README.md
 include LICENSE

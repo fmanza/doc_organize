@@ -34,6 +34,7 @@ nav:
       - Panel de Administración: functional/admin.md
   - API:
       - Descripción general: api/index.md
+      - API pública y compatibilidad: api/publica.md
       - Validadores: api/validators.md
       - Scanner: api/scanner.md
       - Converter: api/converter.md
