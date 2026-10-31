@@ -18,7 +18,7 @@ Descarga el ZIP más reciente:
 ```
 
 **Contenido del ZIP:**
-- ✅ Documentación HTML completa (compilada con MkDocs)
+- ✅ Documentación HTML completa (compilada con Zensical)
 - ✅ Diagramas Mermaid (renderizados como SVG)
 - ✅ Ejemplos de código ejecutables
 - ✅ Referencia API completa
@@ -127,9 +127,9 @@ Descarga desde el mismo Release o accede al archivo de histórico.
 
 Cada vez que se actualiza la documentación en `main` o `develop`, se genera automáticamente un nuevo ZIP:
 
-1. **Trigger:** Push a `main`/`develop` que afecte `docs/`, `mkdocs.yml` o `pyproject.toml`
+1. **Trigger:** Push a `main`/`develop` que afecte `docs/`, `zensical.toml` o `pyproject.toml`
 2. **CI/CD:** GitHub Actions ejecuta automáticamente:
-   - `mkdocs build --strict` (construye HTML)
+   - `zensical build --strict` (construye HTML)
    - `python scripts/build_docs_zip.py` (crea ZIP + checksums)
    - Publica nuevo Release con tag `docs-v{version}`
 3. **Descarga:** El nuevo ZIP está disponible en Releases inmediatamente
@@ -163,7 +163,7 @@ cd doc_organize
 pip install -e ".[docs]"
 
 # Construye la documentación
-mkdocs build
+zensical build --strict
 
 # Abre en navegador
 open site/index.html  # macOS

@@ -59,7 +59,7 @@ Restricciones:
 Lee [ruta_del_área_o_módulo] y genera la guía de usuario usando el
 prompt en .github/prompts/guide_doc.prompt.md.
 Actualiza docs/[nombre-guia].md si existe, o crea la página si no hay equivalente.
-Actualiza mkdocs.yml si se crea o mueve una página.
+Actualiza zensical.toml si se crea o mueve una página.
 No inventes pasos ni comandos; si falta información, márcala como pendiente.
 ```
 

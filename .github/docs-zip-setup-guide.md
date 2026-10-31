@@ -1,5 +1,10 @@
 # 📦 Descarga de Documentación como ZIP
 
+> **Nota (2026-10-31, doc_organize 0.10.0, L-13b)**: la documentación se construye ahora con **Zensical**
+> (`zensical.toml`, `zensical build --strict`); `mkdocs.yml` y el extra de mkdocs se retiraron. El script usa
+> `python scripts/build_docs_zip.py --builder zensical` (único valor admitido). Lo que esta página diga de mkdocs,
+> plugins o `--builder mkdocs` es histórico.
+
 > **⚠️ Nota de verificación (2026-08-28, corregida 2026-09-03)**: la nota original de esta fecha
 > afirmaba que `scripts/build_docs_zip.py` no existía en el repo y que la funcionalidad de ZIP de
 > release nunca se completó — **eso ya no es cierto**: el script existe (342 líneas), tiene 13 tests

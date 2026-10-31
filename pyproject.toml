@@ -67,9 +67,9 @@ dev = [
     "matplotlib>=3.5",
 ]
 docs = [
-    "mkdocs>=1.4",
-    "mkdocs-material>=9.0",
-    "mkdocstrings[python]>=0.20",
+    # Sitio con Zensical (L-13b); la referencia de API sale de los docstrings con mkdocstrings.
+    "zensical>=0.0.71",
+    "mkdocstrings-python>=2.0",
 ]
 web = [
     "fastapi>=0.100",

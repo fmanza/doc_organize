@@ -13,11 +13,11 @@ Revisar ficheros de instrucciones actuales (`.github/copilot-instructions.md`, `
 - Mantenga cada fichero funcional sin dependencias cruzadas (o con referencias explícitas)
 - Clasifique reglas en categorías: `shared`, `copilot-only`, `claude-only`, `duplicado`
 - Justifique estrategia elegida (Opción A: fichero compartido + especializaciones vs Opción B: ficheros separados autosuficientes)
-- Alinee prompts/agentes de documentación con MkDocs Material, Mermaid, separación funcional/técnica, ejemplos verificables y actualización de proyecto completo.
+- Alinee prompts/agentes de documentación con Zensical, Mermaid, separación funcional/técnica, ejemplos verificables y actualización de proyecto completo.
 - Excluya por el momento instrucciones de generación vía APIs externas.
 
 ### Alcance
-- Lectura: ficheros actuales en `.github/`, `CLAUDE.md`, `.github/prompts/`, `.github/agents/`, `.github/instructions/`, `mkdocs.yml`
+- Lectura: ficheros actuales en `.github/`, `CLAUDE.md`, `.github/prompts/`, `.github/agents/`, `.github/instructions/`, `zensical.toml`
 - Clasificación: categorización de reglas por plataforma y duplicación
 - Propuesta: nueva estructura con justificación SOLID (DRY, responsabilidad única, extensibilidad)
 - **No ejecuta cambios**: solo propone y audita
@@ -38,7 +38,7 @@ Ficheros a revisar:
 - .github/prompts/documentation_review.prompt.md (opcional)
 - .github/prompts/functional_doc.prompt.md (opcional)
 - .github/prompts/technical_doc.prompt.md (opcional)
-- mkdocs.yml (opcional, para validar navegación documental)
+- zensical.toml (opcional, para validar navegación documental)
 
 Estrategia preferida: [Opción A / Opción B / Decidir durante análisis]
 Restricciones: [romper contratos públicos: sí/no]
@@ -51,7 +51,7 @@ Restricciones: [romper contratos públicos: sí/no]
    - Porcentaje estimado de contenido compartido
    - Ejemplos de duplicación encontrada
    - Volumetría: líneas por categoría
-   - Gaps de documentación IA: instrucciones de MkDocs, Mermaid, ejemplos, no invención, API externa
+   - Gaps de documentación IA: instrucciones de Zensical, Mermaid, ejemplos, no invención, API externa
 
 2. **PLAN**
    - Estrategia elegida y justificación (DRY, mantenibilidad, extensibilidad)
@@ -78,7 +78,7 @@ Restricciones: [romper contratos públicos: sí/no]
      - SOLID principles (SRP, OCP, DIP)
      - Políticas por tipo de tarea (new_feature, hotfix, refactor, security_review)
      - Multibase, OOP, anti-patrones claros
-     - Documentación: funcional/técnica separadas, ejemplos, `mkdocs.yml`, Mermaid, no invención
+     - Documentación: funcional/técnica separadas, ejemplos, `zensical.toml`, Mermaid, no invención
    - Secciones ausentes o incompletas vs ficheros actuales
    - Veredicto: `APROBADO | APROBADO CON CONDICIONES | RECHAZADO`
 

@@ -3,7 +3,7 @@ applyTo: "docs/**"
 ---
 # Documentación
 
-> **TL;DR** — Seis arquetipos fijos (funcional, técnica, guía, ejemplo, arquitectura, páginas de navegación). Secciones numeradas 1–5 obligatorias. Mermaid.js para diagramas. MkDocs Material como generador estático. No inventar nada. Si una sección queda vacía, escribe `*No aplica para este módulo.*` — nunca la omitas. Enlace bidireccional obligatorio entre Arquetipo 2 §5 y Arquetipo 4 §5.
+> **TL;DR** — Seis arquetipos fijos (funcional, técnica, guía, ejemplo, arquitectura, páginas de navegación). Secciones numeradas 1–5 obligatorias. Mermaid.js para diagramas. Zensical como generador estático. No inventar nada. Si una sección queda vacía, escribe `*No aplica para este módulo.*` — nunca la omitas. Enlace bidireccional obligatorio entre Arquetipo 2 §5 y Arquetipo 4 §5.
 
 ---
 
@@ -233,7 +233,7 @@ Fecha de última revisión.
 ## Arquetipo 6 — Páginas de Navegación Principal (`docs/` raíz)
 
 **Audiencia**: cualquier visitante que llega a la documentación por primera vez.
-Para las páginas de entrada de nivel raíz del `nav:` — **Inicio**, **Instalación** y **Arquitectura del sistema**.
+Para las páginas de entrada de nivel raíz del `nav` — **Inicio**, **Instalación** y **Arquitectura del sistema**.
 
 **Prompt**: `.github/prompts/landing_doc.prompt.md` (tres variantes A/B/C, 5 secciones cada una).
 
@@ -278,11 +278,11 @@ la Variante B es específica de instalación del paquete y drivers.
 
 ---
 
-## Generador estático: MkDocs con Material for MkDocs
+## Generador estático: Zensical con Zensical
 
-El proyecto usa **MkDocs** con el tema **Material for MkDocs** como generador estático.
+El proyecto usa **Zensical** con el tema **Zensical** como generador estático.
 
-- Toda documentación generada debe tener su entrada en `mkdocs.yml` bajo `nav:`.
+- Toda documentación generada debe tener su entrada en `zensical.toml` en el `nav`.
 - La navegación tiene **exactamente 8 secciones top-level**:
   `Inicio`, `Instalación`, `Documentación Funcional`, `Referencia Técnica`, `Guías`, `Ejemplos`,
   `Arquitectura`, `Historia y Planes`.
@@ -375,7 +375,7 @@ cache_manager = CacheManager   # ← ALIAS de variable, NO la clase real
 2. Usar la ruta completa hasta esa definición: `modulo.submodulo.NombreClase`.
 3. Verificar que no es un alias (`NombreAlias = NombreClase`); si lo es, usar `NombreClase`.
 4. Si la clase vive en un subpaquete privado (`_execution/`), usar su ruta completa incluyendo el guión bajo — `mkdocstrings` lo resuelve correctamente.
-5. Ejecutar `mkdocs build --strict` y confirmar que la sección muestra los métodos expandidos.
+5. Ejecutar `zensical build --strict` y confirmar que la sección muestra los métodos expandidos.
 
 **Señales de alias incorrecto en el build:**
 - La sección autodoc aparece en el sitio pero sin métodos
@@ -390,7 +390,7 @@ en `__init__.py`; el archivo `.md` de la sección Autodoc debe referenciarla exp
 ### Regla de cobertura: cada módulo público necesita un archivo autodoc
 
 **Síntoma del gap:** existe documentación manual en `docs/api/[modulo].md` pero
-NO hay ninguna entrada `:::` en la sección Autodoc de `mkdocs.yml` para ese módulo.
+NO hay ninguna entrada `:::` en la sección Autodoc de `zensical.toml` para ese módulo.
 Resultado: los docstrings del código fuente nunca se renderizan en el sitio.
 
 **Patrón correcto** (un módulo bien cubierto tiene ambos tipos):
@@ -408,7 +408,7 @@ docs/api/
 Antes de añadir un módulo nuevo al proyecto, verificar que su `__init__.py` tiene
 `__all__` y que TODAS las clases de `__all__` tienen:
 1. Una directiva `:::` en un archivo `.md` bajo `docs/api/`
-2. Ese archivo `.md` está registrado en la sección `Autodoc (mkdocstrings)` de `mkdocs.yml`
+2. Ese archivo `.md` está registrado en la sección `Autodoc (mkdocstrings)` de `zensical.toml`
 
 ```bash
 # Detectar módulos en __all__ sin cobertura autodoc:
@@ -424,7 +424,7 @@ grep -r ":::" docs/api/ | grep "[NombreClase]"
 **Nomenclatura de archivos autodoc:**
 - Si ya existe un `api/[modulo].md` manual, el autodoc se llama `api/[modulo]-autodoc.md`
 - Si el módulo no tiene archivo manual previo, el autodoc puede llamarse `api/[modulo].md`
-- Registrar siempre en `mkdocs.yml` bajo `Autodoc (mkdocstrings):`
+- Registrar siempre en `zensical.toml` bajo `Autodoc (mkdocstrings):`
 
 **Clases excluidas del autodoc:**
 - Clases re-exportadas de otro módulo ya cubierto (e.g., `PKSyncResult` se exporta en
@@ -451,7 +451,7 @@ Usa **Mermaid.js** para diagramas: texto plano que el renderer convierte en caja
 #### Límites y legibilidad
 - Máximo 12 nodos para legibilidad sin zoom.
 - **Nunca uses diagramas ASCII** (cajas con `┌─┐│└─┘` o flechas con `──>`). Son
-  frágiles en proporcional fonts, no escalan y no se renderizan en MkDocs ni GitHub.
+  frágiles en proporcional fonts, no escalan y no se renderizan en Zensical ni GitHub.
   Sustituye cualquier diagrama ASCII existente por un bloque Mermaid equivalente.
 
 #### Etiquetas y lenguaje
@@ -460,7 +460,7 @@ Usa **Mermaid.js** para diagramas: texto plano que el renderer convierte en caja
 
 #### Sintaxis y formato
 - Valida que el Mermaid generado sea sintácticamente correcto antes de guardar.
-- Usa bloques fenced ` ```mermaid ` (compatible con MkDocs Material y GitHub).
+- Usa bloques fenced ` ```mermaid ` (compatible con Zensical y GitHub).
 - **`flowchart TD` para arquitecturas en capas o pipelines con bifurcación**: cuando
   el diagrama muestra capas verticales (browser → API → servicios → filesystem) y
   tiene al menos un nodo de decisión o dos ramas paralelas, `flowchart TD` es siempre
@@ -472,7 +472,7 @@ Usa **Mermaid.js** para diagramas: texto plano que el renderer convierte en caja
 
 #### Estructura del documento (headings y listas)
 - **Nunca uses texto en negrita como pseudo-subheading antes de listas** (`**Componente:**\n- item`).
-  En MkDocs y VSCode preview los bloques se mezclan visualmente y la separación no queda clara.
+  En Zensical y VSCode preview los bloques se mezclan visualmente y la separación no queda clara.
   Usa `####` para subsecciones reales, o un diagrama Mermaid si los componentes tienen relación
   entre sí. Cuando hay tres o más componentes con responsabilidades distintas y flujo entre ellos,
   un `flowchart TD` con subgraphs es siempre más claro que listas de bullets independientes.
@@ -495,7 +495,7 @@ Usa **Mermaid.js** para diagramas: texto plano que el renderer convierte en caja
 - **Conectores**: usa `A:R -- L:B` (doble guión). El conector `-->` es de `flowchart`, no de `architecture-beta`.
   `httpclient:R --> L:webserver` ❌ — `httpclient:R -- L:webserver` ✅
 - **Iconos integrados en Mermaid 11**: `cloud`, `database`, `disk`, `internet`, `server`. No uses otros sin verificar que existen.
-- **Compatibilidad**: renderiza en MkDocs Material con CDN `mermaid@11`. No renderiza en VS Code preview ni en GitHub Markdown preview.
+- **Compatibilidad**: renderiza en Zensical con CDN `mermaid@11`. No renderiza en VS Code preview ni en GitHub Markdown preview.
 
 ### Sección de Arquitectura física (condicional)
 
@@ -537,7 +537,7 @@ Para generar o actualizar la documentación completa del proyecto:
 1. **Inventario**: lista todos los módulos en `src/` y clasifica qué arquetipo necesita cada documento (`docs/functional/` → Arquetipo 1, `docs/api/` → Arquetipo 2, guías raíz `docs/` → Arquetipo 3, `docs/examples/` → Arquetipo 4, ADR `docs/adr/` → Arquetipo 5, páginas raíz `index.md`/`INSTALLATION.md`/`ARCHITECTURE.md` → Arquetipo 6).
 2. **Orden de generación**: empieza por módulos base (`_base.py`, contratos) antes que servicios; los servicios antes que las CLIs y la capa web.
 3. **Generación por arquetipo**: aplica el prompt correspondiente (`functional_doc`, `technical_doc`, `guide_doc`, `example_doc`, `architecture_doc` o `landing_doc`) a cada archivo.
-4. **mkdocs.yml**: actualiza la sección `nav:` con todas las entradas nuevas o modificadas.
+4. **zensical.toml**: actualiza la sección `nav` con todas las entradas nuevas o modificadas.
 5. **Consistencia**: usa el mismo tono, nivel de detalle y estructura en todos los archivos del mismo arquetipo.
 
 ---
@@ -556,15 +556,15 @@ Activar cuando el usuario solicite comprobar compatibilidad de versiones o plugi
 
 | Herramienta | URL de referencia |
 |---|---|
-| MkDocs | `https://www.mkdocs.org/about/release-notes/` |
-| Material for MkDocs | `https://squidfunk.github.io/mkdocs-material/plugins/` |
+| Zensical | `https://zensical.org` |
+| Zensical | `https://squidfunk.github.io/zensical/plugins/` |
 
-> Este proyecto usa MkDocs, no Zensical: se evaluó como alternativa más rápida y se descartó por no
+> Este proyecto usa Zensical, no Zensical: se evaluó como alternativa más rápida y se descartó por no
 > estar disponible como dependencia instalable (ver `.ai/DECISIONS_LOG.md`).
 
 #### Procedimiento
 
-1. Fetch la documentación oficial según el generador activo (`mkdocs.yml` → `theme.name`).
+1. Fetch la documentación oficial según el generador activo (`zensical.toml` → `theme.name`).
 2. Contrasta las directivas del fichero de configuración con la documentación oficial.
 3. Reporta discrepancias con severidad:
    - **Nivel 1** — plugin o directiva inexistente en la versión instalada (build roto).
@@ -581,7 +581,7 @@ Activar tras la generación de documentación para detectar errores solo visible
 #### Modo A — build (por defecto)
 
 ```bash
-mkdocs build --strict
+zensical build --strict
 ```
 
 Leer páginas clave de `site/` con el tool `Read`. Priorizar páginas con directivas `:::`, bloques Mermaid o snippets `--8<--`.
@@ -592,13 +592,13 @@ Leer páginas clave de `site/` con el tool `Read`. Priorizar páginas con direct
 | Alias bug | Métodos presentes bajo el nombre real de la clase | Sección autodoc vacía |
 | Snippet `--8<--` resuelto | Ausencia de `--8<--` literal en el HTML | La cadena aparece como texto |
 | Mermaid presente | `<code class="language-mermaid">` o SVG | Bloque no encontrado |
-| Nav sin huérfanos | Cada página del `nav:` existe en `site/` | Fichero `.html` ausente |
+| Nav sin huérfanos | Cada página del `nav` existe en `site/` | Fichero `.html` ausente |
 | Build limpio | `--strict` termina con código 0 | Cualquier warning con `--strict` |
 
 #### Modo B — serve (activar con `--verify-build --serve`)
 
 ```bash
-mkdocs serve   # confirmar con el usuario antes de arrancar
+zensical serve   # confirmar con el usuario antes de arrancar
 ```
 
 Usar `WebFetch` sobre `http://localhost:8000/` para las mismas verificaciones que el Modo A.
@@ -614,7 +614,7 @@ No modifica ningún fichero basándose solo en hallazgos del HTML. Propone corre
 ## Reglas Markdown (CRÍTICAS)
 
 - Genera Markdown portable y legible.
-- Prioriza CommonMark; usa extensiones solo si el renderer ya las soporta (ver `mkdocs.yml`).
+- Prioriza CommonMark; usa extensiones solo si el renderer ya las soporta (ver `zensical.toml`).
 - No uses macros, directivas ni shortcodes propietarios.
 - Evita HTML embebido salvo que no exista alternativa razonable y quede justificado.
 - Usa preferentemente:
@@ -631,7 +631,7 @@ No modifica ningún fichero basándose solo en hallazgos del HTML. Propone corre
   como `**Parameters:**` o `**Fields:**`.
 - **Deja siempre una línea en blanco antes de cada lista**, aunque el párrafo anterior
   termine en dos puntos (`:`). Sin ella, la frase introductoria y la lista se fusionan
-  visualmente en MkDocs y VS Code preview. Ejemplo correcto:
+  visualmente en Zensical y VS Code preview. Ejemplo correcto:
   ```markdown
   Todos heredan de `ProjectCopyError`:
 
@@ -669,9 +669,9 @@ No modifica ningún fichero basándose solo en hallazgos del HTML. Propone corre
 
 ## Inclusión de código en documentación (CRÍTICO)
 
-### Estándar de Snippets MkDocs (`--8<--`)
+### Estándar de Snippets Zensical (`--8<--`)
 
-**NUEVO (desde v0.10.0):** Usa la sintaxis de snippets de MkDocs (`--8<--`) para todas las referencias a archivos `.py` ejecutables en `docs/examples/`.
+**NUEVO (desde v0.10.0):** Usa la sintaxis de snippets de Zensical (`--8<--`) para todas las referencias a archivos `.py` ejecutables en `docs/examples/`.
 
 **Regla principal:** La directiva `--8<--` debe ser el **ÚNICO contenido** dentro del bloque fenced ` ```python ` (u otro lenguaje).
 
@@ -735,9 +735,9 @@ Antes de referenciar `--8<-- "examples/..."` en un `.md`:
 - [ ] ¿El archivo `.py` existe?
 - [ ] ¿Es sintácticamente válido? (`python -m py_compile`)
 - [ ] ¿No contiene hardcoded credentials/secrets?
-- [ ] ¿Se actualiza `mkdocs.yml` si es un archivo nuevo?
+- [ ] ¿Se actualiza `zensical.toml` si es un archivo nuevo?
 
-Ejecuta `mkdocs build` para validar que la referencia se resuelve sin ERROR.
+Ejecuta `zensical build --strict` para validar que la referencia se resuelve sin ERROR.
 
 ---
 

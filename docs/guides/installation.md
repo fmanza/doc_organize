@@ -218,7 +218,7 @@ pip install -e ".[dev,web,docs]"
 
 - `dev`: pytest, ruff, mypy y el resto de herramientas de calidad.
 - `web`: interfaz web (necesaria para correr `tests/unit/test_web_*.py`).
-- `docs`: mkdocs + mkdocs-material + mkdocstrings, para compilar esta documentación.
+- `docs`: zensical + mkdocstrings-python, para compilar esta documentación.
 
 ### Comandos de desarrollo
 
@@ -228,6 +228,6 @@ python -m ruff format src tests      # formato
 python -m mypy src                   # type-check
 python -m pytest                     # todos los tests
 python -m pytest -k "not slow"       # sin los tests de integración con Docling real
-mkdocs serve                         # documentación local (http://127.0.0.1:8000)
-mkdocs build                         # sitio estático en ./site
+zensical serve                         # documentación local (http://127.0.0.1:8000)
+zensical build --strict                         # sitio estático en ./site
 ```

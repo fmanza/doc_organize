@@ -81,7 +81,7 @@ Restricciones:
 Lee docs/examples/[nombre].py y genera la guía de ejemplo usando el
 prompt en .github/prompts/example_doc.prompt.md.
 Actualiza docs/examples/[nombre].md si existe, o crea la página si no hay equivalente.
-Actualiza mkdocs.yml si se crea una página nueva.
+Actualiza zensical.toml si se crea una página nueva.
 Verifica que el .py es sintácticamente válido antes de referenciar.
 ```
 
@@ -101,7 +101,7 @@ Si un `.md` existente tiene código inline ≥30 líneas que debería estar en u
 1. Extrae el código a `docs/examples/[nombre].py` con docstring de módulo.
 2. Valida: `python -m py_compile docs/examples/[nombre].py`
 3. Reemplaza el bloque inline en el `.md` por `--8<-- "examples/[nombre].py"`.
-4. Actualiza `mkdocs.yml` si el `.py` es nuevo.
+4. Actualiza `zensical.toml` si el `.py` es nuevo.
 
 ## Organización de archivos `.py`
 

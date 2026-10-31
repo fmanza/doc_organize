@@ -136,21 +136,21 @@ Para un módulo o el proyecto completo:
 # Módulo individual — funcional
 Lee src/doc_organize/[modulo].py y genera la documentación funcional
 usando .github/prompts/functional_doc.prompt.md.
-Guarda en docs/functional/[nombre].md y actualiza mkdocs.yml.
+Guarda en docs/functional/[nombre].md y actualiza zensical.toml.
 
 # Módulo individual — técnica
 Lee src/doc_organize/[modulo].py y genera la documentación técnica
 usando .github/prompts/technical_doc.prompt.md.
-Guarda en docs/api/[nombre].md y actualiza mkdocs.yml.
+Guarda en docs/api/[nombre].md y actualiza zensical.toml.
 
 # Proyecto completo (fases 3-4 del flujo estándar)
 @Documentation Generator
 Genera la documentación completa del proyecto: todos los módulos en src/doc_organize/.
-Tipo: funcional + técnica para cada módulo. Actualiza mkdocs.yml al finalizar.
+Tipo: funcional + técnica para cada módulo. Actualiza zensical.toml al finalizar.
 ```
 
 Regla crítica: no inventar. Lee el código fuente antes de generar cualquier sección.
-Criterio de completitud: `mkdocs build --strict` sin errores + todos los módulos de `src/` documentados.
+Criterio de completitud: `zensical build --strict` sin errores + todos los módulos de `src/` documentados.
 
 ## 📐 Arquetipos Formales de Documentación
 
@@ -169,7 +169,7 @@ Toda documentación en doc_organize sigue **6 arquetipos formales** definidos en
 - ✅ Secciones fijas: estructura inmutable (nunca omitir, escribir "No aplica" si vacío)
 - ✅ Enlaces bidireccionales: Arquetipo 2 (§5) ↔ Arquetipo 4 (§5) obligatorios
 - ✅ Multi-lenguaje: Arquetipo 2 soporta pseudocódigo en Python, Java, TypeScript, Go, etc.
-- ✅ Navegación: 7 secciones top-level exactas en `mkdocs.yml`
+- ✅ Navegación: 7 secciones top-level exactas en `zensical.toml`
 
 **Notas especiales**:
 - Criterios de Aceptación (Arq.1 §4): Pendiente QA — placeholder hasta validación
@@ -184,12 +184,12 @@ No uses un único prompt masivo: divide siempre el trabajo por fases.
 ### Flujo por fases
 
 ```
-Fase 1 — Inventariar: src/, README, docs/, docs/examples/, mkdocs.yml
+Fase 1 — Inventariar: src/, README, docs/, docs/examples/, zensical.toml
 Fase 2 — Mapeo funcional (Senior Product Owner): objetivo, precondiciones, flujo Mermaid, reglas
 Fase 3 — Documentación técnica: responsabilidad, Mermaid, API pública, contratos, errores
 Fase 4 — Ejemplos verificables: código real, resultado determinista, sin credenciales
-Fase 5 — Sincronizar mkdocs.yml: añadir/mover/retirar entradas de navegación
-Fase 6 — Revisión final: Markdown, enlaces relativos, sintaxis Mermaid, mkdocs build --strict
+Fase 5 — Sincronizar zensical.toml: añadir/mover/retirar entradas de navegación
+Fase 6 — Revisión final: Markdown, enlaces relativos, sintaxis Mermaid, zensical build --strict
 ```
 
 **Solicitud para módulo único**:
@@ -200,7 +200,7 @@ Fase 6 — Revisión final: Markdown, enlaces relativos, sintaxis Mermaid, mkdoc
 Genera documentación funcional y técnica para [ruta_del_módulo].
 Aplica functional_doc.prompt.md y technical_doc.prompt.md.
 Guarda en docs/functional/[nombre].md y docs/api/[nombre].md.
-MkDocs renderiza automáticamente al añadir la entrada a `mkdocs.yml`; no requiere más configuración.
+Zensical renderiza automáticamente al añadir la entrada a `zensical.toml`; no requiere más configuración.
 No inventes capacidades; marca como pendiente lo no verificable.
 ```
 
@@ -214,8 +214,8 @@ Revisa el proyecto completo y actualiza la documentación pública en 6 fases:
 2. Mapeo funcional con functional_doc.prompt.md por módulo sin doc o desactualizado.
 3. Documentación técnica con technical_doc.prompt.md y Mermaid apropiado.
 4. Ejemplos verificables en docs/examples/ para módulos sin ejemplo reproducible.
-5. MkDocs renderiza automáticamente tras añadir la entrada a `mkdocs.yml` (no requiere más sync).
-6. Revisión final: Markdown, enlaces y Mermaid; recomendar `mkdocs build --strict`.
+5. Zensical renderiza automáticamente tras añadir la entrada a `zensical.toml` (no requiere más sync).
+6. Revisión final: Markdown, enlaces y Mermaid; recomendar `zensical build --strict`.
 
 No inventes módulos ni capacidades; marca como pendiente lo no verificable.
 No uses APIs externas por el momento.
@@ -226,7 +226,7 @@ No uses APIs externas por el momento.
 ```markdown
 @Documentation Reviewer
 
-Revisa docs/, docs/examples/, README y mkdocs.yml para detectar gaps.
+Revisa docs/, docs/examples/, README y zensical.toml para detectar gaps.
 Usa .github/prompts/documentation_review.prompt.md como criterio.
 Entrega hallazgos con severidad (Nivel 1/2/3) sin editar archivos.
 ```
@@ -283,7 +283,7 @@ Ver `.github/SHARED_INSTRUCTIONS.md` § "Validación de Markdown en documentaci�
 - ✅ Enlaces a archivos estáticos: usar rutas relativas, NO placeholders
   - ❌ `[archivo.zip](#)`
   - ✅ `[archivo.zip](../doc_organize.zip)` (desde `site/downloads/index.html` → apunta a `site/doc_organize.zip`)
-- ✅ Validar: `python -m mkdocs build --strict` sin errores
+- ✅ Validar: `python -m zensical build --strict` sin errores
 - ✅ Inspeccionar HTML: Revisar que `<ul><li>` se usan para listas, NUNCA `<p><br /></p>`
 
 ---
@@ -303,7 +303,7 @@ Util_bbdd proporciona **documentación en ZIP offline** con búsqueda integrada,
 ### Generar localmente
 
 ```bash
-mkdocs build --strict
+zensical build --strict
 python scripts/build_docs_zip.py
 
 # Validar checksums
