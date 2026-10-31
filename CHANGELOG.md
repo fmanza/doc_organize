@@ -49,7 +49,8 @@ hash. Recoge todo lo integrado en `develop` desde la 0.9.0.
 - CI: `ruff` fijado a `<0.16` (la 0.16 activa por defecto reglas DTZ/RUF/SIM y el CI estaba en rojo desde
   septiembre con 11 avisos nuevos, pendientes de revisar), `pandas` sin stubs ignorado por mypy y `cryptography`
   añadido al extra `dev` (lo importa `auth/secrets_cipher.py`; solo estaba en `web`).
-- CI: la matriz de tests deja de incluir Python 3.11 (3.12, 3.13 y 3.14).
+- **Python mínimo 3.12** (`requires-python = ">=3.12"`, objetivo de ruff `py312`): la matriz del CI deja de incluir
+  3.11 (prueba 3.12, 3.13 y 3.14).
 
 ### Fixed
 

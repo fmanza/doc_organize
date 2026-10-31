@@ -16,7 +16,7 @@ instalables desde fuera.
 
 | Versión | Python | Dependencias clave | Estado |
 |---|---|---|---|
-| 0.9.3 | `>=3.11` | Mismas cotas que 0.9.0 (sin cambios en `pyproject.toml` salvo la versión); primera versión con wheel en GitHub Releases | ✅ Activa |
+| 0.9.3 | `>=3.12` | Mismas dependencias que 0.9.0; Python mínimo sube a 3.12 (el CI ya no prueba 3.11); primera versión con wheel en GitHub Releases | ✅ Activa |
 | 0.9.0 | `>=3.11` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0`, nueva `cryptography>=41.0` (cifrado Fernet de credenciales de IA); `[ai]`: `httpx>=0.24`; `[context]`: `pyyaml>=6.0` | ❌ EOL |
 | 0.8.0 | `>=3.11` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0`; nuevos extras `[ai]`: `httpx>=0.24`, `[context]`: `pyyaml>=6.0` | ❌ EOL |
 | 0.7.0 | `>=3.11` | `docling[rapidocr]>=2.0.0`, `pydantic>=2.0`, `aiosqlite>=0.19`, extra `[web]`: `fastapi>=0.100`, `jinja2>=3.1.0` | ❌ EOL |

@@ -7,7 +7,7 @@ name = "doc_organize"
 version = "0.9.3"
 description = "Sistema de extracción de contenido de documentos en Markdown y JSON documentación y organización."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 authors = [{name = "Paco Manzano", email = "fmanzano.trabajo@gmail.com"}]
 license = {text = "MIT"}
 keywords = []
@@ -16,7 +16,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
@@ -130,7 +129,7 @@ ignore_errors = true
 
 [tool.ruff]
 line-length = 150
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 extend-select = ["E", "W", "F", "I", "B", "C4", "UP", "N"]
