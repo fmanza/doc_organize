@@ -413,6 +413,28 @@ feat: añadir Cache Viewer a la interfaz web (Fase D-2c)
 - Actualiza docstring y §2.7.4 del PLAN
 ```
 
+### Ramas y publicación
+
+- PR a `develop` fusionado con **squash**: un commit por PR, con el título del PR en Conventional Commits. La rama se
+  borra al fusionar.
+- La suite (`tests.yml`) corre en cada PR y una vez en el commit resultante de `develop`; no en ramas sueltas ni en
+  `main`.
+- Release: el commit `release: vX.Y.Z` llega a `develop` por PR. Con su CI en verde, `main` avanza por
+  **fast-forward** a ese commit y el tag se crea sobre él; `release.yml` publica wheel y sdist. Sin PR de `develop` a
+  `main` ni commits de merge:
+
+  ```bash
+  git switch develop && git pull
+  sha=$(git rev-parse HEAD)
+  gh run list --branch develop --commit "$sha" --workflow CI   # completed / success
+  git push origin "$sha:main"                                  # el ruleset lo rechaza sin CI verde
+  git tag -a vX.Y.Z -m "vX.Y.Z" "$sha" && git push origin vX.Y.Z
+  ```
+
+- Rulesets: CI en verde en `main` y `develop` (6 jobs `test` y `package`, rama al día, sin force-push ni borrado) sin
+  excepciones; PR obligatorio en `develop` sin excepciones y en `main` con excepción solo para administradores (el
+  fast-forward).
+
 ---
 
 ## Flujo de trabajo

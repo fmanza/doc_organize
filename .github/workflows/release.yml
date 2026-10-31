@@ -2,7 +2,9 @@ name: Release
 
 # Publica el wheel y el sdist en la GitHub Release del tag (L-6d, hueco G9 de doc_organize_web).
 # Los consumidores (doc_organize_web) fijan la URL del wheel y su SHA-256 en uv.lock.
-#   git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z
+# Flujo (SHARED_INSTRUCTIONS § «Ramas y publicación»): fast-forward de main al commit de develop con el CI en verde y
+# tag sobre ese mismo commit:
+#   git push origin <sha>:main && git tag -a vX.Y.Z -m "vX.Y.Z" <sha> && git push origin vX.Y.Z
 
 on:
   push:
