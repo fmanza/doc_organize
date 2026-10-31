@@ -108,7 +108,7 @@ rutas) tal como lo recibió — habría permitido mover un archivo arbitrario de
 para correlacionar el `GET` inicial con el `POST` de resolución — se usa una clave estable derivada
 del contenido (`_group_key`, sha256 de las rutas ordenadas) en su lugar.
 
-## Revisión 12 (`§15`) — CI real vs. documentación heredada
+## Revisión 12 (`§15`, la parte de documentación la sustituye la Revisión 17) — CI real vs. documentación heredada
 
 **Decisión**: la matriz de CI (`tests.yml`) se amplió a Python 3.10–3.14 para coincidir con
 `requires-python >=3.10` (`pyproject.toml`); `docs.yml` se corrigió de `zensical build` (binario no
@@ -287,3 +287,14 @@ de ellos sin que el otro se entere — mitigado con visibilidad, no con un ACL n
 "Alternativas descartadas"). Detalle completo, hallazgos y evidencia:
 `.ai/sessions/2026-09-11-tenant-role-user-redesign/{00_PLAN,TRACEABILITY}.md`. Sigue sin cerrar
 version (`CHANGELOG.md` `[Unreleased]`, pendiente de bump de `pyproject.toml`).
+
+## Revisión 17 — Documentación con Zensical (L-13b, 0.10.0)
+
+**Decisión**: `zensical.toml` sustituye a `mkdocs.yml`; el extra `docs` declara `zensical` y `mkdocstrings-python`
+y `docs.yml` ejecuta `zensical build --strict`. `scripts/build_docs_zip.py` solo admite `--builder zensical`.
+**Razón**: la Revisión 12 descartó Zensical porque no era una dependencia declarada y no estaba claro que soportara
+mkdocstrings. En 2026-10-31 se verificó empíricamente (zensical 0.0.74 + mkdocstrings-python 2.0.10, configuración en
+`[project.plugins.mkdocstrings.handlers.python]`): 35 páginas y la referencia de API se construyen con `--strict`.
+doc_organize_web ya publica con Zensical y el usuario pidió alinear ambos repos en la 0.10.0.
+**Impacto actual**: `zensical build --strict` es el comando de validación. El sitio de **contexto** de los proyectos
+(`context/mkdocs_generator.py`, `MkDocsGenerator`) sigue generando un sitio mkdocs y no se toca en esta versión.

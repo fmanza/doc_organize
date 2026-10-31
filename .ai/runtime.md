@@ -23,7 +23,7 @@ pip install -e ".[dev,web,docs]"
 - `dev`: pytest, ruff, mypy y el resto de herramientas de calidad.
 - `web`: FastAPI/Uvicorn/Jinja2 + `cryptography` (Fernet, cifrado de credenciales de IA en
   `/admin/configuracion-ia`) — necesario para correr `tests/unit/test_web_*.py`.
-- `docs`: mkdocs + mkdocs-material + mkdocstrings — necesario para `mkdocs build`.
+- `docs`: zensical + mkdocstrings-python — necesario para `zensical build` (desde 0.10.0, L-13b).
 - `ai`: `httpx` — clientes de IA (`ai/`, LiteLLM Proxy/GitHub Copilot Pro).
 - `context`: `pyyaml` — front matter de `taxonomy_manifest.md` y plantillas compartidas (`context/`).
 
@@ -39,8 +39,8 @@ python -m mypy src                   # type-check
 python -m pytest                     # todos los tests
 python -m pytest -k "not slow"       # sin los tests de integración con Docling real (más lentos)
 python -m pytest --cov=src           # con cobertura
-mkdocs serve                         # documentación local (http://127.0.0.1:8000)
-mkdocs build --strict                # sitio estático en ./site — comando de validación real de CI
+zensical serve                       # documentación local (http://127.0.0.1:8000)
+zensical build --strict              # sitio estático en ./site — comando de validación real de CI
 ```
 
 ## CLI de la aplicación (no confundir con los comandos de desarrollo de arriba)
@@ -63,8 +63,8 @@ python -m doc_organize user set-instance-admin alice --tenant mi-organizacion  #
 
 - `tests.yml`: matriz `os: [ubuntu-latest, windows-latest]` × `python-version: [3.11, 3.12,
   3.13, 3.14]` — `ruff check`, `mypy src`, `pytest --cov`.
-- `docs.yml`: `pip install -e ".[docs]"` + `mkdocs build --strict` (no `zensical` — ese binario no
-  es una dependencia declarada; ver `.ai/DECISIONS_LOG.md` revisión 12 para el porqué).
+- `docs.yml`: `pip install -e ".[docs]"` + `zensical build --strict` (desde 0.10.0; ver `.ai/DECISIONS_LOG.md`
+  revisión 17, que sustituye a la 12).
 
 ## Variables de entorno
 

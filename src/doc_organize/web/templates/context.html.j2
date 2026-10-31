@@ -122,7 +122,7 @@
 {% elif context and not context.mkdocs_generated %}
 <p class="text-sm text-red-700 mb-3">⚠ La última construcción no terminó de generar el sitio MkDocs — reconstruye el contexto.</p>
 {% elif context and not context.mkdocs_site_built %}
-<p class="text-sm text-amber-700 mb-3">⚠ <code>mkdocs.yml</code> generado, pero no se pudo construir el sitio navegable (¿está <code>mkdocs</code> instalado? extra <code>doc_organize[docs]</code>) — revisa los logs del servidor.</p>
+<p class="text-sm text-amber-700 mb-3">⚠ <code>mkdocs.yml</code> generado, pero no se pudo construir el sitio navegable (¿está <code>mkdocs</code> instalado? extra <code>doc_organize[site]</code>) — revisa los logs del servidor.</p>
 {% elif context and context.mkdocs_site_built %}
 <p class="text-sm text-green-700 mb-3">
     ✓ Sitio de documentación listo —
