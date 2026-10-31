@@ -237,11 +237,16 @@ class DuplicateGroup(BaseModel):
     )
 
 
+#: Qué hacer con los descartados de cada grupo (L-6): moverlos, copiarlos (el origen no se toca) o solo informar.
+DedupMode = Literal["move", "copy", "report_only"]
+
+
 class DeduplicationReport(BaseModel):
     """Resultado del proceso de deduplicación."""
 
     timestamp: str = Field(..., description="Timestamp ISO 8601 de cuándo se ejecutó la deduplicación")
-    total_exact_duplicates: int = Field(..., description="Número de ficheros duplicados exactos movidos")
+    mode: DedupMode = Field(default="move", description="Modo aplicado: move, copy o report_only (L-6)")
+    total_exact_duplicates: int = Field(..., description="Número de ficheros duplicados exactos movidos (o copiados/señalados según `mode`)")
     total_version_conflicts: int = Field(..., description="Número de conflictos de versión resueltos")
     duplicates_folder_path: str = Field(..., description="Ruta a la carpeta donde se movieron los duplicados")
     audit_json_path: str = Field(..., description="Ruta al fichero DEDUP_REPORT.json")
