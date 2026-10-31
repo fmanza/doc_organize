@@ -18,7 +18,7 @@ from typing import Any
 import httpx
 
 from doc_organize.ai._http_client_base import AiHttpClientBase
-from doc_organize.auth import InstanceSecretsStore
+from doc_organize.ai._secrets import SecretValueReader, warn_store_config_deprecated
 from doc_organize.core.exceptions import UsageSourceAuthError, UsageSourceConnectionError, UsageSourceError
 from doc_organize.core.models import GitHubCopilotUsageConfig, UsageLineItem, UsageSnapshot, UsageSourceName
 from doc_organize.utils.logging import get_logger
@@ -54,7 +54,7 @@ def github_copilot_usage_config_from_env() -> GitHubCopilotUsageConfig:
     return GitHubCopilotUsageConfig(username=username, personal_access_token=pat)
 
 
-async def github_copilot_usage_config_from_store_or_env(store: InstanceSecretsStore) -> GitHubCopilotUsageConfig:
+async def github_copilot_usage_config_from_store_or_env(store: SecretValueReader) -> GitHubCopilotUsageConfig:
     """Construye `GitHubCopilotUsageConfig` con precedencia `store` (panel de configuración IA) >
     `DOC_ORGANIZE_GITHUB_USERNAME`/`_PAT` del entorno.
 
@@ -66,6 +66,7 @@ async def github_copilot_usage_config_from_store_or_env(store: InstanceSecretsSt
     Raises:
         ValueError: Si, tras aplicar la precedencia, falta `username` o `pat`.
     """
+    warn_store_config_deprecated("github_copilot_usage_config_from_store_or_env")
     username = await store.get(_ENV_VAR_USERNAME.lower()) or os.environ.get(_ENV_VAR_USERNAME)
     pat = await store.get(_ENV_VAR_PAT.lower()) or os.environ.get(_ENV_VAR_PAT)
     if not username or not pat:

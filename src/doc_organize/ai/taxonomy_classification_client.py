@@ -22,7 +22,7 @@ from typing import Any
 import httpx
 
 from doc_organize.ai._http_client_base import AiHttpClientBase
-from doc_organize.auth import InstanceSecretsStore
+from doc_organize.ai._secrets import SecretValueReader, warn_store_config_deprecated
 from doc_organize.core.exceptions import TaxonomyClassificationAuthError, TaxonomyClassificationConnectionError, TaxonomyClassificationError
 from doc_organize.core.models import LiteLLMTaxonomyClassificationConfig, TaxonomyClassificationResult
 from doc_organize.utils.logging import get_logger
@@ -72,7 +72,7 @@ def litellm_taxonomy_classification_config_from_env() -> LiteLLMTaxonomyClassifi
     return LiteLLMTaxonomyClassificationConfig(base_url=base_url, virtual_key=virtual_key)
 
 
-async def litellm_taxonomy_classification_config_from_store_or_env(store: InstanceSecretsStore) -> LiteLLMTaxonomyClassificationConfig:
+async def litellm_taxonomy_classification_config_from_store_or_env(store: SecretValueReader) -> LiteLLMTaxonomyClassificationConfig:
     """Construye `LiteLLMTaxonomyClassificationConfig` con precedencia `store` (panel de
     configuración IA) > `DOC_ORGANIZE_LITELLM_TAXONOMY_CLASSIFICATION_*` del entorno.
 
@@ -85,6 +85,7 @@ async def litellm_taxonomy_classification_config_from_store_or_env(store: Instan
     Raises:
         ValueError: Si, tras aplicar la precedencia, falta `base_url` o `virtual_key`.
     """
+    warn_store_config_deprecated("litellm_taxonomy_classification_config_from_store_or_env")
     base_url = await store.get(_ENV_VAR_BASE_URL.lower()) or os.environ.get(_ENV_VAR_BASE_URL)
     virtual_key = await store.get(_ENV_VAR_VIRTUAL_KEY.lower()) or os.environ.get(_ENV_VAR_VIRTUAL_KEY)
     if not base_url or not virtual_key:
