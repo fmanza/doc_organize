@@ -25,6 +25,14 @@ detect_office_status().libreoffice_installed   # no carga Docling
 ```
 
 `ScanCommand`, `DocumentConverter` y el resto de lo que convierte documentos sí cargan Docling al usarlos.
+`doc_organize.export` no carga Docling, y `openpyxl` (extra `export`) solo se importa al escribir un Excel.
+
+## Cambios por versión
+
+| Versión | Cambio |
+|---|---|
+| 0.11.0 | Nuevo grupo «Exportación» y `MissingDependencyError`. `ProgressEvent.operation` admite `"export"` y `Phase` la fase `"export"`: un `match` exhaustivo sobre esos valores tiene un caso nuevo |
+| 0.10.0 | Primera API pública estable |
 
 ## Grupos de nombres
 
@@ -33,11 +41,12 @@ detect_office_status().libreoffice_installed   # no carga Docling
 | Escaneo y conversión | `ScanCommand`, `ScanSummary`, `DocumentScanner`, `DocumentConverter`, `OCRScheduler`, `CacheManager` |
 | Duplicados | `DeduplicationManager`, `DeduplicationSummary`, `DuplicateGroup`, `DuplicateReason`, `DeduplicationReport` |
 | Contexto | `ContextBuilder`, `ContextRegistry`, `Reorganizer`, `MkDocsGenerator`, `TaxonomyTemplateRegistry`, `Context`, `TaxonomyManifest` |
+| Exportación (0.11.0) | `write_project_zip`, `preview_project_zip`, `ExportStats`, `write_cache_xlsx`, `write_scan_errors_xlsx`, `load_cache_entries`, `load_scan_error_history` (también en `doc_organize.export`; ver [Exportación](export.md)) |
 | Proyectos (CLI) | `ProjectRegistry`, `ProjectHistoryCleaner`, `ScannedFoldersStore`, `Project`, `ScannedFolder`, `FolderValidator`, `ProjectValidator` |
 | Eventos de progreso | `ScanEvent`/`ScanEventType`, `DedupEvent`/`DedupEventType`, `ContextBuildEvent`/`ContextBuildEventType`, `ContextDeleteEvent`/`ContextDeleteEventType` |
 | Modelos | `DocumentMetadata`, `ConversionResult`, `CacheEntry`, `ScanResult`, `ScanErrorEntry`, `ScanErrorReport`, `ScanRunReport` |
 | Diagnóstico | `detect_gpu_status`, `detect_av_status`, `detect_office_status`, `GpuStatus`, `AvStatus`, `OfficeStatus` |
-| Errores | `DocOrganizeError` (base), `InvalidPathError`, `ConversionError`, `CacheError`, `ProjectError`, `ProjectNotFoundError`, `ContextError` |
+| Errores | `DocOrganizeError` (base), `InvalidPathError`, `MissingDependencyError`, `ConversionError`, `CacheError`, `ProjectError`, `ProjectNotFoundError`, `ContextError` |
 
 El paquete incluye `py.typed`: los tipos son utilizables por `mypy` en el código que lo consume.
 

@@ -41,3 +41,15 @@ def test_importing_package_and_light_modules_does_not_load_docling() -> None:
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True, timeout=120)
 
     assert result.stdout.strip() == "[]"
+
+
+def test_importing_export_does_not_load_docling_nor_openpyxl() -> None:
+    """`doc_organize.export` (L-7) no arrastra Docling, y `openpyxl` (extra `export`) solo se importa al escribir un Excel."""
+    code = (
+        "import sys, doc_organize.export; "
+        "from doc_organize import write_project_zip, write_cache_xlsx, ExportStats, MissingDependencyError; "
+        "print(sorted(m for m in ('docling', 'torch', 'openpyxl', 'doc_organize.web', 'doc_organize.auth') if m in sys.modules))"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True, timeout=120)
+
+    assert result.stdout.strip() == "[]"

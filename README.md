@@ -30,6 +30,7 @@ proyectos, aisladas entre sí).
 
 ```bash
 pip install doc_organize            # núcleo: CLI, OCR en CPU incluido
+pip install doc_organize[export]    # + Excel de caché y de errores (`export cache-xlsx`/`errors-xlsx`)
 pip install doc_organize[web]       # + interfaz web
 ```
 
@@ -48,6 +49,11 @@ pip install -e ".[dev,web,docs]"
 # Crear un proyecto y escanear una carpeta
 python -m doc_organize project create "Mi Proyecto" --location /ruta/a/workspaces
 python -m doc_organize scan --project "Mi Proyecto" --paths /ruta/a/documentos
+
+# Exportar: ZIP de Conversión/ + cache_export.json, y Excel de caché o de errores (extra [export])
+python -m doc_organize export zip --project "Mi Proyecto" --preview
+python -m doc_organize export zip --project "Mi Proyecto" -o export.zip
+python -m doc_organize export errors-xlsx --output-root /ruta/salidas --state-root /ruta/estado -o errores.xlsx
 
 # Interfaz web (loopback, sin autenticación)
 pip install doc_organize[web]
@@ -118,6 +124,7 @@ doc_organize/
 │   ├── projects/             # ProjectRegistry (Nivel 2)
 │   ├── auth/                  # AuthStore: usuarios/tenants/sesiones (Nivel 2)
 │   ├── scan/                   # ScanCommand: orquestación compartida CLI/web (Nivel 3)
+│   ├── export/                 # ZIP en streaming y Excel de un proyecto (Nivel 3, Excel con extra [export])
 │   ├── web/                     # interfaz web opcional, FastAPI (Nivel 3, extra [web])
 │   └── main.py                   # CLI (Nivel 3)
 ├── tests/

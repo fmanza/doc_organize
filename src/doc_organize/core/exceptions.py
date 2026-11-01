@@ -15,6 +15,15 @@ class OperationCancelledError(DocOrganizeError):
     """La operación se paró a petición del llamador (`CancelToken.cancel()`), entre dos documentos o grupos (L-2)."""
 
 
+class MissingDependencyError(DocOrganizeError):
+    """Falta una dependencia opcional: se instala con el extra indicado en `extra` (p. ej. `pip install doc_organize[export]`)."""
+
+    def __init__(self, package: str, extra: str) -> None:
+        self.package = package
+        self.extra = extra
+        super().__init__(f"Falta '{package}': instala el extra con `pip install doc_organize[{extra}]`.")
+
+
 class InvalidPathError(DocOrganizeError):
     """La ruta indicada no existe, no es accesible o no es del tipo esperado."""
 
@@ -251,6 +260,7 @@ __all__ = [
     "IncompleteConversionArtifactsError",
     "InstanceAdminRequiredError",
     "InvalidPathError",
+    "MissingDependencyError",
     "ProjectAlreadyExistsError",
     "ProjectError",
     "ProjectNameError",

@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from doc_organize.core.exceptions import OperationCancelledError
 
-Phase = Literal["started", "discovery", "conversion", "ocr", "deduplication", "classification", "reorganize", "site", "done"]
+Phase = Literal["started", "discovery", "conversion", "ocr", "deduplication", "classification", "reorganize", "site", "export", "done"]
 
 
 class CancelToken:
@@ -57,16 +57,16 @@ class ProgressEvent(BaseModel):
     """Progreso con unidades, independiente del tipo de evento de cada operación.
 
     Attributes:
-        operation: `scan`, `deduplicate` o `context_build`.
+        operation: `scan`, `deduplicate`, `context_build` o `export` (L-7).
         phase: Fase actual.
-        processed: Unidades terminadas en la fase (documentos, grupos).
+        processed: Unidades terminadas en la fase (documentos, grupos, ficheros del ZIP, filas del Excel).
         total: Unidades de la fase, si se conocen.
-        current: Unidad en curso (ruta del documento), si la hay.
+        current: Unidad en curso (ruta del documento o nombre dentro del ZIP), si la hay.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    operation: Literal["scan", "deduplicate", "context_build"]
+    operation: Literal["scan", "deduplicate", "context_build", "export"]
     phase: Phase
     processed: int = Field(default=0, ge=0)
     total: int | None = Field(default=None, ge=0)
