@@ -1,5 +1,5 @@
 """
-CLI de doc_organize: gestión de proyectos y escaneo/conversión de documentos (Fase D-1).
+CLI de doc_organize: gestión de proyectos, escaneo/conversión de documentos (Fase D-1) y exportación (L-7).
 """
 
 import argparse
@@ -10,8 +10,16 @@ import sys
 from pathlib import Path
 
 from doc_organize.auth import AuthStore
-from doc_organize.core.exceptions import DocOrganizeError
+from doc_organize.core.exceptions import DocOrganizeError, InvalidPathError
 from doc_organize.core.models import DedupEventType
+from doc_organize.export import (
+    load_cache_entries,
+    load_scan_error_history,
+    preview_project_zip,
+    write_cache_xlsx,
+    write_project_zip,
+    write_scan_errors_xlsx,
+)
 from doc_organize.projects import ProjectLayout, ProjectRegistry
 from doc_organize.scan import DeduplicationSummary, ScanCommand, ScanSummary
 from doc_organize.utils.av_detector import detect_av_status
@@ -71,6 +79,8 @@ def build_parser() -> argparse.ArgumentParser:
     dedup_parser.add_argument("--project", help="Nombre de un proyecto existente (REQ-008)")
     dedup_parser.add_argument("--duplicates-dir", help="Carpeta de duplicados (uso avanzado sin proyecto)")
 
+    _add_export_parser(subparsers, registry_flag)
+
     auth_db_flag = argparse.ArgumentParser(add_help=False)
     auth_db_flag.add_argument(
         "--auth-db-path",
@@ -110,6 +120,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     return parser
+
+
+def _add_export_parser(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]", registry_flag: argparse.ArgumentParser) -> None:
+    """`export zip | cache-xlsx | errors-xlsx` (L-7): rutas de un proyecto del registro o explícitas."""
+    sources = argparse.ArgumentParser(add_help=False, parents=[registry_flag])
+    sources.add_argument("--project", help="Nombre de un proyecto existente (REQ-008)")
+    sources.add_argument("--output-root", help="Raíz de salidas del proyecto (contiene Conversión/), sin --project")
+    sources.add_argument("--state-root", help="Raíz del estado (cache.db, errores_escaneo/, duplicados/) si no es la de salidas")
+    sources.add_argument("--cache-file", nargs="+", help="Una o varias cache.db (por defecto la del proyecto)")
+
+    export_parser = subparsers.add_parser("export", help="Exportar un proyecto: ZIP, Excel de caché o Excel de errores (L-7)")
+    export_subparsers = export_parser.add_subparsers(dest="export_command", required=True)
+
+    zip_parser = export_subparsers.add_parser("zip", help="ZIP con Conversión/, cache_export.json y DEDUP_REPORT.json (si existe)", parents=[sources])
+    zip_target = zip_parser.add_mutually_exclusive_group(required=True)
+    zip_target.add_argument("-o", "--output", help="Ruta del ZIP a escribir (se sobrescribe si existe)")
+    zip_target.add_argument("--preview", action="store_true", help="Solo mostrar cuántos ficheros y bytes incluiría el ZIP")
+
+    cache_parser = export_subparsers.add_parser("cache-xlsx", help="Excel con todas las entradas de la caché", parents=[sources])
+    cache_parser.add_argument("-o", "--output", required=True, help="Ruta del .xlsx a escribir (se sobrescribe si existe)")
+
+    errors_parser = export_subparsers.add_parser("errors-xlsx", help="Excel de errores de escaneo: estado actual e histórico", parents=[sources])
+    errors_parser.add_argument("-o", "--output", required=True, help="Ruta del .xlsx a escribir (se sobrescribe si existe)")
+    errors_parser.add_argument("--errors-log", nargs="+", help="Uno o varios SCAN_ERRORS_HISTORY.jsonl (por defecto el del proyecto)")
 
 
 def _registry(args: argparse.Namespace) -> ProjectRegistry:
@@ -172,6 +206,46 @@ async def _resolve_dedup_paths(args: argparse.Namespace) -> tuple[Path, Path]:
         raise DocOrganizeError("Sin --project, hay que indicar --duplicates-dir explícitamente.")
     duplicates_dir = Path(args.duplicates_dir)
     return duplicates_dir, ProjectLayout(duplicates_dir.parent).folders_json
+
+
+async def _resolve_export_layout(args: argparse.Namespace) -> ProjectLayout:
+    """Rutas de `export`: las del proyecto `--project` o las de `--output-root`, con `--state-root` opcional."""
+    state_root = Path(args.state_root) if args.state_root else None
+    if args.project and args.output_root:
+        raise DocOrganizeError("Indica --project o --output-root, no ambos.")
+    if args.project:
+        async with _registry(args) as registry:
+            project = await registry.get_project(args.project)
+        return ProjectLayout.for_project(project, state_root=state_root)
+    if not args.output_root:
+        raise DocOrganizeError("Indica --project o --output-root.")
+    return ProjectLayout(Path(args.output_root), state_root=state_root)
+
+
+async def _run_export(args: argparse.Namespace) -> int:
+    layout = await _resolve_export_layout(args)
+    cache_dbs = [Path(cache_file) for cache_file in args.cache_file] if args.cache_file else [layout.cache_db]
+    entries = await load_cache_entries(cache_dbs)
+
+    if args.export_command == "zip" and args.preview:
+        stats = preview_project_zip(entries, layout=layout)
+        print(f"El ZIP incluiría {stats.file_count} ficheros ({stats.total_size_bytes} bytes sin comprimir).")
+        return 0
+
+    output = Path(args.output)
+    if not output.parent.is_dir():
+        raise InvalidPathError(f"No existe la carpeta de destino '{output.parent}'.")
+    if args.export_command == "zip":
+        stats = write_project_zip(output, entries, layout=layout)
+        print(f"ZIP escrito en '{output}': {stats.file_count} ficheros ({stats.total_size_bytes} bytes sin comprimir).")
+    elif args.export_command == "cache-xlsx":
+        rows = write_cache_xlsx(output, entries)
+        print(f"Excel de caché escrito en '{output}': {rows} filas.")
+    else:
+        history_logs = [Path(log) for log in args.errors_log] if args.errors_log else [layout.scan_errors_log]
+        rows = write_scan_errors_xlsx(output, entries, load_scan_error_history(history_logs))
+        print(f"Excel de errores escrito en '{output}': {rows} filas.")
+    return 0
 
 
 async def _run_project_create(args: argparse.Namespace) -> int:
@@ -351,6 +425,8 @@ def main(argv: list[str] | None = None) -> int:
             return asyncio.run(_run_scan(args))
         if args.command == "deduplicate":
             return asyncio.run(_run_deduplicate(args))
+        if args.command == "export":
+            return asyncio.run(_run_export(args))
         if args.command == "web":
             return _run_web(args)
         if args.command == "tenant" and args.tenant_command == "create":

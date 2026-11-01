@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_organize"
-version = "0.10.0"
+version = "0.11.0"
 description = "Sistema de extracción de contenido de documentos en Markdown y JSON documentación y organización."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -55,6 +55,8 @@ dev = [
     "mypy>=1.0",
     "types-aiofiles>=23.0",
     "types-PyYAML>=6.0",
+    "types-openpyxl>=3.1",
+    "openpyxl>=3.1",  # tests de doc_organize.export (extra `export`)
     "black>=23.0",
     # Web dependencies for type checking and testing (have native type hints)
     "fastapi>=0.100",
@@ -71,6 +73,10 @@ docs = [
     "zensical>=0.0.71",
     "mkdocstrings-python>=2.0",
 ]
+# Excel de `doc_organize.export` (`write_cache_xlsx`, `write_scan_errors_xlsx`); el ZIP no necesita nada (L-7).
+export = [
+    "openpyxl>=3.1",
+]
 # Sitio navegable del contexto de un proyecto (`MkDocsGenerator` ejecuta `mkdocs build`); antes venía con `docs`.
 site = [
     "mkdocs>=1.4",
@@ -80,7 +86,7 @@ web = [
     "uvicorn>=0.23",
     "jinja2>=3.1.0",
     "python-multipart>=0.0.6",
-    "openpyxl>=3.1",
+    "openpyxl>=3.1",  # web/routes/downloads.py usa doc_organize.export (mismo requisito que el extra `export`)
     # Cifrado en reposo de credenciales de IA guardadas desde el panel de
     # configuración (auth/secrets_cipher.py, Fernet) -- auditoría de parametrización,
     # 2026-09-10.
@@ -121,11 +127,6 @@ ignore_missing_imports = false
 # Docling arrastra dependencias (via scipy-stubs) que usan sintaxis de
 # Python 3.12+ en sus stubs; no seguimos sus imports para que no rompan el
 # type-check de nuestro propio codigo (que sigue siendo compatible con 3.11+).
-# pandas no publica tipos (pandas-stubs es aparte) y solo lo usa web/routes/downloads.py, que se retira con web/.
-[[tool.mypy.overrides]]
-module = ["pandas", "pandas.*"]
-ignore_missing_imports = true
-
 [[tool.mypy.overrides]]
 module = ["docling.*"]
 follow_imports = "skip"

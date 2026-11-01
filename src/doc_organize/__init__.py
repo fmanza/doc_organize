@@ -41,6 +41,14 @@ _EXPORTS: dict[str, str] = {
     "ProjectHistoryCleaner": "doc_organize.projects.project_history_cleaner",
     "ScannedFoldersStore": "doc_organize.projects.scanned_folders_store",
     "FolderValidator": "doc_organize.validators.folder_validator",
+    # Exportación (L-7): ZIP en streaming, vista previa y Excel (extra `export` para el Excel)
+    "ExportStats": "doc_organize.export.zip_export",
+    "preview_project_zip": "doc_organize.export.zip_export",
+    "write_project_zip": "doc_organize.export.zip_export",
+    "write_cache_xlsx": "doc_organize.export.xlsx_export",
+    "write_scan_errors_xlsx": "doc_organize.export.xlsx_export",
+    "load_cache_entries": "doc_organize.export.sources",
+    "load_scan_error_history": "doc_organize.export.sources",
     "ProjectValidator": "doc_organize.validators.project_validator",
     # Diagnóstico de la instancia (ligeros: no cargan Docling)
     "detect_gpu_status": "doc_organize.utils.gpu_detector",
@@ -78,6 +86,7 @@ _EXPORTS: dict[str, str] = {
     "DocOrganizeError": "doc_organize.core.exceptions",
     "OperationCancelledError": "doc_organize.core.exceptions",
     "InvalidPathError": "doc_organize.core.exceptions",
+    "MissingDependencyError": "doc_organize.core.exceptions",
     "ConversionError": "doc_organize.core.exceptions",
     "CacheError": "doc_organize.core.exceptions",
     "ProjectError": "doc_organize.core.exceptions",
@@ -117,6 +126,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         ConversionError,
         DocOrganizeError,
         InvalidPathError,
+        MissingDependencyError,
         OperationCancelledError,
         ProjectError,
         ProjectNotFoundError,
@@ -152,6 +162,9 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
     )
     from doc_organize.core.progress import CancelToken, ProgressEvent
     from doc_organize.dedup.deduplication import DeduplicationManager
+    from doc_organize.export.sources import load_cache_entries, load_scan_error_history
+    from doc_organize.export.xlsx_export import write_cache_xlsx, write_scan_errors_xlsx
+    from doc_organize.export.zip_export import ExportStats, preview_project_zip, write_project_zip
     from doc_organize.projects.layout import ProjectLayout
     from doc_organize.projects.project_history_cleaner import ProjectHistoryCleaner
     from doc_organize.projects.project_registry import ProjectRegistry

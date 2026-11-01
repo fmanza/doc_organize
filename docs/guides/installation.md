@@ -23,6 +23,17 @@ imágenes base completas de Ubuntu/Debian ya lo traen, pero las variantes `slim`
 paquetes de la distro (p.ej. `apt-get install -y libgomp1` en Debian/Ubuntu; ver
 [Resolución de problemas](troubleshooting.md#libgompso1-no-encontrado-en-linux-minimocontenedores)).
 
+## Exportación a Excel (opcional)
+
+```bash
+pip install doc_organize[export]
+```
+
+Añade `openpyxl` para `export cache-xlsx` y `export errors-xlsx` (y las funciones
+`write_cache_xlsx`/`write_scan_errors_xlsx` de `doc_organize.export`). El ZIP
+(`export zip`) no necesita ningún extra. Sin `openpyxl`, el Excel falla con
+`MissingDependencyError` y el mensaje indica qué instalar.
+
 ## Interfaz web (opcional)
 
 ```bash

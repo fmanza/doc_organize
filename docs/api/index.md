@@ -10,15 +10,18 @@ convención completa):
   `dedup/`, `cache/`, `projects/`, `auth/`): cada uno resuelve una responsabilidad
   del dominio sin depender de los otros módulos de su mismo nivel. Solo dependen
   de Nivel 1.
-- **Nivel 3 — Orquestación** (`scan/`, `web/`, `main.py`): coordinan los servicios
+- **Nivel 3 — Orquestación** (`scan/`, `export/`, `web/`, `main.py`): coordinan los servicios
   de Nivel 2 sin cambiar sus contratos. `scan/` es compartido por el CLI y la web
-  a propósito — ninguno de los dos "posee" la orquestación de escaneo.
+  a propósito — ninguno de los dos "posee" la orquestación de escaneo. `export/`
+  (ZIP y Excel de un proyecto, ver [Exportación](export.md)) tampoco: lo usan el CLI,
+  la web integrada y doc_organize_web.
 
 ```mermaid
 graph TB
     subgraph L3["Nivel 3 — Orquestación"]
         CLI["main.py (CLI)"]
         ScanCmd["scan/ScanCommand"]
+        Export["export/ (ZIP y Excel)"]
         Web["web/ (FastAPI, extra [web])"]
     end
 
@@ -39,6 +42,10 @@ graph TB
 
     CLI --> ScanCmd
     Web --> ScanCmd
+    CLI --> Export
+    Web --> Export
+    Export --> Cache
+    Export --> Projects
     CLI --> Projects
     Web --> Projects
     Web --> Auth

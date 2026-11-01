@@ -6,10 +6,37 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-01
+
+Exportación de proyectos como API pública (tarea L-7 del plan de doc_organize_web; cierra el hueco G8). Cambios
+aditivos: la web integrada y el CLI existente se comportan igual.
+
+### Added
+
+- `doc_organize.export`: `write_project_zip` (ZIP en *streaming* a una ruta o fichero binario, copia por bloques de
+  1 MiB, sin temporales), `preview_project_zip` (ficheros y bytes, igual que el ZIP) y `ExportStats`;
+  `write_cache_xlsx` y `write_scan_errors_xlsx` (`openpyxl` en modo `write_only`, fórmulas neutralizadas);
+  `load_cache_entries` (varias `cache.db`) y `load_scan_error_history` (varios históricos). Rutas explícitas
+  (`ProjectLayout` o `conversion_dir`/`dedup_report`), `on_progress` y `cancel_token`; al cancelar se borra el
+  fichero parcial y se lanza `OperationCancelledError`. Nombres incluidos en `doc_organize.__all__`.
+- CLI: `doc_organize export zip | cache-xlsx | errors-xlsx` con `--project` o `--output-root`/`--state-root`,
+  `--cache-file` y `--errors-log` repetibles y `zip --preview`.
+- Extra `export` (`openpyxl>=3.1`), importado al escribir un Excel; si falta, `MissingDependencyError` (nuevo en
+  `core/exceptions.py` y en la API pública, con `package` y `extra`).
+- `ProgressEvent.operation="export"` y fase `"export"`.
+- Documentación: `docs/functional/export.md`, `docs/api/export.md`; `docs/api/publica.md` con el grupo «Exportación».
+
 ### Changed
 
+- `web/routes/downloads.py` usa `doc_organize.export` (mismas rutas, nombres de fichero y contenido). Diferencias
+  menores: `cache_export.json` lleva las entradas ordenadas por `file_path` y `export_timestamp` siempre con
+  microsegundos; exportar un proyecto nunca escaneado ya no crea un `cache.db` vacío; la cabecera del Excel sigue en
+  negrita pero sin borde; los ficheros enlace de `Conversión/` ya no entran en el ZIP; los caracteres de control de
+  los mensajes de error se quitan en vez de hacer fallar el Excel.
 - CI: `tests.yml` corre en los PR y en `develop`, no en cada push ni en `main`. PR fusionados con squash y release por
   fast-forward de `main` al commit de `develop` con el CI en verde (`SHARED_INSTRUCTIONS.md` § «Ramas y publicación»).
+- `dev` incluye `openpyxl` y `types-openpyxl`; se retira el *override* de mypy para `pandas`, que ya no se importa en
+  `src/`.
 
 ## [0.10.0] - 2026-10-31
 
