@@ -6,10 +6,14 @@
 (`".."`) que es la razón de ser de `safe_path_join` (maturity-assessment,
 sesión 2026-09-03)."""
 
+import os
+
+from pathlib import Path
+
 import pytest
 
 from doc_organize.core.exceptions import InvalidPathError
-from doc_organize.utils.path_utils import is_subpath, paths_within_roots, safe_path_join
+from doc_organize.utils.path_utils import ensure_no_symlinks, is_subpath, paths_within_roots, safe_path_join
 
 
 def test_safe_path_join_joins_parts_under_base(tmp_path) -> None:
@@ -75,3 +79,21 @@ def test_paths_within_roots_restricted_role_without_roots_rejects_everything(tmp
     """Un rol restringido sin `allowed_scan_roots` configuradas no puede indicar
     ninguna ruta externa — mismo criterio que documenta `paths_within_roots`."""
     assert paths_within_roots([str(tmp_path)], []) is False
+
+
+def test_ensure_no_symlinks_returns_absolute_path_without_resolving(tmp_path) -> None:
+    assert ensure_no_symlinks(tmp_path / "no" / "existe") == Path(os.path.abspath(tmp_path / "no" / "existe"))
+
+
+def test_ensure_no_symlinks_rejects_any_symlink_segment(tmp_path) -> None:
+    real = tmp_path / "real"
+    real.mkdir()
+    try:
+        (tmp_path / "enlace").symlink_to(real, target_is_directory=True)
+    except OSError:
+        pytest.skip("El entorno no permite crear symlinks (privilegios insuficientes en Windows).")
+
+    with pytest.raises(OSError):
+        ensure_no_symlinks(tmp_path / "enlace")
+    with pytest.raises(OSError):
+        ensure_no_symlinks(tmp_path / "enlace" / "a.pdf")

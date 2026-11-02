@@ -859,6 +859,7 @@ class ScanCommand:
         """
         started_at = datetime.now(UTC)
         duplicates_dir = Path(duplicates_dir)
+        DeduplicationManager.check_duplicates_dir(duplicates_dir)
         dedup_manager = DeduplicationManager()
         groups: list[DuplicateGroup] = []
         exact_moved = 0

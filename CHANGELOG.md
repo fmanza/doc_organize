@@ -8,8 +8,9 @@ releases publicados antes de esa versión).
 
 ## [0.12.1] - 2026-11-02
 
-Ruta relativa en `duplicados/` para doc_organize_web (tarea L-11a de su plan; cierra el hueco G24). Aditivo y
-compatible: sin el parámetro nuevo nada cambia.
+Ruta relativa en `duplicados/` y movimiento sin seguir enlaces simbólicos para doc_organize_web (tarea L-11a de su
+plan; cierra los huecos G24 y G26). Aditivo y compatible, salvo que ya no se mueven ni copian rutas que pasen por un
+enlace (ver «Security»).
 
 ### Added
 
@@ -23,8 +24,23 @@ compatible: sin el parámetro nuevo nada cambia.
 - `resolve_duplicates`/`deduplicate_streaming` solo pasan `mode`/`relative_to` a `move_group` (y este a
   `_move_to_duplicates`) cuando no tienen el valor por defecto: quien sustituya esos métodos con la firma anterior
   sigue funcionando.
+- `doc_organize.utils.path_utils.ensure_no_symlinks(path) -> Path`: ruta absoluta normalizada sin resolver; `OSError`
+  (`ELOOP`) si algún tramo existente es un enlace simbólico o una unión de Windows.
+- `DeduplicationManager.check_duplicates_dir(duplicates_dir)`: `InvalidPathError` si es (o pasa por) un enlace.
 
-### Firmas finales (para doc_organize_web)
+### Security
+
+- **L-11a (G26)**: `_move_to_duplicates` ya no sigue enlaces simbólicos. Antes resolvía el origen con `resolve()` y
+  `safe_path_join` resolvía la base de `duplicates_dir`: un enlace cambiado justo antes de mover hacía que se moviera o
+  copiara un fichero de fuera (p. ej. secretos). Ahora ninguna de las dos rutas se resuelve; si algún tramo del origen,
+  de `duplicates_dir` o de la carpeta destino es un enlace, ese fichero falla (`OSError` → `failed_paths`) sin tocar el
+  destino del enlace. En POSIX el origen y el destino se abren tramo a tramo con `O_NOFOLLOW` y se mueven con `rename`
+  relativo a esos descriptores (o se copian con `O_NOFOLLOW`/`O_EXCL` si están en sistemas de ficheros distintos), así
+  que un enlace puesto entre la comprobación y el movimiento tampoco se sigue; en Windows (sin `dir_fd`) queda la
+  comprobación con `lstat` de cada tramo. `resolve_duplicates` y `deduplicate_streaming` rechazan de entrada un
+  `duplicates_dir` enlazado (`InvalidPathError`) antes de escribir nada.
+- Consecuencia: una ruta de origen o de duplicados que pase por un enlace del sistema (p. ej. `/tmp` → `/private/tmp`
+  en macOS) falla. El llamador debe pasar rutas reales (resueltas una vez, en la configuración).
 
 ```python
 # doc_organize.DeduplicationManager
@@ -35,6 +51,11 @@ async def move_group(self, group: DuplicateGroup, duplicates_dir: Path, *, mode:
                      relative_to: Path | None = None) -> tuple[int, int, list[str]]
 async def _move_to_duplicates(self, source: Path, duplicates_dir: Path, sha256_hash: str, *, copy: bool = False,
                               relative_to: Path | None = None) -> None
+@staticmethod
+def check_duplicates_dir(duplicates_dir: Path) -> None        # InvalidPathError si hay un enlace
+
+# doc_organize.utils.path_utils
+def ensure_no_symlinks(path: str | Path) -> Path               # OSError (ELOOP) si hay un enlace
 
 # doc_organize.ScanCommand
 def deduplicate_streaming(self, paths: list[str], duplicates_dir: Path, folders_json: Path, *,

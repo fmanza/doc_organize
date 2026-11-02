@@ -122,6 +122,7 @@ Mueve documentos descartados a carpeta de duplicados.
 5. Retorna `DeduplicationReport` con resumen
 
 **Excepciones**:
+- `InvalidPathError` — `duplicates_dir` es (o pasa por) un enlace simbólico (desde 0.12.1)
 - `ProjectError` — Errores críticos durante movimiento
 
 ---
@@ -163,7 +164,7 @@ class DeduplicationReport:
 | `core.constants.VERSION_SUFFIX_PATTERN` | Detecta sufijos de versión |
 | `core.models.DuplicateGroup`, `DeduplicationReport` | Modelos |
 | `core.exceptions.ProjectError` | Excepciones |
-| `utils.path_utils.is_subpath()`, `safe_path_join()` | Manipulación segura de rutas |
+| `utils.path_utils.ensure_no_symlinks()` | Rutas absolutas sin resolver ni seguir enlaces |
 | `utils.logging` | Logging |
 | `rapidfuzz.process.cdist`, `rapidfuzz.fuzz.WRatio`, `rapidfuzz.utils.default_process` | Matriz de scores de similitud de nombre (3ª pasada, vectorizado, con normalización previa) |
 | `numpy` (transitivo vía `pandas`) | Extrae, vectorizado, los pares de la matriz de scores por encima del umbral |
@@ -171,7 +172,12 @@ class DeduplicationReport:
 ## Notas Internas
 
 - **Naming**: `_extract_base_name()` normaliza nombres (strip extensión, sufijo versión, lowercase)
-- **Movimiento seguro**: `safe_path_join()` previene path traversal
+- **Movimiento seguro**: las rutas se normalizan sin resolver enlaces (nunca contienen `..`) y no se siguen enlaces
+  simbólicos (desde 0.12.1): si algún tramo del origen, de `duplicates_dir` o de la carpeta destino es un enlace, el
+  fichero falla (`failed_paths`); `resolve_duplicates()` y `deduplicate_streaming()` rechazan de entrada un
+  `duplicates_dir` enlazado (`InvalidPathError`). En POSIX el origen y el destino se abren tramo a tramo con
+  `O_NOFOLLOW` y se mueven con `rename` relativo a esos descriptores, así que un enlace puesto justo antes de mover
+  tampoco se sigue; en Windows (sin `dir_fd`) queda la comprobación con `lstat`
 - **Colisiones**: Si destino existe, añade sufijo con hash de 8 caracteres
 - **Auditoría completa**: `DEDUP_REPORT.json` incluye lista de todas las decisiones
 - **Histórico incremental**: `DEDUP_HISTORY.jsonl` (una línea JSON por ejecución de
