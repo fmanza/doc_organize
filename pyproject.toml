@@ -51,7 +51,7 @@ dev = [
     "httpx>=0.24",
     # ruff 0.16 amplía las reglas por defecto (DTZ, RUF, SIM) y el CI, que instala la última, falla con 11
     # avisos nuevos; se fija por debajo hasta revisarlos (deuda registrada en el CHANGELOG 0.9.3).
-    "ruff>=0.1.0,<0.16",
+    "ruff>=0.1.0,<0.18",
     "mypy>=1.0",
     "types-aiofiles>=23.0",
     "types-PyYAML>=6.0",
