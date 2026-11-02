@@ -1,7 +1,7 @@
 # Organización Documental — Dominios y Contextos
 
 Clasificar los documentos ya convertidos de un proyecto en dominios, copiarlos a
-una carpeta reorganizada y generar un sitio MkDocs navegable.
+una carpeta reorganizada y generar un sitio navegable con Zensical.
 
 ## Objetivo
 
@@ -9,7 +9,7 @@ Sobre un proyecto ya escaneado y convertido, identificar **dominios** (a qué á
 temática pertenece cada documento) por reglas — con un fallback opcional por IA —
 copiar cada documento (original + `.md` + `.json`) a
 `<output_folder_name>/<dominio>/<tipo>/<stem>/` y generar la configuración de un
-sitio [MkDocs](https://www.mkdocs.org/) que lo navegue.
+sitio [Zensical](https://zensical.org/) que lo navegue (con MkDocs hasta 0.12.x).
 
 Opcionalmente, si el proyecto tiene un **manifiesto de taxonomía**
 (`taxonomy_manifest.md`, ver más abajo), la clasificación pasa a ser de **2 ejes**
@@ -20,7 +20,9 @@ fichero para ser ese tipo de material semántico.
 
 - El proyecto tiene documentos ya convertidos con éxito (`cache.db` con entradas
   `conversion_status=success`) — ver [Converter](converter.md).
-- Extra `doc_organize[context]` instalado (`pyyaml`, para generar `mkdocs.yml`).
+- Extra `doc_organize[context]` instalado (`pyyaml`, para el manifiesto y las plantillas de taxonomía).
+- Para construir el sitio navegable: extra `doc_organize[site]` (`zensical`). Sin él, la configuración se escribe
+  igual y `SiteGenerator` lanza `SiteBuildError` al construir.
 - Sub-fase B (opcional): un LiteLLM Proxy desplegado — ver
   [Desplegar un LiteLLM Proxy](../guides/litellm_proxy_setup.md).
 
@@ -34,7 +36,7 @@ sequenceDiagram
     participant RulesA as DomainClassifier (Sub-fase A)
     participant IA as DomainClassificationClient (Sub-fase B)
     participant Reorg as Reorganizer
-    participant MkDocs as MkDocsGenerator
+    participant Site as SiteGenerator
 
     Usuario->>API: construir contexto (catálogo?, IA?)
     API->>Builder: build(documentos, ...)
@@ -47,9 +49,9 @@ sequenceDiagram
     Builder-->>API: Context (persistido)
     API->>Reorg: reorganize(context)
     Reorg-->>API: organizado/ poblado
-    API->>MkDocs: generate(context)
-    MkDocs-->>API: mkdocs.yml + index.md
-    API-->>Usuario: dominios, sin_clasificar, reorganized, mkdocs_generated
+    API->>Site: generate(context)
+    Site-->>API: zensical.toml + index.md (+ zensical build)
+    API-->>Usuario: dominios, sin_clasificar, reorganized, site_generated, site_built
 ```
 
 ## Manifiesto de Taxonomía (opcional, 2 ejes)
@@ -84,9 +86,9 @@ Si el fichero existe, `POST .../context` lo carga automáticamente (no hace falt
 activar nada en el formulario) y clasifica cada documento en los dos ejes, por
 reglas — mismo criterio de puntuación que el modo de un eje (palabras del slug
 encontradas en título+contenido, con bonus si la carpeta contenedora coincide). La
-copia física y el sitio MkDocs reflejan el segundo eje:
+copia física y el sitio reflejan el segundo eje:
 `<output_folder_name>/<dominio>/<tipo-de-material>/<stem>/`, y el nav de
-`mkdocs.yml` se agrupa `dominio > tipo de material > documentos`.
+`zensical.toml` se agrupa `dominio > tipo de material > documentos`.
 
 Con `ai_classification_enabled=True` (y el proxy de clasificación de 2 ejes
 configurado, ver más abajo), cada documento que las reglas dejan con el placeholder
@@ -155,14 +157,51 @@ local), el comportamiento es exactamente el mismo que antes de esta funcionalida
 
 ## Visualizar el Sitio Generado
 
-`GET /projects/{name}/context/site/` sirve el sitio MkDocs ya construido
+`GET /projects/{name}/context/site/` sirve el sitio ya construido
 (`<project.root_path>/site/`), como acción de solo lectura totalmente
 independiente de construir/reconstruir el contexto: nunca se abre
 automáticamente al terminar un `POST`, el usuario decide cuándo verlo (enlace
 "ver documentación generada" en la página del proyecto, visible solo cuando
-`mkdocs_site_built` es `True`). Al ser un sitio distinto por cada `Project`
+`site_built` es `True`). Al ser un sitio distinto por cada `Project`
 (cada uno con su propio `root_path`), la misma ruta sirve el sitio de
 cualquier proyecto sin acoplarse a la construcción de ningún otro.
+
+Un contexto construido antes de 0.13.0 (con `mkdocs.yml`) pasa a Zensical al reconstruirlo: se borra `mkdocs.yml`, se
+escribe `zensical.toml` y se vuelve a construir `site/`. `context.json` antiguo se sigue leyendo
+(`mkdocs_generated`/`mkdocs_site_built` pasan a `site_generated`/`site_built`).
+
+## Seguridad del sitio
+
+Los `.md` del sitio salen de documentos de terceros: son **contenido no confiable**. Comprobado con Zensical 0.0.74
+(build real con Markdown hostil):
+
+- **El HTML incrustado en el Markdown llega tal cual al sitio**: `<script>`, atributos `on*` (`<img onerror>`) y
+  enlaces `javascript:` no se filtran. Es el comportamiento por defecto de Zensical (Python-Markdown), igual que con
+  MkDocs; doc_organize no lo cambia ni lo empeora.
+- **La configuración generada no añade nada ejecutable**: ni JavaScript propio, ni `extra_javascript`, ni plugins, ni
+  extensiones Markdown distintas de las que Zensical activa por defecto. Solo fija nombre, carpetas, `nav`, idioma y
+  `font = false` (sin peticiones a Google Fonts).
+- **Lo que escribe doc_organize sí se neutraliza**: Zensical inserta sin escapar las etiquetas del `nav` y
+  `site_name`, y el tema mete el título de cada página en `<title>` deshaciendo las entidades (`striptags`). Por eso
+  los títulos de documento y los nombres de dominio y de proyecto se escriben sin `<`/`>` (pasan a `＜`/`＞`) y con
+  `&` y comillas escapados: un título como `</title><script>…` no se ejecuta.
+- **El tema por defecto** usa su propio JavaScript (navegación, búsqueda) y carga Mermaid desde `unpkg.com` cuando una
+  página tiene un bloque de código `mermaid`.
+
+Quien sirva el sitio debe tratarlo como contenido de terceros: servirlo desde **otro origen** que la aplicación (sin
+sus cookies), o con una cabecera `Content-Security-Policy` restrictiva (por ejemplo `sandbox`, que deja el sitio en un
+origen opaco). La web integrada (congelada, se retira en 1.0.0) lo sirve en el mismo origen, como hacía con MkDocs.
+
+## Reorganizar sin seguir enlaces simbólicos
+
+Desde 0.13.0, `Reorganizer` no sigue enlaces simbólicos (ni uniones de Windows), con el mismo criterio que la
+deduplicación desde 0.12.1:
+
+- La carpeta reorganizada no puede ser ni pasar por un enlace: la reorganización falla entera antes de tocar nada.
+- Un documento con algún tramo enlazado (el original, el `.md`, el `.json` o sus imágenes) falla solo, sin copiar el
+  destino del enlace ni dejar copias parciales; el resto sigue. Los fallos quedan en
+  `Context.reorganize_failed_documents` y la página "Contexto" los avisa.
+- Una ruta que pase por un enlace del sistema (p. ej. `/tmp` en macOS) falla: hay que trabajar con rutas reales.
 
 ## Reglas de Negocio
 
@@ -173,7 +212,7 @@ cualquier proyecto sin acoplarse a la construcción de ningún otro.
 | **IA es fallback, nunca primera pasada** | Sub-fase B solo se intenta con documentos que la Sub-fase A deja por debajo del umbral de confianza, y opt-in explícito (`ai_classification_enabled`, `False` por defecto) |
 | **Copiar, nunca mover** | `Reorganizer` copia los tres artefactos (original + `.md` + `.json`); la fuente original nunca se toca |
 | **Reconstrucción limpia** | Cada `POST` reconstruye desde cero: dominios/documentos ya no vigentes se eliminan de `context.json` y de `organizado/`, sin copias huérfanas |
-| **Estado honesto ante fallo parcial** | Si la reorganización o la generación de MkDocs fallan a mitad, `context.json` persiste `reorganized`/`mkdocs_generated=false` — nunca se reporta éxito falso |
+| **Estado honesto ante fallo parcial** | Si la reorganización o la generación del sitio fallan a mitad, `context.json` persiste `reorganized`/`site_generated=false` — nunca se reporta éxito falso. `SiteGenerator` lanza `SiteBuildError` si no puede construir el sitio, nunca lo deja sin construir en silencio |
 | **Una operación a la vez** | `POST /api/projects/{name}/context` se rechaza con `409` si hay un escaneo, deduplicación u otra construcción de contexto en curso para el mismo proyecto |
 | **Manifiesto y catálogo simple son excluyentes** | Un proyecto con `taxonomy_manifest.md` no puede combinar `candidate_domains` en la misma petición — `400` explícito, nunca precedencia silenciosa |
 | **Fichero local, catálogo simple y plantilla son excluyentes entre sí** | Cualquier combinación de `taxonomy_manifest.md` local, `candidate_domains` y `taxonomy_template_name` en la misma petición se rechaza con `400` explícito — el fichero local, si existe, siempre gana sobre una plantilla, nunca precedencia silenciosa |

@@ -22,7 +22,7 @@ from doc_organize.core.constants import DEDUP_HISTORY_JSONL_NAME, DEDUP_REPORT_J
 from doc_organize.core.exceptions import InvalidPathError
 from doc_organize.core.models import DeduplicationReport, DedupMode, DocumentMetadata, DuplicateGroup, DuplicateReason
 from doc_organize.utils.logging import get_logger
-from doc_organize.utils.path_utils import ensure_no_symlinks
+from doc_organize.utils.path_utils import _copy_nofollow, _open_dir_nofollow, ensure_no_symlinks
 
 
 class DeduplicationManager:
@@ -458,24 +458,11 @@ class DeduplicationManager:
             shutil.move(source_abs, target)
 
 
-# `dir_fd` + `O_NOFOLLOW` (POSIX): abrir cada tramo sin seguir enlaces y operar relativo a esos descriptores.
+# `dir_fd` + `O_NOFOLLOW` (POSIX): abrir cada tramo sin seguir enlaces y operar relativo a esos descriptores (los
+# helpers viven en `utils.path_utils`, compartidos con `Reorganizer` desde 0.13.0).
 _O_NOFOLLOW: int = getattr(os, "O_NOFOLLOW", 0)
 _O_DIRECTORY: int = getattr(os, "O_DIRECTORY", 0)
 _NOFOLLOW_DIR_FD = bool(_O_NOFOLLOW and _O_DIRECTORY) and {os.open, os.rename, os.unlink, os.stat} <= os.supports_dir_fd
-
-
-def _open_dir_nofollow(path: Path) -> int:
-    """Abre el directorio absoluto `path` tramo a tramo con `O_NOFOLLOW` (`ELOOP` si alguno es un enlace)."""
-    fd = os.open(path.anchor, os.O_RDONLY | _O_DIRECTORY)
-    try:
-        for part in path.parts[1:]:
-            next_fd = os.open(part, os.O_RDONLY | _O_DIRECTORY | _O_NOFOLLOW, dir_fd=fd)
-            os.close(fd)
-            fd = next_fd
-    except BaseException:
-        os.close(fd)
-        raise
-    return fd
 
 
 def _transfer_nofollow(source: Path, target: Path, *, copy: bool) -> None:
@@ -500,24 +487,6 @@ def _transfer_nofollow(source: Path, target: Path, *, copy: bool) -> None:
             os.close(dst_dir)
     finally:
         os.close(src_dir)
-
-
-def _copy_nofollow(source: Path, target: Path, src_dir: int, dst_dir: int) -> None:
-    """Copia contenido, permisos y fechas (como `shutil.copy2`) con `O_NOFOLLOW` en el origen y `O_EXCL` en el destino."""
-    with os.fdopen(os.open(source.name, os.O_RDONLY | _O_NOFOLLOW, dir_fd=src_dir), "rb") as src:
-        st = os.fstat(src.fileno())
-        if not stat.S_ISREG(st.st_mode):
-            raise OSError(errno.ELOOP, "El origen no es un fichero normal (no se sigue)", str(source))
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW
-        with os.fdopen(os.open(target.name, flags, 0o600, dir_fd=dst_dir), "wb") as dst:
-            try:
-                shutil.copyfileobj(src, dst)
-                dst.flush()  # antes de fijar las fechas: si no, la escritura al cerrar las cambia
-                os.chmod(dst.fileno(), stat.S_IMODE(st.st_mode))
-                os.utime(dst.fileno(), ns=(st.st_atime_ns, st.st_mtime_ns))
-            except BaseException:
-                os.unlink(target.name, dir_fd=dst_dir)
-                raise
 
 
 __all__ = ["DeduplicationManager"]

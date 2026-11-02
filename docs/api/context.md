@@ -32,10 +32,12 @@ classDiagram
         +get_domain(project, slug) Domain
     }
     class Reorganizer {
-        +reorganize(project, context) Path
+        +reorganize(project, context, on_document_copied, on_document_failed) Path
     }
-    class MkDocsGenerator {
-        +generate(project, context) Path
+    class SiteGenerator {
+        +generate(project, context, build, site_dir, timeout) SiteResult
+        +build_site(project, timeout) None
+        +delete_site(project, site_dir) None
     }
     class DomainClassificationClient {
         +config: LiteLLMClassificationConfig
@@ -185,9 +187,11 @@ el delimitador de front matter, el YAML no es válido, o no cumple el schema
 
 ```python
 class TaxonomyTemplateRegistry:
-    def __init__(self, templates_dir: str | Path = Path.home() / ".doc_organize" / "taxonomy_templates") -> None
+    def __init__(self, templates_dir: str | Path | None = None) -> None   # None: ~/.doc_organize/taxonomy_templates
     async def list_templates(self) -> list[TaxonomyTemplateSummary]
     async def load_template(self, name: str) -> TaxonomyManifest
+    async def save_template(self, name: str, manifest: TaxonomyManifest) -> None
+    async def delete_template(self, name: str) -> None
 ```
 
 Biblioteca de plantillas de `TaxonomyManifest` reutilizables entre proyectos —
@@ -209,6 +213,38 @@ ninguna plantilla con ese nombre en ninguna de las dos ubicaciones; o existe una
 plantilla de usuario con ese nombre pero su front matter es inválido (en ese caso
 el error se propaga tal cual — nunca cae en silencio a la plantilla empaquetada,
 que enmascararía el fichero de usuario roto).
+
+Desde 0.13.0 la carpeta por defecto (`Path.home()`) se calcula al crear el registro, no al importar el módulo, y el
+registro usa por dentro las funciones de texto de abajo, sin cambio de comportamiento.
+
+### Plantillas como texto (0.13.0, L-8c)
+
+```python
+# doc_organize.context.taxonomy_templates (y doc_organize.context, doc_organize)
+def parse_taxonomy_template(text: str, *, source: str = "<texto>") -> TaxonomyManifest
+def render_taxonomy_template(manifest: TaxonomyManifest, body: str = "") -> str
+def list_builtin_templates() -> list[TaxonomyTemplateSummary]
+def load_builtin_template(name: str) -> TaxonomyManifest
+```
+
+Para un consumidor que guarda las plantillas fuera del disco (p. ej. en su base de datos), sin carpeta de usuario ni
+`Path.home()`:
+
+- `parse_taxonomy_template` valida el front matter con los mismos errores (`TaxonomyTemplateError`) que al cargar una
+  plantilla de fichero; `source` es como se nombra la plantilla en los mensajes.
+- `render_taxonomy_template` escribe el front matter (y `body` detrás). Ida y vuelta estable:
+  `parse_taxonomy_template(render_taxonomy_template(m)) == m`, también con `title`/`description` vacíos y con saltos
+  de línea o `---` dentro de los textos (salen escapados entre comillas dobles).
+- `list_builtin_templates`/`load_builtin_template` leen las plantillas empaquetadas (`sgi-iso27001`, `calidad`,
+  `sgi-integrado`); son síncronas (ficheros pequeños del paquete).
+
+```python
+from doc_organize import load_builtin_template, parse_taxonomy_template, render_taxonomy_template
+
+manifest = load_builtin_template("calidad")
+text = render_taxonomy_template(manifest, "# Notas de la organización\n")
+assert parse_taxonomy_template(text) == manifest
+```
 
 ---
 
@@ -237,38 +273,93 @@ conserva.
 
 ```python
 class Reorganizer:
-    async def reorganize(self, project: Project, context: Context) -> Path
+    async def reorganize(
+        self,
+        project: Project,
+        context: Context,
+        on_document_copied: Callable[[int, int, str], Awaitable[None]] | None = None,
+        *,
+        on_document_failed: Callable[[int, int, str, str], Awaitable[None]] | None = None,  # 0.13.0
+    ) -> Path
+    @staticmethod
+    def check_output_root(output_root: Path) -> None                                       # 0.13.0
+    async def delete_output(self, project: Project, context: Context) -> None
 ```
 
-Copia original + `.md` + `.json` de cada documento clasificado a
+Copia original + `.md` + `.json` (+ `img/<stem>/`) de cada documento clasificado a
 `<output_folder_name>/<dominio>/<tipo>/<stem>/`. Antes de copiar, borra la carpeta
 de cada dominio vigente (se reconstruye entera) y la de cualquier dominio ya no
 presente — sin copias huérfanas entre reconstrucciones. `<tipo>` es
 `DomainDocument.material_type` cuando está definido (modo manifiesto), o la
 extensión del documento original (modo sin manifiesto, sin cambios).
 
+**Sin seguir enlaces simbólicos (0.13.0, L-8a)**, con el mismo criterio que la deduplicación desde 0.12.1
+(`ensure_no_symlinks` y, en POSIX, descriptores abiertos con `O_NOFOLLOW`; en Windows, comprobación con `lstat`):
+
+- La carpeta reorganizada no puede ser ni pasar por un enlace: `InvalidPathError` antes de tocar nada. Un enlace en el
+  lugar de la carpeta de un dominio se quita (el enlace, nunca su destino).
+- Un documento con algún tramo enlazado (original, `.md`, `.json`, `img/<stem>/` o algo dentro) falla solo, sin
+  copiar el destino del enlace: todo se comprueba antes de copiar, y si la copia falla a medias se borra lo copiado de
+  ese documento. Lo mismo con cualquier otro `OSError` al copiarlo (permiso denegado...). El resto sigue.
+- Los fallos quedan en `Context.reorganize_failed_documents` (`source_path`, se rehace en cada llamada) y en
+  `on_document_failed(index, total, source_path, error)`.
+- Consecuencia: una ruta que pase por un enlace del sistema (p. ej. `/tmp` en macOS) falla; hay que pasar rutas reales.
+
 **Excepciones**: `IncompleteConversionArtifactsError` si a algún documento le falta
-un artefacto en disco.
+un artefacto en disco; `InvalidPathError` si la carpeta reorganizada es o pasa por un enlace.
 
 ---
 
-## MkDocsGenerator
+## SiteGenerator (0.13.0, L-8)
 
 ```python
-class MkDocsGenerator:
-    async def generate(self, project: Project, context: Context) -> Path
+@dataclass(frozen=True)
+class SiteResult:
+    config_path: Path    # <root_path>/zensical.toml
+    index_path: Path     # <root_path>/<output_folder_name>/index.md
+    site_dir: Path       # destino de zensical build
+    site_built: bool
+
+class SiteGenerator:
+    async def generate(self, project: Project, context: Context, *, build: bool = True,
+                       site_dir: Path | None = None, timeout: float | None = None) -> SiteResult
+    async def build_site(self, project: Project, *, timeout: float | None = None) -> None
+    async def delete_site(self, project: Project, *, site_dir: Path | None = None) -> None
 ```
 
-Escribe `<project.root_path>/mkdocs.yml` (usando `<output_folder_name>/` como
-`docs_dir` directamente, sin copiar el contenido una vez más) + `index.md`, con
-`nav` agrupado por dominio — y, si `Context.taxonomy_manifest_used`, también por
-`material_type` dentro de cada dominio (mismo nivel de profundidad que la carpeta
-física de `Reorganizer`). Además ejecuta `mkdocs build --clean` (si `mkdocs`
-está instalado — extra `doc_organize[docs]`) dejando `<project.root_path>/site/`
-ya navegable; si no está instalado o el build falla, se loguea un aviso y
-`Context.mkdocs_site_built` queda en `False`, sin propagar la excepción. Ver
-"Rutas HTTP" para cómo se visualiza ese sitio (`GET .../context/site/...`),
-acción independiente de este `generate()`.
+Sustituye a `MkDocsGenerator`. Escribe `<project.root_path>/zensical.toml` (usando `<output_folder_name>/` como
+`docs_dir` directamente, sin copiar el contenido una vez más) + `index.md`, con `nav` agrupado por dominio — y, si
+`Context.taxonomy_manifest_used`, también por `material_type` dentro de cada dominio (mismo nivel de profundidad que
+la carpeta física de `Reorganizer`). Con `build=True` ejecuta `zensical build` (el del mismo entorno,
+`python -m zensical`, o el del `PATH`) hacia `site_dir`.
+
+- **Errores tipados**: si falta `zensical` (extra `doc_organize[site]`), el build termina con error o supera
+  `timeout`, lanza `SiteBuildError` (subclase de `DocOrganizeError`, con la salida de error de Zensical). Nunca
+  devuelve un sitio sin construir en silencio. La configuración ya está escrita cuando se lanza.
+- **`site_dir`**: por defecto `<root_path>/site`; relativa a `root_path` si no es absoluta. Tiene que colgar de
+  `root_path` (lo exige Zensical, que también vacía `site_dir` al construir), y no puede ser la raíz, la carpeta
+  reorganizada ni otra carpeta reservada (`RESERVED_OUTPUT_FOLDER_NAMES`), ni pasar por un enlace:
+  `InvalidPathError` antes de escribir nada.
+- **Configuración mínima**: nombre, carpetas, `nav`, `theme.language = "es"` y `theme.font = false` (sin peticiones a
+  Google Fonts). Sin JavaScript propio, `extra_javascript`, plugins ni extensiones Markdown distintas de las de
+  Zensical por defecto.
+- **Contenido no confiable**: ver [Funcionalidad → Seguridad del sitio](../functional/context.md#seguridad-del-sitio).
+  Los textos que escribe esta clase (títulos de documento, nombres de dominio y de proyecto) se escriben sin `<`/`>`
+  (pasan a `＜`/`＞`) y con `&` y comillas escapados, porque Zensical los inserta en el HTML sin escapar.
+- **Contextos de antes de 0.13.0**: `generate` borra el `mkdocs.yml` que quede; `delete_site` borra `zensical.toml`,
+  `mkdocs.yml`, `site_dir` y la caché de Zensical (`.cache/`).
+
+```python
+from doc_organize import SiteBuildError, SiteGenerator
+
+try:
+    result = await SiteGenerator().generate(project, context, timeout=300)
+except SiteBuildError as exc:
+    ...  # configuración escrita, sitio sin construir: mostrar exc al administrador
+```
+
+`MkDocsGenerator` queda como alias obsoleto de `SiteGenerator` (`DeprecationWarning` al crearlo; se retira en 1.0.0):
+es la misma clase, así que su `generate` devuelve `SiteResult` y lanza `SiteBuildError`.
 
 ---
 
@@ -411,7 +502,9 @@ class Context(BaseModel):
     domains: list[Domain]
     unclassified_documents: list[str]
     reorganized: bool
-    mkdocs_generated: bool
+    reorganize_failed_documents: list[str]   # 0.13.0
+    site_generated: bool                     # antes mkdocs_generated (alias obsoleto)
+    site_built: bool                         # antes mkdocs_site_built (alias obsoleto)
     taxonomy_manifest_used: bool  # default False
     taxonomy_template_name: str | None  # default None — nombre de la plantilla usada, o None (fichero local / sin manifiesto)
     created_at: str
@@ -482,8 +575,8 @@ Todas bajo `/projects/{name}/context` (página) y `/api/projects/{name}/context`
 | `/api/projects/{name}/context` | `GET` | Devuelve el contexto ya construido — `404` si no existe todavía |
 | `/api/projects/{name}/context/taxonomy-manifest-draft` | `POST` | Pide a la IA un borrador de manifiesto de taxonomía: `{sample_size?}` (1-60, default 25) → `TaxonomyManifestDraftResponse` (`manifest`, `manifest_markdown`, `reasoning`, `sample_document_count`, `total_document_count`). Endpoint de solo lectura (sin lock de operación, nunca escribe nada en disco) — distinto de `ai_classification_enabled` en `POST .../context` (Sub-fase B: elige DENTRO de un catálogo ya confirmado), aquí la IA propone el catálogo mismo. `400` si el proyecto no tiene documentos convertidos (o ninguno con `.json` legible), o si `DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_*` no está configurado; `502` si el LiteLLM Proxy falla o responde algo que no cumple el schema esperado |
 | `/api/taxonomy-templates` | `GET` | Lista las plantillas disponibles (`TaxonomyTemplateRegistry.list_templates()`) — biblioteca compartida, no ligada a ningún proyecto ni tenant |
-| `/projects/{name}/context/site` | `GET` | Redirige a `.../site/` (barra final — las páginas de mkdocs usan URLs relativas que la necesitan) |
-| `/projects/{name}/context/site/{file_path}` | `GET` | Sirve el sitio MkDocs ya construido (`<project.root_path>/site/{file_path}`) — `404` si `mkdocs_site_built` es `False` o si `file_path` no resuelve dentro de `site/`. Acción de solo lectura, independiente de `POST .../context` (nunca se dispara automáticamente tras un build) |
+| `/projects/{name}/context/site` | `GET` | Redirige a `.../site/` (barra final — las páginas del sitio usan URLs relativas que la necesitan) |
+| `/projects/{name}/context/site/{file_path}` | `GET` | Sirve el sitio ya construido (`<project.root_path>/site/{file_path}`) — `404` si `site_built` es `False` o si `file_path` no resuelve dentro de `site/`. Acción de solo lectura, independiente de `POST .../context` (nunca se dispara automáticamente tras un build) |
 
 ## Dependencias
 
@@ -493,8 +586,9 @@ Todas bajo `/projects/{name}/context` (página) y `/api/projects/{name}/context`
 | `cache.CacheManager` | Fuente de los documentos ya convertidos con éxito |
 | `projects.ScannedFoldersStore` | Carpetas de escaneo guardadas, usadas como `scan_roots` |
 | `core.exceptions` | `ContextError`, `DomainClassificationError`, `TaxonomyClassificationError`, `TaxonomyManifestError`, `TaxonomyTemplateError` y sus subclases |
+| `zensical` (extra `site`) | `zensical build` del sitio de contexto (`SiteGenerator`); sin él, `SiteBuildError` |
 | `httpx` | Cliente HTTP de `DomainClassificationClient`/`TaxonomyClassificationClient` (ya incluido en el extra `ai`) |
-| `pyyaml` (extra `context`) | Serialización de `mkdocs.yml` y parseo del front matter de `taxonomy_manifest.md`/plantillas de `TaxonomyTemplateRegistry` |
+| `pyyaml` (extra `context`) | Parseo y escritura del front matter de `taxonomy_manifest.md`/plantillas de `TaxonomyTemplateRegistry` |
 
 ## Ejemplos Relacionados
 

@@ -33,6 +33,7 @@ solo lectura).
 
 | Versión | Cambio |
 |---|---|
+| 0.13.0 | Nuevos `SiteGenerator`, `SiteResult` y `SiteBuildError` (sitio de contexto con Zensical); `parse_taxonomy_template`, `render_taxonomy_template`, `list_builtin_templates` y `load_builtin_template`; `RESERVED_OUTPUT_FOLDER_NAMES` y `validate_output_folder_name`. Propiedades nuevas de `ProjectLayout` (contexto y sitio), `Context.site_generated`/`site_built`/`reorganize_failed_documents`, `Reorganizer.reorganize(on_document_failed=)` y `ContextBuildEventType.DOCUMENT_FAILED` (un `match` exhaustivo tiene un caso nuevo). **Obsoletos** (se retiran en 1.0.0): `MkDocsGenerator` (alias de `SiteGenerator`) y `Context.mkdocs_generated`/`mkdocs_site_built`. **Cambios de comportamiento**: el extra `site` instala `zensical` en lugar de `mkdocs`; `MkDocsGenerator.generate` devuelve `SiteResult` y lanza `SiteBuildError` en lugar de devolver `(ruta, False)`; `Reorganizer` ya no sigue enlaces simbólicos |
 | 0.12.0 | Nuevos `resolve_output_paths`, `resolve_images_dir`, `relative_source_path` (grupo «Rutas de salida»), `CacheNotFoundError` y `ModelsNotAvailableError`. Parámetros opcionales *keyword-only*: `CacheManager(read_only=)`, `count_entries`/`load_cache_page(relative_to=, conversion_status=)`, `DocumentConverter(artifacts_path=, allow_model_downloads=)`, `OCRScheduler(...)` ídem, `convert_document`/`process_with_ocr(include_root_name=, json_source_path=)`. Se exportan también `ConversionStatus` y `DocumentStatus`. Campos nuevos en `ScanOptions` y `ScanResult.unreadable_dirs`. **Cambio de comportamiento**: el `source_path` del JSON de cada documento pasa a ser relativo a la carpeta escaneada (`json_source_path="absolute"` recupera lo anterior) |
 | 0.11.0 | Nuevo grupo «Exportación» y `MissingDependencyError`. `ProgressEvent.operation` admite `"export"` y `Phase` la fase `"export"`: un `match` exhaustivo sobre esos valores tiene un caso nuevo |
 | 0.10.0 | Primera API pública estable |
@@ -43,14 +44,16 @@ solo lectura).
 |---|---|
 | Escaneo y conversión | `ScanCommand`, `ScanOptions`, `ScanSummary`, `DocumentScanner`, `DocumentConverter`, `OCRScheduler`, `CacheManager`, `CancelToken`, `ProgressEvent` |
 | Rutas de salida (0.12.0) | `resolve_output_paths`, `resolve_images_dir`, `relative_source_path` (también en `doc_organize.projects`; no cargan Docling) |
+| Carpeta reorganizada (0.13.0) | `RESERVED_OUTPUT_FOLDER_NAMES`, `validate_output_folder_name` (también en `doc_organize.projects.layout`) |
 | Duplicados | `DeduplicationManager`, `DeduplicationSummary`, `DuplicateGroup`, `DuplicateReason`, `DeduplicationReport` |
-| Contexto | `ContextBuilder`, `ContextRegistry`, `Reorganizer`, `MkDocsGenerator`, `TaxonomyTemplateRegistry`, `Context`, `TaxonomyManifest` |
+| Contexto | `ContextBuilder`, `ContextRegistry`, `Reorganizer`, `SiteGenerator`, `SiteResult`, `MkDocsGenerator` (obsoleto), `TaxonomyTemplateRegistry`, `Context`, `TaxonomyManifest` |
+| Plantillas de taxonomía como texto (0.13.0) | `parse_taxonomy_template`, `render_taxonomy_template`, `list_builtin_templates`, `load_builtin_template` (también en `doc_organize.context`) |
 | Exportación (0.11.0) | `write_project_zip`, `preview_project_zip`, `ExportStats`, `write_cache_xlsx`, `write_scan_errors_xlsx`, `load_cache_entries`, `load_scan_error_history` (también en `doc_organize.export`; ver [Exportación](export.md)) |
 | Proyectos (CLI) | `ProjectRegistry`, `ProjectLayout`, `ProjectHistoryCleaner`, `ScannedFoldersStore`, `Project`, `ScannedFolder`, `FolderValidator`, `ProjectValidator` |
 | Eventos de progreso | `ScanEvent`/`ScanEventType`, `DedupEvent`/`DedupEventType`, `ContextBuildEvent`/`ContextBuildEventType`, `ContextDeleteEvent`/`ContextDeleteEventType` |
 | Modelos | `DocumentMetadata`, `ConversionResult`, `CacheEntry`, `ConversionStatus`, `DocumentStatus`, `ScanResult`, `ScanErrorEntry`, `ScanErrorReport`, `ScanRunReport` |
 | Diagnóstico | `detect_gpu_status`, `detect_av_status`, `detect_office_status`, `GpuStatus`, `AvStatus`, `OfficeStatus` |
-| Errores | `DocOrganizeError` (base), `OperationCancelledError`, `InvalidPathError`, `MissingDependencyError`, `ConversionError`, `ModelsNotAvailableError`, `CacheError`, `CacheNotFoundError`, `ProjectError`, `ProjectNotFoundError`, `ContextError` |
+| Errores | `DocOrganizeError` (base), `OperationCancelledError`, `InvalidPathError`, `MissingDependencyError`, `ConversionError`, `ModelsNotAvailableError`, `CacheError`, `CacheNotFoundError`, `ProjectError`, `ProjectNotFoundError`, `ContextError`, `SiteBuildError` |
 
 El paquete incluye `py.typed`: los tipos son utilizables por `mypy` en el código que lo consume.
 

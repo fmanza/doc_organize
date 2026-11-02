@@ -12,12 +12,13 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from doc_organize.core.constants import CONTEXT_FILE_NAME, DOMAINS_FOLDER_NAME
 from doc_organize.core.exceptions import ContextError, ContextNotFoundError, DomainNotFoundError
 from doc_organize.core.models import Context, Domain, DomainDocument, Project
 from doc_organize.utils.logging import get_logger
 
-_CONTEXT_FILE_NAME = "context.json"
-_DOMAINS_DIR_NAME = "domains"
+_CONTEXT_FILE_NAME = CONTEXT_FILE_NAME
+_DOMAINS_DIR_NAME = DOMAINS_FOLDER_NAME
 _DOMAIN_MD_NAME = "DOMAIN.md"
 _DOMAIN_INDEX_NAME = "index.json"
 _DOMAIN_DOCUMENTS_HEADING = "## Documentos clasificados"

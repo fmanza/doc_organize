@@ -3,14 +3,16 @@ Copia física de los documentos clasificados a la carpeta reorganizada del proye
 """
 
 import asyncio
+import os
 import shutil
 
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from doc_organize.core.exceptions import IncompleteConversionArtifactsError
+from doc_organize.core.exceptions import IncompleteConversionArtifactsError, InvalidPathError
 from doc_organize.core.models import Context, DomainDocument, Project
 from doc_organize.utils.logging import get_logger
+from doc_organize.utils.path_utils import copy_file_nofollow, copy_tree_nofollow, ensure_no_symlinks, ensure_tree_has_no_symlinks
 
 logger = get_logger(__name__)
 
@@ -19,8 +21,8 @@ def resolve_document_slug_parts(document: DomainDocument) -> tuple[str, str]:
     """`(tipo, stem)`: determina la carpeta de un documento clasificado
     bajo `<output_folder_name>/<dominio>/<tipo>/<stem>/`.
 
-    Compartida entre `Reorganizer` (ruta real en disco) y `MkDocsGenerator` (ruta
-    del `.md` en el `nav` de `mkdocs.yml`, siempre con `/` literales — nunca
+    Compartida entre `Reorganizer` (ruta real en disco) y `SiteGenerator` (ruta
+    del `.md` en el `nav` de `zensical.toml`, siempre con `/` literales — nunca
     `Path`, que en Windows usaría `\\`) — antes cada uno repetía
     `Path(document.markdown_path).stem` por su cuenta, sin nada que garantizara
     que no divergieran (AUDIT_CODE, sesión 2026-09-09).
@@ -49,6 +51,13 @@ class Reorganizer:
     `Context` dice que un documento está clasificado, sus tres rutas deben existir
     de verdad en disco para poder copiarlo — de ahí `IncompleteConversionArtifactsError`.
 
+    No sigue enlaces simbólicos (L-8a, G27; mismo criterio que la deduplicación desde
+    0.12.1): la carpeta de salida no puede ser ni pasar por un enlace
+    (`InvalidPathError` antes de tocar nada), y un documento con algún tramo enlazado
+    (original, `.md`, `.json`, `img/<stem>/` o lo que contiene) falla solo, sin copiar
+    el destino del enlace: queda en `Context.reorganize_failed_documents` y en
+    `on_document_failed`, y el resto sigue.
+
     Limitación conocida: si dos documentos del mismo dominio/tipo comparten el
     mismo `stem` (p. ej. dos ficheros distintos ambos llamados `informe.pdf` en
     carpetas de origen distintas), el segundo sobrescribe el primero en
@@ -56,6 +65,18 @@ class Reorganizer:
 
     Attributes:
         logger (logging.Logger): Logger estructurado de la instancia.
+
+    Example:
+        >>> import asyncio, tempfile
+        >>> from datetime import UTC, datetime
+        >>> async def main():
+        ...     root = tempfile.mkdtemp()
+        ...     project = Project(name="Demo", root_path=root, created_at=datetime.now(UTC).isoformat())
+        ...     context = Context(project_name="Demo", created_at="2026-01-01", updated_at="2026-01-01")
+        ...     output_root = await Reorganizer().reorganize(project, context)
+        ...     return output_root.name, context.reorganize_failed_documents
+        >>> asyncio.run(main())  # doctest: +SKIP
+        ('organizado', [])
     """
 
     def __init__(self) -> None:
@@ -66,6 +87,8 @@ class Reorganizer:
         project: Project,
         context: Context,
         on_document_copied: Callable[[int, int, str], Awaitable[None]] | None = None,
+        *,
+        on_document_failed: Callable[[int, int, str, str], Awaitable[None]] | None = None,
     ) -> Path:
         """Copia todos los documentos clasificados de `context` a la carpeta de salida.
 
@@ -82,7 +105,14 @@ class Reorganizer:
         reconstruye entera) y la de cualquier dominio ya no presente en
         `context` — sin esto, un documento reclasificado a otro dominio (o un
         dominio eliminado entre dos reconstrucciones) dejaba su copia física
-        huérfana en disco para siempre (AUDIT_CODE, sesión 2026-09-08).
+        huérfana en disco para siempre (AUDIT_CODE, sesión 2026-09-08). Un enlace
+        que aparezca en el lugar de una de esas carpetas se quita (el enlace, nunca
+        su destino).
+
+        Un documento que no se puede copiar (`OSError`: un tramo enlazado, un permiso
+        denegado...) no interrumpe el resto (L-8a, G27): se borra lo que se hubiera
+        copiado de él, se añade su `source_path` a `context.reorganize_failed_documents`
+        (que se rehace en cada llamada) y se notifica por `on_document_failed`.
 
         Args:
             on_document_copied: Si se da, se invoca `await on_document_copied(index, total, source_path)`
@@ -90,15 +120,20 @@ class Reorganizer:
                 `web/routes/context.py::context_build_websocket` para retransmitir
                 progreso en tiempo real (semáforo). `None` (default) no tiene efecto
                 ninguno: los llamadores existentes no cambian de comportamiento.
+            on_document_failed: Si se da, se invoca `await on_document_failed(index, total, source_path, error)`
+                por cada documento que no se pudo copiar (mismo `index` que habría tenido en
+                `on_document_copied`).
 
         Returns:
             La carpeta de salida (`<project.root_path>/<context.output_folder_name>/`).
 
         Raises:
+            InvalidPathError: Si la carpeta de salida es o pasa por un enlace — antes de tocar nada.
             IncompleteConversionArtifactsError: Si a algún documento le falta el
                 original, el `.md` o el `.json` en disco — antes de tocar nada.
         """
         output_root = Path(project.root_path) / context.output_folder_name
+        await asyncio.to_thread(self.check_output_root, output_root)
 
         for domain in context.domains:
             for document in domain.documents:
@@ -109,19 +144,41 @@ class Reorganizer:
 
         total = sum(len(domain.documents) for domain in context.domains)
         index = 0
+        failed: list[str] = []
         for domain in context.domains:
             await self._reset_domain_dir(output_root, domain.slug)
             for document in domain.documents:
-                await self._copy_document(output_root, domain.slug, document)
                 index += 1
+                try:
+                    await self._copy_document(output_root, domain.slug, document)
+                except OSError as exc:
+                    failed.append(document.source_path)
+                    self.logger.warning(f"No se pudo reorganizar '{document.source_path}': {exc}")
+                    if on_document_failed is not None:
+                        await on_document_failed(index, total, document.source_path, str(exc))
+                    continue
                 if on_document_copied is not None:
                     await on_document_copied(index, total, document.source_path)
+        context.reorganize_failed_documents = failed
         return output_root
+
+    @staticmethod
+    def check_output_root(output_root: Path) -> None:
+        """Comprueba que la carpeta de salida no sea ni pase por un enlace simbólico (L-8a).
+
+        Raises:
+            InvalidPathError: Si algún tramo existente de `output_root` es un enlace.
+        """
+        try:
+            ensure_no_symlinks(output_root)
+        except OSError as exc:
+            raise InvalidPathError(f"La carpeta reorganizada '{output_root}' no puede ser ni pasar por un enlace simbólico.") from exc
 
     @staticmethod
     def _validate_artifacts(document: DomainDocument) -> None:
         for artifact in (Path(document.source_path), Path(document.markdown_path), Path(document.json_path)):
-            if not artifact.is_file():
+            # Un enlace no es un artefacto que falte: falla solo ese documento al copiarlo (L-8a).
+            if not artifact.is_file() and not artifact.is_symlink():
                 raise IncompleteConversionArtifactsError(f"Falta '{artifact}' — no se puede reorganizar '{document.source_path}' a medias.")
 
     async def _remove_stale_domain_dirs(self, output_root: Path, current_slugs: set[str]) -> None:
@@ -129,7 +186,7 @@ class Reorganizer:
             return
         stale_dirs = await asyncio.to_thread(self._list_stale_domain_dirs, output_root, current_slugs)
         for stale_dir in stale_dirs:
-            await asyncio.to_thread(shutil.rmtree, stale_dir)
+            await asyncio.to_thread(_remove_dir_or_link, stale_dir)
             self.logger.info(f"Copia obsoleta eliminada tras reorganizar: {stale_dir}")
 
     @staticmethod
@@ -141,40 +198,73 @@ class Reorganizer:
         anterior, para que documentos que ya no pertenecen a este dominio (o que
         se eliminaron) no queden como sub-carpetas huérfanas."""
         domain_dir = output_root / domain_slug
-        if domain_dir.is_dir():
-            await asyncio.to_thread(shutil.rmtree, domain_dir)
+        if domain_dir.is_dir() or domain_dir.is_symlink():
+            await asyncio.to_thread(_remove_dir_or_link, domain_dir)
 
     async def delete_output(self, project: Project, context: Context) -> None:
         """Borra `<project.root_path>/<context.output_folder_name>/` por completo, si existe.
 
         Usado al eliminar el contexto de un proyecto (ver `web/routes/context.py`)
         para volver al estado anterior a la primera construcción — sin esto, la
-        copia física quedaría huérfana en disco tras borrar `context.json`.
+        copia física quedaría huérfana en disco tras borrar `context.json`. Si la
+        carpeta es un enlace, se quita el enlace (nunca su destino).
+
+        Raises:
+            InvalidPathError: Si la raíz del proyecto pasa por un enlace simbólico.
         """
         output_root = Path(project.root_path) / context.output_folder_name
-        if await asyncio.to_thread(output_root.is_dir):
-            await asyncio.to_thread(shutil.rmtree, output_root)
+        await asyncio.to_thread(self.check_output_root, output_root.parent)
+        if await asyncio.to_thread(output_root.is_symlink) or await asyncio.to_thread(output_root.is_dir):
+            await asyncio.to_thread(_remove_dir_or_link, output_root)
 
     async def _copy_document(self, output_root: Path, domain_slug: str, document: DomainDocument) -> None:
+        await asyncio.to_thread(self._copy_document_sync, output_root, domain_slug, document)
+
+    @staticmethod
+    def _copy_document_sync(output_root: Path, domain_slug: str, document: DomainDocument) -> None:
+        """Copia los artefactos de `document` sin seguir enlaces; si falla, borra lo copiado de él."""
         source = Path(document.source_path)
         markdown = Path(document.markdown_path)
         json_file = Path(document.json_path)
         document_type, stem = resolve_document_slug_parts(document)
 
-        target_dir = output_root / domain_slug / document_type / stem
-        await asyncio.to_thread(target_dir.mkdir, parents=True, exist_ok=True)
-        await asyncio.to_thread(shutil.copy2, source, target_dir / source.name)
-        await asyncio.to_thread(shutil.copy2, markdown, target_dir / markdown.name)
-        await asyncio.to_thread(shutil.copy2, json_file, target_dir / json_file.name)
-
+        # Todo se comprueba antes de copiar nada: un enlace en cualquier artefacto no deja ni una copia parcial.
+        for artifact in (source, markdown, json_file):
+            ensure_no_symlinks(artifact)
+        images_dir: Path | None = None
         if document.images_dir is not None:
-            images_dir = Path(document.images_dir)
-            if await asyncio.to_thread(images_dir.is_dir):
+            images_dir = ensure_no_symlinks(document.images_dir)
+            if os.path.isdir(images_dir):
+                ensure_tree_has_no_symlinks(images_dir)
+            else:
+                images_dir = None
+
+        target_dir = ensure_no_symlinks(output_root / domain_slug / document_type / stem)
+        created = not os.path.lexists(target_dir)
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            # Con `overwrite`: mismo comportamiento que antes si dos documentos comparten `stem` (ver limitación conocida).
+            copy_file_nofollow(source, target_dir / source.name, overwrite=True)
+            copy_file_nofollow(markdown, target_dir / markdown.name, overwrite=True)
+            copy_file_nofollow(json_file, target_dir / json_file.name, overwrite=True)
+            if images_dir is not None:
                 # Mismo layout relativo ("img/<stem>/") que asume la referencia
                 # `![](img/<stem>/imagen.png)` del `.md` (ver `converter.resolve_images_dir`)
                 # — el `.md` no se reescribe, así que la carpeta debe quedar sibling
                 # con el mismo nombre para que la ruta relativa siga resolviendo.
-                await asyncio.to_thread(shutil.copytree, images_dir, target_dir / "img" / stem, dirs_exist_ok=True)
+                copy_tree_nofollow(images_dir, target_dir / "img" / stem)
+        except OSError:
+            if created:
+                shutil.rmtree(target_dir, ignore_errors=True)
+            raise
+
+
+def _remove_dir_or_link(path: Path) -> None:
+    """Borra la carpeta `path` entera o, si es un enlace (o una unión de Windows), solo el enlace; si no existe, nada."""
+    if path.is_symlink() or path.is_junction():
+        os.unlink(path)
+    elif path.is_dir():
+        shutil.rmtree(path)
 
 
 __all__ = ["Reorganizer", "resolve_document_slug_parts"]

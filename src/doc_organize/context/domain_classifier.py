@@ -124,7 +124,7 @@ class DomainClassifier:
         HTTP (`web/routes/context.py::BuildContextRequest`) acababa como
         `Domain.slug` sin validar, y de ahí directamente en rutas de disco
         (`ContextRegistry._domain_dir`, `Reorganizer.reorganize`,
-        `MkDocsGenerator`) — un valor como `"../../otro-sitio"` podía escapar de
+        `SiteGenerator`) — un valor como `"../../otro-sitio"` podía escapar de
         `project.root_path` si llegaba a "ganar" la clasificación de algún
         documento (AUDIT_CODE, sesión 2026-09-08). `_slugify()` solo conserva
         caracteres de palabra, así que el resultado nunca contiene `/` ni `..`.
@@ -233,7 +233,7 @@ def score_catalog(
     Extraída de `DomainClassifier._best_from_catalog` para que `MaterialTypeClassifier`
     (segundo eje de clasificación, manifiesto de taxonomía) reutilice el mismo criterio de
     puntuación sin duplicar la fórmula — mismo motivo que llevó a compartir
-    `resolve_document_slug_parts` entre `Reorganizer`/`MkDocsGenerator` (AUDIT_CODE, sesión
+    `resolve_document_slug_parts` entre `Reorganizer`/`SiteGenerator` (AUDIT_CODE, sesión
     2026-09-09).
 
     Args:

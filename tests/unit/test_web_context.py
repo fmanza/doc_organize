@@ -31,11 +31,11 @@ def _ai_toggle_tag(html: str) -> str:
 
 
 @pytest.fixture(autouse=True)
-def _no_real_mkdocs_build(monkeypatch):
-    """Ninguno de estos tests ejercita `mkdocs build` de verdad (lento, y depende
-    de que `mkdocs` esté instalado en el entorno) — ese comportamiento se cubre
-    aparte en `test_mkdocs_generator.py`."""
-    monkeypatch.setattr("doc_organize.context.mkdocs_generator.shutil.which", lambda _name: None)
+def _no_real_site_build(monkeypatch):
+    """Ninguno de estos tests ejercita `zensical build` de verdad (lento, y depende
+    de que `zensical` esté instalado en el entorno) — ese comportamiento se cubre
+    aparte en `test_site_generator.py`. Sin zensical, la web deja `site_built=False`."""
+    monkeypatch.setattr("doc_organize.context.site_generator.SiteGenerator._zensical_command", staticmethod(lambda: None))
 
 
 async def _create_project(tmp_path, registry_path, name: str = "Proyecto Contexto", tenant_id: str = "default"):
@@ -62,12 +62,12 @@ def _seed_converted_document(project_root: Path, stem: str, title: str) -> str:
 
 
 async def _build_context_with_fake_site(client: httpx.AsyncClient, project: Project, project_root: Path) -> None:
-    """Construye el contexto (con `mkdocs build` real deshabilitado, ver
-    `_no_real_mkdocs_build`) y simula a mano lo que dejaría un `mkdocs build` real
+    """Construye el contexto (con `zensical build` real deshabilitado, ver
+    `_no_real_site_build`) y simula a mano lo que dejaría un `zensical build` real
     en disco — `site/index.html` + una página de dominio con `use_directory_urls`
-    (`site/<dominio>/index.html`) — marcando `mkdocs_site_built=True`, para poder
+    (`site/<dominio>/index.html`) — marcando `site_built=True`, para poder
     probar `context_site_index`/`context_site_asset` sin depender de tener
-    `mkdocs` instalado en el entorno de tests."""
+    `zensical` instalado en el entorno de tests."""
     response = await client.post(f"/api/projects/{project.name}/context")
     assert response.status_code == 200
 
@@ -78,7 +78,7 @@ async def _build_context_with_fake_site(client: httpx.AsyncClient, project: Proj
 
     registry = ContextRegistry()
     context = await registry.load_context(project)
-    context.mkdocs_site_built = True
+    context.site_built = True
     await registry.save_context(project, context)
 
 
@@ -360,7 +360,7 @@ async def test_taxonomy_templates_admin_page_renders(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_build_context_classifies_reorganizes_and_generates_mkdocs(tmp_path) -> None:
+async def test_build_context_classifies_reorganizes_and_generates_site(tmp_path) -> None:
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
     project_root = tmp_path / "workspaces" / project.name
@@ -389,7 +389,7 @@ async def test_build_context_classifies_reorganizes_and_generates_mkdocs(tmp_pat
     assert body["domains"] == [{"slug": "ciberseguridad", "name": "Ciberseguridad", "status": "borrador", "document_count": 1}]
 
     assert (project_root / "organizado" / "ciberseguridad" / "pdf" / "informe" / "informe.pdf").exists()
-    assert (project_root / "mkdocs.yml").exists()
+    assert (project_root / "zensical.toml").exists()
 
     async with _client(app) as client:
         get_response = await client.get(f"/api/projects/{project.name}/context")
@@ -397,6 +397,8 @@ async def test_build_context_classifies_reorganizes_and_generates_mkdocs(tmp_pat
     assert get_response.json()["domains"][0]["slug"] == "ciberseguridad"
     assert get_response.json()["reorganized"] is True
     assert get_response.json()["mkdocs_generated"] is True
+    assert get_response.json()["site_generated"] is True
+    assert get_response.json()["site_built"] is False  # sin zensical (fixture)
 
 
 @pytest.mark.asyncio
@@ -803,14 +805,14 @@ async def test_delete_context_removes_everything_and_allows_choosing_a_new_folde
     async with _client(app) as client:
         await client.post(f"/api/projects/{project.name}/context", json={"output_folder_name": "primera"})
     assert (project_root / "primera").exists()
-    assert (project_root / "mkdocs.yml").exists()
+    assert (project_root / "zensical.toml").exists()
     assert (project_root / "context.json").exists()
 
     async with _client(app) as client:
         delete_response = await client.request("DELETE", f"/api/projects/{project.name}/context", json={"confirm": True})
     assert delete_response.status_code == 204
     assert not (project_root / "primera").exists()
-    assert not (project_root / "mkdocs.yml").exists()
+    assert not (project_root / "zensical.toml").exists()
     assert not (project_root / "context.json").exists()
 
     async with _client(app) as client:
@@ -1149,7 +1151,7 @@ async def test_context_delete_websocket_removes_everything_and_reports_progress(
 
     assert [event["event"] for event in events] == ["started", "output_deleted", "site_deleted", "completed"]
     assert not (project_root / "organizado").exists()
-    assert not (project_root / "mkdocs.yml").exists()
+    assert not (project_root / "zensical.toml").exists()
     assert not (project_root / "context.json").exists()
 
 
@@ -1338,8 +1340,8 @@ async def test_context_site_404_when_no_context_built(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_context_site_404_when_context_built_but_mkdocs_site_not_built(tmp_path) -> None:
-    """`_no_real_mkdocs_build` deja `mkdocs_site_built=False` tras un build normal
+async def test_context_site_404_when_context_built_but_site_not_built(tmp_path) -> None:
+    """`_no_real_site_build` deja `site_built=False` tras un build normal
     (sin sitio simulado a mano) — el visor debe devolver 404, no servir un sitio
     que nunca llegó a construirse."""
     registry_path = tmp_path / "projects.json"
@@ -1355,7 +1357,7 @@ async def test_context_site_404_when_context_built_but_mkdocs_site_not_built(tmp
 
 @pytest.mark.asyncio
 async def test_context_site_rejects_path_traversal_outside_site_dir(tmp_path) -> None:
-    """`mkdocs.yml` vive en `project.root_path`, un nivel por encima de `site/` —
+    """`zensical.toml` vive en `project.root_path`, un nivel por encima de `site/` —
     si el guard de `context_site_asset` fallara, este `..` lo expondría."""
     registry_path = tmp_path / "projects.json"
     project = await _create_project(tmp_path, registry_path)
@@ -1377,8 +1379,8 @@ async def test_context_site_rejects_path_traversal_outside_site_dir(tmp_path) ->
     app = create_app(registry_path=registry_path, auth_db_path=tmp_path / "auth.db")
     async with _client(app) as client:
         await _build_context_with_fake_site(client, project, project_root)
-        assert (project_root / "mkdocs.yml").exists()
-        response = await client.get(f"/projects/{project.name}/context/site/../mkdocs.yml")
+        assert (project_root / "zensical.toml").exists()
+        response = await client.get(f"/projects/{project.name}/context/site/../zensical.toml")
 
     assert response.status_code == 404
 
