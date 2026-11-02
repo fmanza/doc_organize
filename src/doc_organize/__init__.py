@@ -113,7 +113,7 @@ _EXPORTS: dict[str, str] = {
     "SiteBuildError": "doc_organize.core.exceptions",
 }
 
-__all__ = ["__version__", *sorted(_EXPORTS)]
+__all__ = ["__version__", *sorted(_EXPORTS)]  # noqa: PLE0604 - las claves de _EXPORTS son cadenas
 
 
 def __getattr__(name: str) -> Any:

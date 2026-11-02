@@ -253,7 +253,7 @@ async def test_symlink_swapped_after_check_is_not_followed(
     tmp_path: Path, nested_group: tuple[Path, list[DocumentMetadata]], secret: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Simula la carrera: el enlace aparece después de la comprobación con `lstat`."""
-    source, docs = nested_group
+    source, _docs = nested_group
     (source / "2024").rename(tmp_path / "2024_movida")
     (secret.parent / "a_copia.pdf").write_bytes(b"secreto")
     _symlink(source / "2024", secret.parent, is_dir=True)

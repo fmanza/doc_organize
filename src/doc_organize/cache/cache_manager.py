@@ -140,7 +140,7 @@ class CacheManager:
         try:
             cursor = await self._conn.execute("PRAGMA table_info(cache_entries)")
             columns = {row[1] for row in await cursor.fetchall()}
-        except Exception as exc:  # noqa: BLE001 - p. ej. sqlite3.DatabaseError si el fichero no es una base SQLite
+        except Exception as exc:  # p. ej. sqlite3.DatabaseError si el fichero no es una base SQLite
             await self.__aexit__()
             raise CacheError(f"No se pudo leer la caché '{self.db_path}': {exc}") from exc
         missing = set(_COLUMNS) - columns
@@ -210,13 +210,13 @@ class CacheManager:
         cache: dict[str, CacheEntry] = {}
         query = "SELECT file_path, sha256_hash, timestamp, status, conversion_status, error_message, error_retry_count FROM cache_entries"
         async with self._connection.execute(query) as cursor:
-            async for file_path, sha256_hash, timestamp, status, conversion_status, error_message, error_retry_count in cursor:
+            async for file_path, sha256_hash, timestamp, status, conversion_value, error_message, error_retry_count in cursor:
                 cache[file_path] = CacheEntry(
                     file_path=file_path,
                     sha256_hash=sha256_hash,
                     timestamp=timestamp,
                     status=DocumentStatus(status),
-                    conversion_status=ConversionStatus(conversion_status) if conversion_status else None,
+                    conversion_status=ConversionStatus(conversion_value) if conversion_value else None,
                     error_message=error_message,
                     error_retry_count=error_retry_count,
                 )
@@ -301,14 +301,14 @@ class CacheManager:
 
         entries: list[CacheEntry] = []
         async with self._connection.execute(query, params) as cursor:
-            async for file_path, sha256_hash, timestamp, status, conversion_status, error_message, error_retry_count in cursor:
+            async for file_path, sha256_hash, timestamp, status, conversion_value, error_message, error_retry_count in cursor:
                 entries.append(
                     CacheEntry(
                         file_path=file_path,
                         sha256_hash=sha256_hash,
                         timestamp=timestamp,
                         status=DocumentStatus(status),
-                        conversion_status=ConversionStatus(conversion_status) if conversion_status else None,
+                        conversion_status=ConversionStatus(conversion_value) if conversion_value else None,
                         error_message=error_message,
                         error_retry_count=error_retry_count,
                     )

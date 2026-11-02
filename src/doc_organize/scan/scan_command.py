@@ -26,7 +26,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from doc_organize.cache import CacheManager
 from doc_organize.converter import DocumentConverter, OCRScheduler
@@ -217,7 +217,7 @@ class _ProgressTracker:
     registra y no interrumpe la operación.
     """
 
-    _PHASES: dict[str, str] = {
+    _PHASES: ClassVar[dict[str, str]] = {
         "started": "started",
         "scanned": "conversion",
         "file_started": "conversion",

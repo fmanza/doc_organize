@@ -49,9 +49,9 @@ dev = [
     "pytest-cov>=3.0",
     "pytest-asyncio>=0.21",
     "httpx>=0.24",
-    # ruff 0.16 amplía las reglas por defecto (DTZ, RUF, SIM) y el CI, que instala la última, falla con 11
-    # avisos nuevos; se fija por debajo hasta revisarlos (deuda registrada en el CHANGELOG 0.9.3).
-    "ruff>=0.1.0,<0.16",
+    # Cota superior: cada MINOR de ruff puede activar reglas nuevas por defecto y el CI instala la última permitida.
+    # Revisados los avisos de 0.16/0.17 (deuda del CHANGELOG 0.9.3); subirla con su PR de Dependabot.
+    "ruff>=0.1.0,<0.18",
     "mypy>=1.0",
     "types-aiofiles>=23.0",
     "types-PyYAML>=6.0",
