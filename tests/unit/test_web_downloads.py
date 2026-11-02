@@ -253,7 +253,7 @@ async def test_export_cache_xlsx_contains_full_hash_and_all_entries(tmp_path) ->
     rows = _read_xlsx_rows(response.content)
     assert len(rows) == 3  # cabecera + 2 entradas
     # Orden estable por file_path: other.pdf antes que report.pdf.
-    header, first, second = rows
+    _header, first, second = rows
     assert first[0] == "other.pdf"
     # `Path("/repo/docs/other.pdf").parent` normaliza a separadores nativos (p. ej.
     # backslash en Windows) -- se compara contra Path en vez de una cadena literal.

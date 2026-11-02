@@ -670,7 +670,7 @@ async def test_deduplicate_streaming_persists_partial_report_on_abort(tmp_path, 
     original_move_group = DeduplicationManager.move_group
     call_count = 0
 
-    async def _flaky_move_group(self, group, duplicates_dir):  # noqa: ANN001
+    async def _flaky_move_group(self, group, duplicates_dir):
         nonlocal call_count
         call_count += 1
         if call_count == 2:

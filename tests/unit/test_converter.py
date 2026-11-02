@@ -336,7 +336,7 @@ def test_resolve_output_paths_strips_trailing_space_from_stem(tmp_path) -> None:
     source = scan_root / "Evidencias Auditoría" / "Anti SPAM correo Virtual Desk .docx"
     output_dir = tmp_path / "prueba_doc" / "organaize" / "Conversión"
 
-    markdown_path, json_path = DocumentConverter.resolve_output_paths(str(source), output_dir, scan_roots=(str(scan_root),))
+    markdown_path, _json_path = DocumentConverter.resolve_output_paths(str(source), output_dir, scan_roots=(str(scan_root),))
 
     assert markdown_path.stem == "Anti SPAM correo Virtual Desk"
     assert not markdown_path.stem.endswith(" ")

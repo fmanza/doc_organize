@@ -290,10 +290,13 @@ async def resolve_duplicates(name: str, payload: ResolveDuplicatesRequest, reque
     groups_to_resolve: list[DuplicateGroup] = []
     groups_excluded = 0
     for group in groups:
-        if payload.fuzzy_group_toggles is not None and group.reason == DuplicateReason.FUZZY_NAME_MATCH:
-            if not payload.fuzzy_group_toggles.get(_group_key(group), False):
-                groups_excluded += 1
-                continue
+        if (
+            payload.fuzzy_group_toggles is not None
+            and group.reason == DuplicateReason.FUZZY_NAME_MATCH
+            and not payload.fuzzy_group_toggles.get(_group_key(group), False)
+        ):
+            groups_excluded += 1
+            continue
         groups_to_resolve.append(group)
 
     resolved_count = 0

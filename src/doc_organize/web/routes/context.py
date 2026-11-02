@@ -534,20 +534,22 @@ async def build_context(name: str, request: Request, payload: BuildContextReques
             project, payload.candidate_domains, payload.taxonomy_template_name, template_registry
         )
 
-        async with get_instance_secrets_store(request) as secrets_store:
-            async with _optional_ai_client(payload.ai_classification_enabled, taxonomy_manifest, secrets_store) as (ai_client, taxonomy_client):
-                context = await _context_builder.build(
-                    project,
-                    documents,
-                    candidate_domains=payload.candidate_domains,
-                    threshold=payload.threshold,
-                    ai_classification_enabled=payload.ai_classification_enabled,
-                    ai_classification_client=ai_client,
-                    output_folder_name=output_folder_name,
-                    taxonomy_manifest=taxonomy_manifest,
-                    taxonomy_classification_client=taxonomy_client,
-                    taxonomy_template_name=payload.taxonomy_template_name if taxonomy_manifest is not None else None,
-                )
+        async with (
+            get_instance_secrets_store(request) as secrets_store,
+            _optional_ai_client(payload.ai_classification_enabled, taxonomy_manifest, secrets_store) as (ai_client, taxonomy_client),
+        ):
+            context = await _context_builder.build(
+                project,
+                documents,
+                candidate_domains=payload.candidate_domains,
+                threshold=payload.threshold,
+                ai_classification_enabled=payload.ai_classification_enabled,
+                ai_classification_client=ai_client,
+                output_folder_name=output_folder_name,
+                taxonomy_manifest=taxonomy_manifest,
+                taxonomy_classification_client=taxonomy_client,
+                taxonomy_template_name=payload.taxonomy_template_name if taxonomy_manifest is not None else None,
+            )
         try:
             await _reorganizer.reorganize(project, context)
             context.reorganized = True

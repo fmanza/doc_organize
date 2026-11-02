@@ -162,7 +162,7 @@ class DocumentConverter:
             )
         try:
             await asyncio.to_thread(docling_converter.initialize_pipeline, InputFormat.PDF)
-        except Exception as exc:  # noqa: BLE001 - Docling lanza RuntimeError, FileNotFoundError u OSError según el modelo
+        except Exception as exc:  # Docling lanza RuntimeError, FileNotFoundError u OSError según el modelo
             raise ModelsNotAvailableError(f"Faltan modelos de Docling en '{folder}' y las descargas están prohibidas: {exc}") from exc
         self._initialized_modes.add(key)
 

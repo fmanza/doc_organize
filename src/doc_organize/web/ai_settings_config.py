@@ -128,8 +128,8 @@ async def is_family_configured(family: AiSettingsFamily, store: InstanceSecretsS
 
 __all__ = [
     "AI_SETTINGS_FAMILIES",
-    "AiSettingsField",
     "AiSettingsFamily",
+    "AiSettingsField",
     "get_family",
     "is_family_configured",
     "resolve_field_value",

@@ -6,6 +6,14 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+### Changed
+
+- CI: `ruff` admite hasta la 0.17 (`<0.18`, antes `<0.16`). Corregidos los 14 avisos de las reglas que activa por
+  defecto (deuda de la 0.9.3): `__all__` ordenados, `noqa` sin uso, variables desempaquetadas sin usar en tests,
+  `with`/`if` anidados unidos en `web/routes/context.py` y `web/routes/duplicates.py`, `ClassVar` en
+  `_ProgressTracker._PHASES`, variable de bucle que ocultaba el parámetro `conversion_status` en
+  `CacheManager.load_cache_page` y `noqa: PLE0604` justificado en `doc_organize.__all__`. Sin cambios funcionales.
+
 ## [0.13.0] - 2026-11-02
 
 Contexto y taxonomías para la Fase 7 de doc_organize_web (tareas L-8 y L-8a…L-8c de su plan; cierra los huecos G10 y

@@ -265,7 +265,6 @@ class TaxonomyManifestDraftConnectionError(TaxonomyManifestDraftError):
 
 
 __all__ = [
-    "OperationCancelledError",
     "AuthError",
     "CacheError",
     "CacheNotFoundError",
@@ -283,6 +282,7 @@ __all__ = [
     "InvalidPathError",
     "MissingDependencyError",
     "ModelsNotAvailableError",
+    "OperationCancelledError",
     "ProjectAlreadyExistsError",
     "ProjectError",
     "ProjectNameError",
