@@ -789,19 +789,24 @@ class ScanCommand:
         *,
         report_dir: Path | None = None,
         mode: DedupMode = "move",
+        relative_to: Path | None = None,
         on_progress: ProgressCallback | None = None,
         cancel_token: CancelToken | None = None,
     ) -> AsyncIterator[DedupEvent]:
         """Busca y mueve duplicados en `paths`, emitiendo progreso (detalle en `_dedup_pipeline`).
 
         Args:
+            relative_to: Si se indica, `duplicates_dir` replica la ruta relativa a esta carpeta en lugar de la absoluta
+                (L-11a, ver `DeduplicationManager._move_to_duplicates`); lo que no cuelgue de ella queda en `failed_paths`.
             on_progress: Recibe un `ProgressEvent` por evento (L-2); un fallo del callback no para la operación.
             cancel_token: Si se cancela, para **entre grupos**: los grupos ya movidos quedan en el informe
                 (`DEDUP_REPORT.json`) y el último evento es `CANCELLED` en lugar de `COMPLETED`.
         """
         tracker = _ProgressTracker("deduplicate", on_progress, self.logger)
         async with contextlib.aclosing(
-            self._dedup_pipeline(paths, duplicates_dir, folders_json, report_dir=report_dir, mode=mode, cancel_token=cancel_token)
+            self._dedup_pipeline(
+                paths, duplicates_dir, folders_json, report_dir=report_dir, mode=mode, relative_to=relative_to, cancel_token=cancel_token
+            )
         ) as events:
             async for event in events:
                 tracker.feed(event.event.value, event.data)
@@ -815,6 +820,7 @@ class ScanCommand:
         *,
         report_dir: Path | None = None,
         mode: DedupMode = "move",
+        relative_to: Path | None = None,
         cancel_token: CancelToken | None = None,
     ) -> AsyncGenerator[DedupEvent, None]:
         """Busca y mueve duplicados en `paths`, a petición explícita del usuario,
@@ -859,6 +865,12 @@ class ScanCommand:
         version_resolved = 0
         failed_paths: list[str] = []
         completed_ok = False
+        # Con los valores por defecto, la misma llamada que antes de L-6 (compatibilidad con quien sustituye move_group).
+        group_kwargs: dict[str, Any] = {}
+        if mode != "move":
+            group_kwargs["mode"] = mode
+        if relative_to is not None:
+            group_kwargs["relative_to"] = relative_to
         try:
             yield DedupEvent(event=DedupEventType.STARTED, data={})
 
@@ -881,10 +893,7 @@ class ScanCommand:
                     yield DedupEvent(event=DedupEventType.CANCELLED, data={"index": index - 1, "total": total})
                     return
                 yield DedupEvent(event=DedupEventType.GROUP_STARTED, data={"index": index, "total": total, "reason": group.reason.value})
-                # Con el modo por defecto, la misma llamada que antes de L-6 (compatibilidad con quien sustituye move_group).
-                exact, version, group_failed = await (
-                    dedup_manager.move_group(group, duplicates_dir) if mode == "move" else dedup_manager.move_group(group, duplicates_dir, mode=mode)
-                )
+                exact, version, group_failed = await dedup_manager.move_group(group, duplicates_dir, **group_kwargs)
                 exact_moved += exact
                 version_resolved += version
                 failed_paths.extend(group_failed)

@@ -9,6 +9,7 @@ import uuid
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -110,7 +111,9 @@ class DeduplicationManager:
         self.logger.info(f"Deduplicación: {len(groups)} grupos detectados sobre {len(docs)} documentos")
         return groups
 
-    async def move_group(self, group: DuplicateGroup, duplicates_dir: Path, *, mode: DedupMode = "move") -> tuple[int, int, list[str]]:
+    async def move_group(
+        self, group: DuplicateGroup, duplicates_dir: Path, *, mode: DedupMode = "move", relative_to: Path | None = None
+    ) -> tuple[int, int, list[str]]:
         """Mueve los documentos descartados de un único `group` a `duplicates_dir`.
 
         Devuelve `(duplicados_exactos_movidos, conflictos_de_version_resueltos,
@@ -131,8 +134,12 @@ class DeduplicationManager:
 
         `mode` (L-6): `move` (por defecto, como siempre), `copy` (copia a `duplicates_dir` sin tocar el origen, apto
         para orígenes de solo lectura) o `report_only` (no toca ningún fichero; los descartados solo se cuentan).
+
+        `relative_to` (L-11a): ver `_move_to_duplicates`; un documento que no cuelgue de esa carpeta cuenta como fallido.
         """
         keep = group.user_choice or group.canonical_doc
+        # Sin `relative_to`, la misma llamada que antes de L-11a (compatibilidad con quien sustituye _move_to_duplicates).
+        extra: dict[str, Any] = {"relative_to": relative_to} if relative_to is not None else {}
         to_move = [doc for doc in [group.canonical_doc, *group.duplicates] if doc.full_path != keep.full_path]
         moved = 0
         failed_paths: list[str] = []
@@ -142,9 +149,9 @@ class DeduplicationManager:
                 continue
             try:
                 if mode == "copy":
-                    await self._move_to_duplicates(Path(doc.full_path), duplicates_dir, doc.sha256_hash, copy=True)
+                    await self._move_to_duplicates(Path(doc.full_path), duplicates_dir, doc.sha256_hash, copy=True, **extra)
                 else:
-                    await self._move_to_duplicates(Path(doc.full_path), duplicates_dir, doc.sha256_hash)
+                    await self._move_to_duplicates(Path(doc.full_path), duplicates_dir, doc.sha256_hash, **extra)
             except OSError as exc:
                 self.logger.warning(f"No se pudo {'copiar' if mode == 'copy' else 'mover'} '{doc.full_path}' a duplicados: {exc}")
                 failed_paths.append(doc.full_path)
@@ -218,9 +225,11 @@ class DeduplicationManager:
         *,
         report_dir: Path | None = None,
         mode: DedupMode = "move",
+        relative_to: Path | None = None,
     ) -> DeduplicationReport:
         """Mueve los documentos descartados de cada grupo a `duplicates_dir`,
-        preservando su estructura de directorios original, y escribe
+        preservando su estructura de directorios original (la ruta absoluta, o
+        la relativa a `relative_to` si se indica; ver `_move_to_duplicates`), y escribe
         `DEDUP_REPORT.json` (solo el último run) y añade una línea a
         `DEDUP_HISTORY.jsonl` (histórico acumulado de todas las ejecuciones).
 
@@ -237,6 +246,12 @@ class DeduplicationManager:
         `duplicates_dir` ni se toca ningún fichero, solo se escribe el informe.
         """
         duplicates_dir = Path(duplicates_dir)
+        # Con los valores por defecto, la misma llamada que antes de L-6 (compatibilidad con quien sustituye move_group).
+        group_kwargs: dict[str, Any] = {}
+        if mode != "move":
+            group_kwargs["mode"] = mode
+        if relative_to is not None:
+            group_kwargs["relative_to"] = relative_to
         if mode != "report_only":
             await asyncio.to_thread(duplicates_dir.mkdir, parents=True, exist_ok=True)
 
@@ -244,10 +259,7 @@ class DeduplicationManager:
         version_resolved = 0
         failed_paths: list[str] = []
         for group in groups:
-            # Con el modo por defecto, la misma llamada que antes de L-6 (compatibilidad con quien sustituye move_group).
-            exact, version, group_failed = await (
-                self.move_group(group, duplicates_dir) if mode == "move" else self.move_group(group, duplicates_dir, mode=mode)
-            )
+            exact, version, group_failed = await self.move_group(group, duplicates_dir, **group_kwargs)
             exact_moved += exact
             version_resolved += version
             failed_paths.extend(group_failed)
@@ -369,10 +381,18 @@ class DeduplicationManager:
             user_choice=None,
         )
 
-    async def _move_to_duplicates(self, source: Path, duplicates_dir: Path, sha256_hash: str, *, copy: bool = False) -> None:
+    async def _move_to_duplicates(
+        self, source: Path, duplicates_dir: Path, sha256_hash: str, *, copy: bool = False, relative_to: Path | None = None
+    ) -> None:
         """Mueve `source` replicando su ruta absoluta (salvo la unidad/raiz)
         bajo `duplicates_dir`; si el destino ya existe, se le añade un
         sufijo con el hash para no sobrescribir nunca en silencio.
+
+        Con `relative_to` (L-11a) se replica solo la ruta relativa a esa carpeta
+        (`duplicados/2024/a.pdf` en lugar de `duplicados/mnt/origen/2024/a.pdf`),
+        sin revelar rutas del servidor. Si `source` no cuelga de `relative_to`
+        lanza `OSError` (fallo por fichero en `move_group`) en vez de recurrir a
+        la ruta absoluta.
 
         Si el destino ya sufijado con el hash **también** existe (AUDIT_CODE,
         sesión 2026-09-03), no se reintenta ni se sobrescribe: `shutil.move` cae
@@ -381,7 +401,13 @@ class DeduplicationManager:
         explícitamente en vez de arriesgar esa pérdida silenciosa de datos.
         """
         resolved_source = source.resolve()
-        relative_parts = resolved_source.parts[1:] or (resolved_source.name,)
+        if relative_to is None:
+            relative_parts = resolved_source.parts[1:] or (resolved_source.name,)
+        else:
+            try:
+                relative_parts = resolved_source.relative_to(Path(relative_to).resolve()).parts or (resolved_source.name,)
+            except ValueError as exc:
+                raise OSError(f"No se pudo mover '{resolved_source}' a duplicados: no cuelga de '{relative_to}'.") from exc
         target = safe_path_join(duplicates_dir, *relative_parts)
         if target.exists():
             target = target.with_name(f"{target.stem}_{sha256_hash[:8]}{target.suffix}")
