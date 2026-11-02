@@ -10,10 +10,11 @@ import time
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Self, cast
+from typing import Any, Literal, Self, cast
 
-from docling.datamodel.base_models import InputFormat
+from docling.datamodel.base_models import FormatToExtensions, InputFormat
 from docling.datamodel.pipeline_options import EasyOcrOptions, PdfPipelineOptions, smolvlm_picture_description
+from docling.datamodel.settings import settings as docling_settings
 from docling.document_converter import DocumentConverter as DoclingConverter, ImageFormatOption, PdfFormatOption
 from docling_core.transforms.chunker.doc_chunk import DocChunk
 from docling_core.transforms.chunker.hierarchical_chunker import HierarchicalChunker
@@ -21,10 +22,14 @@ from docling_core.types.doc.base import ImageRefMode
 from docling_core.types.doc.items.node import DocItem
 from docling_core.types.doc.items.picture.picture import PictureDescriptionData, PictureItem
 
-from doc_organize.core.exceptions import ConversionError
+from doc_organize.core.exceptions import ConversionError, ModelsNotAvailableError
 from doc_organize.core.models import ConversionResult, DocumentMetadata
+from doc_organize.projects.layout import relative_source_path, resolve_images_dir, resolve_output_paths
 from doc_organize.utils.logging import get_logger
 from doc_organize.utils.office_detector import detect_office_status
+
+#: Extensiones que Docling convierte con el pipeline PDF/imagen, el único que usa modelos (layout, tablas, OCR).
+_MODEL_PIPELINE_EXTENSIONS = frozenset(FormatToExtensions[InputFormat.PDF] + FormatToExtensions[InputFormat.IMAGE])
 
 
 class DocumentConverter:
@@ -49,14 +54,22 @@ class DocumentConverter:
     un documento sin capa de texto nativa no tiene `parse_score`, tenga o
     no OCR aplicado en esa misma pasada.
 
+    Los modelos de Docling (layout, tablas, OCR) se descargan la primera vez que se usan, salvo que se indique
+    `artifacts_path` (carpeta con los modelos ya descargados, p. ej. con `docling-tools models download`): entonces
+    Docling solo los lee de ahí. Con `allow_model_downloads=False` esa carpeta es obligatoria (la indicada o
+    `DOCLING_ARTIFACTS_PATH`) y, si falta un modelo, `convert_document` lanza `ModelsNotAvailableError` en vez de
+    marcar cada documento como fallido (L-10b, G17).
+
     Attributes:
         logger (logging.Logger): Logger estructurado de la instancia.
+        artifacts_path (Path | None): Carpeta de modelos de Docling, si se indicó.
+        allow_model_downloads (bool): Si Docling puede descargar los modelos que falten.
 
     Example:
         >>> import asyncio
         >>> from pathlib import Path
         >>> async def main():
-        ...     async with DocumentConverter() as converter:
+        ...     async with DocumentConverter(artifacts_path=Path("/modelos"), allow_model_downloads=False) as converter:
         ...         result = await converter.convert_document(doc, Path("./Conversión"))
         >>> asyncio.run(main())  # doctest: +SKIP
     """
@@ -69,9 +82,12 @@ class DocumentConverter:
     # misma máquina pesada, en cada job de `pytest --doctest-modules`, solo
     # para un docstring.
 
-    def __init__(self) -> None:
+    def __init__(self, *, artifacts_path: Path | str | None = None, allow_model_downloads: bool = True) -> None:
         self.logger = get_logger(__name__)
+        self.artifacts_path = Path(artifacts_path).expanduser() if artifacts_path is not None else None
+        self.allow_model_downloads = allow_model_downloads
         self._docling_by_mode: dict[tuple[bool, bool, bool, bool], DoclingConverter] | None = None
+        self._initialized_modes: set[tuple[bool, bool, bool, bool]] = set()
         self._chunker: HierarchicalChunker | None = None
 
     async def __aenter__(self) -> Self:
@@ -81,6 +97,7 @@ class DocumentConverter:
 
     async def __aexit__(self, *exc_info: object) -> None:
         self._docling_by_mode = None
+        self._initialized_modes = set()
         self._chunker = None
 
     def _get_docling(
@@ -97,6 +114,8 @@ class DocumentConverter:
         if key not in self._docling_by_mode:
             options = PdfPipelineOptions()
             options.do_ocr = use_ocr
+            if self.artifacts_path is not None:
+                options.artifacts_path = self.artifacts_path
             if use_ocr and use_gpu:
                 # RapidOCR (default, via onnxruntime) es CPU-only. EasyOCR soporta
                 # aceleracion GPU (torch/cuda) — se activa solo si el llamante lo pide
@@ -127,6 +146,26 @@ class DocumentConverter:
             )
         return self._docling_by_mode[key]
 
+    async def _ensure_models(self, docling_converter: DoclingConverter, key: tuple[bool, bool, bool, bool], extension: str) -> None:
+        """Con descargas prohibidas, carga los modelos del pipeline PDF/imagen antes del primer documento (L-10b).
+
+        Un modelo que falta se detecta aquí, una vez por modo, como `ModelsNotAvailableError` (que se propaga), y no
+        como un error repetido en cada documento. El resto de formatos (Word, HTML…) no usa modelos y no se comprueba.
+        """
+        if self.allow_model_downloads or extension not in _MODEL_PIPELINE_EXTENSIONS or key in self._initialized_modes:
+            return
+        folder = self.artifacts_path or docling_settings.artifacts_path
+        if folder is None:
+            raise ModelsNotAvailableError(
+                "Las descargas de modelos están prohibidas y no hay carpeta de modelos: indica `artifacts_path` "
+                "(o DOCLING_ARTIFACTS_PATH) con los modelos descargados (`docling-tools models download`)."
+            )
+        try:
+            await asyncio.to_thread(docling_converter.initialize_pipeline, InputFormat.PDF)
+        except Exception as exc:  # noqa: BLE001 - Docling lanza RuntimeError, FileNotFoundError u OSError según el modelo
+            raise ModelsNotAvailableError(f"Faltan modelos de Docling en '{folder}' y las descargas están prohibidas: {exc}") from exc
+        self._initialized_modes.add(key)
+
     async def convert_document(
         self,
         source_doc: DocumentMetadata,
@@ -136,6 +175,9 @@ class DocumentConverter:
         extract_images: bool = False,
         use_picture_description: bool = False,
         scan_roots: Sequence[str] = (),
+        *,
+        include_root_name: bool = False,
+        json_source_path: Literal["relative", "absolute"] = "relative",
     ) -> ConversionResult:
         """Convierte `source_doc` a Markdown + JSON bajo `output_dir`.
 
@@ -168,10 +210,19 @@ class DocumentConverter:
                 bajo `output_dir` (ver `resolve_output_paths`) -- nunca la ruta
                 absoluta completa del disco de origen. Vacio por defecto: sin
                 ninguna raiz conocida, la salida se aplana a `output_dir/<stem>`.
+            include_root_name: Antepone el nombre de la raiz a la ruta de salida
+                (ver `resolve_output_paths`, L-10c). Por defecto `False`.
+            json_source_path: `source_path` del `.json`: `"relative"` (por defecto
+                desde 0.12.0, ruta relativa a la raiz escaneada, sin rutas del
+                servidor, G23) o `"absolute"` (la ruta completa, como antes).
 
         Returns:
             ConversionResult con las rutas de salida, si tuvo exito, y si el
             documento requiere OCR (para REQ-004).
+
+        Raises:
+            ModelsNotAvailableError: `allow_model_downloads=False` y faltan modelos
+                de Docling (se comprueba con el primer PDF/imagen de cada modo).
         """
         start = time.monotonic()
 
@@ -201,6 +252,7 @@ class DocumentConverter:
         # _get_docling() valida el uso como context manager; ese error de programacion
         # se propaga (no se atrapa como fallo de conversion de este documento).
         docling_converter = self._get_docling(use_ocr, use_gpu, extract_images, use_picture_description)
+        await self._ensure_models(docling_converter, (use_ocr, use_gpu, extract_images, use_picture_description), source_doc.extension)
 
         try:
             docling_result = await asyncio.to_thread(docling_converter.convert, source_doc.full_path)
@@ -210,7 +262,15 @@ class DocumentConverter:
             # que no tiene ese paso, asi que el flag pedido por el llamante no tuvo efecto.
             picture_description_applied = use_picture_description and docling_result.input.format in (InputFormat.PDF, InputFormat.IMAGE)
             markdown_path, json_path, images_dir = await self._write_outputs(
-                source_doc, docling_result, output_dir, ocr_required, extract_images, picture_description_applied, scan_roots
+                source_doc,
+                docling_result,
+                output_dir,
+                ocr_required,
+                extract_images,
+                picture_description_applied,
+                scan_roots,
+                include_root_name=include_root_name,
+                json_source_path=json_source_path,
             )
         # Excepcion amplia deliberada: cualquier fallo de conversion o de escritura de
         # salida (incluida la limpieza de img/<stem>/, AUDIT_CODE) se reporta en
@@ -264,61 +324,16 @@ class DocumentConverter:
         )
 
     @staticmethod
-    def resolve_output_paths(full_path: str, output_dir: Path, scan_roots: Sequence[str] = ()) -> tuple[Path, Path]:
-        """Deriva `(markdown_path, json_path)` para el fichero fuente `full_path` bajo `output_dir`.
-
-        Determinista y basado solo en la ruta del fichero fuente (nunca en su
-        hash). Si `full_path` cuelga de alguna de `scan_roots` (las carpetas que
-        el usuario indico al escanear), replica la jerarquia relativa a esa raiz
-        bajo `output_dir` -- nunca la ruta absoluta completa del disco de origen:
-        `output_dir` puede vivir en otra rama del arbol de ficheros (p.ej. una
-        carpeta de exportacion ajena a lo escaneado), y mezclar ahi la ruta
-        absoluta de origen entera generaba una jerarquia duplicada e inexistente
-        en vez de una salida valida (bug real: documento .docx con imagenes,
-        `[Errno 2] No such file or directory`, sesion 2026-09-05). Si ninguna
-        raiz coincide (o no se indica ninguna), usa solo el `stem` del fichero
-        -- una unica carpeta plana bajo `output_dir` -- en vez de reconstruir su
-        ruta absoluta. Extraido de `_write_outputs` para que el llamante (p.ej.
-        `ScanCommand`, al forzar un rescan) pueda localizar la salida de un
-        documento sin tener que reconvertirlo.
-
-        Cada segmento (carpetas intermedias y `stem` final) se sanea con
-        `rstrip(" .")`: Windows normaliza (quita) espacios/puntos finales de un
-        componente SOLO cuando es el ultimo de la ruta que se le pasa a una
-        llamada de API -- al crear `img/<stem>/` (donde `stem` SI es el ultimo
-        componente) el espacio final desaparecia del directorio real en disco,
-        pero al escribir luego un fichero dentro (`img/<stem>/imagen.png`,
-        donde `stem` pasa a ser un componente intermedio) no se normalizaba y
-        Windows buscaba un directorio con el espacio que nunca existio
-        (`[Errno 2] No such file or directory`, bug real: `.docx` con nombre
-        terminado en espacio, sesion 2026-09-05).
-        """
-        resolved = Path(full_path).resolve()
-        relative_parts: tuple[str, ...] = ()
-        best_root_depth = -1
-        for root in scan_roots:
-            resolved_root = Path(root).resolve()
-            try:
-                relative = resolved.relative_to(resolved_root)
-            except ValueError:
-                continue
-            if len(resolved_root.parts) > best_root_depth:
-                best_root_depth = len(resolved_root.parts)
-                relative_parts = relative.parts
-        stem = Path(relative_parts[-1]).stem if relative_parts else resolved.stem
-        stem = stem.rstrip(" .")
-        dir_parts = [part.rstrip(" .") for part in relative_parts[:-1]]
-        target_dir = output_dir.joinpath(*dir_parts) if dir_parts else output_dir
-        return target_dir / f"{stem}.md", target_dir / f"{stem}.json"
+    def resolve_output_paths(
+        full_path: str, output_dir: Path, scan_roots: Sequence[str] = (), *, include_root_name: bool = False
+    ) -> tuple[Path, Path]:
+        """Alias de `doc_organize.projects.layout.resolve_output_paths` (movida en 0.12.0 a un módulo sin Docling, G20)."""
+        return resolve_output_paths(full_path, output_dir, scan_roots, include_root_name=include_root_name)
 
     @staticmethod
     def resolve_images_dir(markdown_path: Path) -> Path:
-        """Carpeta de imagenes namespaced (`img/<stem>/`) junto a `markdown_path` —
-        misma convencion que usa `_write_outputs` con `extract_images=True`. Expuesta
-        (no privada) para que `ScanCommand._delete_orphaned_outputs` pueda borrarla al
-        limpiar la salida de un documento huerfano, sin duplicar la convencion de
-        nombrado (AUDIT_CODE)."""
-        return markdown_path.parent / "img" / markdown_path.stem
+        """Alias de `doc_organize.projects.layout.resolve_images_dir` (movida en 0.12.0, G20)."""
+        return resolve_images_dir(markdown_path)
 
     async def _write_outputs(
         self,
@@ -333,8 +348,11 @@ class DocumentConverter:
         extract_images: bool,
         picture_description_applied: bool,
         scan_roots: Sequence[str] = (),
+        *,
+        include_root_name: bool = False,
+        json_source_path: Literal["relative", "absolute"] = "relative",
     ) -> tuple[Path, Path, Path | None]:
-        markdown_path, json_path = self.resolve_output_paths(source_doc.full_path, output_dir, scan_roots)
+        markdown_path, json_path = resolve_output_paths(source_doc.full_path, output_dir, scan_roots, include_root_name=include_root_name)
         await asyncio.to_thread(markdown_path.parent.mkdir, parents=True, exist_ok=True)
 
         images_dir: Path | None = None
@@ -346,7 +364,7 @@ class DocumentConverter:
             # "img" compartida a secas) para que dos documentos distintos convertidos en
             # el mismo `output_dir` no se pisen las imagenes entre si.
             relative_images_dir = Path("img") / markdown_path.stem
-            absolute_images_dir = self.resolve_images_dir(markdown_path)
+            absolute_images_dir = resolve_images_dir(markdown_path)
             # Se borra ANTES de escribir (AUDIT_CODE): `save_as_markdown` solo hace
             # `mkdir(exist_ok=True)`, nunca limpia el directorio previo, y Docling nombra
             # cada imagen con un sufijo de hash de contenido — una reconversion con
@@ -372,7 +390,7 @@ class DocumentConverter:
             await asyncio.to_thread(markdown_path.write_text, markdown_text, encoding="utf-8")
 
         document_json = {
-            "source_path": source_doc.full_path,
+            "source_path": (source_doc.full_path if json_source_path == "absolute" else relative_source_path(source_doc.full_path, scan_roots)),
             "title": markdown_path.stem,
             "size_bytes": source_doc.size_bytes,
             "sha256_hash": source_doc.sha256_hash,

@@ -160,3 +160,50 @@ def test_only_project_layout_builds_project_paths() -> None:
     ]
 
     assert offenders == []
+
+
+# --- Rutas de salida de un documento (L-10c, L-10e; G18, G20, G23) ------------------------------------------------------
+
+
+def test_resolve_output_paths_with_several_roots_collides_without_root_name(tmp_path: Path) -> None:
+    roots = [str(tmp_path / "2024"), str(tmp_path / "2025")]
+    output_dir = tmp_path / "Conversión"
+
+    first = doc_organize.resolve_output_paths(str(tmp_path / "2024" / "x" / "a.pdf"), output_dir, roots)
+    second = doc_organize.resolve_output_paths(str(tmp_path / "2025" / "x" / "a.pdf"), output_dir, roots)
+
+    assert first == second == (output_dir / "x" / "a.md", output_dir / "x" / "a.json")
+
+
+def test_resolve_output_paths_with_root_name_separates_roots(tmp_path: Path) -> None:
+    roots = [str(tmp_path / "2024"), str(tmp_path / "2025")]
+    output_dir = tmp_path / "Conversión"
+
+    first, _ = doc_organize.resolve_output_paths(str(tmp_path / "2024" / "x" / "a.pdf"), output_dir, roots, include_root_name=True)
+    second, _ = doc_organize.resolve_output_paths(str(tmp_path / "2025" / "x" / "a.pdf"), output_dir, roots, include_root_name=True)
+
+    assert first == output_dir / "2024" / "x" / "a.md"
+    assert second == output_dir / "2025" / "x" / "a.md"
+
+
+def test_resolve_output_paths_with_root_name_uses_deepest_root_and_ignores_unmatched(tmp_path: Path) -> None:
+    roots = [str(tmp_path / "datos"), str(tmp_path / "datos" / "2024")]
+    output_dir = tmp_path / "out"
+
+    nested, _ = doc_organize.resolve_output_paths(str(tmp_path / "datos" / "2024" / "a.pdf"), output_dir, roots, include_root_name=True)
+    unmatched, _ = doc_organize.resolve_output_paths(str(tmp_path / "otra" / "b.pdf"), output_dir, roots, include_root_name=True)
+
+    assert nested == output_dir / "2024" / "a.md"
+    assert unmatched == output_dir / "b.md"
+
+
+def test_relative_source_path_never_returns_server_paths(tmp_path: Path) -> None:
+    root = tmp_path / "mnt" / "datos"
+
+    assert doc_organize.relative_source_path(str(root / "Informes" / "a.pdf"), [str(root)]) == "Informes/a.pdf"
+    assert doc_organize.relative_source_path(str(tmp_path / "fuera" / "b.pdf"), [str(root)]) == "b.pdf"
+    assert doc_organize.relative_source_path(str(root / "c.pdf")) == "c.pdf"
+
+
+def test_resolve_images_dir_is_next_to_markdown(tmp_path: Path) -> None:
+    assert doc_organize.resolve_images_dir(tmp_path / "x" / "a.md") == tmp_path / "x" / "img" / "a"

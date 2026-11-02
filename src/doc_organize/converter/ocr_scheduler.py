@@ -4,6 +4,7 @@ Deteccion y procesamiento de OCR en dos fases (REQ-004).
 
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
+from typing import Literal
 
 from doc_organize.converter.converter import DocumentConverter
 from doc_organize.core.models import ConversionResult, DocumentMetadata
@@ -22,6 +23,8 @@ class OCRScheduler:
     (EasyOCR) en vez del motor CPU por defecto (RapidOCR) — no es un requisito
     funcional, es una optimizacion de velocidad (AUDIT_PLAN revision 5).
 
+    `artifacts_path` y `allow_model_downloads` se pasan al `DocumentConverter` del lote (L-10b, ver su docstring).
+
     Attributes:
         logger (logging.Logger): Logger estructurado de la instancia.
 
@@ -33,14 +36,17 @@ class OCRScheduler:
         ...     results = await scheduler.process_with_ocr(candidates, Path("./Conversión"))
         >>> asyncio.run(main())  # doctest: +SKIP
     """
+
     # +SKIP deliberado (AUDIT_CODE, sesión 2026-09-03/04): `process_with_ocr()`
     # necesita un documento real con OCR real de Docling (carga de modelo
     # incluida) -- mismo motivo que `DocumentConverter.convert_document()`, ver
     # su docstring. `test_ocr_scheduler.py` ya cubre esto de verdad, marcado
     # `@pytest.mark.slow`.
 
-    def __init__(self) -> None:
+    def __init__(self, *, artifacts_path: Path | str | None = None, allow_model_downloads: bool = True) -> None:
         self.logger = get_logger(__name__)
+        self._artifacts_path = artifacts_path
+        self._allow_model_downloads = allow_model_downloads
 
     async def process_with_ocr(
         self,
@@ -51,6 +57,9 @@ class OCRScheduler:
         use_picture_description: bool = False,
         scan_roots: Sequence[str] = (),
         progress_callback: Callable[[DocumentMetadata, int, int], Awaitable[None]] | None = None,
+        *,
+        include_root_name: bool = False,
+        json_source_path: Literal["relative", "absolute"] = "relative",
     ) -> list[ConversionResult]:
         """Reconvierte `docs` con OCR activado y escribe los resultados en `output_dir`.
 
@@ -74,10 +83,13 @@ class OCRScheduler:
                 documento. Permite a quien orquesta el batch (`ScanCommand._process_ocr`)
                 informar progreso en vivo sin que este método conozca `ScanEvent`/
                 WebSocket -- mantiene la capa de OCR agnóstica del transporte de eventos.
+            include_root_name: igual que en `DocumentConverter.convert_document` (L-10c);
+                debe coincidir con la primera pasada.
+            json_source_path: igual que en `DocumentConverter.convert_document` (G23).
         """
         results: list[ConversionResult] = []
         total = len(docs)
-        async with DocumentConverter() as converter:
+        async with DocumentConverter(artifacts_path=self._artifacts_path, allow_model_downloads=self._allow_model_downloads) as converter:
             for index, doc in enumerate(docs, start=1):
                 if progress_callback is not None:
                     await progress_callback(doc, index, total)
@@ -89,6 +101,8 @@ class OCRScheduler:
                     extract_images=extract_images,
                     use_picture_description=use_picture_description,
                     scan_roots=scan_roots,
+                    include_root_name=include_root_name,
+                    json_source_path=json_source_path,
                 )
                 results.append(result)
 

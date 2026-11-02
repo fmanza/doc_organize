@@ -6,6 +6,96 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-02
+
+Robustez del escaneo y API de lectura para doc_organize_web (tareas L-10a…L-10e de su plan; cierra los huecos
+G16–G23). Todo es aditivo salvo el valor por defecto de `source_path` en el JSON de cada documento (ver «Changed»).
+
+> **Nota de versión**: el plan de doc_organize_web reservaba la 0.12.0 para L-10 (deprecación de la web integrada);
+> esa tarea pasa a la siguiente MINOR.
+
+### Added
+
+- **L-10a (G16)**: `ScanCommand.run_streaming` guarda la caché durante la conversión cada
+  `ScanOptions.cache_save_every` documentos (20) o `cache_save_seconds` segundos (30; 0 desactiva cada disparo), y
+  también si el escaneo termina por una excepción, se cierra el generador o se cancela la tarea, antes de propagar el
+  error. Un fallo o un `kill` a mitad solo pierde lo convertido desde el último guardado. En la fase de OCR los
+  resultados llegan al final del lote: un corte en esa fase deja esos documentos en `ocr_pending`.
+- **L-10b (G17)**: carpeta de modelos de Docling (`ScanOptions.artifacts_path`, `DocumentConverter(artifacts_path=)`,
+  `OCRScheduler(artifacts_path=)`) y `allow_model_downloads=False` para prohibir descargas: hace falta una carpeta (la
+  indicada o `DOCLING_ARTIFACTS_PATH`) y, si falta un modelo, `ModelsNotAvailableError` (subclase de
+  `ConversionError`) en lugar de descargarlo o de marcar cada documento como error. Solo se comprueba con
+  PDF/imagen, los únicos formatos que usan modelos.
+- **L-10c (G18)**: `ScanOptions.root_name_in_output` (y `include_root_name=` en `resolve_output_paths`,
+  `convert_document` y `process_with_ocr`) antepone el nombre de la carpeta escaneada a la ruta de salida:
+  `2024/x/a.pdf` y `2025/x/a.pdf` van a `2024/x/a.md` y `2025/x/a.md`. Por defecto no cambia nada; con varias raíces y
+  la opción desactivada, el evento `SCANNED` avisa (`warnings`) de los documentos que irían a la misma salida.
+- **L-10d (G19)**: `ScanResult.unreadable_dirs` con las carpetas que no se pudieron listar (también en los `warnings`
+  de `SCANNED`). Con `force`, los documentos de esas carpetas no se tratan como huérfanos: no se borran sus salidas y
+  se conservan sus entradas de caché. Al cancelar un escaneo se escribe el `ScanErrorReport` de lo procesado en
+  `error_log_path`.
+- **L-10e (G20–G22)**: `resolve_output_paths`, `resolve_images_dir` y `relative_source_path` en
+  `doc_organize.projects.layout` (no importa Docling); `DocumentConverter.resolve_output_paths`/`resolve_images_dir`
+  quedan como alias. `CacheManager(db_path, read_only=True)` (URI `mode=ro`, sin `PRAGMA WAL`, `CREATE` ni `ALTER`;
+  `CacheNotFoundError` si no existe; `CacheError` si el esquema no es el actual o si se intenta escribir).
+  `count_entries`/`load_cache_page` con `relative_to=` (solo entradas bajo esa raíz y `search` sobre la ruta relativa)
+  y `conversion_status=`.
+- API pública: `resolve_output_paths`, `resolve_images_dir`, `relative_source_path`, `CacheNotFoundError`,
+  `ModelsNotAvailableError`, `ConversionStatus` y `DocumentStatus`.
+
+### Changed
+
+- **L-10e (G23)**: el `source_path` del `.json` de cada documento convertido pasa a ser la ruta **relativa a la
+  carpeta escaneada**, en formato POSIX (`Informes/a.pdf`; solo el nombre si no cuelga de ninguna raíz), en lugar de
+  la ruta absoluta del servidor, que llegaba a quien abría el JSON o el ZIP del proyecto. `json_source_path="absolute"`
+  (`ScanOptions`, `convert_document`, `process_with_ocr`) recupera lo anterior. Los JSON ya generados no cambian hasta
+  reconvertirse.
+- `ScanCommand` pasa los argumentos nuevos a `convert_document`/`process_with_ocr` solo cuando no tienen el valor por
+  defecto (quien sustituya esos métodos con la firma anterior sigue funcionando).
+
+### Firmas finales (para doc_organize_web)
+
+```python
+# doc_organize.projects.layout (y doc_organize.*)
+def resolve_output_paths(full_path: str, output_dir: Path, scan_roots: Sequence[str] = (), *,
+                         include_root_name: bool = False) -> tuple[Path, Path]
+def resolve_images_dir(markdown_path: Path) -> Path
+def relative_source_path(full_path: str, scan_roots: Sequence[str] = ()) -> str
+
+# doc_organize.ScanOptions (campos nuevos)
+cache_save_every: int = 20            # ge=0
+cache_save_seconds: float = 30.0      # ge=0
+artifacts_path: Path | None = None
+allow_model_downloads: bool = True
+root_name_in_output: bool = False
+json_source_path: Literal["relative", "absolute"] = "relative"
+
+# doc_organize.ScanResult (campo nuevo)
+unreadable_dirs: list[str] = []
+
+# doc_organize.DocumentConverter / OCRScheduler
+DocumentConverter(*, artifacts_path: Path | str | None = None, allow_model_downloads: bool = True)
+DocumentConverter.convert_document(source_doc, output_dir, use_ocr=False, use_gpu=False, extract_images=False,
+                                   use_picture_description=False, scan_roots=(), *, include_root_name: bool = False,
+                                   json_source_path: Literal["relative", "absolute"] = "relative") -> ConversionResult
+OCRScheduler(*, artifacts_path: Path | str | None = None, allow_model_downloads: bool = True)
+OCRScheduler.process_with_ocr(docs, output_dir, use_gpu=False, extract_images=False, use_picture_description=False,
+                              scan_roots=(), progress_callback=None, *, include_root_name: bool = False,
+                              json_source_path: Literal["relative", "absolute"] = "relative") -> list[ConversionResult]
+
+# doc_organize.CacheManager
+CacheManager(db_path: str | Path = "cache.db", *, read_only: bool = False)
+async def count_entries(search: str | None = None, *, relative_to: str | Path | None = None,
+                        conversion_status: ConversionStatus | str | None = None) -> int
+async def load_cache_page(limit: int, offset: int, search: str | None = None, *,
+                          relative_to: str | Path | None = None,
+                          conversion_status: ConversionStatus | str | None = None) -> list[CacheEntry]
+
+# doc_organize (errores)
+class CacheNotFoundError(CacheError)
+class ModelsNotAvailableError(ConversionError)
+```
+
 ## [0.11.0] - 2026-11-01
 
 Exportación de proyectos como API pública (tarea L-7 del plan de doc_organize_web; cierra el hueco G8). Cambios

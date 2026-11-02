@@ -13,6 +13,7 @@ Modelos Pydantic v2 usados en todos los módulos:
 """
 
 from enum import Enum
+from pathlib import Path
 from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -371,6 +372,10 @@ class ScanResult(BaseModel):
     summary: dict[str, int] = Field(..., description="Conteo de ficheros por extensión")
     tree: DirectoryTree = Field(..., description="Estructura de directorios")
     scan_duration_seconds: float = Field(..., description="Tiempo empleado en completar el escaneo")
+    unreadable_dirs: list[str] = Field(
+        default_factory=list,
+        description="Carpetas que no se pudieron listar (permiso denegado, montaje caído); su contenido falta de `documents`",
+    )
 
 
 #: Versión del esquema de los eventos de progreso (L-6b). Sube cuando cambian los campos de `to_dict()` o el
@@ -415,6 +420,16 @@ class ScanOptions(BaseModel):
     include_audio_video: bool = Field(default=False, description="Incluir audio y vídeo (requiere el extra `av`)")
     extract_images: bool = Field(default=False, description="Extraer las imágenes de los documentos")
     use_picture_description: bool = Field(default=False, description="Describir las imágenes con un modelo de visión")
+    cache_save_every: int = Field(default=20, ge=0, description="Guardar la caché cada N documentos convertidos (0: no)")
+    cache_save_seconds: float = Field(default=30.0, ge=0, description="Guardar la caché cada X segundos de conversión (0: no)")
+    artifacts_path: Path | None = Field(default=None, description="Carpeta de modelos de Docling (sin ella, Docling los descarga)")
+    allow_model_downloads: bool = Field(
+        default=True, description="Permitir que Docling descargue modelos; con `False` falta un modelo → `ModelsNotAvailableError`"
+    )
+    root_name_in_output: bool = Field(default=False, description="Incluir el nombre de la carpeta escaneada en la ruta de salida")
+    json_source_path: Literal["relative", "absolute"] = Field(
+        default="relative", description="`source_path` del JSON de cada documento: relativo a la carpeta escaneada o absoluto"
+    )
 
 
 class ScanEvent(VersionedEvent):
