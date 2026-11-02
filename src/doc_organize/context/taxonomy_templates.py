@@ -122,8 +122,8 @@ def load_builtin_template(name: str) -> TaxonomyManifest:
         TaxonomyTemplateError: `name` no es un slug válido, no existe esa plantilla o su front matter no es válido.
 
     Example:
-        >>> load_builtin_template("calidad").domains[0].slug
-        'calidad'
+        >>> load_builtin_template("calidad").domains[0].slug  # catálogo de la plantilla empaquetada "calidad"
+        'procesos'
     """
     template_path = template_file(_BUILTIN_TEMPLATES_DIR, name)
     if not template_path.is_file():
