@@ -6,9 +6,16 @@ y partes controladas por el usuario/documento (nombres de archivo, rutas
 relativas) debe pasar por safe_path_join(), en vez de concatenar manualmente.
 """
 
+import errno
+import os
+import stat
+
 from pathlib import Path
 
 from doc_organize.core.exceptions import InvalidPathError
+
+# Unión de Windows (`stat.IO_REPARSE_TAG_MOUNT_POINT` solo existe en Windows; `st_reparse_tag`, tampoco fuera de él).
+_IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003
 
 
 def safe_path_join(base: str | Path, *parts: str) -> Path:
@@ -40,6 +47,32 @@ def safe_path_join(base: str | Path, *parts: str) -> Path:
     except ValueError as exc:
         raise InvalidPathError(f"Path traversal detectado: '{candidate}' escapa de '{base_resolved}'") from exc
     return candidate
+
+
+def ensure_no_symlinks(path: str | Path) -> Path:
+    """Comprueba con `lstat`, sin resolver, que ningún tramo existente de `path` sea un enlace simbólico (o una unión
+    de Windows) y devuelve la ruta absoluta normalizada (`os.path.abspath`).
+
+    Los tramos que todavía no existen no pueden ser enlaces y no se comprueban (L-11a, hueco G26 de doc_organize_web).
+
+    Raises:
+        OSError: (`errno.ELOOP`) si algún tramo es un enlace.
+
+    Example:
+        >>> ensure_no_symlinks("/repo/no/existe").parts[-2:]
+        ('no', 'existe')
+    """
+    absolute = Path(os.path.abspath(path))
+    current = Path(absolute.anchor)
+    for part in absolute.parts[1:]:
+        current = current / part
+        try:
+            st = os.lstat(current)
+        except FileNotFoundError:
+            break
+        if stat.S_ISLNK(st.st_mode) or getattr(st, "st_reparse_tag", 0) == _IO_REPARSE_TAG_MOUNT_POINT:
+            raise OSError(errno.ELOOP, "La ruta pasa por un enlace simbólico (no se sigue)", str(current))
+    return absolute
 
 
 def is_subpath(child: str | Path, parent: str | Path) -> bool:
@@ -78,4 +111,4 @@ def paths_within_roots(paths: list[str], allowed_roots: list[str] | None) -> boo
     return all(any(is_subpath(path, root) for root in allowed_roots) for path in paths)
 
 
-__all__ = ["is_subpath", "paths_within_roots", "safe_path_join"]
+__all__ = ["ensure_no_symlinks", "is_subpath", "paths_within_roots", "safe_path_join"]

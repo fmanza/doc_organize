@@ -3,7 +3,8 @@
 ## Sesión
 - **Fecha**: 2026-11-02
 - **Tipo**: `feature`
-- **Rama**: `feature/dedup-relativo-0.12.1` → PR a `develop` (squash)
+- **Rama**: `feature/dedup-relativo-0.12.1` → PR #16 a `develop` (squash); ampliación G26:
+  `feature/dedup-nofollow-0.12.1` → segundo PR a `develop` (squash), antes del tag
 - **Estado**: ✅ COMPLETADA
 
 ## Objetivo
@@ -35,6 +36,34 @@ la 0.13.0 queda reservada para L-10, deprecación de la web integrada). Plan del
   `relative_to` falla por fichero.
 - **Simplificaciones**: no se añade a la CLI (no lo pide el consumidor).
 - **Veredicto**: GO.
+
+## Ampliación G26 (misma versión 0.12.1)
+
+Petición añadida a L-11a: `_move_to_duplicates` no debe seguir enlaces simbólicos (antes resolvía el origen con
+`resolve()` y `safe_path_join` resolvía la base de `duplicates_dir`; un enlace cambiado justo antes de mover hacía que
+se moviera o copiara un fichero de fuera).
+
+- **PLAN**: `ensure_no_symlinks` en `utils/path_utils.py` (`lstat` de cada tramo existente, sin resolver; también
+  uniones de Windows); en `_move_to_duplicates`, rutas con `os.path.abspath` y comprobación del origen, de
+  `duplicates_dir` y de la carpeta destino; en POSIX, movimiento/copia con descriptores abiertos tramo a tramo con
+  `O_NOFOLLOW` (`rename` con `src_dir_fd`/`dst_dir_fd`; con `EXDEV`, copia `O_NOFOLLOW`/`O_EXCL` + `unlink`);
+  `check_duplicates_dir` al inicio de `resolve_duplicates` y `_dedup_pipeline` (`InvalidPathError`).
+- **AUDIT_PLAN**: la comprobación con `lstat` sola deja una ventana entre comprobar y mover: por eso en POSIX se opera
+  con `dir_fd`. Windows no tiene `dir_fd` ni `O_NOFOLLOW`: queda la comprobación con `lstat` (crear enlaces allí exige
+  privilegios). Rutas que pasan por un enlace del sistema (macOS `/tmp`, `/var`) fallan: el llamador debe pasar rutas
+  reales. Veredicto: GO.
+- **AUDIT_CODE**: en la verificación en Linux (WSL, script que ejecuta las funciones nuevas extraídas con `ast`) se
+  encontraron y corrigieron dos fallos que Windows no mostraba: `stat.IO_REPARSE_TAG_MOUNT_POINT` solo existe en
+  Windows (constante propia) y la copia perdía la fecha porque el búfer se escribía al cerrar, después de `utime`
+  (`flush` antes). Verificado en Linux: move/copy normales, permisos y fecha, sufijo y colisión doble, origen enlace,
+  enlace en tramo intermedio y en el fichero final puestos *después* de la comprobación (`ENOTDIR`/`ELOOP`),
+  subcarpeta de duplicados enlazada, `duplicates_dir` enlace y movimiento entre sistemas de ficheros (`EXDEV`).
+  Residual: `rename` sobrescribe en POSIX si el destino aparece entre la comprobación de existencia y el movimiento
+  (ya ocurría antes); `mkdir` puede dejar carpetas vacías bajo `duplicados/` cuando el fichero falla.
+- **Tests**: origen sustituido por un enlace (move y copy) y carpeta de origen sustituida por un enlace →
+  `failed_paths` sin tocar el destino del enlace; `duplicates_dir` enlace → `InvalidPathError` y `OSError`; carrera
+  simulada (solo POSIX); copia conserva la fecha; `ensure_no_symlinks`. En Windows sin privilegios se saltan los que
+  crean enlaces; en el CI de Ubuntu se ejecutan.
 
 ## Cambios Ejecutados
 
@@ -90,7 +119,7 @@ firmas finales), `COMPATIBILITY.md`, `pyproject.toml` (0.12.1)
 python -m ruff format src tests     # 2 ficheros reformateados (los nuevos tests)
 python -m ruff check src tests      # All checks passed!
 python -m mypy src                  # Success: no issues found in 92 source files
-python -m pytest                    # 1005 passed, 3 skipped
+python -m pytest                    # 1005 passed, 3 skipped (PR #16); 1007 passed, 9 skipped con G26
 zensical build --strict             # sin errores
 ```
 
@@ -110,6 +139,10 @@ zensical build --strict             # sin errores
 
 - **[dedup]**: con `relative_to`, `_move_to_duplicates` nunca recurre a la ruta absoluta; un origen fuera de esa
   carpeta es `OSError` (fallo por fichero en `move_group`).
+- **[dedup]**: `_move_to_duplicates` no resuelve ni sigue enlaces (G26); en POSIX opera con `dir_fd` + `O_NOFOLLOW`.
+  No volver a usar `resolve()` ni `safe_path_join` (resuelve la base) en ese camino.
+- **[verificación]**: los tests con enlaces se saltan en Windows sin privilegios; para probar la ruta POSIX en local
+  sirve WSL (sin `pip`: extraer las funciones con `ast`, no dependen de numpy/pydantic).
 - **[compatibilidad]**: los parámetros nuevos de `move_group`/`_move_to_duplicates` solo se pasan cuando no tienen el
   valor por defecto, porque hay tests que sustituyen esos métodos con la firma anterior.
 

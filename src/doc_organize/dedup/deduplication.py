@@ -3,8 +3,11 @@ Deduplicacion y resolucion de conflictos de version (REQ-005).
 """
 
 import asyncio
+import errno
 import hashlib
+import os
 import shutil
+import stat
 import uuid
 
 from datetime import UTC, datetime
@@ -16,9 +19,10 @@ import numpy as np
 from rapidfuzz import fuzz, process, utils
 
 from doc_organize.core.constants import DEDUP_HISTORY_JSONL_NAME, DEDUP_REPORT_JSON_NAME, VERSION_SUFFIX_PATTERN
+from doc_organize.core.exceptions import InvalidPathError
 from doc_organize.core.models import DeduplicationReport, DedupMode, DocumentMetadata, DuplicateGroup, DuplicateReason
 from doc_organize.utils.logging import get_logger
-from doc_organize.utils.path_utils import safe_path_join
+from doc_organize.utils.path_utils import ensure_no_symlinks
 
 
 class DeduplicationManager:
@@ -246,6 +250,7 @@ class DeduplicationManager:
         `duplicates_dir` ni se toca ningún fichero, solo se escribe el informe.
         """
         duplicates_dir = Path(duplicates_dir)
+        self.check_duplicates_dir(duplicates_dir)
         # Con los valores por defecto, la misma llamada que antes de L-6 (compatibilidad con quien sustituye move_group).
         group_kwargs: dict[str, Any] = {}
         if mode != "move":
@@ -279,6 +284,18 @@ class DeduplicationManager:
             + (f", {len(failed_paths)} fallidos" if failed_paths else "")
         )
         return report
+
+    @staticmethod
+    def check_duplicates_dir(duplicates_dir: Path) -> None:
+        """Rechaza un `duplicates_dir` que sea (o pase por) un enlace simbólico, antes de escribir nada (L-11a, G26).
+
+        Raises:
+            InvalidPathError: si algún tramo existente de `duplicates_dir` es un enlace.
+        """
+        try:
+            ensure_no_symlinks(duplicates_dir)
+        except OSError as exc:
+            raise InvalidPathError(f"La carpeta de duplicados no puede ser ni contener un enlace simbólico: {exc}") from exc
 
     @staticmethod
     async def _append_to_history(duplicates_dir: Path, report: DeduplicationReport) -> None:
@@ -394,34 +411,113 @@ class DeduplicationManager:
         lanza `OSError` (fallo por fichero en `move_group`) en vez de recurrir a
         la ruta absoluta.
 
+        No sigue enlaces simbólicos (L-11a, G26): ni `source` ni `duplicates_dir`
+        se resuelven, y si algún tramo de cualquiera de los dos (o de la carpeta
+        destino) es un enlace se lanza `OSError`. En POSIX el origen y el destino
+        se abren tramo a tramo con `O_NOFOLLOW` y se mueven con `rename` relativo
+        a esos descriptores, así que un enlace puesto justo antes de mover tampoco
+        se sigue; en Windows (sin `dir_fd`) queda la comprobación con `lstat`.
+
         Si el destino ya sufijado con el hash **también** existe (AUDIT_CODE,
         sesión 2026-09-03), no se reintenta ni se sobrescribe: `shutil.move` cae
         a un fallback copy+unlink cuando `os.rename` falla por destino existente
         y ese fallback sobrescribe sin avisar en Windows — se rechaza
         explícitamente en vez de arriesgar esa pérdida silenciosa de datos.
         """
-        resolved_source = source.resolve()
+        await asyncio.to_thread(self._transfer_to_duplicates, source, duplicates_dir, sha256_hash, copy, relative_to)
+
+    @staticmethod
+    def _transfer_to_duplicates(source: Path, duplicates_dir: Path, sha256_hash: str, copy: bool, relative_to: Path | None) -> None:
+        """Parte síncrona de `_move_to_duplicates` (se ejecuta en un hilo)."""
+        # Rutas absolutas normalizadas sin resolver enlaces: sus partes nunca contienen "..".
+        duplicates_abs = ensure_no_symlinks(duplicates_dir)
+        source_abs = ensure_no_symlinks(source)
         if relative_to is None:
-            relative_parts = resolved_source.parts[1:] or (resolved_source.name,)
+            relative_parts = source_abs.parts[1:] or (source_abs.name,)
         else:
             try:
-                relative_parts = resolved_source.relative_to(Path(relative_to).resolve()).parts or (resolved_source.name,)
+                relative_parts = source_abs.relative_to(os.path.abspath(relative_to)).parts or (source_abs.name,)
             except ValueError as exc:
-                raise OSError(f"No se pudo mover '{resolved_source}' a duplicados: no cuelga de '{relative_to}'.") from exc
-        target = safe_path_join(duplicates_dir, *relative_parts)
-        if target.exists():
+                raise OSError(f"No se pudo mover '{source_abs}' a duplicados: no cuelga de '{relative_to}'.") from exc
+        target = duplicates_abs.joinpath(*relative_parts)
+        if os.path.lexists(target):
             target = target.with_name(f"{target.stem}_{sha256_hash[:8]}{target.suffix}")
-            if target.exists():
+            if os.path.lexists(target):
                 raise FileExistsError(
-                    f"No se pudo mover '{resolved_source}' a duplicados: el destino '{target}' ya existe "
+                    f"No se pudo mover '{source_abs}' a duplicados: el destino '{target}' ya existe "
                     "incluso tras añadir el sufijo de hash (colisión doble)."
                 )
 
-        await asyncio.to_thread(target.parent.mkdir, parents=True, exist_ok=True)
-        if copy:
-            await asyncio.to_thread(shutil.copy2, str(resolved_source), str(target))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        ensure_no_symlinks(target.parent)
+        if _NOFOLLOW_DIR_FD:
+            _transfer_nofollow(source_abs, target, copy=copy)
+        elif copy:
+            shutil.copy2(source_abs, target, follow_symlinks=False)
         else:
-            await asyncio.to_thread(shutil.move, str(resolved_source), str(target))
+            shutil.move(source_abs, target)
+
+
+# `dir_fd` + `O_NOFOLLOW` (POSIX): abrir cada tramo sin seguir enlaces y operar relativo a esos descriptores.
+_O_NOFOLLOW: int = getattr(os, "O_NOFOLLOW", 0)
+_O_DIRECTORY: int = getattr(os, "O_DIRECTORY", 0)
+_NOFOLLOW_DIR_FD = bool(_O_NOFOLLOW and _O_DIRECTORY) and {os.open, os.rename, os.unlink, os.stat} <= os.supports_dir_fd
+
+
+def _open_dir_nofollow(path: Path) -> int:
+    """Abre el directorio absoluto `path` tramo a tramo con `O_NOFOLLOW` (`ELOOP` si alguno es un enlace)."""
+    fd = os.open(path.anchor, os.O_RDONLY | _O_DIRECTORY)
+    try:
+        for part in path.parts[1:]:
+            next_fd = os.open(part, os.O_RDONLY | _O_DIRECTORY | _O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _transfer_nofollow(source: Path, target: Path, *, copy: bool) -> None:
+    """Mueve o copia `source` a `target` sin seguir enlaces en ningún tramo; nunca sobrescribe al copiar."""
+    src_dir = _open_dir_nofollow(source.parent)
+    try:
+        dst_dir = _open_dir_nofollow(target.parent)
+        try:
+            if not copy:
+                if not stat.S_ISREG(os.stat(source.name, dir_fd=src_dir, follow_symlinks=False).st_mode):
+                    raise OSError(errno.ELOOP, "El origen no es un fichero normal (no se sigue)", str(source))
+                try:
+                    os.rename(source.name, target.name, src_dir_fd=src_dir, dst_dir_fd=dst_dir)
+                    return
+                except OSError as exc:
+                    if exc.errno != errno.EXDEV:
+                        raise
+            _copy_nofollow(source, target, src_dir, dst_dir)
+            if not copy:
+                os.unlink(source.name, dir_fd=src_dir)
+        finally:
+            os.close(dst_dir)
+    finally:
+        os.close(src_dir)
+
+
+def _copy_nofollow(source: Path, target: Path, src_dir: int, dst_dir: int) -> None:
+    """Copia contenido, permisos y fechas (como `shutil.copy2`) con `O_NOFOLLOW` en el origen y `O_EXCL` en el destino."""
+    with os.fdopen(os.open(source.name, os.O_RDONLY | _O_NOFOLLOW, dir_fd=src_dir), "rb") as src:
+        st = os.fstat(src.fileno())
+        if not stat.S_ISREG(st.st_mode):
+            raise OSError(errno.ELOOP, "El origen no es un fichero normal (no se sigue)", str(source))
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW
+        with os.fdopen(os.open(target.name, flags, 0o600, dir_fd=dst_dir), "wb") as dst:
+            try:
+                shutil.copyfileobj(src, dst)
+                dst.flush()  # antes de fijar las fechas: si no, la escritura al cerrar las cambia
+                os.chmod(dst.fileno(), stat.S_IMODE(st.st_mode))
+                os.utime(dst.fileno(), ns=(st.st_atime_ns, st.st_mtime_ns))
+            except BaseException:
+                os.unlink(target.name, dir_fd=dst_dir)
+                raise
 
 
 __all__ = ["DeduplicationManager"]
