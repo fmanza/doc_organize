@@ -39,6 +39,7 @@ classDiagram
 
 ```python
 class DocumentConverter:
+    def __init__(self, *, artifacts_path: Path | str | None = None, allow_model_downloads: bool = True) -> None
     async def __aenter__(self) -> 'DocumentConverter'
     async def __aexit__(self, *args) -> None
     
@@ -50,9 +51,24 @@ class DocumentConverter:
         use_gpu: bool = False,
         extract_images: bool = False,
         use_picture_description: bool = False,
-        scan_roots: Sequence[str] = ()
+        scan_roots: Sequence[str] = (),
+        *,
+        include_root_name: bool = False,
+        json_source_path: Literal["relative", "absolute"] = "relative",
     ) -> ConversionResult
+    
+    # Alias de doc_organize.projects.layout (desde 0.12.0, sin Docling)
+    @staticmethod
+    def resolve_output_paths(full_path, output_dir, scan_roots=(), *, include_root_name=False) -> tuple[Path, Path]
+    @staticmethod
+    def resolve_images_dir(markdown_path: Path) -> Path
 ```
+
+**Carpeta de modelos (0.12.0)**: `artifacts_path` se pasa a Docling (`PdfPipelineOptions.artifacts_path`), que carga
+los modelos solo de esa carpeta (descargados antes con `docling-tools models download`). Con
+`allow_model_downloads=False` hace falta una carpeta (la indicada o `DOCLING_ARTIFACTS_PATH`); antes del primer
+PDF/imagen se inicializa el pipeline y, si falta un modelo, se lanza `ModelsNotAvailableError` (se propaga: no es un
+fallo de un documento). Word, Excel, HTML… no usan modelos y no se comprueban.
 
 Context manager para conversión de documentos.
 
@@ -65,6 +81,8 @@ Context manager para conversión de documentos.
 | `extract_images` | `bool` | Extrae imágenes embebidas a `img/<stem>/` junto al `.md` y las referencia (`ImageRefMode.REFERENCED`) en vez del placeholder por defecto. Solo tiene efecto real en documentos PDF/imagen |
 | `use_picture_description` | `bool` | Genera descripción textual de cada imagen (modelo local `smolvlm_picture_description`) en el `.json`. Solo tiene efecto en documentos PDF/imagen (`StandardPdfPipeline`); se ignora sin error en el resto de formatos |
 | `scan_roots` | `Sequence[str]` | Carpetas raíz indicadas por el usuario al escanear. Si `source_doc.full_path` cuelga de alguna, `output_dir` replica esa jerarquía relativa a la raíz (no la ruta absoluta completa del disco de origen). Vacío por defecto: sin ninguna raíz conocida, la salida se aplana a `output_dir/<stem>` |
+| `include_root_name` | `bool` | Antepone el nombre de la raíz a la ruta de salida (`2024/x/a.md`), para que varias raíces no colisionen (0.12.0). Por defecto `False` |
+| `json_source_path` | `"relative" \| "absolute"` | `source_path` del `.json`: relativo a la raíz escaneada, en POSIX (por defecto desde 0.12.0), o la ruta absoluta (lo de antes) |
 
 | Retorno | Tipo | Descripción |
 |---|---|---|
@@ -79,7 +97,8 @@ Context manager para conversión de documentos.
 | `picture_description_applied` | `bool` | `True` si `use_picture_description=True` tuvo efecto real (solo PDF/imagen) |
 
 **Excepciones**:
-- No relanza excepciones; devuelve resultado con `success=False`
+- No relanza los fallos de un documento; devuelve resultado con `success=False`
+- `ModelsNotAvailableError` con `allow_model_downloads=False` si faltan modelos (0.12.0)
 
 ---
 

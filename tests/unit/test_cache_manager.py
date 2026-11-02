@@ -1,10 +1,15 @@
 """Tests unitarios de CacheManager (REQ-006)."""
 
+import sqlite3
+
+from pathlib import Path
+
 import pytest
 
 from doc_organize.cache import CacheManager
-from doc_organize.core.exceptions import CacheError
-from doc_organize.core.models import CacheEntry, DocumentMetadata, DocumentStatus
+from doc_organize.cache.cache_manager import _py_relpath
+from doc_organize.core.exceptions import CacheError, CacheNotFoundError
+from doc_organize.core.models import CacheEntry, ConversionStatus, DocumentMetadata, DocumentStatus
 
 
 def _entry(
@@ -260,3 +265,109 @@ async def test_search_with_like_special_characters_is_treated_literally(tmp_path
     # "%" y "_" deben tratarse como literales (escapados), no como comodines de LIKE:
     # de lo contrario "100%_done" tambien encontraria "100Xdone".
     assert total == 1
+
+
+# --- L-10e: solo lectura (G21) y filtros (G22) ---------------------------------------------------------------------------
+
+
+def _status_entry(file_path: str, conversion_status: ConversionStatus | None) -> CacheEntry:
+    return _entry(file_path, f"hash-{file_path}").model_copy(update={"conversion_status": conversion_status})
+
+
+@pytest.mark.asyncio
+async def test_read_only_missing_cache_raises_typed_error_and_creates_nothing(tmp_path) -> None:
+    db_path = tmp_path / "cache.db"
+
+    with pytest.raises(CacheNotFoundError):
+        async with CacheManager(db_path, read_only=True):
+            pass
+
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_read_only_reads_while_writer_is_open_and_rejects_writes(tmp_path) -> None:
+    db_path = tmp_path / "Conversión ñ" / "cache.db"  # ruta con espacios y no ASCII (URI)
+    db_path.parent.mkdir()
+    async with CacheManager(db_path) as writer:
+        await writer.save_entries([_entry("/repo/a.pdf", "hash-a")])
+        async with CacheManager(db_path, read_only=True) as reader:
+            assert set(await reader.load_cache()) == {"/repo/a.pdf"}
+            await writer.save_entries([_entry("/repo/b.pdf", "hash-b")])
+            assert await reader.count_entries() == 2  # ve lo que el escritor confirma
+            with pytest.raises(CacheError, match="solo lectura"):
+                await reader.save_entries([_entry("/repo/c.pdf", "hash-c")])
+            with pytest.raises(CacheError, match="solo lectura"):
+                await reader.clear()
+
+
+@pytest.mark.asyncio
+async def test_read_only_does_not_create_table_nor_migrate(tmp_path) -> None:
+    db_path = tmp_path / "cache.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE cache_entries (file_path TEXT PRIMARY KEY, sha256_hash TEXT, timestamp REAL, status TEXT, conversion_status TEXT)")
+
+    with pytest.raises(CacheError, match="error_message"):
+        async with CacheManager(db_path, read_only=True):
+            pass
+
+    with sqlite3.connect(db_path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(cache_entries)")}
+        journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    assert "error_message" not in columns
+    assert journal_mode == "delete"
+
+
+@pytest.mark.asyncio
+async def test_filters_by_path_relative_to_root_and_by_status(tmp_path) -> None:
+    root = tmp_path.resolve() / "mnt" / "datos"
+    other = tmp_path.resolve() / "mnt" / "otros"
+    db_path = tmp_path / "cache.db"
+    async with CacheManager(db_path) as cache:
+        await cache.save_entries(
+            [
+                _status_entry(str(root / "Informes" / "a.pdf"), ConversionStatus.SUCCESS),
+                _status_entry(str(root / "Informes" / "b.pdf"), ConversionStatus.ERROR),
+                _status_entry(str(root / "c.pdf"), ConversionStatus.ERROR),
+                _status_entry(str(other / "Informes" / "d.pdf"), ConversionStatus.ERROR),
+            ]
+        )
+
+        assert await cache.count_entries("mnt") == 4  # sin raíz: la ruta absoluta, como antes
+        assert await cache.count_entries("mnt", relative_to=root) == 0  # el prefijo del montaje no cuenta
+        assert await cache.count_entries(relative_to=root) == 3
+        assert await cache.count_entries("informes", relative_to=str(root)) == 2
+        assert await cache.count_entries(conversion_status=ConversionStatus.ERROR) == 3
+        assert await cache.count_entries("informes", relative_to=root, conversion_status="error") == 1
+        page = await cache.load_cache_page(limit=10, offset=0, relative_to=root, conversion_status=ConversionStatus.ERROR)
+        assert [Path(entry.file_path).name for entry in page] == ["b.pdf", "c.pdf"]
+        second = await cache.load_cache_page(limit=1, offset=1, search="pdf", relative_to=root)
+        assert [Path(entry.file_path).name for entry in second] == ["b.pdf"]
+
+
+@pytest.mark.asyncio
+async def test_filters_also_work_in_read_only_mode(tmp_path) -> None:
+    root = tmp_path.resolve() / "datos"
+    db_path = tmp_path / "cache.db"
+    async with CacheManager(db_path) as cache:
+        await cache.save_entries([_status_entry(str(root / "x" / "a.pdf"), ConversionStatus.ERROR)])
+
+    async with CacheManager(db_path, read_only=True) as cache:
+        assert await cache.count_entries("x", relative_to=root, conversion_status=ConversionStatus.ERROR) == 1
+
+
+def test_relative_path_sql_function_handles_both_separators() -> None:
+    assert _py_relpath(r"C:\datos\x\a.pdf", r"C:\datos") == r"x\a.pdf"
+    assert _py_relpath("/datos/x/a.pdf", "/datos") == "x/a.pdf"
+    assert _py_relpath("/datos2/a.pdf", "/datos") is None  # mismo prefijo, otra carpeta
+    assert _py_relpath("/a.pdf", "/") == "a.pdf"
+
+
+@pytest.mark.asyncio
+async def test_read_only_on_a_file_that_is_not_sqlite_raises_cache_error(tmp_path) -> None:
+    db_path = tmp_path / "cache.db"
+    db_path.write_bytes(b"esto no es una base de datos SQLite, solo texto" * 20)
+
+    with pytest.raises(CacheError, match="No se pudo leer"):
+        async with CacheManager(db_path, read_only=True):
+            pass

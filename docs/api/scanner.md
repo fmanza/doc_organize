@@ -93,7 +93,12 @@ class ScanResult:
     tree: DirectoryTree
     summary: dict
     scan_duration_seconds: float
+    unreadable_dirs: list[str]  # 0.12.0: carpetas que no se pudieron listar
 ```
+
+Una carpeta que no se puede listar (permiso denegado, montaje de red caído) no aborta el escaneo: se registra en
+`unreadable_dirs` y su contenido falta de `documents`. Quien compare contra una caché no debe dar esos documentos por
+eliminados; `ScanCommand` con `force` no borra sus salidas (0.12.0).
 
 ## Dependencias
 

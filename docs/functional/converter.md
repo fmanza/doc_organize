@@ -51,11 +51,14 @@ sequenceDiagram
 | **Dos fases** | Intento rápido primero; OCR solo si necesario |
 | **No bloquea** | Usa `asyncio.to_thread()` para I/O CPU-intensivo |
 | **Pool de convertidores** | Cachea por `(use_ocr, use_gpu, extract_images, use_picture_description)` para eficiencia |
-| **Errores capturados** | Nunca relanza; devuelve error en `ConversionResult` |
+| **Errores capturados** | Los fallos de un documento no se relanzan: van en `ConversionResult` (salvo `ModelsNotAvailableError`, que es de configuración) |
 | **Formatos ampliados** | `SUPPORTED_EXTENSIONS` cubre además html/htm/xhtml, csv, odt/ods/odp, adoc/asciidoc/asc, epub, eml, txt (siempre activos, sin flag); audio/vídeo son opt-in vía `include_audio_video` (requieren el extra `[av]` + `ffmpeg`) |
 | **OCR de imágenes sueltas** | `use_ocr` gobierna también `InputFormat.IMAGE` (png/jpg/tiff/bmp), no solo PDF |
 | **Extracción de imágenes** | `extract_images=True` guarda las imágenes embebidas en `img/<stem>/` junto al `.md` y las referencia, en vez del placeholder `<!-- image -->`. Namespaced por documento: dos documentos en la misma carpeta no comparten imágenes |
 | **Descripción de imágenes (RAG)** | `use_picture_description=True` añade `image_descriptions` a los chunks del `.json` (modelo local `smolvlm`), solo para documentos PDF/imagen |
+| **`source_path` del `.json`** | Desde 0.12.0, ruta del documento relativa a la carpeta escaneada (`Informes/a.pdf`), sin rutas del servidor; `json_source_path="absolute"` (o `ScanOptions(json_source_path="absolute")`) guarda la ruta completa, como antes |
+| **Varias carpetas escaneadas** | La salida replica la ruta relativa a su carpeta. Con varias carpetas, `ScanOptions(root_name_in_output=True)` antepone el nombre de cada una (`2024/x/a.md`) para que no colisionen; sin ella, el escaneo avisa si dos documentos irían al mismo `.md` |
+| **Sin red** | `ScanOptions(artifacts_path=..., allow_model_downloads=False)`: Docling lee los modelos de esa carpeta y, si falta alguno, el escaneo para con `ModelsNotAvailableError` en vez de descargarlo |
 
 ## Límites y Restricciones
 

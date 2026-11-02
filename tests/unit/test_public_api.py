@@ -53,3 +53,16 @@ def test_importing_export_does_not_load_docling_nor_openpyxl() -> None:
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True, timeout=120)
 
     assert result.stdout.strip() == "[]"
+
+
+def test_output_layout_and_read_only_cache_do_not_load_docling() -> None:
+    """La API de la web calcula rutas de salida y lee la caché sin Docling (L-10e, G20/G21)."""
+    code = (
+        "import sys, doc_organize.projects.layout, doc_organize.cache; "
+        "from doc_organize import resolve_output_paths, resolve_images_dir, relative_source_path, CacheManager, "
+        "CacheNotFoundError, ModelsNotAvailableError; "
+        "print(sorted(m for m in ('docling', 'torch') if m in sys.modules))"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True, timeout=120)
+
+    assert result.stdout.strip() == "[]"

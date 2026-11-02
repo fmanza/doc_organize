@@ -91,19 +91,23 @@ class DocumentScanner:
 
         Returns:
             ScanResult con la lista de documentos descubiertos (con hash
-            SHA-256 ya calculado), el conteo por extension y el arbol de
-            directorios.
+            SHA-256 ya calculado), el conteo por extension, el arbol de
+            directorios y las carpetas que no se pudieron listar
+            (`unreadable_dirs`, L-10d): su contenido falta de `documents`, asi
+            que quien compare contra una caché no debe darlo por eliminado.
         """
         start = time.monotonic()
         allowed_extensions = SUPPORTED_EXTENSIONS | AV_SUPPORTED_EXTENSIONS if include_audio_video else SUPPORTED_EXTENSIONS
         root_nodes: list[DirectoryTreeNode] = []
         discovered: list[_DiscoveredFile] = []
+        unreadable_dirs: list[str] = []
 
         for raw_path in paths:
             root = Path(raw_path).expanduser().resolve()
-            node, files = await asyncio.to_thread(self._walk_sync, root, allowed_extensions, exclude_dir)
+            node, files, unreadable = await asyncio.to_thread(self._walk_sync, root, allowed_extensions, exclude_dir)
             root_nodes.append(node)
             discovered.extend(files)
+            unreadable_dirs.extend(unreadable)
 
         documents = await self._hash_all(discovered)
 
@@ -121,24 +125,35 @@ class DocumentScanner:
 
         duration = time.monotonic() - start
         self.logger.info(f"Escaneo completado: {len(documents)} documentos en {duration:.2f}s")
-        return ScanResult(documents=documents, summary=summary, tree=tree, scan_duration_seconds=duration)
+        return ScanResult(documents=documents, summary=summary, tree=tree, scan_duration_seconds=duration, unreadable_dirs=unreadable_dirs)
 
     def _walk_sync(
         self, root: Path, allowed_extensions: frozenset[str], exclude_dir: Path | None = None
-    ) -> tuple[DirectoryTreeNode, list[_DiscoveredFile]]:
-        """Recorrido sincrono de un arbol de directorios (se ejecuta en un hilo)."""
+    ) -> tuple[DirectoryTreeNode, list[_DiscoveredFile], list[str]]:
+        """Recorrido sincrono de un arbol de directorios (se ejecuta en un hilo).
+
+        Devuelve tambien las carpetas que no se pudieron listar (incluida la raiz si
+        desaparecio o es inaccesible, p. ej. un montaje de red caido).
+        """
         files: list[_DiscoveredFile] = []
-        node = self._build_node(root, files, allowed_extensions, exclude_dir)
+        unreadable: list[str] = []
+        node = self._build_node(root, files, allowed_extensions, exclude_dir, unreadable)
         if node is None:
             # Solo ocurre si la propia raiz desaparece entre la validacion previa
             # (FolderValidator) y este recorrido -- caso extremo; se degrada a un
             # nodo vacio en vez de propagar `None` (AUDIT_CODE, sesion 2026-09-03).
             self.logger.warning(f"La carpeta raíz '{root}' desapareció antes de poder escanearla.")
             node = DirectoryTreeNode(name=root.name or str(root), type="dir", path=str(root), children=[])
-        return node, files
+            unreadable.append(str(root))
+        return node, files, unreadable
 
     def _build_node(
-        self, path: Path, files: list[_DiscoveredFile], allowed_extensions: frozenset[str], exclude_dir: Path | None = None
+        self,
+        path: Path,
+        files: list[_DiscoveredFile],
+        allowed_extensions: frozenset[str],
+        exclude_dir: Path | None = None,
+        unreadable: list[str] | None = None,
     ) -> DirectoryTreeNode | None:
         """Devuelve `None` si `path` desapareció entre `iterdir()` y esta llamada
         (TOCTOU: fichero borrado/movido por otra app mientras el escaneo está en
@@ -153,24 +168,33 @@ class DocumentScanner:
         if is_symlink:
             return DirectoryTreeNode(name=path.name, type="file", path=str(path))
         if path.is_dir():
-            return self._build_dir_node(path, files, allowed_extensions, exclude_dir)
+            return self._build_dir_node(path, files, allowed_extensions, exclude_dir, unreadable)
         return self._build_file_node(path, files, allowed_extensions)
 
     def _build_dir_node(
-        self, path: Path, files: list[_DiscoveredFile], allowed_extensions: frozenset[str], exclude_dir: Path | None
+        self,
+        path: Path,
+        files: list[_DiscoveredFile],
+        allowed_extensions: frozenset[str],
+        exclude_dir: Path | None,
+        unreadable: list[str] | None = None,
     ) -> DirectoryTreeNode:
         children: list[DirectoryTreeNode] = []
-        for entry in self._list_dir_entries(path, exclude_dir):
-            child = self._build_node(entry, files, allowed_extensions, exclude_dir)
+        for entry in self._list_dir_entries(path, exclude_dir, unreadable):
+            child = self._build_node(entry, files, allowed_extensions, exclude_dir, unreadable)
             if child is not None:
                 children.append(child)
         return DirectoryTreeNode(name=path.name or str(path), type="dir", path=str(path), children=children)
 
-    def _list_dir_entries(self, path: Path, exclude_dir: Path | None) -> list[Path]:
+    def _list_dir_entries(self, path: Path, exclude_dir: Path | None, unreadable: list[str] | None = None) -> list[Path]:
         try:
             entries = sorted(path.iterdir(), key=lambda p: p.name)
         except OSError as exc:
+            # Se sigue con el resto del arbol (una subcarpeta sin permisos no debe abortar el escaneo), pero se anota:
+            # sus documentos no aparecen y no deben tratarse como eliminados (L-10d, G19).
             self.logger.warning(f"No se pudo listar '{path}': {exc}")
+            if unreadable is not None:
+                unreadable.append(str(path))
             return []
         return [entry for entry in entries if entry.name not in IGNORED_NAMES and entry != exclude_dir]
 

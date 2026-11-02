@@ -36,8 +36,19 @@ class ConversionError(DocOrganizeError):
     """Error durante la conversion de un documento a Markdown/JSON."""
 
 
+class ModelsNotAvailableError(ConversionError):
+    """Faltan modelos de Docling y las descargas están prohibidas (`allow_model_downloads=False`, L-10b).
+
+    No es un fallo de un documento: se propaga y para la conversión.
+    """
+
+
 class CacheError(DocOrganizeError):
     """Error de almacenamiento o transaccion en el cache de documentos."""
+
+
+class CacheNotFoundError(CacheError):
+    """Se abrió una caché en solo lectura (`CacheManager(read_only=True)`) y el fichero no existe (L-10e)."""
 
 
 class ProjectError(DocOrganizeError):
@@ -248,6 +259,7 @@ __all__ = [
     "OperationCancelledError",
     "AuthError",
     "CacheError",
+    "CacheNotFoundError",
     "ContextError",
     "ContextNotFoundError",
     "ConversionError",
@@ -261,6 +273,7 @@ __all__ = [
     "InstanceAdminRequiredError",
     "InvalidPathError",
     "MissingDependencyError",
+    "ModelsNotAvailableError",
     "ProjectAlreadyExistsError",
     "ProjectError",
     "ProjectNameError",

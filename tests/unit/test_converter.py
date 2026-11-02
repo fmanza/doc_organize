@@ -501,3 +501,108 @@ async def test_using_outside_context_manager_raises(tmp_path) -> None:
     )
     with pytest.raises(ConversionError):
         await converter.convert_document(doc, tmp_path)
+
+
+# --- L-10b: carpeta de modelos y descargas prohibidas (G17) --------------------------------------------------------------
+
+
+def _html_doc(tmp_path: Path, relative: str = "page.html") -> DocumentMetadata:
+    html_path = tmp_path / "origen" / relative
+    html_path.parent.mkdir(parents=True, exist_ok=True)
+    html_path.write_text("<html><body><h1>Hola</h1><p>Texto</p></body></html>", encoding="utf-8")
+    stat = html_path.stat()
+    return DocumentMetadata(
+        full_path=str(html_path.resolve()),
+        display_name=html_path.name,
+        extension="html",
+        size_bytes=stat.st_size,
+        modified_time=stat.st_mtime,
+        sha256_hash="irrelevant",
+    )
+
+
+@pytest.mark.asyncio
+async def test_artifacts_path_reaches_docling_pipeline_options(tmp_path) -> None:
+    from docling.datamodel.base_models import InputFormat
+
+    async with DocumentConverter(artifacts_path=tmp_path) as converter:
+        docling = converter._get_docling(use_ocr=False)
+
+    assert docling.format_to_options[InputFormat.PDF].pipeline_options.artifacts_path == tmp_path
+
+
+@pytest.mark.asyncio
+async def test_forbidden_downloads_without_models_folder_raise_typed_error(monkeypatch, tmp_path) -> None:
+    import doc_organize.converter.converter as converter_module
+
+    from doc_organize import ModelsNotAvailableError
+
+    monkeypatch.setattr(converter_module.docling_settings, "artifacts_path", None)
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+    async with DocumentConverter(allow_model_downloads=False) as converter:
+        with pytest.raises(ModelsNotAvailableError, match="artifacts_path"):
+            await converter.convert_document(_metadata_for(pdf), tmp_path / "Conversión")
+        # Los formatos sin modelos (HTML, Word…) se siguen convirtiendo.
+        result = await converter.convert_document(_html_doc(tmp_path), tmp_path / "Conversión")
+
+    assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_forbidden_downloads_with_incomplete_models_folder_raise_typed_error(monkeypatch, tmp_path) -> None:
+    from docling.document_converter import DocumentConverter as DoclingConverter
+
+    from doc_organize import ModelsNotAvailableError
+
+    def _missing_model(self, _format) -> None:
+        raise FileNotFoundError("layout model not found")
+
+    monkeypatch.setattr(DoclingConverter, "initialize_pipeline", _missing_model)
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+    async with DocumentConverter(artifacts_path=tmp_path, allow_model_downloads=False) as converter:
+        with pytest.raises(ModelsNotAvailableError, match="layout model not found"):
+            await converter.convert_document(_metadata_for(pdf), tmp_path / "Conversión")
+
+
+# --- L-10e: `source_path` del JSON (G23) y alias de rutas (G20) -------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_json_source_path_is_relative_to_scan_root_by_default(tmp_path) -> None:
+    doc = _html_doc(tmp_path, "Informes/page.html")
+    scan_root = str((tmp_path / "origen").resolve())
+
+    async with DocumentConverter() as converter:
+        result = await converter.convert_document(doc, tmp_path / "Conversión", scan_roots=(scan_root,))
+        absolute = await converter.convert_document(doc, tmp_path / "Abs", scan_roots=(scan_root,), json_source_path="absolute")
+
+    assert json.loads(Path(result.json_path).read_text(encoding="utf-8"))["source_path"] == "Informes/page.html"
+    assert json.loads(Path(absolute.json_path).read_text(encoding="utf-8"))["source_path"] == doc.full_path
+
+
+@pytest.mark.asyncio
+async def test_include_root_name_prefixes_output_with_root_folder(tmp_path) -> None:
+    doc = _html_doc(tmp_path, "x/page.html")
+    scan_root = str((tmp_path / "origen").resolve())
+
+    async with DocumentConverter() as converter:
+        result = await converter.convert_document(doc, tmp_path / "Conversión", scan_roots=(scan_root,), include_root_name=True)
+
+    assert Path(result.markdown_path) == tmp_path / "Conversión" / "origen" / "x" / "page.md"
+
+
+def test_resolve_aliases_match_layout_functions(tmp_path) -> None:
+    from doc_organize.projects.layout import resolve_images_dir, resolve_output_paths
+
+    source = str(tmp_path / "in" / "x" / "a.pdf")
+    roots = (str(tmp_path / "in"),)
+
+    assert DocumentConverter.resolve_output_paths(source, tmp_path, roots) == resolve_output_paths(source, tmp_path, roots)
+    assert DocumentConverter.resolve_output_paths(source, tmp_path, roots, include_root_name=True) == resolve_output_paths(
+        source, tmp_path, roots, include_root_name=True
+    )
+    assert DocumentConverter.resolve_images_dir(tmp_path / "a.md") == resolve_images_dir(tmp_path / "a.md")

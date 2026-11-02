@@ -223,6 +223,27 @@ actualizado, revierte el movimiento antes de propagar el error.
 
 ---
 
+## Rutas de salida de un documento (`doc_organize.projects.layout`, 0.12.0)
+
+Funciones sin Docling: un consumidor que no convierte (p. ej. la API de doc_organize_web) calcula las mismas rutas
+que `DocumentConverter`, que las conserva como alias (`DocumentConverter.resolve_output_paths`/`resolve_images_dir`).
+
+```python
+def resolve_output_paths(
+    full_path: str, output_dir: Path, scan_roots: Sequence[str] = (), *, include_root_name: bool = False
+) -> tuple[Path, Path]          # (.md, .json)
+def resolve_images_dir(markdown_path: Path) -> Path   # img/<stem>/ junto al .md
+def relative_source_path(full_path: str, scan_roots: Sequence[str] = ()) -> str   # POSIX, nunca absoluta
+```
+
+- La salida replica la ruta relativa a la raíz más profunda de `scan_roots` de la que cuelga el documento; si no cuelga
+  de ninguna, `output_dir/<stem>`.
+- `include_root_name=True` antepone el nombre de esa raíz: con varias raíces, `2024/x/a.pdf` y `2025/x/a.pdf` van a
+  `2024/x/a.md` y `2025/x/a.md` en lugar de compartir `x/a.md`. Dos raíces con el mismo nombre (`a/2024`, `b/2024`)
+  siguen colisionando. En `ScanCommand` es `ScanOptions.root_name_in_output`; cambiarla en un proyecto ya convertido
+  mueve las salidas (usa `force`).
+- `relative_source_path` es el `source_path` del JSON de cada documento desde 0.12.0.
+
 ## ProjectHistoryCleaner
 
 ```python

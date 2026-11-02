@@ -10,8 +10,9 @@ classDiagram
         -logger: Logger
         -db_path: Path
         +load_cache() dict[str, CacheEntry]
-        +count_entries(search: str) int
-        +load_cache_page(limit: int, offset: int, search: str) list[CacheEntry]
+        +read_only: bool
+        +count_entries(search, relative_to, conversion_status) int
+        +load_cache_page(limit, offset, search, relative_to, conversion_status) list[CacheEntry]
         +get_changes(cache: dict, current_docs: list) tuple
         +save_entries(entries: list[CacheEntry]) void
     }
@@ -33,18 +34,28 @@ classDiagram
 
 ```python
 class CacheManager:
+    def __init__(self, db_path: str | Path = "cache.db", *, read_only: bool = False) -> None
     async def __aenter__(self) -> 'CacheManager'
     async def __aexit__(self, *args) -> None
     
     async def load_cache(self) -> dict[str, CacheEntry]
     
-    async def count_entries(self, search: str | None = None) -> int
+    async def count_entries(
+        self,
+        search: str | None = None,
+        *,
+        relative_to: str | Path | None = None,
+        conversion_status: ConversionStatus | str | None = None,
+    ) -> int
     
     async def load_cache_page(
         self,
         limit: int,
         offset: int,
-        search: str | None = None
+        search: str | None = None,
+        *,
+        relative_to: str | Path | None = None,
+        conversion_status: ConversionStatus | str | None = None,
     ) -> list[CacheEntry]
     
     def get_changes(
@@ -60,6 +71,22 @@ class CacheManager:
 ```
 
 Context manager para gestión de caché SQLite (WAL mode).
+
+#### Solo lectura (`read_only=True`, desde 0.12.0)
+
+Para leer la caché que escribe otro proceso (p. ej. la API de doc_organize_web mientras el worker escanea):
+
+- Abre con la URI `file:...?mode=ro`: no ejecuta `PRAGMA journal_mode=WAL`, no crea la tabla ni migra columnas.
+- `CacheNotFoundError` (subclase de `CacheError`) si el fichero no existe; no se crea.
+- `CacheError` si la caché no tiene el esquema actual (ábrela una vez en escritura para migrarla) o si se llama a
+  `save_entries`/`clear`.
+
+```python
+from doc_organize import CacheManager, CacheNotFoundError, ConversionStatus
+
+async with CacheManager(layout.cache_db, read_only=True) as cache:
+    total = await cache.count_entries("informe", relative_to="/mnt/datos/2024", conversion_status=ConversionStatus.ERROR)
+```
 
 #### load_cache
 
@@ -82,6 +109,8 @@ Cuenta entradas de `cache_entries`, opcionalmente filtradas por `search`.
 | Parámetro | Tipo | Descripción |
 |---|---|---|
 | `search` | `str \| None` | Subcadena a buscar en `file_path` (nombre o carpeta). `None` cuenta todas |
+| `relative_to` | `str \| Path \| None` | Raíz escaneada (0.12.0): solo cuenta las entradas que cuelgan de ella y `search` se aplica a la ruta relativa a esa raíz (buscar `mnt` no encuentra el prefijo del montaje) |
+| `conversion_status` | `ConversionStatus \| str \| None` | Solo las entradas con ese estado (p. ej. `"error"`) (0.12.0) |
 
 | Retorno | Tipo | Descripción |
 |---|---|---|
@@ -103,6 +132,8 @@ Lee una página de `cache_entries`, ordenada por `file_path` para paginación es
 | `limit` | `int` | Número máximo de entradas a devolver |
 | `offset` | `int` | Entradas a saltar desde el principio del orden |
 | `search` | `str \| None` | Subcadena a buscar en `file_path`. `None` no filtra |
+| `relative_to` | `str \| Path \| None` | Igual que en `count_entries` (0.12.0) |
+| `conversion_status` | `ConversionStatus \| str \| None` | Igual que en `count_entries` (0.12.0) |
 
 | Retorno | Tipo | Descripción |
 |---|---|---|
