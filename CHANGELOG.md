@@ -6,6 +6,144 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-02
+
+Contexto y taxonomías para la Fase 7 de doc_organize_web (tareas L-8 y L-8a…L-8c de su plan; cierra los huecos G10 y
+G27–G29). Aditivo y compatible salvo lo indicado en «Changed», «Deprecated» y «Security».
+
+> **Nota de versión**: el plan de doc_organize_web reservaba la 0.13.0 para L-10 (deprecación de la web integrada);
+> esa tarea pasa a la siguiente MINOR.
+
+### Added
+
+- **L-8 (G10)**: `SiteGenerator` (sitio de contexto con Zensical) y `SiteResult`. `generate` escribe `zensical.toml`
+  en la raíz del proyecto y `index.md` en la carpeta reorganizada y, con `build=True` (por defecto), ejecuta
+  `zensical build` (el del mismo entorno o el del `PATH`) hacia `site_dir`, con `timeout` opcional. `build_site`
+  construye sobre una configuración ya escrita y `delete_site` borra la configuración (también un `mkdocs.yml`
+  anterior), el sitio y la caché de Zensical (`.cache/`).
+- **L-8 (G10)**: `SiteBuildError` (subclase de `DocOrganizeError`) si falta `zensical`, el build termina con error (con
+  su salida) o se pasa de tiempo: nunca un sitio sin construir en silencio.
+- **L-8 (G10)**: `Context.site_generated` y `Context.site_built`; un `context.json` antiguo (`mkdocs_generated`,
+  `mkdocs_site_built`) se sigue leyendo.
+- **L-8a (G27)**: `Context.reorganize_failed_documents` y `Reorganizer.reorganize(on_document_failed=)`
+  (`index, total, source_path, error`); `ContextBuildEventType.DOCUMENT_FAILED` (`"document_failed"`) para quien
+  retransmita el progreso. `Reorganizer.check_output_root`.
+- **L-8a (G27)**: `copy_file_nofollow`, `copy_tree_nofollow` y `ensure_tree_has_no_symlinks` en
+  `doc_organize.utils.path_utils`, con el mismo criterio que la deduplicación de 0.12.1 (cuyos helpers comparten).
+- **L-8b (G28)**: rutas del contexto en `ProjectLayout`: `context_file`, `domains_dir`, `taxonomy_manifest_file`,
+  `site_config_file`, `site_cache_dir`, `legacy_mkdocs_config_file` y `reorganized_dir(output_folder_name)` (validado).
+  `RESERVED_OUTPUT_FOLDER_NAMES` (nombres que no puede usar `output_folder_name`: `Conversión`, `duplicados`,
+  `errores_escaneo`, `historial_escaneo`, `domains`, `site`, `.cache` y los ficheros de la raíz) y
+  `validate_output_folder_name`, que compara sin mayúsculas, sin puntos ni espacios finales y en NFC. Constantes
+  nuevas en `core.constants` (`CONTEXT_FILE_NAME`, `DOMAINS_FOLDER_NAME`, `TAXONOMY_MANIFEST_FILE_NAME`,
+  `SITE_FOLDER_NAME`, `SITE_CONFIG_FILE_NAME`, `SITE_CACHE_FOLDER_NAME`, `LEGACY_MKDOCS_CONFIG_NAME`).
+- **L-8c (G29)**: plantillas de taxonomía como texto en `doc_organize.context.taxonomy_templates`:
+  `parse_taxonomy_template` (mismos errores que al cargar un fichero), `render_taxonomy_template` (ida y vuelta
+  estable: `parse(render(m)) == m`, también con saltos de línea o `---` en los textos), `list_builtin_templates` y
+  `load_builtin_template`, sin carpeta de usuario ni `Path.home()`. `TaxonomyTemplateRegistry` las usa por dentro.
+- API pública: `SiteGenerator`, `SiteResult`, `SiteBuildError`, `parse_taxonomy_template`, `render_taxonomy_template`,
+  `list_builtin_templates`, `load_builtin_template`, `RESERVED_OUTPUT_FOLDER_NAMES` y `validate_output_folder_name`.
+
+### Changed
+
+- **L-8**: el extra `site` instala `zensical>=0.0.71` en lugar de `mkdocs`. La configuración generada no añade
+  JavaScript propio, `extra_javascript`, plugins ni extensiones Markdown; fija `theme.language = "es"` y
+  `theme.font = false` (sin Google Fonts). Un contexto con `mkdocs.yml` pasa a Zensical al reconstruirlo (se borra
+  `mkdocs.yml`).
+- **L-8**: `MkDocsGenerator` es ahora la misma clase que `SiteGenerator` (ver «Deprecated»): su `generate` devuelve
+  `SiteResult` en lugar de `(ruta, site_built)` y lanza `SiteBuildError` en lugar de devolver `site_built=False`.
+- **L-8a**: `Reorganizer` captura los `OSError` de cada documento (antes uno abortaba toda la reorganización): ese
+  documento falla, se borra lo copiado de él y el resto sigue.
+- **L-8b**: la web integrada usa `ProjectLayout`, `RESERVED_OUTPUT_FOLDER_NAMES` y `validate_output_folder_name` en
+  lugar de sus copias; además de lo que ya rechazaba, rechaza `.cache` y los nombres de ficheros de la raíz. Construye
+  el sitio con `SiteGenerator` (si no puede, `site_built=False` y aviso en el log, como antes), avisa de los documentos
+  que no se pudieron copiar y su respuesta JSON añade `site_generated`, `site_built` y `reorganize_failed_count`
+  (conserva `mkdocs_generated`/`mkdocs_site_built`).
+- **L-8c**: `TaxonomyTemplateRegistry(templates_dir=None)` calcula `~/.doc_organize/taxonomy_templates` al crearse,
+  no al importar el módulo. Al guardar, un `title`/`description` vacío (`""`) se escribe en lugar de omitirse, para
+  que se relea igual.
+
+### Deprecated
+
+- `MkDocsGenerator` (alias de `SiteGenerator`, `DeprecationWarning` al crearlo) y `Context.mkdocs_generated` /
+  `Context.mkdocs_site_built` (propiedades que leen y escriben `site_generated` / `site_built`). Se retiran en 1.0.0.
+
+### Security
+
+- **L-8a (G27)**: `Reorganizer` ya no sigue enlaces simbólicos (ni uniones de Windows). Antes copiaba con
+  `shutil.copy2`/`copytree`, que siguen los enlaces: un original, `.md`, `.json` o carpeta de imágenes cambiado por un
+  enlace copiaba a la carpeta reorganizada (y al sitio) un fichero de fuera. Ahora todo se comprueba con `lstat` antes
+  de copiar y, en POSIX, se copia con descriptores abiertos tramo a tramo con `O_NOFOLLOW`, así que un enlace puesto
+  entre la comprobación y la copia tampoco se sigue. La carpeta reorganizada no puede ser ni pasar por un enlace
+  (`InvalidPathError` antes de tocar nada); un enlace en el lugar de la carpeta de un dominio se quita sin tocar su
+  destino. Consecuencia, como en 0.12.1: una ruta que pase por un enlace del sistema (p. ej. `/tmp` en macOS) falla.
+- **L-8**: Zensical inserta sin escapar las etiquetas del `nav` y `site_name`, y el tema pone el título de cada página
+  en `<title>` deshaciendo las entidades: un título de documento como `</title><script>…</script>` se ejecutaba (con
+  MkDocs, igual en el `nav`). `SiteGenerator` escribe esos textos sin `<`/`>` (pasan a `＜`/`＞`) y con `&` y comillas
+  escapados. El HTML incrustado en el propio Markdown sigue llegando tal cual al sitio (comportamiento por defecto de
+  Zensical, como con MkDocs): quien sirva el sitio debe aislarlo (otro origen o `Content-Security-Policy`); ver
+  «Seguridad del sitio» en `docs/functional/context.md`.
+- **L-8c**: `TaxonomyTemplateRegistry.delete_template` valida el nombre como el resto de métodos: antes
+  `delete_template("../x")` borraba `<templates_dir>/../x.md`.
+
+### Firmas finales (para doc_organize_web)
+
+```python
+# doc_organize (y doc_organize.context)
+@dataclass(frozen=True)
+class SiteResult:
+    config_path: Path
+    index_path: Path
+    site_dir: Path
+    site_built: bool
+
+class SiteGenerator:
+    async def generate(self, project: Project, context: Context, *, build: bool = True,
+                       site_dir: Path | None = None, timeout: float | None = None) -> SiteResult
+    async def build_site(self, project: Project, *, timeout: float | None = None) -> None
+    async def delete_site(self, project: Project, *, site_dir: Path | None = None) -> None
+
+class SiteBuildError(DocOrganizeError): ...
+class MkDocsGenerator(SiteGenerator): ...   # obsoleto, DeprecationWarning; se retira en 1.0.0
+
+class Reorganizer:
+    async def reorganize(self, project: Project, context: Context,
+                         on_document_copied: Callable[[int, int, str], Awaitable[None]] | None = None, *,
+                         on_document_failed: Callable[[int, int, str, str], Awaitable[None]] | None = None) -> Path
+    @staticmethod
+    def check_output_root(output_root: Path) -> None          # InvalidPathError si es o pasa por un enlace
+
+class Context(BaseModel):
+    reorganize_failed_documents: list[str]
+    site_generated: bool                                       # acepta también "mkdocs_generated"
+    site_built: bool                                           # acepta también "mkdocs_site_built"
+    mkdocs_generated: bool    # propiedad obsoleta
+    mkdocs_site_built: bool   # propiedad obsoleta
+
+# doc_organize.projects.layout (y doc_organize.*)
+RESERVED_OUTPUT_FOLDER_NAMES: frozenset[str]
+def validate_output_folder_name(name: str) -> str               # InvalidPathError
+class ProjectLayout:
+    context_file: Path; domains_dir: Path; taxonomy_manifest_file: Path        # propiedades
+    site_dir: Path; site_config_file: Path; site_cache_dir: Path; legacy_mkdocs_config_file: Path
+    def reorganized_dir(self, output_folder_name: str) -> Path  # InvalidPathError
+
+# doc_organize.context.taxonomy_templates (y doc_organize.context, doc_organize)
+def parse_taxonomy_template(text: str, *, source: str = "<texto>") -> TaxonomyManifest   # TaxonomyTemplateError
+def render_taxonomy_template(manifest: TaxonomyManifest, body: str = "") -> str
+def list_builtin_templates() -> list[TaxonomyTemplateSummary]
+def load_builtin_template(name: str) -> TaxonomyManifest                                  # TaxonomyTemplateError
+
+# doc_organize.utils.path_utils
+def copy_file_nofollow(source: str | Path, target: str | Path, *, overwrite: bool = False) -> None
+def copy_tree_nofollow(source_dir: str | Path, target_dir: str | Path) -> None
+def ensure_tree_has_no_symlinks(path: str | Path) -> Path
+
+# doc_organize.core.models
+class ContextBuildEventType(str, Enum):
+    DOCUMENT_FAILED = "document_failed"                        # data: index, total, path, error
+```
+
 ## [0.12.1] - 2026-11-02
 
 Ruta relativa en `duplicados/` y movimiento sin seguir enlaces simbólicos para doc_organize_web (tarea L-11a de su

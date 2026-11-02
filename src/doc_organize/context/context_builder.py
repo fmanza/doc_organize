@@ -20,7 +20,7 @@ _UNCLASSIFIED_SLUG = "sin-clasificar"
 cuando hay un manifiesto de taxonomía activo — el documento se reorganiza igual bajo este
 slug en el eje afectado, en vez de excluirse por completo (`unclassified_documents` sigue
 reservado a documentos con artefactos incompletos, ver `_classify_with_manifest`). Al
-tratarse como un slug de dominio/tipo más, `Reorganizer`/`MkDocsGenerator` no necesitan
+tratarse como un slug de dominio/tipo más, `Reorganizer`/`SiteGenerator` no necesitan
 lógica especial: `"sin-clasificar".replace("-", " ").title()` ya da un nombre legible
 ("Sin Clasificar") igual que cualquier otro slug."""
 
@@ -41,8 +41,8 @@ class ContextBuilder:
       en el placeholder `sin-clasificar` — un eje que la Sub-fase A ya clasificó con confianza
       nunca se sobreescribe.
 
-    La copia física a `<output_folder_name>/` y la generación del sitio MkDocs son
-    responsabilidad de `Reorganizer`/`MkDocsGenerator` — este builder no toca
+    La copia física a `<output_folder_name>/` y la generación del sitio son
+    responsabilidad de `Reorganizer`/`SiteGenerator` — este builder no toca
     ficheros fuera de `context.json`/`domains/`.
 
     Attributes:
@@ -250,7 +250,7 @@ class ContextBuilder:
 
         # Mismo saneado que `domain_keywords`/`material_keywords`, para el mismo motivo:
         # `TaxonomyCatalogEntry.name` (nombre legible declarado en el manifiesto) se leía
-        # pero nunca se propagaba a `DomainDocument.material_type_name` — `MkDocsGenerator`
+        # pero nunca se propagaba a `DomainDocument.material_type_name` — `SiteGenerator`
         # acababa derivando la etiqueta del nav del slug (`"normativa" -> "Normativa"`) en vez
         # de usar el nombre declarado (AUDIT_CODE, mismo hallazgo que `Domain.name`/`.description`
         # en `build()`).

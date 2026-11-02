@@ -207,3 +207,85 @@ def test_relative_source_path_never_returns_server_paths(tmp_path: Path) -> None
 
 def test_resolve_images_dir_is_next_to_markdown(tmp_path: Path) -> None:
     assert doc_organize.resolve_images_dir(tmp_path / "x" / "a.md") == tmp_path / "x" / "img" / "a"
+
+
+# --- Contexto y sitio (L-8b, G28) ---------------------------------------------------------------------------------------
+
+
+def test_layout_exposes_context_and_site_paths(tmp_path: Path) -> None:
+    layout = ProjectLayout(tmp_path, state_root=tmp_path / "estado")
+
+    assert layout.context_file == tmp_path / "context.json"
+    assert layout.domains_dir == tmp_path / "domains"
+    assert layout.site_dir == tmp_path / "site"
+    assert layout.site_config_file == tmp_path / "zensical.toml"
+    assert layout.taxonomy_manifest_file == tmp_path / "taxonomy_manifest.md"
+    assert layout.reorganized_dir("organizado") == tmp_path / "organizado"
+    assert layout.reorganized_dir("  Mi carpeta ") == tmp_path / "Mi carpeta"
+
+
+def test_layout_context_paths_match_the_modules_that_write_them() -> None:
+    from doc_organize.context import context_registry, taxonomy_manifest
+
+    layout = ProjectLayout(Path("/p"))
+
+    assert layout.context_file.name == context_registry._CONTEXT_FILE_NAME
+    assert layout.domains_dir.name == context_registry._DOMAINS_DIR_NAME
+    assert layout.taxonomy_manifest_file.name == taxonomy_manifest.MANIFEST_FILE_NAME
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Conversión",
+        "CONVERSIÓN",
+        "Conversión",
+        "duplicados",
+        "errores_escaneo",
+        "historial_escaneo",
+        "domains",
+        "Site",
+        "site.",
+        "site ",
+        ".cache",
+        "context.json",
+        "zensical.toml",
+        "mkdocs.yml",
+        "taxonomy_manifest.md",
+        "cache.db",
+        "folders.json",
+        "scanned_folders.json",
+    ],
+)
+def test_reserved_output_folder_names_are_rejected(name: str) -> None:
+    with pytest.raises(doc_organize.InvalidPathError):
+        ProjectLayout(Path("/p")).reorganized_dir(name)
+
+
+@pytest.mark.parametrize("name", ["", "  ", ".", "..", "...", "a/b", "a\b", "../fuera", "/abs", "C:", "a:b"])
+def test_output_folder_name_must_be_a_simple_name(name: str) -> None:
+    with pytest.raises(doc_organize.InvalidPathError):
+        doc_organize.validate_output_folder_name(name)
+
+
+def test_reserved_names_cover_every_root_folder_of_the_layout(tmp_path: Path) -> None:
+    layout = ProjectLayout(tmp_path)
+    reserved = {name.casefold() for name in doc_organize.RESERVED_OUTPUT_FOLDER_NAMES}
+    paths = [
+        layout.conversion_dir,
+        layout.duplicates_dir,
+        layout.site_dir,
+        layout.site_cache_dir,
+        layout.context_file,
+        layout.domains_dir,
+        layout.site_config_file,
+        layout.legacy_mkdocs_config_file,
+        layout.taxonomy_manifest_file,
+        layout.cache_db,
+        layout.folders_json,
+        layout.scanned_folders_json,
+        layout.scan_errors_log.parent,
+        layout.scan_history_log.parent,
+    ]
+
+    assert {path.relative_to(tmp_path).parts[0].casefold() for path in paths} <= reserved

@@ -11,13 +11,14 @@ import yaml
 
 from pydantic import ValidationError
 
+from doc_organize.core.constants import TAXONOMY_MANIFEST_FILE_NAME
 from doc_organize.core.exceptions import TaxonomyManifestError
 from doc_organize.core.models import Project, TaxonomyManifest
 from doc_organize.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-MANIFEST_FILE_NAME = "taxonomy_manifest.md"
+MANIFEST_FILE_NAME = TAXONOMY_MANIFEST_FILE_NAME
 _FRONT_MATTER_DELIMITER = "---"
 
 

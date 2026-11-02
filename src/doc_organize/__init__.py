@@ -35,13 +35,23 @@ _EXPORTS: dict[str, str] = {
     "ContextRegistry": "doc_organize.context.context_registry",
     "Reorganizer": "doc_organize.context.reorganizer",
     "MkDocsGenerator": "doc_organize.context.mkdocs_generator",
+    "SiteGenerator": "doc_organize.context.site_generator",
+    "SiteResult": "doc_organize.context.site_generator",
     "TaxonomyTemplateRegistry": "doc_organize.context.taxonomy_template_registry",
+    # Plantillas de taxonomía como texto, sin carpeta de usuario (L-8c)
+    "parse_taxonomy_template": "doc_organize.context.taxonomy_templates",
+    "render_taxonomy_template": "doc_organize.context.taxonomy_templates",
+    "list_builtin_templates": "doc_organize.context.taxonomy_templates",
+    "load_builtin_template": "doc_organize.context.taxonomy_templates",
     "ProjectRegistry": "doc_organize.projects.project_registry",
     "ProjectLayout": "doc_organize.projects.layout",
     # Rutas de salida de un documento (sin Docling, G20/G23)
     "resolve_output_paths": "doc_organize.projects.layout",
     "resolve_images_dir": "doc_organize.projects.layout",
     "relative_source_path": "doc_organize.projects.layout",
+    # Carpeta reorganizada del contexto (L-8b)
+    "RESERVED_OUTPUT_FOLDER_NAMES": "doc_organize.projects.layout",
+    "validate_output_folder_name": "doc_organize.projects.layout",
     "ProjectHistoryCleaner": "doc_organize.projects.project_history_cleaner",
     "ScannedFoldersStore": "doc_organize.projects.scanned_folders_store",
     "FolderValidator": "doc_organize.validators.folder_validator",
@@ -100,6 +110,7 @@ _EXPORTS: dict[str, str] = {
     "ProjectError": "doc_organize.core.exceptions",
     "ProjectNotFoundError": "doc_organize.core.exceptions",
     "ContextError": "doc_organize.core.exceptions",
+    "SiteBuildError": "doc_organize.core.exceptions",
 }
 
 __all__ = ["__version__", *sorted(_EXPORTS)]
@@ -125,7 +136,14 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
     from doc_organize.context.context_registry import ContextRegistry
     from doc_organize.context.mkdocs_generator import MkDocsGenerator
     from doc_organize.context.reorganizer import Reorganizer
+    from doc_organize.context.site_generator import SiteGenerator, SiteResult
     from doc_organize.context.taxonomy_template_registry import TaxonomyTemplateRegistry
+    from doc_organize.context.taxonomy_templates import (
+        list_builtin_templates,
+        load_builtin_template,
+        parse_taxonomy_template,
+        render_taxonomy_template,
+    )
     from doc_organize.converter.converter import DocumentConverter
     from doc_organize.converter.ocr_scheduler import OCRScheduler
     from doc_organize.core.exceptions import (
@@ -140,6 +158,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         OperationCancelledError,
         ProjectError,
         ProjectNotFoundError,
+        SiteBuildError,
     )
     from doc_organize.core.models import (
         AvStatus,
@@ -177,7 +196,14 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
     from doc_organize.export.sources import load_cache_entries, load_scan_error_history
     from doc_organize.export.xlsx_export import write_cache_xlsx, write_scan_errors_xlsx
     from doc_organize.export.zip_export import ExportStats, preview_project_zip, write_project_zip
-    from doc_organize.projects.layout import ProjectLayout, relative_source_path, resolve_images_dir, resolve_output_paths
+    from doc_organize.projects.layout import (
+        RESERVED_OUTPUT_FOLDER_NAMES,
+        ProjectLayout,
+        relative_source_path,
+        resolve_images_dir,
+        resolve_output_paths,
+        validate_output_folder_name,
+    )
     from doc_organize.projects.project_history_cleaner import ProjectHistoryCleaner
     from doc_organize.projects.project_registry import ProjectRegistry
     from doc_organize.projects.scanned_folders_store import ScannedFoldersStore

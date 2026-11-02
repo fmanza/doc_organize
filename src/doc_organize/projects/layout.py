@@ -8,35 +8,106 @@ Un proyecto tiene dos raíces:
   informes de deduplicación). SQLite no es fiable sobre SMB/NFS, así que un consumidor puede ponerlo en un disco
   local. Por defecto es la misma ``output_root``: las rutas son las de siempre.
 
-Es la única fuente de estas rutas fuera de la web integrada (congelada, se retira en 1.0.0).
+Es la única fuente de estas rutas, también para la web integrada (congelada, se retira en 1.0.0). Incluye las del
+contexto de organización documental y del sitio (L-8b, G28) y los nombres que no puede usar la carpeta reorganizada
+(``RESERVED_OUTPUT_FOLDER_NAMES``).
 
 También define dónde va la salida de cada documento (``resolve_output_paths``, ``resolve_images_dir``) y su ruta
 relativa a la carpeta escaneada (``relative_source_path``): sin Docling, para que un consumidor que no convierte (la
 API de la web, G20) calcule las mismas rutas que ``DocumentConverter``.
 """
 
+import re
+import unicodedata
+
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from doc_organize.core.constants import (
+    CONTEXT_FILE_NAME,
     CONVERSION_FOLDER_NAME,
     DEDUP_HISTORY_JSONL_NAME,
     DEDUP_REPORT_JSON_NAME,
     DEFAULT_CACHE_DB_NAME,
+    DOMAINS_FOLDER_NAME,
     DUPLICATES_FOLDER_NAME,
+    LEGACY_MKDOCS_CONFIG_NAME,
     SCAN_ERRORS_FOLDER_NAME,
     SCAN_ERRORS_HISTORY_JSONL_NAME,
     SCAN_FOLDERS_JSON_NAME,
     SCAN_HISTORY_FOLDER_NAME,
     SCAN_HISTORY_JSONL_NAME,
+    SITE_CACHE_FOLDER_NAME,
+    SITE_CONFIG_FILE_NAME,
+    SITE_FOLDER_NAME,
+    TAXONOMY_MANIFEST_FILE_NAME,
 )
+from doc_organize.core.exceptions import InvalidPathError
 from doc_organize.core.models import Project
 
 #: Nombre del registro de carpetas guardadas (antes privado en ``scanned_folders_store``).
 SCANNED_FOLDERS_JSON_NAME = "scanned_folders.json"
-#: Carpeta del sitio de contexto generado.
-SITE_FOLDER_NAME = "site"
+
+#: Nombres de la raíz del proyecto que no puede usar ``Context.output_folder_name`` (se comparan sin distinguir
+#: mayúsculas): la carpeta reorganizada se borra entera al reconstruir o eliminar el contexto, así que coincidir con
+#: una carpeta o un fichero de otro subsistema lo pisaría (L-8b, G28).
+RESERVED_OUTPUT_FOLDER_NAMES: frozenset[str] = frozenset(
+    {
+        CONVERSION_FOLDER_NAME,
+        DUPLICATES_FOLDER_NAME,
+        SCAN_ERRORS_FOLDER_NAME,
+        SCAN_HISTORY_FOLDER_NAME,
+        DOMAINS_FOLDER_NAME,
+        SITE_FOLDER_NAME,
+        SITE_CACHE_FOLDER_NAME,
+        CONTEXT_FILE_NAME,
+        SITE_CONFIG_FILE_NAME,
+        LEGACY_MKDOCS_CONFIG_NAME,
+        TAXONOMY_MANIFEST_FILE_NAME,
+        DEFAULT_CACHE_DB_NAME,
+        SCAN_FOLDERS_JSON_NAME,
+        SCANNED_FOLDERS_JSON_NAME,
+    }
+)
+
+#: Nombre simple de carpeta: letras, dígitos, ``_``, ``.``, ``-`` y espacios (sin separadores de ruta).
+_OUTPUT_FOLDER_NAME_PATTERN = re.compile(r"^[\w.\- ]+$")
+
+
+def _folder_key(name: str) -> str:
+    """Clave de comparación: sin puntos ni espacios finales (Windows los quita), en NFC y sin mayúsculas."""
+    return unicodedata.normalize("NFC", name.rstrip(" .")).casefold()
+
+
+_RESERVED_KEYS = frozenset(_folder_key(reserved) for reserved in RESERVED_OUTPUT_FOLDER_NAMES)
+
+
+def validate_output_folder_name(name: str) -> str:
+    """Valida ``name`` como carpeta reorganizada del contexto y lo devuelve sin espacios a los lados.
+
+    Tiene que ser un nombre simple (sin separadores de ruta, ni ``.``/``..``) y no puede coincidir, sin distinguir
+    mayúsculas, con ``RESERVED_OUTPUT_FOLDER_NAMES`` (tampoco con puntos o espacios finales, que Windows quita, ni en
+    otra forma Unicode).
+
+    Raises:
+        InvalidPathError: Si el nombre está vacío, no es simple o está reservado.
+
+    Example:
+        >>> validate_output_folder_name(" organizado ")
+        'organizado'
+        >>> validate_output_folder_name("Site")
+        Traceback (most recent call last):
+            ...
+        doc_organize.core.exceptions.InvalidPathError: 'Site' es un nombre de carpeta reservado por el proyecto — elige otro.
+    """
+    candidate = name.strip()
+    key = _folder_key(candidate)
+    if not key or not _OUTPUT_FOLDER_NAME_PATTERN.fullmatch(candidate):
+        raise InvalidPathError(f"Nombre de carpeta de salida inválido: '{name}'.")
+    if key in _RESERVED_KEYS:
+        raise InvalidPathError(f"'{name}' es un nombre de carpeta reservado por el proyecto — elige otro.")
+    return candidate
 
 
 @dataclass(frozen=True)
@@ -84,8 +155,53 @@ class ProjectLayout:
 
     @property
     def site_dir(self) -> Path:
-        """Sitio de contexto generado."""
+        """Sitio de contexto generado (destino por defecto de ``zensical build``)."""
         return self.output_root / SITE_FOLDER_NAME
+
+    # --- contexto y sitio (L-8b) -----------------------------------------------------------------------------------
+
+    @property
+    def context_file(self) -> Path:
+        """``context.json``: metadatos del contexto y resumen de sus dominios."""
+        return self.output_root / CONTEXT_FILE_NAME
+
+    @property
+    def domains_dir(self) -> Path:
+        """``domains/<slug>/{DOMAIN.md,index.json}`` de cada dominio del contexto."""
+        return self.output_root / DOMAINS_FOLDER_NAME
+
+    @property
+    def taxonomy_manifest_file(self) -> Path:
+        """Manifiesto de taxonomía local del proyecto (``taxonomy_manifest.md``)."""
+        return self.output_root / TAXONOMY_MANIFEST_FILE_NAME
+
+    @property
+    def site_config_file(self) -> Path:
+        """Configuración del sitio de contexto (``zensical.toml``)."""
+        return self.output_root / SITE_CONFIG_FILE_NAME
+
+    @property
+    def site_cache_dir(self) -> Path:
+        """Caché que Zensical crea junto a su configuración (``.cache/``)."""
+        return self.output_root / SITE_CACHE_FOLDER_NAME
+
+    @property
+    def legacy_mkdocs_config_file(self) -> Path:
+        """``mkdocs.yml`` de un contexto generado antes de 0.13.0 (se borra al regenerar el sitio)."""
+        return self.output_root / LEGACY_MKDOCS_CONFIG_NAME
+
+    def reorganized_dir(self, output_folder_name: str) -> Path:
+        """Carpeta reorganizada del contexto (``Context.output_folder_name``), validada con
+        ``validate_output_folder_name``.
+
+        Raises:
+            InvalidPathError: Si el nombre no es simple o está reservado.
+
+        Example:
+            >>> ProjectLayout(Path("/p")).reorganized_dir("organizado").as_posix()
+            '/p/organizado'
+        """
+        return self.output_root / validate_output_folder_name(output_folder_name)
 
     # --- estado --------------------------------------------------------------------------------------------------
 
@@ -212,10 +328,12 @@ def relative_source_path(full_path: str, scan_roots: Sequence[str] = ()) -> str:
 
 
 __all__ = [
+    "RESERVED_OUTPUT_FOLDER_NAMES",
     "SCANNED_FOLDERS_JSON_NAME",
     "SITE_FOLDER_NAME",
     "ProjectLayout",
     "relative_source_path",
     "resolve_images_dir",
     "resolve_output_paths",
+    "validate_output_folder_name",
 ]

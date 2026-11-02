@@ -8,7 +8,6 @@ sesión 2026-09-17).
 
 import asyncio
 import json
-import re
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -31,8 +30,8 @@ from doc_organize.cache import CacheManager
 from doc_organize.context import (
     ContextBuilder,
     ContextRegistry,
-    MkDocsGenerator,
     Reorganizer,
+    SiteGenerator,
     TaxonomyTemplateRegistry,
     load_taxonomy_manifest,
     render_taxonomy_manifest_markdown,
@@ -40,15 +39,11 @@ from doc_organize.context import (
     select_document_sample,
 )
 from doc_organize.converter import DocumentConverter
-from doc_organize.core.constants import (
-    CONVERSION_FOLDER_NAME,
-    DEFAULT_CACHE_DB_NAME,
-    DUPLICATES_FOLDER_NAME,
-    SCAN_ERRORS_FOLDER_NAME,
-    SCAN_HISTORY_FOLDER_NAME,
-)
+from doc_organize.core.constants import CONVERSION_FOLDER_NAME, DEFAULT_CACHE_DB_NAME
 from doc_organize.core.exceptions import (
     ContextNotFoundError,
+    InvalidPathError,
+    SiteBuildError,
     TaxonomyManifestDraftError,
     TaxonomyManifestError,
     TaxonomyTemplateError,
@@ -64,6 +59,7 @@ from doc_organize.core.models import (
     Project,
     TaxonomyManifest,
 )
+from doc_organize.projects.layout import ProjectLayout, validate_output_folder_name
 from doc_organize.utils.logging import get_logger
 from doc_organize.web.ai_settings_config import get_family, is_family_configured
 from doc_organize.web.dependencies import (
@@ -90,24 +86,14 @@ router = APIRouter(tags=["context"])
 _context_registry = ContextRegistry()
 _context_builder = ContextBuilder(_context_registry)
 _reorganizer = Reorganizer()
-_mkdocs_generator = MkDocsGenerator()
+_site_generator = SiteGenerator()
 
 _DEFAULT_OUTPUT_FOLDER_NAME = "organizado"
-_OUTPUT_FOLDER_NAME_PATTERN = re.compile(r"^[\w.\- ]+$")
-# Carpetas de `project.root_path` ya reservadas por otros subsistemas ("domains" en
-# ContextRegistry, "site" en MkDocsGenerator — sin constante importable propia, son
-# privadas a su módulo). Si `output_folder_name` coincidiera con una de estas,
-# `Reorganizer` escribiría dentro de la carpeta de otro subsistema y
+# Los nombres reservados de `project.root_path` ("domains", "site", `Conversión`...) y la
+# validación del nombre viven en `projects.layout` (L-8b, G28): si `output_folder_name`
+# coincidiera con uno, `Reorganizer` escribiría dentro de la carpeta de otro subsistema y
 # `delete_context_endpoint` podría borrarla entera vía `Reorganizer.delete_output()`
-# (AUDIT_CODE, sesión 2026-09-10 — ver p. ej. la colisión con `CONVERSION_FOLDER_NAME`:
-# borraría todo lo convertido del proyecto).
-_RESERVED_OUTPUT_FOLDER_NAMES = frozenset(
-    name.casefold() for name in (DUPLICATES_FOLDER_NAME, SCAN_ERRORS_FOLDER_NAME, SCAN_HISTORY_FOLDER_NAME, CONVERSION_FOLDER_NAME, "domains", "site")
-)
-
-# Duplicado de `MkDocsGenerator._SITE_DIR_NAME` (privada a su módulo) — política
-# "prohibido refactorizar" de `/new-feature`, mismo criterio que `ConfirmedActionRequest`.
-_SITE_DIR_NAME = "site"
+# (AUDIT_CODE, sesión 2026-09-10).
 _SITE_INDEX_NAME = "index.html"
 
 
@@ -148,6 +134,10 @@ class ContextResponse(BaseModel):
     domains: list[DomainSummary]
     unclassified_count: int
     reorganized: bool
+    reorganize_failed_count: int = 0
+    site_generated: bool
+    site_built: bool
+    # Nombres anteriores a 0.13.0, con el mismo valor que `site_generated`/`site_built`.
     mkdocs_generated: bool
     mkdocs_site_built: bool
     ai_classification_enabled: bool
@@ -324,19 +314,17 @@ def _resolve_output_folder_name(existing_context: Context | None, requested: str
         HTTPException: 400 si `requested` no es un nombre de carpeta simple (sin
             separadores de ruta ni `..`), o si coincide (sin distinguir mayúsculas)
             con una carpeta ya reservada por otro subsistema del proyecto
-            (`_RESERVED_OUTPUT_FOLDER_NAMES`) — evita tanto escribir fuera de
+            (`RESERVED_OUTPUT_FOLDER_NAMES` de `projects.layout`) — evita tanto escribir fuera de
             `root_path` como pisar/heredar el borrado de una carpeta ajena.
     """
     if existing_context is not None:
         return existing_context.output_folder_name
     if requested is None or not requested.strip():
         return _DEFAULT_OUTPUT_FOLDER_NAME
-    candidate = requested.strip()
-    if candidate in {".", ".."} or not _OUTPUT_FOLDER_NAME_PATTERN.fullmatch(candidate):
-        raise HTTPException(status_code=400, detail=f"Nombre de carpeta de salida inválido: '{requested}'.")
-    if candidate.casefold() in _RESERVED_OUTPUT_FOLDER_NAMES:
-        raise HTTPException(status_code=400, detail=f"'{requested}' es un nombre de carpeta reservado por el proyecto — elige otro.")
-    return candidate
+    try:
+        return validate_output_folder_name(requested)
+    except InvalidPathError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 async def _gather_converted_documents(project: Project) -> list[ConversionResult]:
@@ -348,7 +336,7 @@ async def _gather_converted_documents(project: Project) -> list[ConversionResult
     `ScanCommand._delete_orphaned_outputs`). `images_dir` no se persiste en
     `cache.db` ni en `document.json`, así que hay que recalcularlo igual que
     `markdown_path`/`json_path` — de lo contrario `Reorganizer` nunca recibe la
-    carpeta de imágenes y MkDocs las sirve rotas (AUDIT_CODE, sesión 2026-09-10).
+    carpeta de imágenes y el sitio las sirve rotas (AUDIT_CODE, sesión 2026-09-10).
 
     Omite las entradas cuyo original ya no existe en `entry.file_path`: `dedup/`
     no actualiza `cache.db` al mover un duplicado a `duplicados/`, así que una
@@ -382,6 +370,21 @@ async def _gather_converted_documents(project: Project) -> list[ConversionResult
     return documents
 
 
+async def _generate_site(project: Project, context: Context) -> None:
+    """Escribe la configuración del sitio y lo construye con Zensical. Si no se puede construir
+    (falta `zensical`, el build falla), el contexto queda con `site_built=False` y el aviso en el
+    log, como antes de 0.13.0: la copia reorganizada y la configuración siguen siendo útiles."""
+    await _site_generator.generate(project, context, build=False)
+    context.site_generated = True
+    try:
+        await _site_generator.build_site(project)
+    except SiteBuildError as exc:
+        logger.warning(f"Sitio de contexto sin construir para '{project.name}': {exc}")
+        context.site_built = False
+    else:
+        context.site_built = True
+
+
 def _to_response(context: Context) -> ContextResponse:
     return ContextResponse(
         output_folder_name=context.output_folder_name,
@@ -391,8 +394,11 @@ def _to_response(context: Context) -> ContextResponse:
         ],
         unclassified_count=len(context.unclassified_documents),
         reorganized=context.reorganized,
-        mkdocs_generated=context.mkdocs_generated,
-        mkdocs_site_built=context.mkdocs_site_built,
+        reorganize_failed_count=len(context.reorganize_failed_documents),
+        site_generated=context.site_generated,
+        site_built=context.site_built,
+        mkdocs_generated=context.site_generated,
+        mkdocs_site_built=context.site_built,
         ai_classification_enabled=context.ai_classification_enabled,
         taxonomy_template_name=context.taxonomy_template_name,
     )
@@ -501,8 +507,8 @@ async def draft_taxonomy_manifest(name: str, request: Request, payload: Taxonomy
 @router.post("/api/projects/{name}/context", response_model=ContextResponse, dependencies=[Depends(require_project_access)])
 async def build_context(name: str, request: Request, payload: BuildContextRequest | None = None) -> ContextResponse:
     """Construye (o reconstruye) el contexto de `name`: clasifica los documentos ya
-    convertidos (Sub-fase A), los copia a `<output_folder_name>/` y genera `mkdocs.yml`
-    (+ `mkdocs build` si `mkdocs` está instalado, ver `MkDocsGenerator`).
+    convertidos (Sub-fase A), los copia a `<output_folder_name>/` y genera `zensical.toml`
+    (+ `zensical build` si `zensical` está instalado, ver `SiteGenerator`).
 
     `payload.output_folder_name` solo tiene efecto en la primera construcción del
     proyecto — en reconstrucciones se ignora y se reutiliza el nombre ya persistido
@@ -510,9 +516,9 @@ async def build_context(name: str, request: Request, payload: BuildContextReques
     contexto primero (`DELETE .../context`).
 
     Si `reorganize()`/`generate()` fallan a mitad, `context.json` se persiste de
-    todas formas (en el `finally`) con `reorganized`/`mkdocs_generated` reflejando
+    todas formas (en el `finally`) con `reorganized`/`site_generated` reflejando
     lo que de verdad se completó — nunca queda un contexto que diga "todo bien"
-    cuando la copia física o el sitio MkDocs se quedaron a medias (AUDIT_CODE,
+    cuando la copia física o el sitio se quedaron a medias (AUDIT_CODE,
     sesión 2026-09-08).
     """
     payload = payload or BuildContextRequest()
@@ -545,9 +551,7 @@ async def build_context(name: str, request: Request, payload: BuildContextReques
         try:
             await _reorganizer.reorganize(project, context)
             context.reorganized = True
-            _, site_built = await _mkdocs_generator.generate(project, context)
-            context.mkdocs_generated = True
-            context.mkdocs_site_built = site_built
+            await _generate_site(project, context)
         finally:
             await _context_registry.save_context(project, context)
         return _to_response(context)
@@ -567,7 +571,7 @@ async def get_context_api(name: str, request: Request) -> ContextResponse:
 @router.delete("/api/projects/{name}/context", status_code=204, dependencies=[Depends(require_project_access)])
 async def delete_context_endpoint(name: str, payload: ConfirmedActionRequest, request: Request) -> None:
     """Elimina el contexto de `name` por completo: `context.json` + `domains/` +
-    la copia física (`<output_folder_name>/`) + `mkdocs.yml`/`site/` — vuelve al
+    la copia física (`<output_folder_name>/`) + `zensical.toml`/`site/` — vuelve al
     estado anterior a la primera construcción, para poder elegir otro
     `output_folder_name` en la siguiente (`output_folder_name` queda fijo mientras
     exista un contexto, ver `_resolve_output_folder_name()`).
@@ -596,7 +600,7 @@ async def delete_context_endpoint(name: str, payload: ConfirmedActionRequest, re
         # limpiar en un reintento (mismo criterio defensivo que el `finally` de
         # `build_context`).
         await _reorganizer.delete_output(project, context)
-        await _mkdocs_generator.delete_site(project)
+        await _site_generator.delete_site(project)
         await _context_registry.delete_context(project)
     finally:
         _release_operation_lock(request, key)
@@ -668,6 +672,10 @@ async def context_build_websocket(name: str, websocket: WebSocket) -> None:
                 )
             )
 
+        async def on_document_failed(index: int, total: int, path: str, error: str) -> None:
+            data = {"index": index, "total": total, "path": path, "error": error}
+            await websocket.send_json(ContextBuildEvent(event=ContextBuildEventType.DOCUMENT_FAILED, data=data).model_dump(mode="json"))
+
         context: Context | None = None
         try:
             async with (
@@ -695,19 +703,17 @@ async def context_build_websocket(name: str, websocket: WebSocket) -> None:
                 )
             # Fuera de `_optional_ai_client`/`get_instance_secrets_store` a propósito
             # (AUDIT_CODE, sesión 2026-09-11): ni el cliente HTTP de IA ni la conexión a
-            # `auth.db` hacen falta durante la copia física/generación de MkDocs, que
+            # `auth.db` hacen falta durante la copia física/generación del sitio, que
             # puede tardar bastante más que la clasificación -- antes se retenían ambos
             # recursos abiertos durante toda la construcción sin ningún beneficio.
             total_documents = sum(len(domain.documents) for domain in context.domains)
             await websocket.send_json(
                 ContextBuildEvent(event=ContextBuildEventType.REORGANIZE_STARTED, data={"total": total_documents}).model_dump(mode="json")
             )
-            await _reorganizer.reorganize(project, context, on_document_copied=on_document_copied)
+            await _reorganizer.reorganize(project, context, on_document_copied=on_document_copied, on_document_failed=on_document_failed)
             context.reorganized = True
             await websocket.send_json(ContextBuildEvent(event=ContextBuildEventType.MKDOCS_STARTED, data={}).model_dump(mode="json"))
-            _, site_built = await _mkdocs_generator.generate(project, context)
-            context.mkdocs_generated = True
-            context.mkdocs_site_built = site_built
+            await _generate_site(project, context)
         except HTTPException as exc:
             await websocket.close(code=1008, reason=str(exc.detail))
             return
@@ -776,7 +782,7 @@ async def context_delete_websocket(name: str, websocket: WebSocket) -> None:
             # sigue existiendo como fuente de verdad de qué queda por limpiar.
             await _reorganizer.delete_output(project, context)
             await websocket.send_json(ContextDeleteEvent(event=ContextDeleteEventType.OUTPUT_DELETED, data={}).model_dump(mode="json"))
-            await _mkdocs_generator.delete_site(project)
+            await _site_generator.delete_site(project)
             await websocket.send_json(ContextDeleteEvent(event=ContextDeleteEventType.SITE_DELETED, data={}).model_dump(mode="json"))
             await _context_registry.delete_context(project)
             await websocket.send_json(ContextDeleteEvent(event=ContextDeleteEventType.COMPLETED, data={}).model_dump(mode="json"))
@@ -829,29 +835,29 @@ async def context_page(name: str, request: Request) -> HTMLResponse:
 
 
 async def _load_built_context(request: Request, name: str) -> Path:
-    """Resuelve `site_root` para servir el sitio MkDocs ya construido de `name` —
+    """Resuelve `site_root` para servir el sitio ya construido de `name` —
     usado por `context_site_index`/`context_site_asset`, nunca por el flujo de
     build (`build_context`/`context_build_websocket`): visualizar el sitio es una
     acción de solo lectura totalmente independiente de generarlo.
 
     Raises:
         HTTPException: 404 si el proyecto no tiene contexto construido, o si la
-            última construcción no dejó un sitio navegable (`mkdocs_site_built`
-            en `False` — ver `MkDocsGenerator._build_site`).
+            última construcción no dejó un sitio navegable (`site_built`
+            en `False` — ver `_generate_site`).
     """
     project = await _get_project(request, name)
     context = await _load_existing_context_or_none(project)
-    if context is None or not context.mkdocs_site_built:
+    if context is None or not context.site_built:
         raise HTTPException(status_code=404, detail="El proyecto no tiene un sitio de documentación construido.")
-    return (Path(project.root_path) / _SITE_DIR_NAME).resolve()
+    return ProjectLayout.for_project(project).site_dir.resolve()
 
 
 @router.get("/projects/{name}/context/site", dependencies=[Depends(require_project_access)])
 async def context_site_index(name: str, request: Request) -> RedirectResponse:
     """Redirige a la versión con barra final (`.../site/`): las páginas que genera
-    mkdocs usan URLs relativas (CSS/JS/enlaces de navegación) que asumen que el
+    Zensical usan URLs relativas (CSS/JS/enlaces de navegación) que asumen que el
     índice se sirve en una ruta terminada en '/' (`use_directory_urls`, activo por
-    defecto — ver `MkDocsGenerator._build_config`); sin la barra, esos enlaces
+    defecto en Zensical); sin la barra, esos enlaces
     relativos resolverían un nivel por encima del sitio.
     """
     await _load_built_context(request, name)
@@ -860,9 +866,9 @@ async def context_site_index(name: str, request: Request) -> RedirectResponse:
 
 @router.get("/projects/{name}/context/site/{file_path:path}", response_model=None, dependencies=[Depends(require_project_access)])
 async def context_site_asset(name: str, file_path: str, request: Request) -> FileResponse | RedirectResponse:
-    """Sirve un fichero del sitio MkDocs ya construido de `name`, bajo `site/{file_path}`.
+    """Sirve un fichero del sitio ya construido de `name`, bajo `site/{file_path}`.
 
-    Si `file_path` resuelve a un directorio (páginas de mkdocs con
+    Si `file_path` resuelve a un directorio (páginas de Zensical con
     `use_directory_urls`) y la petición no terminaba en '/', redirige añadiéndola
     (mismo motivo que `context_site_index`); si ya terminaba en '/', sirve el
     `index.html` de ese directorio.

@@ -201,6 +201,15 @@ class TaxonomyTemplateError(ContextError):
     `TaxonomyManifest` — mismos motivos que `TaxonomyManifestError`, ver `TaxonomyTemplateRegistry`."""
 
 
+class SiteBuildError(DocOrganizeError):
+    """No se pudo construir el sitio de contexto con Zensical (L-8, G10): `zensical` no está instalado (extra
+    `doc_organize[site]`), `zensical build` terminó con error o superó el tiempo indicado.
+
+    `SiteGenerator.generate(build=True)` la lanza en lugar de devolver un sitio sin construir: la configuración
+    (`zensical.toml` + `index.md`) ya está escrita cuando se lanza.
+    """
+
+
 class IncompleteConversionArtifactsError(ContextError):
     """Un documento no tiene los tres artefactos completos (original + .md + .json).
 
@@ -287,6 +296,7 @@ __all__ = [
     "ScannedFolderNotFoundError",
     "SecretsCipherError",
     "SecretsEncryptionNotConfiguredError",
+    "SiteBuildError",
     "TaxonomyClassificationAuthError",
     "TaxonomyClassificationConnectionError",
     "TaxonomyClassificationError",

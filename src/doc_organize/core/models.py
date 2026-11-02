@@ -12,11 +12,13 @@ Modelos Pydantic v2 usados en todos los módulos:
 - ScanRunReport: duración de una ejecución de escaneo (histórico de tiempos)
 """
 
+import warnings
+
 from enum import Enum
 from pathlib import Path
 from typing import Any, Final, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME
 
@@ -106,6 +108,10 @@ class ContextBuildEventType(str, Enum):
     AI_DOCUMENT_CLASSIFIED = "ai_document_classified"
     REORGANIZE_STARTED = "reorganize_started"
     DOCUMENT_COPIED = "document_copied"
+    #: Un documento no se pudo copiar a la carpeta reorganizada (L-8a); el resto sigue. `data`: `index`, `total`,
+    #: `path`, `error`.
+    DOCUMENT_FAILED = "document_failed"
+    #: Generación del sitio de contexto (con Zensical desde 0.13.0; el valor conserva el nombre de antes).
     MKDOCS_STARTED = "mkdocs_started"
     COMPLETED = "completed"
     #: Parada a petición del llamador (L-2); es el último evento, en lugar de `COMPLETED`.
@@ -784,7 +790,7 @@ class DomainDocument(BaseModel):
         description=(
             "Nombre legible de `material_type` (`TaxonomyCatalogEntry.name` del manifiesto), o `None` si "
             "`material_type` es el placeholder `sin-clasificar` o no hay manifiesto — el llamador (p. ej. "
-            "`MkDocsGenerator`) recurre entonces a derivar una etiqueta a partir del slug"
+            "`SiteGenerator`) recurre entonces a derivar una etiqueta a partir del slug"
         ),
     )
     confidence: float = Field(..., ge=0.0, le=1.0, description="Score de confianza de la clasificación, 0-1")
@@ -827,17 +833,29 @@ class Context(BaseModel):
         default=False,
         description="Si `Reorganizer.reorganize()` terminó con éxito para esta versión del contexto — `False` si nunca se intentó o si falló a medias (ver `web/routes/context.py::build_context`, AUDIT_CODE sesión 2026-09-08)",
     )
-    mkdocs_generated: bool = Field(default=False, description="Si `MkDocsGenerator.generate()` terminó con éxito para esta versión del contexto")
-    mkdocs_site_built: bool = Field(
+    reorganize_failed_documents: list[str] = Field(
+        default_factory=list,
+        description=(
+            "`source_path` de los documentos que `Reorganizer.reorganize()` no pudo copiar en la última reorganización "
+            "(p. ej. algún tramo es un enlace simbólico, L-8a); el resto sí se copió"
+        ),
+    )
+    site_generated: bool = Field(
         default=False,
-        description="Si `mkdocs build` se ejecutó con éxito sobre el `mkdocs.yml` generado — `False` si mkdocs no está instalado o el build falló",
+        validation_alias=AliasChoices("site_generated", "mkdocs_generated"),
+        description="Si `SiteGenerator.generate()` escribió la configuración del sitio (`zensical.toml` + `index.md`) para esta versión del contexto",
+    )
+    site_built: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("site_built", "mkdocs_site_built"),
+        description="Si `zensical build` terminó con éxito sobre la configuración generada (sitio navegable en `site/`)",
     )
     taxonomy_manifest_used: bool = Field(
         default=False,
         description=(
             "Si esta construcción usó un manifiesto de taxonomía (`taxonomy_manifest.md`, "
             "clasificación de 2 ejes: dominio + tipo de material) en vez de `candidate_domains`/"
-            "descubrimiento (1 eje) — determina si `Reorganizer`/`MkDocsGenerator` agrupan también "
+            "descubrimiento (1 eje) — determina si `Reorganizer`/`SiteGenerator` agrupan también "
             "por `DomainDocument.material_type`"
         ),
     )
@@ -852,6 +870,34 @@ class Context(BaseModel):
     )
     created_at: str = Field(..., description="Timestamp ISO 8601 de creación del contexto")
     updated_at: str = Field(..., description="Timestamp ISO 8601 de la última reconstrucción del contexto")
+
+    # Alias obsoletos de antes de 0.13.0 (sitio con MkDocs). Un `context.json` antiguo, o `Context(mkdocs_generated=...)`,
+    # se siguen leyendo gracias a `validation_alias`; se retiran en 1.0.0.
+    @property
+    def mkdocs_generated(self) -> bool:
+        """Obsoleto desde 0.13.0 (se retira en 1.0.0): usar `site_generated`."""
+        _warn_deprecated_context_field("mkdocs_generated", "site_generated")
+        return self.site_generated
+
+    @mkdocs_generated.setter
+    def mkdocs_generated(self, value: bool) -> None:
+        _warn_deprecated_context_field("mkdocs_generated", "site_generated")
+        self.site_generated = value
+
+    @property
+    def mkdocs_site_built(self) -> bool:
+        """Obsoleto desde 0.13.0 (se retira en 1.0.0): usar `site_built`."""
+        _warn_deprecated_context_field("mkdocs_site_built", "site_built")
+        return self.site_built
+
+    @mkdocs_site_built.setter
+    def mkdocs_site_built(self, value: bool) -> None:
+        _warn_deprecated_context_field("mkdocs_site_built", "site_built")
+        self.site_built = value
+
+
+def _warn_deprecated_context_field(old: str, new: str) -> None:
+    warnings.warn(f"Context.{old} está obsoleto desde 0.13.0 y se retira en 1.0.0: usa Context.{new}.", DeprecationWarning, stacklevel=3)
 
 
 class DomainClassificationResult(BaseModel):

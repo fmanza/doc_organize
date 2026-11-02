@@ -175,7 +175,7 @@ DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_MODEL=claude-classifier   # opciona
 ```
 
 Requiere el extra `doc_organize[context]` instalado (`pip install
-doc_organize[context]`) para `pyyaml` (generación de `mkdocs.yml`) — el cliente
+doc_organize[context]`) para `pyyaml` (manifiestos y plantillas de taxonomía) — el cliente
 de clasificación en sí solo usa `httpx`, ya incluido en el extra `ai`.
 
 ## Parar el proxy

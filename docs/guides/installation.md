@@ -230,7 +230,7 @@ pip install -e ".[dev,web,docs]"
 - `dev`: pytest, ruff, mypy y el resto de herramientas de calidad.
 - `web`: interfaz web (necesaria para correr `tests/unit/test_web_*.py`).
 - `docs`: zensical + mkdocstrings-python, para compilar esta documentación.
-- `site`: mkdocs, para construir el sitio navegable del contexto de un proyecto (`MkDocsGenerator`).
+- `site`: zensical, para construir el sitio navegable del contexto de un proyecto (`SiteGenerator`; mkdocs hasta 0.12.x).
 
 ### Comandos de desarrollo
 

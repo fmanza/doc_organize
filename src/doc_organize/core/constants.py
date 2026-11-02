@@ -132,6 +132,18 @@ SCAN_ERRORS_HISTORY_JSONL_NAME = "SCAN_ERRORS_HISTORY.jsonl"
 SCAN_HISTORY_FOLDER_NAME = "historial_escaneo"
 SCAN_HISTORY_JSONL_NAME = "SCAN_HISTORY.jsonl"
 
+#: Contexto de organización documental en la raíz del proyecto (L-8b, G28): `context.json` + `domains/<slug>/`
+#: (`ContextRegistry`), manifiesto de taxonomía local (`load_taxonomy_manifest`) y sitio de contexto (`SiteGenerator`:
+#: `zensical.toml`, `site/` y la caché `.cache/` que Zensical crea junto a su configuración). `mkdocs.yml` es la
+#: configuración de antes de 0.13.0: se borra al regenerar o eliminar el sitio.
+CONTEXT_FILE_NAME = "context.json"
+DOMAINS_FOLDER_NAME = "domains"
+TAXONOMY_MANIFEST_FILE_NAME = "taxonomy_manifest.md"
+SITE_FOLDER_NAME = "site"
+SITE_CONFIG_FILE_NAME = "zensical.toml"
+SITE_CACHE_FOLDER_NAME = ".cache"
+LEGACY_MKDOCS_CONFIG_NAME = "mkdocs.yml"
+
 #: Longitud maxima de un nombre de proyecto (REQ-008), tras strip().
 PROJECT_NAME_MAX_LENGTH = 100
 
@@ -210,17 +222,20 @@ DEFAULT_ADMIN_PASSWORD = "admin"
 
 __all__ = [
     "AV_SUPPORTED_EXTENSIONS",
+    "CONTEXT_FILE_NAME",
     "CONVERSION_FOLDER_NAME",
+    "DEDUP_HISTORY_JSONL_NAME",
+    "DEDUP_REPORT_JSON_NAME",
     "DEFAULT_ADMIN_PASSWORD",
     "DEFAULT_ADMIN_ROLE_NAME",
     "DEFAULT_ADMIN_USERNAME",
     "DEFAULT_AUTH_DB_NAME",
     "DEFAULT_CACHE_DB_NAME",
     "DEFAULT_TENANT_ID",
-    "DEDUP_HISTORY_JSONL_NAME",
-    "DEDUP_REPORT_JSON_NAME",
+    "DOMAINS_FOLDER_NAME",
     "DUPLICATES_FOLDER_NAME",
     "IGNORED_NAMES",
+    "LEGACY_MKDOCS_CONFIG_NAME",
     "LOGIN_LOCKOUT_SECONDS",
     "LOGIN_MAX_ATTEMPTS",
     "MAX_AUTO_ERROR_RETRIES",
@@ -240,7 +255,11 @@ __all__ = [
     "SCRYPT_P",
     "SCRYPT_R",
     "SESSION_LIFETIME_HOURS",
+    "SITE_CACHE_FOLDER_NAME",
+    "SITE_CONFIG_FILE_NAME",
+    "SITE_FOLDER_NAME",
     "SUPPORTED_EXTENSIONS",
+    "TAXONOMY_MANIFEST_FILE_NAME",
     "TENANT_ID_MAX_LENGTH",
     "USERNAME_MAX_LENGTH",
     "USERNAME_PATTERN",

@@ -1,42 +1,42 @@
 """
 Biblioteca de plantillas de manifiesto de taxonomía reutilizables entre proyectos.
+
+El formato de fichero (parsear/renderizar) y las plantillas empaquetadas viven en
+`doc_organize.context.taxonomy_templates` (L-8c), sin carpeta de usuario; este registro
+añade la biblioteca de usuario en disco encima.
 """
 
 import asyncio
 import os
-import re
 
 from pathlib import Path
 
-import yaml
-
-from pydantic import ValidationError
-
+from doc_organize.context.taxonomy_templates import (
+    TEMPLATE_FILE_EXTENSION,
+    list_builtin_templates,
+    list_template_names,
+    load_builtin_template,
+    parse_taxonomy_template,
+    render_taxonomy_template,
+    template_file,
+)
 from doc_organize.core.exceptions import TaxonomyTemplateError
 from doc_organize.core.models import TaxonomyManifest, TaxonomyTemplateSummary
 from doc_organize.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-TEMPLATE_FILE_EXTENSION = ".md"
-_FRONT_MATTER_DELIMITER = "---"
 
-#: Fuera de cualquier `project.root_path` (cada proyecto puede vivir en una ubicación
-#: distinta elegida por el usuario) — mismo criterio que `ProjectRegistry`/`AuthStore`
-#: (`~/.doc_organize/projects.json`, `~/.doc_organize/auth.db`): una única biblioteca
-#: compartida por toda la instalación de doc_organize, no por proyecto ni por tenant.
-_DEFAULT_TEMPLATES_DIR = Path.home() / ".doc_organize" / "taxonomy_templates"
+def default_templates_dir() -> Path:
+    """Carpeta de plantillas de usuario por defecto: `~/.doc_organize/taxonomy_templates/`.
 
-#: Plantillas de ejemplo distribuidas con el propio paquete (ver `MANIFEST.in`) — de
-#: solo lectura, nunca escritas por la aplicación. Una plantilla de usuario con el
-#: mismo nombre en `_DEFAULT_TEMPLATES_DIR` tiene prioridad (ver `TaxonomyTemplateRegistry.load_template`).
-_BUILTIN_TEMPLATES_DIR = Path(__file__).parent / "taxonomy_templates_builtin"
-
-#: Un nombre de plantilla llega desde un payload de API y se usa para construir una
-#: ruta de fichero (`<templates_dir>/<name>.md`) — se valida contra este patrón ANTES
-#: de tocar el filesystem, para que `../otra-cosa` o rutas absolutas nunca lleguen a
-#: `Path.__truediv__` (path traversal fuera de las dos carpetas de plantillas).
-_TEMPLATE_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+    Fuera de cualquier `project.root_path` (cada proyecto puede vivir en una ubicación
+    distinta elegida por el usuario) — mismo criterio que `ProjectRegistry`/`AuthStore`
+    (`~/.doc_organize/projects.json`, `~/.doc_organize/auth.db`): una única biblioteca
+    compartida por toda la instalación de doc_organize, no por proyecto ni por tenant.
+    Se calcula al crear un registro sin carpeta, no al importar el módulo (L-8c).
+    """
+    return Path.home() / ".doc_organize" / "taxonomy_templates"
 
 
 class TaxonomyTemplateRegistry:
@@ -51,8 +51,8 @@ class TaxonomyTemplateRegistry:
     Busca primero en `templates_dir` (por defecto `~/.doc_organize/taxonomy_templates/`,
     fuera de cualquier `project.root_path` — gestionado por el usuario) y, si no
     encuentra el nombre ahí, en las plantillas de ejemplo empaquetadas con
-    `doc_organize` (de solo lectura). Una plantilla de usuario con el mismo nombre
-    que una empaquetada tiene prioridad — nunca al revés.
+    `doc_organize` (de solo lectura, `load_builtin_template`). Una plantilla de usuario
+    con el mismo nombre que una empaquetada tiene prioridad — nunca al revés.
 
     Un proyecto que quiere usar una plantilla la referencia por nombre en la
     petición de construcción de contexto (`BuildContextRequest.taxonomy_template_name`,
@@ -80,8 +80,8 @@ class TaxonomyTemplateRegistry:
         'calidad'
     """
 
-    def __init__(self, templates_dir: str | Path = _DEFAULT_TEMPLATES_DIR) -> None:
-        self.templates_dir = Path(templates_dir)
+    def __init__(self, templates_dir: str | Path | None = None) -> None:
+        self.templates_dir = Path(templates_dir) if templates_dir is not None else default_templates_dir()
 
     async def list_templates(self) -> list[TaxonomyTemplateSummary]:
         """Lista las plantillas disponibles (usuario + empaquetadas), sin duplicar nombres.
@@ -95,24 +95,14 @@ class TaxonomyTemplateRegistry:
         Returns:
             Resúmenes ordenados por `name`, para un listado determinista.
         """
-        summaries: dict[str, TaxonomyTemplateSummary] = {}
-        for directory in (_BUILTIN_TEMPLATES_DIR, self.templates_dir):
-            for name in await asyncio.to_thread(self._list_template_names, directory):
-                try:
-                    manifest = await self._load_from_dir(directory, name)
-                except TaxonomyTemplateError:
-                    continue
-                summaries[name] = TaxonomyTemplateSummary(name=name, title=manifest.title, description=manifest.description)
+        summaries = {summary.name: summary for summary in await asyncio.to_thread(list_builtin_templates)}
+        for name in await asyncio.to_thread(list_template_names, self.templates_dir):
+            try:
+                manifest = await self._load_from_dir(self.templates_dir, name)
+            except TaxonomyTemplateError:
+                continue
+            summaries[name] = TaxonomyTemplateSummary(name=name, title=manifest.title, description=manifest.description)
         return [summaries[name] for name in sorted(summaries)]
-
-    @staticmethod
-    def _list_template_names(directory: Path) -> list[str]:
-        if not directory.is_dir():
-            return []
-        # Mismo patrón que `load_template()`: un fichero cuyo nombre NO es un slug
-        # válido (mayúsculas, espacios...) se omite del listado en vez de mostrarse
-        # y luego rechazarse al intentar cargarlo por ese mismo nombre (AUDIT_CODE).
-        return [path.stem for path in directory.glob(f"*{TEMPLATE_FILE_EXTENSION}") if path.is_file() and _TEMPLATE_NAME_PATTERN.match(path.stem)]
 
     async def load_template(self, name: str) -> TaxonomyManifest:
         """Carga la plantilla `name`: primero de `templates_dir` (usuario), si no de
@@ -132,56 +122,41 @@ class TaxonomyTemplateRegistry:
                 silencio a la empaquetada (que enmascararía un fichero de usuario roto
                 detrás de un mensaje de "no existe" que no ayuda a arreglarlo).
         """
-        if not _TEMPLATE_NAME_PATTERN.match(name):
-            raise TaxonomyTemplateError(f"'{name}' no es un nombre de plantilla válido — solo minúsculas, dígitos y guiones (p. ej. 'sgi-iso27001').")
-        user_template_path = self.templates_dir / f"{name}{TEMPLATE_FILE_EXTENSION}"
+        user_template_path = template_file(self.templates_dir, name)
         if await asyncio.to_thread(user_template_path.is_file):
             return await self._load_from_dir(self.templates_dir, name)
-        manifest = await self._load_from_dir(_BUILTIN_TEMPLATES_DIR, name)
+        manifest = await asyncio.to_thread(load_builtin_template, name)
         logger.info(f"Plantilla de taxonomía '{name}' cargada de la biblioteca empaquetada (sin override de usuario en '{self.templates_dir}')")
         return manifest
 
     async def _load_from_dir(self, directory: Path, name: str) -> TaxonomyManifest:
-        template_path = directory / f"{name}{TEMPLATE_FILE_EXTENSION}"
+        template_path = template_file(directory, name)
         if not await asyncio.to_thread(template_path.is_file):
             raise TaxonomyTemplateError(f"No existe ninguna plantilla de taxonomía llamada '{name}' en '{directory}'.")
         raw = await asyncio.to_thread(template_path.read_text, encoding="utf-8")
-        front_matter = _extract_front_matter(raw, template_path)
-        return _parse_front_matter(front_matter, template_path)
+        return parse_taxonomy_template(raw, source=str(template_path))
 
     async def save_template(self, name: str, manifest: TaxonomyManifest) -> None:
         """Crea o sobrescribe la plantilla `name` en `templates_dir` (biblioteca de usuario).
 
-        Nunca escribe en `_BUILTIN_TEMPLATES_DIR` (empaquetada, de solo lectura) --
-        una plantilla guardada aquí ya tiene precedencia sobre una empaquetada del
-        mismo nombre (`load_template()`), así que "editar" una empaquetada equivale
-        a crear un override de usuario con su mismo nombre, nunca a tocar el fichero
-        empaquetado.
+        Nunca escribe en las plantillas empaquetadas (de solo lectura) -- una plantilla
+        guardada aquí ya tiene precedencia sobre una empaquetada del mismo nombre
+        (`load_template()`), así que "editar" una empaquetada equivale a crear un
+        override de usuario con su mismo nombre, nunca a tocar el fichero empaquetado.
 
         Args:
             name: Slug de la plantilla (sin extensión).
-            manifest: Catálogo a guardar -- `title`/`description` (si se rellenan) se
-                usan para el listado (`list_templates()`); `domains`/`material_types`
-                son el catálogo cerrado en sí.
+            manifest: Catálogo a guardar (`render_taxonomy_template`) -- `title`/`description`
+                (si se rellenan) se usan para el listado (`list_templates()`);
+                `domains`/`material_types` son el catálogo cerrado en sí.
 
         Raises:
             TaxonomyTemplateError: `name` no es un slug válido.
         """
-        if not _TEMPLATE_NAME_PATTERN.match(name):
-            raise TaxonomyTemplateError(f"'{name}' no es un nombre de plantilla válido — solo minúsculas, dígitos y guiones (p. ej. 'sgi-iso27001').")
-
-        front_matter_payload: dict[str, object] = {}
-        if manifest.title:
-            front_matter_payload["title"] = manifest.title
-        if manifest.description:
-            front_matter_payload["description"] = manifest.description
-        front_matter_payload["domains"] = [entry.model_dump(exclude_none=True) for entry in manifest.domains]
-        front_matter_payload["material_types"] = [entry.model_dump(exclude_none=True) for entry in manifest.material_types]
-        front_matter = yaml.safe_dump(front_matter_payload, allow_unicode=True, sort_keys=False)
-        content = f"---\n{front_matter}---\n"
+        template_path = template_file(self.templates_dir, name)
+        content = render_taxonomy_template(manifest)
 
         await asyncio.to_thread(self.templates_dir.mkdir, parents=True, exist_ok=True)
-        template_path = self.templates_dir / f"{name}{TEMPLATE_FILE_EXTENSION}"
         tmp_path = template_path.with_suffix(".tmp")
         await asyncio.to_thread(tmp_path.write_text, content, encoding="utf-8")
         await asyncio.to_thread(os.replace, tmp_path, template_path)
@@ -190,48 +165,20 @@ class TaxonomyTemplateRegistry:
     async def delete_template(self, name: str) -> None:
         """Borra la plantilla de usuario `name` de `templates_dir`.
 
-        Nunca borra una plantilla empaquetada (`_BUILTIN_TEMPLATES_DIR`) -- si `name`
-        solo existe ahí, no hay nada que hacer en `templates_dir` y se levanta el
-        mismo error que "no existe" (desde fuera, una empaquetada sin override de
-        usuario no es borrable, igual que no lo es editable sin crear un override).
+        Nunca borra una plantilla empaquetada -- si `name` solo existe ahí, no hay nada
+        que hacer en `templates_dir` y se levanta el mismo error que "no existe" (desde
+        fuera, una empaquetada sin override de usuario no es borrable, igual que no lo
+        es editable sin crear un override).
 
         Raises:
-            TaxonomyTemplateError: No existe ninguna plantilla de usuario llamada
-                `name` en `templates_dir`.
+            TaxonomyTemplateError: `name` no es un slug válido, o no existe ninguna
+                plantilla de usuario llamada `name` en `templates_dir`.
         """
-        template_path = self.templates_dir / f"{name}{TEMPLATE_FILE_EXTENSION}"
+        template_path = template_file(self.templates_dir, name)
         if not await asyncio.to_thread(template_path.is_file):
             raise TaxonomyTemplateError(f"No existe ninguna plantilla de usuario llamada '{name}' en '{self.templates_dir}' que se pueda eliminar.")
         await asyncio.to_thread(template_path.unlink)
         logger.info(f"Plantilla de taxonomía '{name}' eliminada de '{template_path}'")
 
 
-# Duplicado intencional de `_extract_front_matter`/`_parse_front_matter`
-# (`taxonomy_manifest.py`, privadas a su módulo) — política "prohibido refactorizar"
-# de `/new-feature`, mismo criterio que `ConfirmedActionRequest`/`_acquire_operation_lock`
-# en `web/routes/context.py`.
-def _extract_front_matter(raw: str, template_path: Path) -> str:
-    lines = raw.splitlines()
-    if not lines or lines[0].strip() != _FRONT_MATTER_DELIMITER:
-        raise TaxonomyTemplateError(f"'{template_path}' debe empezar con el delimitador de front matter YAML ('---').")
-    try:
-        closing_index = lines.index(_FRONT_MATTER_DELIMITER, 1)
-    except ValueError as exc:
-        raise TaxonomyTemplateError(f"'{template_path}' no cierra el front matter YAML (falta un segundo '---').") from exc
-    return "\n".join(lines[1:closing_index])
-
-
-def _parse_front_matter(front_matter: str, template_path: Path) -> TaxonomyManifest:
-    try:
-        payload = yaml.safe_load(front_matter)
-    except yaml.YAMLError as exc:
-        raise TaxonomyTemplateError(f"El front matter YAML de '{template_path}' no es válido: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise TaxonomyTemplateError(f"El front matter de '{template_path}' debe ser un mapeo YAML con 'domains'/'material_types'.")
-    try:
-        return TaxonomyManifest.model_validate(payload)
-    except ValidationError as exc:
-        raise TaxonomyTemplateError(f"El front matter de '{template_path}' no cumple el schema de taxonomía: {exc}") from exc
-
-
-__all__ = ["TaxonomyTemplateRegistry"]
+__all__ = ["TEMPLATE_FILE_EXTENSION", "TaxonomyTemplateRegistry", "default_templates_dir"]
