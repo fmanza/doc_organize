@@ -208,7 +208,7 @@ async def test_source_replaced_by_symlink_fails_per_file(
     assert report.failed_paths == [docs[1].full_path]
     assert secret.read_bytes() == b"secreto"
     assert swapped.is_symlink()
-    assert not any(p.is_file() for p in duplicates_dir.rglob("*"))
+    assert list(duplicates_dir.rglob("*.pdf")) == []  # el informe (DEDUP_REPORT.json) sí se escribe
 
 
 @pytest.mark.asyncio
@@ -226,7 +226,7 @@ async def test_source_directory_replaced_by_symlink_fails_per_file(
 
     assert sorted(report.failed_paths) == sorted(d.full_path for d in docs if d.display_name == "a_copia.pdf")
     assert (secret.parent / "a_copia.pdf").read_bytes() == b"secreto"
-    assert not any(p.is_file() for p in duplicates_dir.rglob("*"))
+    assert list(duplicates_dir.rglob("*.pdf")) == []  # el informe (DEDUP_REPORT.json) sí se escribe
 
 
 @pytest.mark.asyncio
