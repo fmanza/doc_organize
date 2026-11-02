@@ -48,8 +48,22 @@ class DeduplicationManager:
     async def resolve_duplicates(
         self,
         groups: list[DuplicateGroup],
-        duplicates_dir: Path
+        duplicates_dir: Path,
+        started_at: datetime | None = None,
+        *,
+        report_dir: Path | None = None,
+        mode: DedupMode = "move",
+        relative_to: Path | None = None,
     ) -> DeduplicationReport
+
+    async def move_group(
+        self,
+        group: DuplicateGroup,
+        duplicates_dir: Path,
+        *,
+        mode: DedupMode = "move",
+        relative_to: Path | None = None,
+    ) -> tuple[int, int, list[str]]
 ```
 
 #### find_duplicates (Síncrono)
@@ -90,6 +104,10 @@ Mueve documentos descartados a carpeta de duplicados.
 |---|---|---|
 | `groups` | `list[DuplicateGroup]` | Grupos de `find_duplicates()` |
 | `duplicates_dir` | `Path` | Carpeta destino para duplicados |
+| `started_at` | `datetime \| None` | Inicio de la operación, para `duration_seconds` del informe |
+| `report_dir` | `Path \| None` | Carpeta de `DEDUP_REPORT.json`/`DEDUP_HISTORY.jsonl` (por defecto, `duplicates_dir`) |
+| `mode` | `"move" \| "copy" \| "report_only"` | Mover (por defecto), copiar sin tocar el origen o solo contar |
+| `relative_to` | `Path \| None` | Si se indica, se replica la ruta **relativa** a esta carpeta (`duplicados/2024/a.pdf`) en lugar de la absoluta (`duplicados/mnt/origen/2024/a.pdf`); un documento que no cuelgue de ella queda en `failed_paths` (desde 0.12.1) |
 
 | Retorno | Tipo | Descripción |
 |---|---|---|
@@ -97,7 +115,8 @@ Mueve documentos descartados a carpeta de duplicados.
 
 **Proceso**:
 1. Para cada grupo, determina canónico (o usa `user_choice` si proporciona)
-2. Mueve documentos no-canónicos a `duplicates_dir`, preservando estructura original
+2. Mueve documentos no-canónicos a `duplicates_dir`, preservando estructura original (la ruta absoluta sin la
+   unidad/raíz o, con `relative_to`, la relativa a esa carpeta); un fallo por fichero va a `failed_paths`
 3. Escribe `DEDUP_REPORT.json` con auditoría completa (solo la última ejecución)
 4. Añade una línea a `DEDUP_HISTORY.jsonl` (histórico acumulado, nunca se sobrescribe)
 5. Retorna `DeduplicationReport` con resumen

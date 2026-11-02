@@ -546,6 +546,33 @@ async def test_scan_command_ocr_pending_then_processed_on_next_run(tmp_path) -> 
 
 @pytest.mark.slow
 @pytest.mark.asyncio
+async def test_scan_command_deduplicate_relative_to(tmp_path) -> None:
+    """L-11a: con `relative_to`, `duplicados/` replica la ruta relativa, no la absoluta."""
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    _make_native_pdf(input_dir / "original.pdf")
+    (input_dir / "copia.pdf").write_bytes((input_dir / "original.pdf").read_bytes())
+    duplicates_dir = tmp_path / "salida" / "duplicados"
+
+    summary = DeduplicationSummary()
+    async for event in ScanCommand().deduplicate_streaming(
+        paths=[str(input_dir)],
+        duplicates_dir=duplicates_dir,
+        folders_json=tmp_path / "salida" / "folders.json",
+        relative_to=tmp_path,
+    ):
+        if event.event is DedupEventType.COMPLETED:
+            summary = DeduplicationSummary(**event.data)
+
+    assert summary.moved == 1
+    moved = [p.relative_to(duplicates_dir).parts for p in duplicates_dir.rglob("*.pdf")]
+    assert len(moved) == 1
+    assert moved[0][0] == "input"
+    assert len(moved[0]) == 2
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
 async def test_scan_command_deduplicate_moves_exact_duplicate(tmp_path) -> None:
     base = tmp_path / "workspaces"
     base.mkdir()
@@ -894,9 +921,7 @@ def test_main_deduplicate_end_to_end(tmp_path, capsys) -> None:
 
 def test_main_web_starts_on_non_loopback_without_any_provisioned_user(tmp_path, monkeypatch) -> None:
     calls: list[dict] = []
-    monkeypatch.setattr(
-        "uvicorn.run", lambda app, host, port, **kwargs: calls.append({"app": app, "host": host, "port": port, **kwargs})
-    )
+    monkeypatch.setattr("uvicorn.run", lambda app, host, port, **kwargs: calls.append({"app": app, "host": host, "port": port, **kwargs}))
 
     exit_code = main(
         [
@@ -920,9 +945,7 @@ def test_main_web_starts_on_non_loopback_without_any_provisioned_user(tmp_path, 
 
 def test_main_web_starts_on_loopback(tmp_path, monkeypatch) -> None:
     calls: list[dict] = []
-    monkeypatch.setattr(
-        "uvicorn.run", lambda app, host, port, **kwargs: calls.append({"app": app, "host": host, "port": port, **kwargs})
-    )
+    monkeypatch.setattr("uvicorn.run", lambda app, host, port, **kwargs: calls.append({"app": app, "host": host, "port": port, **kwargs}))
 
     exit_code = main(["web", "--registry-path", str(tmp_path / "p.json"), "--auth-db-path", str(tmp_path / "auth.db")])
 
@@ -937,9 +960,7 @@ def test_main_web_disables_ws_ping_timeout(tmp_path, monkeypatch) -> None:
     que entonces cierra la conexión de forma prematura ("Cliente desconectado
     durante el escaneo" en pleno progreso, sin que el cliente se haya ido)."""
     calls: list[dict] = []
-    monkeypatch.setattr(
-        "uvicorn.run", lambda app, host, port, **kwargs: calls.append({"app": app, "host": host, "port": port, **kwargs})
-    )
+    monkeypatch.setattr("uvicorn.run", lambda app, host, port, **kwargs: calls.append({"app": app, "host": host, "port": port, **kwargs}))
 
     exit_code = main(["web", "--registry-path", str(tmp_path / "p.json"), "--auth-db-path", str(tmp_path / "auth.db")])
 

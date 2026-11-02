@@ -6,6 +6,43 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-11-02
+
+Ruta relativa en `duplicados/` para doc_organize_web (tarea L-11a de su plan; cierra el hueco G24). Aditivo y
+compatible: sin el parámetro nuevo nada cambia.
+
+### Added
+
+- **L-11a (G24)**: parámetro opcional `relative_to` en `DeduplicationManager.resolve_duplicates`, `move_group` y
+  `_move_to_duplicates`, y en `ScanCommand.deduplicate_streaming`. Si se indica, cada descartado se lleva a
+  `duplicates_dir / <ruta relativa a relative_to>` (`duplicados/2024/a.pdf`) en lugar de replicar su ruta absoluta
+  (`duplicados/mnt/origen/2024/a.pdf`), que revelaba rutas del servidor. Un documento que no cuelgue de
+  `relative_to` (comparando rutas resueltas) es un fallo por fichero (`OSError` → `failed_paths`), nunca se escribe
+  fuera de `duplicates_dir`. Se mantiene todo lo demás: nunca se sobrescribe (sufijo de hash; colisión doble =
+  fallo por fichero), `copy` y `report_only`.
+- `resolve_duplicates`/`deduplicate_streaming` solo pasan `mode`/`relative_to` a `move_group` (y este a
+  `_move_to_duplicates`) cuando no tienen el valor por defecto: quien sustituya esos métodos con la firma anterior
+  sigue funcionando.
+
+### Firmas finales (para doc_organize_web)
+
+```python
+# doc_organize.DeduplicationManager
+async def resolve_duplicates(self, groups: list[DuplicateGroup], duplicates_dir: Path,
+                             started_at: datetime | None = None, *, report_dir: Path | None = None,
+                             mode: DedupMode = "move", relative_to: Path | None = None) -> DeduplicationReport
+async def move_group(self, group: DuplicateGroup, duplicates_dir: Path, *, mode: DedupMode = "move",
+                     relative_to: Path | None = None) -> tuple[int, int, list[str]]
+async def _move_to_duplicates(self, source: Path, duplicates_dir: Path, sha256_hash: str, *, copy: bool = False,
+                              relative_to: Path | None = None) -> None
+
+# doc_organize.ScanCommand
+def deduplicate_streaming(self, paths: list[str], duplicates_dir: Path, folders_json: Path, *,
+                          report_dir: Path | None = None, mode: DedupMode = "move",
+                          relative_to: Path | None = None, on_progress: ProgressCallback | None = None,
+                          cancel_token: CancelToken | None = None) -> AsyncIterator[DedupEvent]
+```
+
 ## [0.12.0] - 2026-11-02
 
 Robustez del escaneo y API de lectura para doc_organize_web (tareas L-10a…L-10e de su plan; cierra los huecos

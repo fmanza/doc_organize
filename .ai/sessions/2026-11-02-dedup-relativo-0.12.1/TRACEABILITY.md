@@ -1,0 +1,117 @@
+# TRACEABILITY: Resumen de Sesión
+
+## Sesión
+- **Fecha**: 2026-11-02
+- **Tipo**: `feature`
+- **Rama**: `feature/dedup-relativo-0.12.1` → PR a `develop` (squash)
+- **Estado**: ✅ COMPLETADA
+
+## Objetivo
+Tarea L-11a del plan de doc_organize_web (Fase 6, condición C1, hueco G24): que `duplicados/` pueda replicar la ruta
+**relativa** a una carpeta indicada en lugar de la ruta absoluta del servidor. Versión 0.12.1 (aditivo y compatible;
+la 0.13.0 queda reservada para L-10, deprecación de la web integrada). Plan del consumidor:
+`../doc_organize_web/.ai/sessions/2026-11-02-fase6/PLAN.md`.
+
+## PLAN
+
+- **Rutas afectadas**: `src/doc_organize/dedup/deduplication.py`, `src/doc_organize/scan/scan_command.py`,
+  `tests/unit/test_dedup_modes.py`, `tests/unit/test_main.py`, `docs/api/dedup.md`, `CHANGELOG.md`,
+  `COMPATIBILITY.md`, `pyproject.toml`.
+- **Componentes**: `DeduplicationManager._move_to_duplicates`, `move_group`, `resolve_duplicates`;
+  `ScanCommand.deduplicate_streaming`/`_dedup_pipeline`.
+- **Tipos**: `relative_to: Path | None = None` (*keyword-only*). Sin tipos nuevos.
+- **Riesgos**: escribir fuera de `duplicates_dir` (mitigado: `safe_path_join` sigue validando el destino y la ruta
+  relativa se obtiene con `Path.relative_to` sobre rutas resueltas, que nunca produce `..`); documentos fuera de
+  `relative_to` (fallo por fichero, no se recurre a la ruta absoluta); dobles de test que sustituyen `move_group` o
+  `_move_to_duplicates` con la firma anterior (los argumentos nuevos solo se pasan si no son el valor por defecto).
+
+## AUDIT_PLAN
+
+- **Funcional**: con varias raíces bajo un mismo `relative_to`, dos descartados pueden coincidir en ruta relativa: lo
+  cubre el sufijo de hash y, si también existe, la colisión doble es un fallo por fichero (sin sobrescribir).
+- **Técnico (LSP/ISP)**: contratos async sin cambios; parámetro opcional y *keyword-only*; llamada idéntica a la
+  anterior con los valores por defecto.
+- **Seguridad**: es el objetivo (no revelar rutas del servidor). Un enlace simbólico que resuelva fuera de
+  `relative_to` falla por fichero.
+- **Simplificaciones**: no se añade a la CLI (no lo pide el consumidor).
+- **Veredicto**: GO.
+
+## Cambios Ejecutados
+
+### ✅ 1. `relative_to` en la resolución de duplicados
+
+**Archivo(s)**: `src/doc_organize/dedup/deduplication.py`, `src/doc_organize/scan/scan_command.py`
+**Descripción**: `_move_to_duplicates` calcula las partes de la ruta relativas a `relative_to` (resuelto); si el
+origen no cuelga de esa carpeta lanza `OSError`, que `move_group` registra en `failed_paths`. `move_group`,
+`resolve_duplicates` y `deduplicate_streaming` propagan el parámetro.
+**Status**: ✅
+
+### ✅ 2. Tests
+
+**Archivo(s)**: `tests/unit/test_dedup_modes.py`, `tests/unit/test_main.py`
+**Descripción**: `move` y `copy` con `relative_to` (`duplicados/2024/a_copia.pdf`); sufijo de hash con
+`relative_to`; documento fuera de `relative_to` → `failed_paths` sin tocar el origen ni escribir nada; sin
+`relative_to` se replica la ruta absoluta como antes; `deduplicate_streaming(relative_to=)` de extremo a extremo.
+**Status**: ✅
+
+### ✅ 3. Documentación y versión
+
+**Archivo(s)**: `docs/api/dedup.md` (firmas actuales de `resolve_duplicates` y `move_group`), `CHANGELOG.md` (con
+firmas finales), `COMPATIBILITY.md`, `pyproject.toml` (0.12.1)
+**Status**: ✅
+
+---
+
+## Impacto
+
+### Código
+- **Cambios funcionales**: sí, solo si se pasa `relative_to`.
+
+### Compatibilidad
+- **BREAKING**: ninguno.
+- **NO BREAKING**: parámetro opcional nuevo en cuatro métodos.
+
+---
+
+## AUDIT_CODE
+
+| Área | Hallazgo | Resolución |
+|---|---|---|
+| Bugs | Origen igual a `relative_to` (ruta relativa vacía) | Se usa el nombre del fichero, igual que la rama absoluta |
+| Edge case | Documento fuera de `relative_to` | `OSError` → `failed_paths`; test |
+| Edge case | Colisión con `relative_to` | Sufijo de hash; test |
+| Performance | Un `resolve()` más por fichero movido | Despreciable frente al movimiento |
+| Seguridad | Escritura fuera de `duplicates_dir` | `safe_path_join` sin cambios + `relative_to` sin `..` |
+| Tipado | `mypy src` sin errores | — |
+| Deuda técnica | `safe_path_join` lanza `InvalidPathError` (no `OSError`), que `move_group` no aísla por fichero | Previo a esta tarea; inalcanzable con rutas resueltas. Sin cambios (política de no refactorizar) |
+
+## Verificación
+```
+python -m ruff format src tests     # 2 ficheros reformateados (los nuevos tests)
+python -m ruff check src tests      # All checks passed!
+python -m mypy src                  # Success: no issues found in 92 source files
+python -m pytest                    # 1005 passed, 3 skipped
+zensical build --strict             # sin errores
+```
+
+## VERSION
+
+- **Commit (squash)**: `feat: ruta relativa en duplicados/ (L-11a) y versión 0.12.1`
+- **Impacto en API pública**: aditivo (`relative_to` opcional, *keyword-only*).
+- **Rollback**: revertir el commit de squash en `develop` (sin migraciones ni cambios de formato).
+
+## Riesgos Residuales
+
+| Riesgo | Mitigación | Status |
+|--------|-----------|--------|
+| El consumidor pasa un `relative_to` que no contiene las raíces escaneadas | Cada fichero queda en `failed_paths` y en el informe; nada se mueve | Aceptado |
+
+## Directrices para Futuras IAs
+
+- **[dedup]**: con `relative_to`, `_move_to_duplicates` nunca recurre a la ruta absoluta; un origen fuera de esa
+  carpeta es `OSError` (fallo por fichero en `move_group`).
+- **[compatibilidad]**: los parámetros nuevos de `move_group`/`_move_to_duplicates` solo se pasan cuando no tienen el
+  valor por defecto, porque hay tests que sustituyen esos métodos con la firma anterior.
+
+## Veredicto
+CLOSED

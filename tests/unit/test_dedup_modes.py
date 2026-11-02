@@ -97,3 +97,72 @@ async def test_report_only_writes_nothing_but_the_report(tmp_path: Path, two_gro
     assert sorted(p.name for p in source.iterdir()) == before
     assert not layout.duplicates_dir.exists()
     assert layout.dedup_report.exists()
+
+
+# --- L-11a (G24): ruta relativa en duplicados/ ---
+
+
+@pytest.fixture
+def nested_group(tmp_path: Path) -> tuple[Path, list[DocumentMetadata]]:
+    source = tmp_path / "origen"
+    (source / "2024").mkdir(parents=True)
+    docs = [_doc(source / "2024" / "a.pdf", b"uno", 1.0), _doc(source / "2024" / "a_copia.pdf", b"uno", 2.0)]
+    return source, docs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["move", "copy"])
+async def test_relative_to_replicates_only_the_relative_path(tmp_path: Path, nested_group: tuple[Path, list[DocumentMetadata]], mode: str) -> None:
+    source, docs = nested_group
+    duplicates_dir = tmp_path / "duplicados"
+
+    report = await DeduplicationManager().resolve_duplicates(
+        DeduplicationManager().find_duplicates(docs),
+        duplicates_dir,
+        mode=mode,
+        relative_to=source,  # type: ignore[arg-type]
+    )
+
+    assert report.failed_paths == []
+    assert [p.relative_to(duplicates_dir).as_posix() for p in duplicates_dir.rglob("*.pdf")] == ["2024/a_copia.pdf"]
+    assert (source / "2024" / "a_copia.pdf").exists() is (mode == "copy")
+
+
+@pytest.mark.asyncio
+async def test_relative_to_keeps_hash_suffix_on_collision(tmp_path: Path, nested_group: tuple[Path, list[DocumentMetadata]]) -> None:
+    source, docs = nested_group
+    duplicates_dir = tmp_path / "duplicados"
+    (duplicates_dir / "2024").mkdir(parents=True)
+    (duplicates_dir / "2024" / "a_copia.pdf").write_bytes(b"previo")
+
+    report = await DeduplicationManager().resolve_duplicates(DeduplicationManager().find_duplicates(docs), duplicates_dir, relative_to=source)
+
+    assert report.failed_paths == []
+    assert (duplicates_dir / "2024" / "a_copia.pdf").read_bytes() == b"previo"
+    assert (duplicates_dir / "2024" / "a_copia_hash-uno.pdf").read_bytes() == b"uno"
+
+
+@pytest.mark.asyncio
+async def test_document_outside_relative_to_fails_per_file(tmp_path: Path, nested_group: tuple[Path, list[DocumentMetadata]]) -> None:
+    _, docs = nested_group
+    duplicates_dir = tmp_path / "duplicados"
+    other_root = tmp_path / "otra"
+    other_root.mkdir()
+
+    report = await DeduplicationManager().resolve_duplicates(DeduplicationManager().find_duplicates(docs), duplicates_dir, relative_to=other_root)
+
+    assert report.failed_paths == [docs[1].full_path]
+    assert report.total_exact_duplicates == 0
+    assert Path(docs[1].full_path).exists()
+    assert list(duplicates_dir.rglob("*.pdf")) == []
+
+
+@pytest.mark.asyncio
+async def test_without_relative_to_replicates_absolute_path(tmp_path: Path, nested_group: tuple[Path, list[DocumentMetadata]]) -> None:
+    _, docs = nested_group
+    duplicates_dir = tmp_path / "duplicados"
+
+    await DeduplicationManager().resolve_duplicates(DeduplicationManager().find_duplicates(docs), duplicates_dir)
+
+    expected = duplicates_dir.resolve().joinpath(*Path(docs[1].full_path).resolve().parts[1:])
+    assert [p.resolve() for p in duplicates_dir.rglob("*.pdf")] == [expected]
