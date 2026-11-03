@@ -4,7 +4,6 @@ Persistencia plana del contexto de organización documental de un proyecto.
 
 import asyncio
 import json
-import os
 import shutil
 
 from pathlib import Path
@@ -15,6 +14,7 @@ from pydantic import ValidationError
 from doc_organize.core.constants import CONTEXT_FILE_NAME, DOMAINS_FOLDER_NAME
 from doc_organize.core.exceptions import ContextError, ContextNotFoundError, DomainNotFoundError
 from doc_organize.core.models import Context, Domain, DomainDocument, Project
+from doc_organize.utils.atomic_write import write_text_atomic
 from doc_organize.utils.logging import get_logger
 
 _CONTEXT_FILE_NAME = CONTEXT_FILE_NAME
@@ -71,7 +71,9 @@ class ContextRegistry:
 
         Raises:
             ContextNotFoundError: Si el proyecto no tiene `context.json` todavía.
-            ContextError: Si `context.json` o algún `index.json` de dominio está corrupto.
+            ContextError: Si `context.json` o algún `index.json` de dominio está corrupto, o si
+                `output_folder_name` no es un nombre de carpeta válido ("..", una ruta absoluta, un nombre
+                reservado...; L-8f): nunca se devuelve un contexto que copiaría o borraría fuera de su sitio.
         """
         async with self._lock:
             return await self._load(project)
@@ -140,6 +142,8 @@ class ContextRegistry:
         try:
             return Context(**payload, domains=domains)
         except ValidationError as exc:
+            if any(error["loc"][:1] == ("output_folder_name",) for error in exc.errors()):
+                raise ContextError(f"El contexto del proyecto tiene un 'output_folder_name' inválido: {context_path}") from exc
             raise ContextError(f"El contexto del proyecto está corrupto: {context_path}") from exc
 
     async def _load_domain_documents(self, project: Project, slug: str) -> list[DomainDocument]:
@@ -246,9 +250,8 @@ class ContextRegistry:
 
     @staticmethod
     async def _write_text_atomic(path: Path, content: str) -> None:
-        tmp_path = path.with_suffix(".tmp")
-        await asyncio.to_thread(tmp_path.write_text, content, encoding="utf-8")
-        await asyncio.to_thread(os.replace, tmp_path, path)
+        # L-8e (G31): temporal con nombre aleatorio y creado en exclusiva, nunca `<fichero>.tmp` de nombre fijo.
+        await asyncio.to_thread(write_text_atomic, path, content)
 
 
 __all__ = ["ContextRegistry"]

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from doc_organize.ai import DomainClassificationClient, TaxonomyClassificationClient
 from doc_organize.context.context_registry import ContextRegistry
 from doc_organize.context.domain_classifier import DomainClassifier, MaterialTypeClassifier, read_conversion_json, resolve_title_and_type
+from doc_organize.context.reorganizer import assign_organized_paths
 from doc_organize.core.exceptions import (
     DomainClassificationAuthError,
     DomainClassificationConnectionError,
@@ -308,6 +309,7 @@ class ContextBuilder:
             created_at=now,
             updated_at=now,
         )
+        assign_organized_paths(context, project.root_path)  # L-8d: ruta final de cada documento, para el consumidor
         checkpoint(cancel_token)  # nunca se persiste un contexto a medias
         await self.registry.save_context(project, context)
         self.logger.info(f"Contexto construido para '{project.name}': {len(domains)} dominio(s), {len(unclassified)} documento(s) sin clasificar")

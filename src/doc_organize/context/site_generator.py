@@ -14,11 +14,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from doc_organize.context.reorganizer import Reorganizer, _remove_dir_or_link, resolve_document_slug_parts
+from doc_organize.context.reorganizer import Reorganizer, _remove_dir_or_link, resolve_organized_paths
 from doc_organize.core.constants import SITE_FOLDER_NAME
 from doc_organize.core.exceptions import InvalidPathError, SiteBuildError
 from doc_organize.core.models import Context, Domain, DomainDocument, Project
-from doc_organize.projects.layout import RESERVED_OUTPUT_FOLDER_NAMES, ProjectLayout, _folder_key
+from doc_organize.projects.layout import RESERVED_OUTPUT_FOLDER_NAMES, ProjectLayout, _folder_key, validate_output_folder_name
+from doc_organize.utils.atomic_write import write_text_atomic
 from doc_organize.utils.logging import get_logger
 from doc_organize.utils.path_utils import ensure_no_symlinks
 
@@ -117,15 +118,15 @@ class SiteGenerator:
         """
         layout = ProjectLayout.for_project(project)
         target_site_dir = await asyncio.to_thread(_resolve_site_dir, layout, site_dir, context.output_folder_name)
-        output_root = layout.output_root / context.output_folder_name
+        output_root = layout.output_root / validate_output_folder_name(context.output_folder_name)
         await asyncio.to_thread(Reorganizer.check_output_root, output_root)
         await asyncio.to_thread(output_root.mkdir, parents=True, exist_ok=True)
         index_path = output_root / _INDEX_MD_NAME
-        await asyncio.to_thread(_write_text_atomic, index_path, _render_index(context))
+        await asyncio.to_thread(write_text_atomic, index_path, _render_index(context))
 
         relative_site_dir = target_site_dir.relative_to(os.path.abspath(layout.output_root)).as_posix()
         config = self._build_config(project, context, relative_site_dir)
-        await asyncio.to_thread(_write_text_atomic, layout.site_config_file, _CONFIG_HEADER + _render_toml(config))
+        await asyncio.to_thread(write_text_atomic, layout.site_config_file, _CONFIG_HEADER + _render_toml(config))
         await asyncio.to_thread(layout.legacy_mkdocs_config_file.unlink, missing_ok=True)
 
         if build:
@@ -192,7 +193,7 @@ class SiteGenerator:
     def _build_config(self, project: Project, context: Context, site_dir: str) -> dict[str, Any]:
         nav: list[Any] = [{"Inicio": _INDEX_MD_NAME}]
         for domain in context.domains:
-            domain_nav = self._build_domain_nav(domain, context.taxonomy_manifest_used)
+            domain_nav = self._build_domain_nav(domain, context.taxonomy_manifest_used, project.root_path)
             if domain_nav:
                 nav.append({_label(domain.name): domain_nav})
         return {
@@ -205,13 +206,14 @@ class SiteGenerator:
             }
         }
 
-    def _build_domain_nav(self, domain: Domain, taxonomy_manifest_used: bool) -> list[Any]:
+    def _build_domain_nav(self, domain: Domain, taxonomy_manifest_used: bool, project_root: str) -> list[Any]:
         """Nav de un dominio: lista plana de documentos (modo sin manifiesto), o agrupada
         por `material_type` dentro del dominio cuando `taxonomy_manifest_used` — mismo
         criterio de profundidad `dominio > tipo de material > documentos` que la carpeta
-        física (`Reorganizer`, vía `resolve_document_slug_parts`)."""
+        física (`Reorganizer`): las dos usan `resolve_organized_paths` (L-8d), que desambigua colisiones de `stem`."""
+        paths = {id(document): path for document, path in zip(domain.documents, resolve_organized_paths(domain, project_root), strict=True)}
         if not taxonomy_manifest_used:
-            return [{_label(document.title): self._relative_doc_path(domain, document)} for document in domain.documents]
+            return [{_label(document.title): paths[id(document)]} for document in domain.documents]
 
         by_material_type: dict[str, list[DomainDocument]] = {}
         for document in domain.documents:
@@ -220,7 +222,7 @@ class SiteGenerator:
 
         nav: list[Any] = []
         for material_type, docs in by_material_type.items():
-            entries = [{_label(document.title): self._relative_doc_path(domain, document)} for document in docs]
+            entries = [{_label(document.title): paths[id(document)]} for document in docs]
             # `material_type_name` (nombre legible del manifiesto) es el mismo para todos los
             # documentos de este grupo -- comparten `material_type`, luego la misma entrada del
             # catálogo `TaxonomyManifest.material_types`. `None` para el placeholder "sin-clasificar"
@@ -228,14 +230,6 @@ class SiteGenerator:
             label = docs[0].material_type_name or material_type.replace("-", " ").title()
             nav.append({_label(label): entries})
         return nav
-
-    @staticmethod
-    def _relative_doc_path(domain: Domain, document: DomainDocument) -> str:
-        # Con "/" literales, nunca `Path` (en Windows uniría con "\\", rompiendo
-        # el `nav`) — misma fórmula que usa `Reorganizer` para el destino real
-        # en disco, via `resolve_document_slug_parts` compartida.
-        document_type, stem = resolve_document_slug_parts(document)
-        return f"{domain.slug}/{document_type}/{stem}/{stem}.md"
 
 
 def _resolve_site_dir(layout: ProjectLayout, site_dir: Path | None, output_folder_name: str | None) -> Path:
@@ -262,12 +256,6 @@ def _resolve_site_dir(layout: ProjectLayout, site_dir: Path | None, output_folde
     except OSError as exc:
         raise InvalidPathError(f"site_dir '{candidate}' no puede ser ni pasar por un enlace simbólico.") from exc
     return candidate
-
-
-def _write_text_atomic(path: Path, content: str) -> None:
-    tmp_path = path.with_name(f"{path.name}.tmp")
-    tmp_path.write_text(content, encoding="utf-8")
-    os.replace(tmp_path, path)
 
 
 def _render_index(context: Context) -> str:

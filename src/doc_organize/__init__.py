@@ -34,6 +34,7 @@ _EXPORTS: dict[str, str] = {
     "ContextBuilder": "doc_organize.context.context_builder",
     "ContextRegistry": "doc_organize.context.context_registry",
     "Reorganizer": "doc_organize.context.reorganizer",
+    "resolve_organized_paths": "doc_organize.context.reorganizer",  # L-8d
     "MkDocsGenerator": "doc_organize.context.mkdocs_generator",
     "SiteGenerator": "doc_organize.context.site_generator",
     "SiteResult": "doc_organize.context.site_generator",
@@ -135,7 +136,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
     from doc_organize.context.context_builder import ContextBuilder
     from doc_organize.context.context_registry import ContextRegistry
     from doc_organize.context.mkdocs_generator import MkDocsGenerator
-    from doc_organize.context.reorganizer import Reorganizer
+    from doc_organize.context.reorganizer import Reorganizer, resolve_organized_paths
     from doc_organize.context.site_generator import SiteGenerator, SiteResult
     from doc_organize.context.taxonomy_template_registry import TaxonomyTemplateRegistry
     from doc_organize.context.taxonomy_templates import (

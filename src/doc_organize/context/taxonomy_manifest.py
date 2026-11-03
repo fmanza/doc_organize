@@ -3,7 +3,6 @@ Manifiesto de taxonomía documental por proyecto: dominios + tipos de material d
 """
 
 import asyncio
-import os
 
 from pathlib import Path
 
@@ -14,6 +13,7 @@ from pydantic import ValidationError
 from doc_organize.core.constants import TAXONOMY_MANIFEST_FILE_NAME
 from doc_organize.core.exceptions import TaxonomyManifestError
 from doc_organize.core.models import Project, TaxonomyManifest
+from doc_organize.utils.atomic_write import write_text_atomic
 from doc_organize.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -78,9 +78,7 @@ async def save_taxonomy_manifest(project: Project, raw_markdown: str) -> Taxonom
     `_parse_front_matter` que usa `load_taxonomy_manifest()`, para no dejar nunca en disco un
     fichero que la propia app no podría releer.
 
-    Escritura atómica (fichero temporal + `os.replace`, mismo patrón que
-    `ContextRegistry._write_text_atomic`, duplicado aquí -- política "prohibido
-    refactorizar"): una construcción de contexto concurrente que esté leyendo el fichero
+    Escritura atómica (`utils.atomic_write.write_text_atomic`, L-8e): una construcción de contexto concurrente que esté leyendo el fichero
     (`_load_taxonomy_manifest_or_400`) nunca ve un `taxonomy_manifest.md` a medio escribir.
 
     Args:
@@ -102,9 +100,8 @@ async def save_taxonomy_manifest(project: Project, raw_markdown: str) -> Taxonom
     front_matter = _extract_front_matter(raw_markdown, manifest_path)
     manifest = _parse_front_matter(front_matter, manifest_path)
 
-    tmp_path = manifest_path.with_suffix(".tmp")
-    await asyncio.to_thread(tmp_path.write_text, raw_markdown, encoding="utf-8")
-    await asyncio.to_thread(os.replace, tmp_path, manifest_path)
+    # L-8e (G31): temporal con nombre aleatorio y creado en exclusiva, nunca `taxonomy_manifest.tmp` de nombre fijo.
+    await asyncio.to_thread(write_text_atomic, manifest_path, raw_markdown)
     logger.info(
         f"Manifiesto de taxonomía guardado en '{manifest_path}': {len(manifest.domains)} dominio(s), {len(manifest.material_types)} tipo(s) de material"
     )

@@ -9,7 +9,8 @@ releases publicados antes de esa versión).
 ## [0.14.0] - 2026-11-03
 
 Sub-fase B de `ContextBuilder` y clientes de `doc_organize.ai` seguros para consumidores multiusuario (peticiones de
-la Fase 8 de doc_organize_web, tareas L-3a…L-3e; cierra los huecos G33–G36). Aditivo y compatible: sin los
+la Fase 8 de doc_organize_web, tareas L-3a…L-3e; cierra los huecos G33–G36) e integridad del contexto (L-8d…L-8f;
+cierra G30–G32). Aditivo y compatible: sin los
 parámetros nuevos, todo se comporta igual que en 0.13.0 salvo lo indicado en «Changed» y «Security».
 
 ### Added
@@ -25,6 +26,9 @@ parámetros nuevos, todo se comporta igual que en 0.13.0 salvo lo indicado en «
 - **L-3c (G35)**: recuentos de la Sub-fase B en `Context`: `ai_documents_sent`, `ai_documents_classified` y
   `ai_documents_failed` (por defecto `0`), con `sent = classified + failed + enviados sin asignación`. Un
   `context.json` antiguo se sigue leyendo.
+- **L-8d (G30)**: `resolve_organized_paths(domain, project_root)` (exportada en `doc_organize`), con la ruta del `.md`
+  copiado de cada documento relativa a la carpeta reorganizada, y `DomainDocument.organized_path`, que rellenan
+  `ContextBuilder.build()` y `Reorganizer.reorganize()` (solo informativo: nunca se usa el valor leído de disco).
 - **L-3d (G36)**: `select_document_sample(roots=)`: la carpeta de cada documento de la muestra es relativa a la raíz
   escaneada que lo contiene y nunca muestra nombres por encima de ella (mismo criterio que
   `json_source_path="relative"`, G23).
@@ -35,6 +39,13 @@ parámetros nuevos, todo se comporta igual que en 0.13.0 salvo lo indicado en «
   rechazada se hace exactamente 1 petición en toda la construcción). Antes se intentaba cada documento pendiente y
   cada uno fallaba igual. Los documentos pendientes de una Sub-fase B detenida no se leen ni se envían, pero siguen
   emitiendo su evento de progreso, y el contexto se construye y persiste igualmente.
+- **L-8d (G30)**: dos documentos del mismo dominio y tipo con el mismo `stem` sin distinguir mayúsculas (en SMB «Acta» y
+  «acta» son la misma carpeta) ya no comparten carpeta: todos van a `<stem>-<8 hex>/` (SHA-256 del `.md` relativo a la
+  raíz del proyecto; determinista). Antes el último sobrescribía a los demás. Sin colisiones, las rutas no cambian.
+- **L-8f (G32)**: `Context` valida `output_folder_name` con `validate_output_folder_name`. `Context(...)` con un nombre
+  no válido da `ValidationError`, y `ContextRegistry.load_context` rechaza con `ContextError` un `context.json` con
+  `..`, una ruta absoluta o un nombre reservado (p. ej. `Conversión`) en vez de usarlo para copiar y borrar.
+  `Reorganizer.reorganize`/`delete_output` y `SiteGenerator.generate` lo vuelven a validar (`InvalidPathError`).
 - CI: `ruff` admite hasta la 0.17 (`<0.18`, antes `<0.16`). Corregidos los 14 avisos de las reglas que activa por
   defecto (deuda de la 0.9.3): `__all__` ordenados, `noqa` sin uso, variables desempaquetadas sin usar en tests,
   `with`/`if` anidados unidos en `web/routes/context.py` y `web/routes/duplicates.py`, `ClassVar` en
@@ -48,6 +59,10 @@ parámetros nuevos, todo se comporta igual que en 0.13.0 salvo lo indicado en «
   envía `key=` (LiteLLM consulta entonces la clave del header; verificado en `info_key_fn`:
   `key = key or user_api_key_dict.api_key`). Con otra clave se sigue enviando, con el riesgo documentado (mejor pasar
   su hash SHA-256, que LiteLLM acepta). Los avisos de reintento no llevan la URL.
+- **L-8e (G31)**: `context.json`, `index.json`, `DOMAIN.md`, `index.md`, `zensical.toml` y `taxonomy_manifest.md` se
+  escriben en un temporal con nombre aleatorio creado en exclusiva (`tempfile.mkstemp`: `O_CREAT | O_EXCL` y
+  `O_NOFOLLOW` donde existe) y luego `os.replace`, nunca con `write_text` sobre un `<fichero>.tmp` de nombre fijo: un
+  enlace puesto con ese nombre desde el recurso de red ya no desvía la escritura. El fichero conserva sus permisos.
 
 ## [0.13.0] - 2026-11-02
 
