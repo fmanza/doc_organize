@@ -183,7 +183,7 @@ def _auth_store(args: argparse.Namespace) -> "AuthStore":
     # Import diferido (L-10): solo `tenant`/`user` cargan `doc_organize.auth`; su aviso ya salió por stderr en `main()`.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        from doc_organize.auth import AuthStore  # noqa: PLC0415
+        from doc_organize.auth import AuthStore
 
     auth_db_path = getattr(args, "auth_db_path", None)
     return AuthStore(auth_db_path) if auth_db_path else AuthStore()
