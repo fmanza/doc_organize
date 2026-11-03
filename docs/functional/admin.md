@@ -1,5 +1,10 @@
 # Panel de Administración (`/admin`)
 
+> **Obsoleto desde 0.14.0 (L-10)**: la interfaz web integrada (`doc_organize.web`, `doc_organize.auth` y los
+> subcomandos `web`, `tenant` y `user` del CLI) está congelada (solo hotfix) y se retira en 1.0.0. Usa
+> [doc_organize_web](https://github.com/fmanza/doc_organize_web). La librería y el CLI de `scan`, `project`,
+> `deduplicate` y `export` no cambian.
+
 Documento único y autocontenido sobre el panel `/admin`: qué es, quién puede
 usarlo, cómo se accede, y el detalle de sus 5 páginas (Roles, Usuarios,
 Tenants y usuarios, Configuración de IA, Plantillas de taxonomía). Incluye

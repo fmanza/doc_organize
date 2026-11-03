@@ -6,10 +6,12 @@ import argparse
 import asyncio
 import getpass
 import sys
+import warnings
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from doc_organize.auth import AuthStore
+from doc_organize._deprecations import web_deprecation_message
 from doc_organize.core.exceptions import DocOrganizeError, InvalidPathError
 from doc_organize.core.models import DedupEventType
 from doc_organize.export import (
@@ -25,7 +27,15 @@ from doc_organize.scan import DeduplicationSummary, ScanCommand, ScanSummary
 from doc_organize.utils.av_detector import detect_av_status
 from doc_organize.utils.logging import configure_logging, get_logger
 
+if TYPE_CHECKING:
+    from doc_organize.auth import AuthStore
+
 logger = get_logger(__name__)
+
+_DEPRECATED_COMMANDS = frozenset({"web", "tenant", "user"})
+"""Subcomandos de la web integrada, obsoletos desde 0.14.0 (L-10); se retiran en 1.0.0. `doc_organize.auth` se importa
+solo dentro de ellos: los comandos de librería (`scan`, `project`, `deduplicate`, `export`) no avisan."""
+_OBSOLETE = "[obsoleto] "
 
 __all__ = ["DeduplicationSummary", "ScanCommand", "ScanSummary", "build_parser", "main"]
 
@@ -93,24 +103,42 @@ def build_parser() -> argparse.ArgumentParser:
         help="Ruta alternativa a la biblioteca de plantillas de taxonomía (por defecto ~/.doc_organize/taxonomy_templates)",
     )
 
-    web_parser = subparsers.add_parser("web", help="Arrancar la interfaz web (REQ-007)", parents=[registry_flag, auth_db_flag, templates_flag])
+    web_parser = subparsers.add_parser(
+        "web",
+        help=f"{_OBSOLETE}Arrancar la interfaz web (REQ-007)",
+        description=f"{_OBSOLETE}Arrancar la interfaz web (REQ-007). {web_deprecation_message("El subcomando 'web'")}",
+        parents=[registry_flag, auth_db_flag, templates_flag],
+    )
     web_parser.add_argument("--host", default="127.0.0.1", help="Host de bind (por defecto 127.0.0.1)")
     web_parser.add_argument("--port", type=int, default=8000, help="Puerto de bind (por defecto 8000)")
 
-    tenant_parser = subparsers.add_parser("tenant", help="Gestión de tenants (revisión 8, §2.7.2)")
+    tenant_parser = subparsers.add_parser(
+        "tenant",
+        help=f"{_OBSOLETE}Gestión de tenants (revisión 8, §2.7.2)",
+        description=f"{_OBSOLETE}Gestión de tenants. {web_deprecation_message("El subcomando 'tenant'")}",
+    )
     tenant_subparsers = tenant_parser.add_subparsers(dest="tenant_command", required=True)
-    tenant_create_parser = tenant_subparsers.add_parser("create", help="Crear un tenant nuevo", parents=[auth_db_flag])
+    tenant_create_parser = tenant_subparsers.add_parser(
+        "create", help=f"{_OBSOLETE}Crear un tenant nuevo", description=f"{_OBSOLETE}Crear un tenant nuevo.", parents=[auth_db_flag]
+    )
     tenant_create_parser.add_argument("name", help="Nombre legible del tenant (el id se deriva como slug)")
 
-    user_parser = subparsers.add_parser("user", help="Gestión de usuarios (revisión 8, §2.7.2)")
+    user_parser = subparsers.add_parser(
+        "user",
+        help=f"{_OBSOLETE}Gestión de usuarios (revisión 8, §2.7.2)",
+        description=f"{_OBSOLETE}Gestión de usuarios. {web_deprecation_message("El subcomando 'user'")}",
+    )
     user_subparsers = user_parser.add_subparsers(dest="user_command", required=True)
-    user_create_parser = user_subparsers.add_parser("create", help="Crear un usuario nuevo", parents=[auth_db_flag])
+    user_create_parser = user_subparsers.add_parser(
+        "create", help=f"{_OBSOLETE}Crear un usuario nuevo", description=f"{_OBSOLETE}Crear un usuario nuevo.", parents=[auth_db_flag]
+    )
     user_create_parser.add_argument("--tenant", required=True, help="Id del tenant al que pertenece")
     user_create_parser.add_argument("username", help="Nombre de usuario, único dentro del tenant")
 
     set_instance_admin_parser = user_subparsers.add_parser(
         "set-instance-admin",
-        help="Conceder o retirar is_instance_admin a un usuario existente (rediseño Tenant/Role/User)",
+        help=f"{_OBSOLETE}Conceder o retirar is_instance_admin a un usuario existente (rediseño Tenant/Role/User)",
+        description=f"{_OBSOLETE}Conceder o retirar is_instance_admin a un usuario existente.",
         parents=[auth_db_flag],
     )
     set_instance_admin_parser.add_argument("--tenant", required=True, help="Id del tenant al que pertenece el usuario")
@@ -151,7 +179,12 @@ def _registry(args: argparse.Namespace) -> ProjectRegistry:
     return ProjectRegistry(registry_path) if registry_path else ProjectRegistry()
 
 
-def _auth_store(args: argparse.Namespace) -> AuthStore:
+def _auth_store(args: argparse.Namespace) -> "AuthStore":
+    # Import diferido (L-10): solo `tenant`/`user` cargan `doc_organize.auth`; su aviso ya salió por stderr en `main()`.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        from doc_organize.auth import AuthStore
+
     auth_db_path = getattr(args, "auth_db_path", None)
     return AuthStore(auth_db_path) if auth_db_path else AuthStore()
 
@@ -382,7 +415,10 @@ def _run_web(args: argparse.Namespace) -> int:
     try:
         import uvicorn
 
-        from doc_organize.web import create_app
+        # El aviso de obsolescencia ya salió por stderr en `main()` (L-10): no se repite al importar.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            from doc_organize.web import create_app
     except ImportError as exc:
         raise DocOrganizeError("La interfaz web requiere el extra [web]: instala con `pip install doc_organize[web]`.") from exc
 
@@ -415,6 +451,9 @@ def main(argv: list[str] | None = None) -> int:
     configure_logging()
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command in _DEPRECATED_COMMANDS:
+        # Por stderr, nunca por stdout (no rompe scripts que lean la salida), y una vez por ejecución (L-10).
+        print(f"Aviso: {web_deprecation_message(f"El subcomando '{args.command}'")}", file=sys.stderr)
 
     try:
         if args.command == "project" and args.project_command == "create":

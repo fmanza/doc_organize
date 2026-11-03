@@ -10,8 +10,8 @@ releases publicados antes de esa versión).
 
 Sub-fase B de `ContextBuilder` y clientes de `doc_organize.ai` seguros para consumidores multiusuario (peticiones de
 la Fase 8 de doc_organize_web, tareas L-3a…L-3e; cierra los huecos G33–G36) e integridad del contexto (L-8d…L-8f;
-cierra G30–G32). Aditivo y compatible: sin los
-parámetros nuevos, todo se comporta igual que en 0.13.0 salvo lo indicado en «Changed» y «Security».
+cierra G30–G32), y deprecación de la web integrada (L-10). Aditivo y compatible: sin los
+parámetros nuevos, todo se comporta igual que en 0.13.0 salvo lo indicado en «Changed», «Deprecated» y «Security».
 
 ### Added
 
@@ -52,6 +52,20 @@ parámetros nuevos, todo se comporta igual que en 0.13.0 salvo lo indicado en «
   `_ProgressTracker._PHASES`, variable de bucle que ocultaba el parámetro `conversion_status` en
   `CacheManager.load_cache_page` y `noqa: PLE0604` justificado en `doc_organize.__all__`. Sin cambios funcionales.
 
+### Deprecated
+
+- **L-10**: la web integrada, porque doc_organize_web 0.9.0 cubre la paridad funcional (salvo roles y tenants, su
+  Fase 9, que la web integrada sigue cubriendo hasta entonces). Se retira en 1.0.0 (L-11); hasta entonces sigue
+  congelada (solo hotfix) y funciona igual:
+  - `import doc_organize.web` y `import doc_organize.auth` (también sus submódulos) emiten `DeprecationWarning`,
+    atribuido a la línea que importa (no a doc_organize ni a la maquinaria de import).
+  - Los subcomandos `web`, `tenant` y `user` del CLI escriben el aviso una vez por stderr (nunca por stdout) con el
+    enlace a https://github.com/fmanza/doc_organize_web; su ayuda lleva «[obsoleto]». Mismo código de salida.
+  - `doc_organize.main` ya no importa `doc_organize.auth` al cargarse: `scan`, `project`, `deduplicate` y `export` no
+    avisan ni cargan la web.
+  - Se quedan en la librería `core/`, `utils/`, `validators/`, `scanner/`, `converter/`, `dedup/`, `cache/`, `scan/`,
+    `context/`, `ai/`, `projects/`, `export/` y el CLI de librería.
+
 ### Security
 
 - **L-3e**: `LiteLLMUsageClient.get_usage()` ya no pone la virtual key propia en la query (`/key/info?key=...`):
@@ -63,6 +77,73 @@ parámetros nuevos, todo se comporta igual que en 0.13.0 salvo lo indicado en «
   escriben en un temporal con nombre aleatorio creado en exclusiva (`tempfile.mkstemp`: `O_CREAT | O_EXCL` y
   `O_NOFOLLOW` donde existe) y luego `os.replace`, nunca con `write_text` sobre un `<fichero>.tmp` de nombre fijo: un
   enlace puesto con ese nombre desde el recurso de red ya no desvía la escritura. El fichero conserva sus permisos.
+
+### Firmas finales
+
+Todo lo nuevo o cambiado en la API pública de 0.14.0, tal como queda en el tag `v0.14.0` (verificado con
+`inspect.signature` y `model_fields`). Los parámetros nuevos son *keyword-only* y con valor por defecto.
+
+```python
+# doc_organize.ContextBuilder (L-3a, L-3b)
+async def build(
+    self,
+    project: Project,
+    documents: list[ConversionResult],
+    candidate_domains: list[str] | None = None,
+    threshold: float = 0.5,
+    ai_classification_enabled: bool = False,
+    ai_classification_client: DomainClassificationClient | None = None,
+    output_folder_name: str = "organizado",
+    on_ai_progress: Callable[[int, int, str], Awaitable[None]] | None = None,
+    taxonomy_manifest: TaxonomyManifest | None = None,
+    taxonomy_classification_client: TaxonomyClassificationClient | None = None,
+    taxonomy_template_name: str | None = None,
+    *,
+    on_progress: ProgressCallback | None = None,
+    cancel_token: CancelToken | None = None,
+    ai_max_failures: int | None = None,   # nuevo; < 1 -> ValueError
+    ai_max_documents: int | None = None,  # nuevo; < 0 -> ValueError
+) -> Context
+
+# doc_organize.core.models (L-3a, L-3c)
+AiClassificationStopReason = Literal["auth", "connection", "budget"]
+
+class Context(BaseModel):
+    ...
+    output_folder_name: str = "organizado"  # ahora validado con validate_output_folder_name (L-8f)
+    ai_classification_stopped: AiClassificationStopReason | None = None
+    ai_documents_sent: int = 0        # ge=0
+    ai_documents_classified: int = 0  # ge=0
+    ai_documents_failed: int = 0      # ge=0
+
+class DomainDocument(BaseModel):
+    ...
+    organized_path: str | None = None  # L-8d: .md copiado, POSIX, relativo a la carpeta reorganizada
+
+# L-3b: en LiteLLMClassificationConfig, LiteLLMTaxonomyClassificationConfig, LiteLLMTaxonomyManifestDraftConfig,
+# LiteLLMUsageConfig y GitHubCopilotUsageConfig
+    retries: int = 0              # ge=0; solo timeout / error de transporte, nunca HTTP
+    retry_backoff_s: float = 0.5  # ge=0.0; espera retry_backoff_s * 2**n
+
+# doc_organize.context.select_document_sample (L-3d)
+async def select_document_sample(
+    documents: list[ConversionResult], sample_size: int, *, roots: Sequence[str] | None = None
+) -> list[SampledDocument]
+
+# doc_organize.ai.LiteLLMUsageClient (L-3e; firma sin cambios, comportamiento nuevo)
+async def get_usage(self, *, key: str | None = None) -> UsageSnapshot  # sin ?key= si key es None o la propia
+
+# doc_organize.resolve_organized_paths / doc_organize.context.resolve_organized_paths (L-8d)
+def resolve_organized_paths(domain: Domain, project_root: str | Path) -> list[str]
+```
+
+Sin cambios de firma, pero con comportamiento nuevo: `Reorganizer.reorganize`, `Reorganizer.delete_output` y
+`SiteGenerator.generate` (validan `output_folder_name`, `InvalidPathError`; rutas desde `resolve_organized_paths`),
+`ContextRegistry.load_context` (`ContextError` si `output_folder_name` no es válido) y `save_taxonomy_manifest`
+(escritura atómica sin seguir enlaces, L-8e).
+
+Obsoletos (L-10, se retiran en 1.0.0): `doc_organize.web`, `doc_organize.auth` y los subcomandos `web`, `tenant` y
+`user` del CLI.
 
 ## [0.13.0] - 2026-11-02
 
