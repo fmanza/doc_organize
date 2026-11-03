@@ -917,8 +917,9 @@ class Context(BaseModel):
     def _validate_output_folder_name(cls, value: str) -> str:
         """L-8f (G32): mismo criterio que `validate_output_folder_name`; un `context.json` manipulado ("..", una ruta
         absoluta, un nombre reservado) no se carga en vez de usarse para copiar y borrar."""
-        from doc_organize.core.exceptions import InvalidPathError  # noqa: PLC0415 - sin ciclo con projects.layout
-        from doc_organize.projects.layout import validate_output_folder_name  # noqa: PLC0415
+        # Importación diferida: `projects.layout` importa este módulo (evita el ciclo).
+        from doc_organize.core.exceptions import InvalidPathError
+        from doc_organize.projects.layout import validate_output_folder_name
 
         try:
             return validate_output_folder_name(value)
