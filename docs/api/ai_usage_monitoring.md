@@ -65,15 +65,21 @@ Context manager async para consultar el spend de un LiteLLM Proxy externo (`GET 
 
 | Parámetro | Tipo | Descripción |
 |---|---|---|
-| `key` | `str \| None` | Virtual key cuyo spend consultar. Por defecto, `config.virtual_key` |
+| `key` | `str \| None` | Virtual key (o su hash SHA-256) cuyo spend consultar. Por defecto, la del Bearer (`config.virtual_key`) |
 
 | Retorno | Tipo | Descripción |
 |---|---|---|
 | | `UsageSnapshot` | Snapshot con una única `UsageLineItem` (spend acumulado, `unit_type="usd"`) |
 
 **Operación**:
-- `GET {base_url}/key/info?key={key}`, `Authorization: Bearer {config.virtual_key}`
-- `Authorization` siempre usa `config.virtual_key` (la credencial esperada por LiteLLM en ese header); `key` solo cambia qué virtual key se consulta
+- Sin `key` (o con la misma clave del Bearer): `GET {base_url}/key/info`, `Authorization: Bearer {config.virtual_key}`.
+  Desde 0.14.0 (L-3e) **no** se envía `?key=`: LiteLLM consulta entonces la clave del header (`info_key_fn`:
+  `key = key or user_api_key_dict.api_key`), y la clave no aparece en la URL que `httpx` escribe en INFO
+  (`HTTP Request: GET ...`). Hasta 0.13.0 la clave propia iba en la query y acababa en los logs.
+- Con otra `key`: `GET {base_url}/key/info?key={key}`. Esa URL **sí** queda en los logs de `httpx` y en los de acceso
+  de cualquier proxy intermedio; pasa el hash SHA-256 de la clave (LiteLLM lo acepta) en vez de la clave en claro.
+  Consultar otra clave exige ser su dueño, de su equipo o administrador del proxy (si no, 403).
+- `Authorization` siempre usa `config.virtual_key` (la credencial esperada por LiteLLM en ese header)
 
 **Excepciones**:
 - `UsageSourceAuthError` — HTTP 401/403
@@ -121,8 +127,15 @@ Context manager async para consultar el consumo de premium requests de Copilot P
 
 | Config | Campos | Impacto si falta |
 |---|---|---|
-| `LiteLLMUsageConfig` | `base_url`, `virtual_key`, `timeout_s` | `ValidationError` de Pydantic al construir |
-| `GitHubCopilotUsageConfig` | `username`, `personal_access_token`, `timeout_s` | `ValidationError` de Pydantic al construir |
+| `LiteLLMUsageConfig` | `base_url`, `virtual_key`, `timeout_s`, `retries`, `retry_backoff_s` | `ValidationError` de Pydantic al construir |
+| `GitHubCopilotUsageConfig` | `username`, `personal_access_token`, `timeout_s`, `retries`, `retry_backoff_s` | `ValidationError` de Pydantic al construir |
+
+**Reintentos (0.14.0, L-3b)**: todas las `*Config` de `doc_organize.ai` tienen `retries` (`int >= 0`, por defecto `0`:
+sin reintentos, como hasta 0.13.0) y `retry_backoff_s` (`float >= 0`, por defecto `0.5`). Solo se reintenta un timeout
+o un error de red/transporte (`httpx.TransportError`), con espera `retry_backoff_s * 2**n` (0.5, 1, 2...); una respuesta
+HTTP no se reintenta nunca (ni 401/403, ni 429, ni 5xx). Al agotar los reintentos se lanza la misma
+`*ConnectionError` de siempre. Ojo: reintentar un `POST` de clasificación que hizo timeout puede cobrarse dos veces si
+el proxy sí lo recibió.
 
 Ninguna config lee variables de entorno en su constructor. Usa las factories:
 

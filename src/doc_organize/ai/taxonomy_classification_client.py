@@ -142,6 +142,8 @@ class TaxonomyClassificationClient(AiHttpClientBase):
             connection_error_cls=TaxonomyClassificationConnectionError,
             generic_error_cls=TaxonomyClassificationError,
             transport=transport,
+            retries=config.retries,
+            backoff_s=config.retry_backoff_s,
         )
 
     async def classify(

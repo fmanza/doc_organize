@@ -12,6 +12,7 @@ es mecánico y no pertenece aquí. Módulo privado (`_` inicial): no se re-expor
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from types import TracebackType
@@ -39,6 +40,8 @@ class AiHttpClientBase:
         connection_error_cls: type[Exception],
         generic_error_cls: type[Exception],
         transport: httpx.AsyncBaseTransport | None = None,
+        retries: int = 0,
+        backoff_s: float = 0.5,
     ) -> None:
         """Inicializa el cliente HTTP subyacente y el mapeo de excepciones de la subclase.
 
@@ -52,8 +55,18 @@ class AiHttpClientBase:
             transport: Transporte `httpx` alternativo (inyección para tests con
                 `httpx.MockTransport`, sin llamadas de red reales). `None` usa el transporte HTTP
                 real por defecto.
+            retries: Reintentos ante timeout o error de red/transporte (`httpx.TransportError`), nunca ante una
+                respuesta HTTP (ni 4xx ni 5xx). `0` (por defecto) no reintenta (L-3b).
+            backoff_s: Espera base entre reintentos, en segundos; se duplica en cada intento (`backoff_s * 2**n`).
+
+        Raises:
+            ValueError: Si `retries` o `backoff_s` son negativos.
         """
+        if retries < 0 or backoff_s < 0:
+            raise ValueError("retries y backoff_s no pueden ser negativos")
         self.logger = logger
+        self._retries = retries
+        self._backoff_s = backoff_s
         self._auth_error_cls = auth_error_cls
         self._connection_error_cls = connection_error_cls
         self._generic_error_cls = generic_error_cls
@@ -94,15 +107,29 @@ class AiHttpClientBase:
                 error. Puede usar el placeholder `{status_code}`.
             **kwargs: Argumentos adicionales de `httpx.AsyncClient.request` (`json`, `params`, `headers`...).
 
+        Un fallo de transporte (timeout incluido) se reintenta hasta `retries` veces con espera creciente; una
+        respuesta HTTP, sea cual sea su código, nunca se reintenta (L-3b).
+
         Returns:
             La respuesta HTTP, garantizada libre de error de transporte, 401/403 e `is_error`.
         """
-        try:
-            response = await self._client.request(method, url, **kwargs)
-        except httpx.TimeoutException as exc:
-            raise self._connection_error_cls(timeout_message) from exc
-        except httpx.HTTPError as exc:
-            raise self._connection_error_cls(connection_message) from exc
+        attempt = 0
+        while True:
+            try:
+                response = await self._client.request(method, url, **kwargs)
+                break
+            except httpx.TransportError as exc:
+                if attempt < self._retries:
+                    delay = self._backoff_s * (2**attempt)
+                    attempt += 1
+                    # Sin la URL: puede llevar parámetros sensibles; `type(exc)` basta para diagnosticar.
+                    self.logger.warning(f"{type(exc).__name__} en {method} {url}; reintento {attempt}/{self._retries} en {delay:g} s")
+                    await asyncio.sleep(delay)
+                    continue
+                message = timeout_message if isinstance(exc, httpx.TimeoutException) else connection_message
+                raise self._connection_error_cls(message) from exc
+            except httpx.HTTPError as exc:
+                raise self._connection_error_cls(connection_message) from exc
 
         if response.status_code in (401, 403):
             raise self._auth_error_cls(auth_message.format(status_code=response.status_code))

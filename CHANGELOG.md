@@ -6,13 +6,48 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-03
+
+Sub-fase B de `ContextBuilder` y clientes de `doc_organize.ai` seguros para consumidores multiusuario (peticiones de
+la Fase 8 de doc_organize_web, tareas L-3a…L-3e; cierra los huecos G33–G36). Aditivo y compatible: sin los
+parámetros nuevos, todo se comporta igual que en 0.13.0 salvo lo indicado en «Changed» y «Security».
+
+### Added
+
+- **L-3a (G33)**: `ContextBuilder.build(ai_max_failures=)`: detiene la Sub-fase B tras N errores de conexión
+  seguidos (una respuesta del servidor, aunque sea un 5xx, corta la racha). `Context.ai_classification_stopped`
+  (`"auth"`, `"connection"`, `"budget"` o `None`) y el alias de tipo `AiClassificationStopReason` en `core.models`.
+- **L-3b (G34)**: `retries` (por defecto `0`) y `retry_backoff_s` (por defecto `0.5`) en las cinco `*Config` de
+  `doc_organize.ai` y en `AiHttpClientBase`. Solo se reintenta un timeout o un error de transporte, con espera
+  creciente (`backoff · 2^n`); nunca una respuesta HTTP (ni 4xx ni 5xx).
+- **L-3b (G34)**: `ContextBuilder.build(ai_max_documents=)`, tope de documentos enviados a la IA por construcción; al
+  alcanzarlo con documentos pendientes, para con `"budget"`.
+- **L-3c (G35)**: recuentos de la Sub-fase B en `Context`: `ai_documents_sent`, `ai_documents_classified` y
+  `ai_documents_failed` (por defecto `0`), con `sent = classified + failed + enviados sin asignación`. Un
+  `context.json` antiguo se sigue leyendo.
+- **L-3d (G36)**: `select_document_sample(roots=)`: la carpeta de cada documento de la muestra es relativa a la raíz
+  escaneada que lo contiene y nunca muestra nombres por encima de ella (mismo criterio que
+  `json_source_path="relative"`, G23).
+
 ### Changed
 
+- **L-3a (G33)**: un error de autenticación (401/403) detiene la Sub-fase B en el acto, en los dos modos (con la clave
+  rechazada se hace exactamente 1 petición en toda la construcción). Antes se intentaba cada documento pendiente y
+  cada uno fallaba igual. Los documentos pendientes de una Sub-fase B detenida no se leen ni se envían, pero siguen
+  emitiendo su evento de progreso, y el contexto se construye y persiste igualmente.
 - CI: `ruff` admite hasta la 0.17 (`<0.18`, antes `<0.16`). Corregidos los 14 avisos de las reglas que activa por
   defecto (deuda de la 0.9.3): `__all__` ordenados, `noqa` sin uso, variables desempaquetadas sin usar en tests,
   `with`/`if` anidados unidos en `web/routes/context.py` y `web/routes/duplicates.py`, `ClassVar` en
   `_ProgressTracker._PHASES`, variable de bucle que ocultaba el parámetro `conversion_status` en
   `CacheManager.load_cache_page` y `noqa: PLE0604` justificado en `doc_organize.__all__`. Sin cambios funcionales.
+
+### Security
+
+- **L-3e**: `LiteLLMUsageClient.get_usage()` ya no pone la virtual key propia en la query (`/key/info?key=...`):
+  `httpx` escribe cada URL en INFO y la clave acababa en los logs. Sin `key`, o con la misma clave del Bearer, no se
+  envía `key=` (LiteLLM consulta entonces la clave del header; verificado en `info_key_fn`:
+  `key = key or user_api_key_dict.api_key`). Con otra clave se sigue enviando, con el riesgo documentado (mejor pasar
+  su hash SHA-256, que LiteLLM acepta). Los avisos de reintento no llevan la URL.
 
 ## [0.13.0] - 2026-11-02
 

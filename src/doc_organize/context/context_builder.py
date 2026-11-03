@@ -3,13 +3,30 @@ Orquestador de la construcción del contexto de organización documental de un p
 """
 
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from doc_organize.ai import DomainClassificationClient, TaxonomyClassificationClient
 from doc_organize.context.context_registry import ContextRegistry
 from doc_organize.context.domain_classifier import DomainClassifier, MaterialTypeClassifier, read_conversion_json, resolve_title_and_type
-from doc_organize.core.exceptions import DomainClassificationError, TaxonomyClassificationError
-from doc_organize.core.models import Context, ConversionResult, Domain, DomainDocument, DomainStatus, Project, TaxonomyManifest
+from doc_organize.core.exceptions import (
+    DomainClassificationAuthError,
+    DomainClassificationConnectionError,
+    DomainClassificationError,
+    TaxonomyClassificationAuthError,
+    TaxonomyClassificationConnectionError,
+    TaxonomyClassificationError,
+)
+from doc_organize.core.models import (
+    AiClassificationStopReason,
+    Context,
+    ConversionResult,
+    Domain,
+    DomainDocument,
+    DomainStatus,
+    Project,
+    TaxonomyManifest,
+)
 from doc_organize.core.progress import CancelToken, ProgressCallback, ProgressEvent, checkpoint
 from doc_organize.utils.logging import get_logger
 
@@ -23,6 +40,54 @@ reservado a documentos con artefactos incompletos, ver `_classify_with_manifest`
 tratarse como un slug de dominio/tipo más, `Reorganizer`/`SiteGenerator` no necesitan
 lógica especial: `"sin-clasificar".replace("-", " ").title()` ya da un nombre legible
 ("Sin Clasificar") igual que cualquier otro slug."""
+
+
+@dataclass
+class _AiRun:
+    """Estado de la Sub-fase B en una construcción (L-3a…L-3c): recuentos, racha de errores de conexión y parada.
+
+    Compartido por los dos modos (`_classify_with_ai` y `_classify_with_manifest_ai`). Un documento cuenta como
+    enviado al llamar a `client.classify()` una vez (los reintentos de transporte del cliente no cuentan aparte), así
+    que `sent == classified + failed + enviados sin asignación` siempre.
+    """
+
+    max_failures: int | None = None
+    max_documents: int | None = None
+    sent: int = 0
+    classified: int = 0
+    failed: int = 0
+    consecutive_connection_failures: int = 0
+    stopped: AiClassificationStopReason | None = None
+    stop_logged: bool = False
+
+    def may_send(self) -> bool:
+        """Reserva un envío si se puede; al agotar `max_documents` marca la parada `"budget"` y devuelve `False`."""
+        if self.stopped is not None:
+            return False
+        if self.max_documents is not None and self.sent >= self.max_documents:
+            self.stopped = "budget"
+            return False
+        self.sent += 1
+        return True
+
+    def record_result(self, *, assigned: bool) -> None:
+        """La llamada respondió: corta la racha de errores de conexión y cuenta si asignó algún eje."""
+        self.consecutive_connection_failures = 0
+        if assigned:
+            self.classified += 1
+
+    def record_failure(self, exc: Exception, auth_error_cls: type[Exception], connection_error_cls: type[Exception]) -> None:
+        """La llamada falló: `auth` para en el acto; `connection` para tras `max_failures` seguidos."""
+        self.failed += 1
+        if isinstance(exc, auth_error_cls):
+            self.stopped = "auth"
+        elif isinstance(exc, connection_error_cls):
+            self.consecutive_connection_failures += 1
+            if self.max_failures is not None and self.consecutive_connection_failures >= self.max_failures:
+                self.stopped = "connection"
+        else:
+            # El servidor respondió (5xx, respuesta mal formada...): no es un error de conexión.
+            self.consecutive_connection_failures = 0
 
 
 class ContextBuilder:
@@ -91,6 +156,8 @@ class ContextBuilder:
         *,
         on_progress: ProgressCallback | None = None,
         cancel_token: CancelToken | None = None,
+        ai_max_failures: int | None = None,
+        ai_max_documents: int | None = None,
     ) -> Context:
         """Clasifica `documents` y persiste el contexto de `project`.
 
@@ -143,14 +210,31 @@ class ContextBuilder:
                 documento de la Sub-fase B (L-2). Un fallo del callback se registra y no para la construcción.
             cancel_token: Si se cancela, la construcción para **entre documentos** de la Sub-fase B (o antes de
                 empezar) con `OperationCancelledError`, **sin** persistir un contexto a medias (L-2).
+            ai_max_failures: Si se da, la Sub-fase B se detiene tras este número de errores de conexión **seguidos**
+                (`Context.ai_classification_stopped = "connection"`, L-3a). `None` (por defecto): nunca para por eso.
+                Un error de autenticación (401/403) la detiene siempre en el acto (`"auth"`), con o sin este
+                parámetro: no se hace ni una petición más.
+            ai_max_documents: Tope de documentos enviados a la IA en esta construcción (L-3b). Al alcanzarlo con
+                documentos aún pendientes, la Sub-fase B se detiene (`"budget"`). `None` (por defecto): sin tope.
+
+            Al detenerse la Sub-fase B, los documentos pendientes no se leen ni se envían: quedan sin clasificar (o en
+            el placeholder `sin-clasificar`, en modo manifiesto), siguen emitiendo su evento de progreso (y el
+            `cancel_token` se sigue comprobando entre ellos), y la construcción termina y persiste el contexto con
+            normalidad. Los recuentos quedan en `Context.ai_documents_sent/_classified/_failed` (L-3c).
 
         Returns:
             El `Context` construido y ya persistido vía `self.registry`.
 
         Raises:
             OperationCancelledError: Se canceló con `cancel_token`.
+            ValueError: `ai_max_failures < 1` o `ai_max_documents < 0`.
         """
+        if ai_max_failures is not None and ai_max_failures < 1:
+            raise ValueError("ai_max_failures debe ser >= 1 (o None)")
+        if ai_max_documents is not None and ai_max_documents < 0:
+            raise ValueError("ai_max_documents debe ser >= 0 (o None)")
         checkpoint(cancel_token)
+        ai_run = _AiRun(max_failures=ai_max_failures, max_documents=ai_max_documents)
 
         async def _ai_progress(index: int, total: int, source_path: str) -> None:
             if on_ai_progress is not None:
@@ -174,7 +258,7 @@ class ContextBuilder:
             classified, unclassified = await self._classify_with_manifest(documents, taxonomy_manifest, threshold)
             if ai_classification_enabled and taxonomy_classification_client is not None:
                 classified = await self._classify_with_manifest_ai(
-                    taxonomy_classification_client, classified, taxonomy_manifest, on_progress=_ai_progress
+                    taxonomy_classification_client, classified, taxonomy_manifest, on_progress=_ai_progress, run=ai_run
                 )
         else:
             classifier = DomainClassifier(candidate_domains=candidate_domains, threshold=threshold)
@@ -182,7 +266,12 @@ class ContextBuilder:
 
             if ai_classification_enabled and ai_classification_client is not None and unclassified:
                 classified, unclassified = await self._classify_with_ai(
-                    ai_classification_client, classified, unclassified, classifier.candidate_domains, on_progress=_ai_progress
+                    ai_classification_client,
+                    classified,
+                    unclassified,
+                    classifier.candidate_domains,
+                    on_progress=_ai_progress,
+                    run=ai_run,
                 )
 
         has_predefined_catalog = bool(candidate_domains) or taxonomy_manifest is not None
@@ -212,6 +301,10 @@ class ContextBuilder:
             unclassified_documents=[document.source_path for document in unclassified],
             taxonomy_manifest_used=taxonomy_manifest is not None,
             taxonomy_template_name=taxonomy_template_name,
+            ai_classification_stopped=ai_run.stopped,
+            ai_documents_sent=ai_run.sent,
+            ai_documents_classified=ai_run.classified,
+            ai_documents_failed=ai_run.failed,
             created_at=now,
             updated_at=now,
         )
@@ -301,6 +394,7 @@ class ContextBuilder:
         classified: dict[str, list[DomainDocument]],
         manifest: TaxonomyManifest,
         on_progress: Callable[[int, int, str], Awaitable[None]] | None = None,
+        run: _AiRun | None = None,
     ) -> dict[str, list[DomainDocument]]:
         """Sub-fase B en modo manifiesto: para cada documento que `_classify_with_manifest` dejó
         con el placeholder `_UNCLASSIFIED_SLUG` en el eje de dominio y/o en el de tipo de
@@ -327,11 +421,14 @@ class ContextBuilder:
         if not pending:
             return classified
 
+        run = run if run is not None else _AiRun()
         total = len(pending)
         for index, (old_domain_slug, document) in enumerate(pending, start=1):
-            await self._try_classify_document_with_manifest_ai(
-                client, document, old_domain_slug, classified, domain_slugs, material_slugs, material_names
-            )
+            if run.stopped is None:
+                await self._try_classify_document_with_manifest_ai(
+                    client, document, old_domain_slug, classified, domain_slugs, material_slugs, material_names, run
+                )
+                self._log_stop(run, total - index)
             if on_progress is not None:
                 await on_progress(index, total, document.source_path)
 
@@ -348,6 +445,7 @@ class ContextBuilder:
         domain_slugs: list[str],
         material_slugs: list[str],
         material_names: dict[str, str],
+        run: _AiRun,
     ) -> None:
         """Resuelve un único `document` vía `client.classify()` y aplica el resultado a
         `classified` in-place — mueve el documento de bucket si el eje de dominio cambió,
@@ -358,12 +456,15 @@ class ContextBuilder:
         if chunks_result is None:
             return
         chunks_text, title = chunks_result
+        if not run.may_send():
+            return
 
         try:
             result = await client.classify(
                 chunks_text=chunks_text, title=title, candidate_domains=domain_slugs, candidate_material_types=material_slugs
             )
         except TaxonomyClassificationError as exc:
+            run.record_failure(exc, TaxonomyClassificationAuthError, TaxonomyClassificationConnectionError)
             self.logger.warning(f"Fallo la clasificación por IA (manifiesto) de '{document.source_path}': {exc} — sigue sin clasificar")
             return
 
@@ -379,6 +480,7 @@ class ContextBuilder:
             changed = True
         if changed:
             document.classified_by = "ai"
+        run.record_result(assigned=changed)
 
     async def _classify_with_ai(
         self,
@@ -387,6 +489,7 @@ class ContextBuilder:
         unclassified: list[ConversionResult],
         candidate_domains: list[str] | None,
         on_progress: Callable[[int, int, str], Awaitable[None]] | None = None,
+        run: _AiRun | None = None,
     ) -> tuple[dict[str, list[DomainDocument]], list[ConversionResult]]:
         """Sub-fase B: intenta clasificar por IA lo que la Sub-fase A dejó sin
         clasificar, eligiendo solo entre el catálogo ya confirmado (el predefinido,
@@ -396,10 +499,14 @@ class ContextBuilder:
         if not catalog:
             return classified, unclassified
 
+        run = run if run is not None else _AiRun()
         total = len(unclassified)
         still_unclassified: list[ConversionResult] = []
         for index, document in enumerate(unclassified, start=1):
-            assigned = await self._try_classify_document_with_ai(client, document, catalog)
+            assigned: tuple[str, DomainDocument] | None = None
+            if run.stopped is None:
+                assigned = await self._try_classify_document_with_ai(client, document, catalog, run)
+                self._log_stop(run, total - index)
             if assigned is None:
                 still_unclassified.append(document)
             else:
@@ -410,7 +517,7 @@ class ContextBuilder:
         return classified, still_unclassified
 
     async def _try_classify_document_with_ai(
-        self, client: DomainClassificationClient, document: ConversionResult, catalog: list[str]
+        self, client: DomainClassificationClient, document: ConversionResult, catalog: list[str], run: _AiRun
     ) -> tuple[str, DomainDocument] | None:
         if not document.success or not document.markdown_path or not document.json_path:
             return None
@@ -418,13 +525,17 @@ class ContextBuilder:
         if chunks_result is None:
             return None
         chunks_text, title = chunks_result
+        if not run.may_send():
+            return None
 
         try:
             result = await client.classify(chunks_text=chunks_text, title=title, candidate_domains=catalog)
         except DomainClassificationError as exc:
+            run.record_failure(exc, DomainClassificationAuthError, DomainClassificationConnectionError)
             self.logger.warning(f"Fallo la clasificación por IA de '{document.source_path}': {exc} — queda sin clasificar")
             return None
 
+        run.record_result(assigned=result.domain is not None)
         if result.domain is None:
             return None
 
@@ -438,6 +549,18 @@ class ContextBuilder:
             document_type=document_type,
             confidence=result.confidence,
             classified_by="ai",
+        )
+
+    def _log_stop(self, run: _AiRun, remaining: int) -> None:
+        """Avisa una sola vez, justo tras el documento que la provocó, de que la Sub-fase B se detuvo."""
+        if run.stopped is None or run.stop_logged:
+            return
+        run.stop_logged = True
+        if run.stopped == "budget":
+            remaining += 1  # el documento que topó con el presupuesto tampoco se envió
+        self.logger.warning(
+            f"Sub-fase B detenida ({run.stopped}) tras {run.sent} documento(s) enviado(s): "
+            f"{remaining} documento(s) pendiente(s) quedan sin clasificar"
         )
 
 

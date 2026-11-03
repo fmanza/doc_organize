@@ -513,6 +513,11 @@ class Project(BaseModel):
 
 _ISO_TIMESTAMP_DESC = "Timestamp ISO 8601 de creación"
 _HTTP_TIMEOUT_DESC = "Timeout de las peticiones HTTP, en segundos"
+_HTTP_RETRIES_DESC = (
+    "Reintentos ante timeout o error de red/transporte (nunca ante una respuesta HTTP, ni 4xx ni 5xx); 0 (por defecto) "
+    "no reintenta. Ojo: reintentar un POST que hizo timeout puede cobrarse dos veces si el proxy sí lo recibió (L-3b)"
+)
+_HTTP_RETRY_BACKOFF_DESC = "Espera base entre reintentos, en segundos: se duplica en cada intento (0.5, 1, 2...) (L-3b)"
 
 
 class Tenant(BaseModel):
@@ -746,6 +751,8 @@ class LiteLLMUsageConfig(BaseModel):
         ..., description="Virtual key del proxy: se usa como Bearer de autenticación y, por defecto, como key consultada en `get_usage()`"
     )
     timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
+    retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
+    retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
 
 
 class GitHubCopilotUsageConfig(BaseModel):
@@ -761,6 +768,8 @@ class GitHubCopilotUsageConfig(BaseModel):
         ..., description="PAT con permiso de lectura de facturación personal (scope exacto sin confirmar, ver AUDIT_PLAN)"
     )
     timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
+    retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
+    retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
 
 
 # ===== Modelos de contexto y dominios (organización documental, `doc_organize.context`) =====
@@ -806,6 +815,10 @@ class Domain(BaseModel):
     status: DomainStatus = Field(default=DomainStatus.DRAFT, description="Estado del dominio")
     predefined: bool = Field(default=False, description="Si el dominio fue predefinido por el usuario (catálogo) o descubierto automáticamente")
     documents: list[DomainDocument] = Field(default_factory=list, description="Documentos clasificados en este dominio")
+
+
+AiClassificationStopReason = Literal["auth", "connection", "budget"]
+"""Motivo por el que `ContextBuilder.build()` detuvo la Sub-fase B (`Context.ai_classification_stopped`, L-3a/L-3b)."""
 
 
 class Context(BaseModel):
@@ -866,6 +879,25 @@ class Context(BaseModel):
             "esta construcción, o `None` si se usó un `taxonomy_manifest.md` local, o ningún "
             "manifiesto — solo informativo (no afecta la reconstrucción, que exige repetir la "
             "elección en cada `POST`, igual que `candidate_domains`)"
+        ),
+    )
+    ai_classification_stopped: AiClassificationStopReason | None = Field(
+        default=None,
+        description=(
+            "Por qué se detuvo la Sub-fase B antes de terminar (L-3a/L-3b): `auth` (clave rechazada, 401/403), "
+            "`connection` (`ai_max_failures` errores de conexión seguidos) o `budget` (se alcanzó `ai_max_documents`); "
+            "`None` si terminó o no se ejecutó. Los documentos que no llegaron a enviarse quedan sin clasificar"
+        ),
+    )
+    ai_documents_sent: int = Field(default=0, ge=0, description="Documentos enviados a la IA en la Sub-fase B (una llamada por documento, L-3c)")
+    ai_documents_classified: int = Field(
+        default=0, ge=0, description="Documentos enviados a los que la IA asignó al menos un eje del catálogo (L-3c)"
+    )
+    ai_documents_failed: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Documentos enviados cuya llamada falló (auth, conexión u otro error, L-3c); `sent = classified + failed + enviados sin asignación`"
         ),
     )
     created_at: str = Field(..., description="Timestamp ISO 8601 de creación del contexto")
@@ -973,6 +1005,8 @@ class LiteLLMClassificationConfig(BaseModel):
     virtual_key: str = Field(..., description="Virtual key con permiso de `chat/completions` para clasificación")
     model: str = Field(default="claude-classifier", description="Alias de modelo configurado en el proxy para clasificar")
     timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
+    retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
+    retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
 
 
 class TaxonomyClassificationResult(BaseModel):
@@ -1004,6 +1038,8 @@ class LiteLLMTaxonomyClassificationConfig(BaseModel):
     virtual_key: str = Field(..., description="Virtual key con permiso de `chat/completions` para clasificación por manifiesto")
     model: str = Field(default="claude-classifier", description="Alias de modelo configurado en el proxy para clasificar por manifiesto")
     timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
+    retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
+    retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
 
 
 class TaxonomyManifestDraftResult(BaseModel):
@@ -1036,9 +1072,12 @@ class LiteLLMTaxonomyManifestDraftConfig(BaseModel):
         default=60.0,
         description="Timeout de las peticiones HTTP, en segundos (más alto que el resto: el prompt incluye varios documentos a la vez, no uno solo)",
     )
+    retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
+    retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
 
 
 __all__ = [
+    "AiClassificationStopReason",
     "AvStatus",
     "CacheConfig",
     "CacheEntry",

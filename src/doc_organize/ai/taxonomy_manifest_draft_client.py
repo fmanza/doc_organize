@@ -160,6 +160,8 @@ class TaxonomyManifestDraftClient(AiHttpClientBase):
             connection_error_cls=TaxonomyManifestDraftConnectionError,
             generic_error_cls=TaxonomyManifestDraftError,
             transport=transport,
+            retries=config.retries,
+            backoff_s=config.retry_backoff_s,
         )
 
     async def propose_manifest(self, *, documents: list[SampledDocument]) -> TaxonomyManifestDraftResult:
