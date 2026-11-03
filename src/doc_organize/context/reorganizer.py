@@ -3,14 +3,17 @@ Copia física de los documentos clasificados a la carpeta reorganizada del proye
 """
 
 import asyncio
+import hashlib
 import os
 import shutil
+import unicodedata
 
 from collections.abc import Awaitable, Callable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from doc_organize.core.exceptions import IncompleteConversionArtifactsError, InvalidPathError
-from doc_organize.core.models import Context, DomainDocument, Project
+from doc_organize.core.models import Context, Domain, DomainDocument, Project
+from doc_organize.projects.layout import validate_output_folder_name
 from doc_organize.utils.logging import get_logger
 from doc_organize.utils.path_utils import copy_file_nofollow, copy_tree_nofollow, ensure_no_symlinks, ensure_tree_has_no_symlinks
 
@@ -38,6 +41,74 @@ def resolve_document_slug_parts(document: DomainDocument) -> tuple[str, str]:
     return tipo, stem
 
 
+_SUFFIX_LENGTHS = (8, 16, 64)
+"""Hex del SHA-256 del sufijo de colisión (L-8d): 8 basta; los otros solo si aun así chocan."""
+
+
+def _collision_key(name: str) -> str:
+    """Igual criterio que una carpeta en SMB/Windows: NFC, sin mayúsculas y sin puntos ni espacios finales."""
+    return unicodedata.normalize("NFC", name.rstrip(" .")).casefold()
+
+
+def _relative_markdown_path(document: DomainDocument, project_root: str | Path) -> str:
+    """`.md` relativo a la raíz del proyecto (POSIX): replica la ruta de origen relativa y no depende del montaje."""
+    markdown = Path(os.path.abspath(document.markdown_path))
+    try:
+        return markdown.relative_to(os.path.abspath(project_root)).as_posix()
+    except ValueError:
+        return markdown.as_posix()
+
+
+def resolve_organized_paths(domain: Domain, project_root: str | Path) -> list[str]:
+    """Ruta POSIX del `.md` copiado de cada documento de `domain`, relativa a la carpeta reorganizada (L-8d, G30).
+
+    Una por documento, en el mismo orden que `domain.documents`: `<dominio>/<tipo>/<carpeta>/<stem>.md`. Sin
+    colisiones, `<carpeta>` es el `stem` del `.md`, igual que en 0.13.0. Si dos o más documentos del dominio comparten
+    `(tipo, stem)` sin distinguir mayúsculas (en SMB/Windows «Acta» y «acta» son la misma carpeta), **todos** ellos
+    llevan `<stem>-<8 hex>`, del SHA-256 de su `.md` relativo a `project_root`: determinista y sin depender del orden.
+    `img/<stem>/` y los nombres de fichero no cambian (el `.md` sigue resolviendo sus imágenes).
+
+    Única fuente de la ruta para `Reorganizer` (disco) y `SiteGenerator` (`nav`), que la recalculan siempre: nunca se
+    usa `DomainDocument.organized_path` leído de disco.
+
+    Example:
+        >>> from doc_organize.core.models import Domain, DomainDocument
+        >>> def doc(name):
+        ...     return DomainDocument(source_path=name, markdown_path=f"/p/Conversión/{name}.md", json_path="x.json",
+        ...                           title="t", document_type="pdf", confidence=1.0)
+        >>> domain = Domain(slug="calidad", name="Calidad", documents=[doc("a/Acta"), doc("b/acta"), doc("c/Informe")])
+        >>> [len(path.split("/")[2]) for path in resolve_organized_paths(domain, "/p")]
+        [13, 13, 7]
+    """
+    parts = [resolve_document_slug_parts(document) for document in domain.documents]
+    groups: dict[tuple[str, str], list[int]] = {}
+    for index, (tipo, stem) in enumerate(parts):
+        groups.setdefault((_collision_key(tipo), _collision_key(stem)), []).append(index)
+
+    folders = [stem for _tipo, stem in parts]
+    plain_keys = {key for key, members in groups.items() if len(members) == 1}
+    for key, members in groups.items():
+        if len(members) == 1:
+            continue
+        digests = [hashlib.sha256(_relative_markdown_path(domain.documents[i], project_root).encode("utf-8")).hexdigest() for i in members]
+        for length in _SUFFIX_LENGTHS:
+            candidates = [f"{parts[i][1]}-{digest[:length]}" for i, digest in zip(members, digests, strict=True)]
+            candidate_keys = [(key[0], _collision_key(name)) for name in candidates]
+            if len(set(candidate_keys)) == len(candidates) and not plain_keys.intersection(candidate_keys):
+                break
+        for i, name in zip(members, candidates, strict=True):
+            folders[i] = name
+
+    return [PurePosixPath(domain.slug, tipo, folder, f"{stem}.md").as_posix() for (tipo, stem), folder in zip(parts, folders, strict=True)]
+
+
+def assign_organized_paths(context: Context, project_root: str | Path) -> None:
+    """Rellena `DomainDocument.organized_path` de todos los documentos de `context` (ver `resolve_organized_paths`)."""
+    for domain in context.domains:
+        for document, organized_path in zip(domain.documents, resolve_organized_paths(domain, project_root), strict=True):
+            document.organized_path = organized_path
+
+
 class Reorganizer:
     """Copia el original + `.md` + `.json` de cada documento clasificado a `<output_folder_name>/`.
 
@@ -58,10 +129,9 @@ class Reorganizer:
     el destino del enlace: queda en `Context.reorganize_failed_documents` y en
     `on_document_failed`, y el resto sigue.
 
-    Limitación conocida: si dos documentos del mismo dominio/tipo comparten el
-    mismo `stem` (p. ej. dos ficheros distintos ambos llamados `informe.pdf` en
-    carpetas de origen distintas), el segundo sobrescribe el primero en
-    `<stem>/` — no hay desambiguación todavía.
+    Dos documentos del mismo dominio/tipo con el mismo `stem` (sin distinguir
+    mayúsculas) ya no comparten carpeta: cada uno va a `<stem>-<8 hex>/` (L-8d, G30;
+    ver `resolve_organized_paths`). Hasta 0.13.0 el segundo sobrescribía al primero.
 
     Attributes:
         logger (logging.Logger): Logger estructurado de la instancia.
@@ -127,12 +197,16 @@ class Reorganizer:
         Returns:
             La carpeta de salida (`<project.root_path>/<context.output_folder_name>/`).
 
+        Rellena `DomainDocument.organized_path` de cada documento con la ruta en la que
+        queda su `.md` (L-8d), también la de los que fallan (es donde habría quedado).
+
         Raises:
-            InvalidPathError: Si la carpeta de salida es o pasa por un enlace — antes de tocar nada.
+            InvalidPathError: Si `context.output_folder_name` no es válido (L-8f) o la carpeta de salida es o pasa
+                por un enlace — antes de tocar nada.
             IncompleteConversionArtifactsError: Si a algún documento le falta el
                 original, el `.md` o el `.json` en disco — antes de tocar nada.
         """
-        output_root = Path(project.root_path) / context.output_folder_name
+        output_root = Path(project.root_path) / validate_output_folder_name(context.output_folder_name)
         await asyncio.to_thread(self.check_output_root, output_root)
 
         for domain in context.domains:
@@ -147,10 +221,12 @@ class Reorganizer:
         failed: list[str] = []
         for domain in context.domains:
             await self._reset_domain_dir(output_root, domain.slug)
-            for document in domain.documents:
+            organized_paths = resolve_organized_paths(domain, project.root_path)
+            for document, organized_path in zip(domain.documents, organized_paths, strict=True):
                 index += 1
+                document.organized_path = organized_path
                 try:
-                    await self._copy_document(output_root, domain.slug, document)
+                    await self._copy_document(output_root, organized_path, document)
                 except OSError as exc:
                     failed.append(document.source_path)
                     self.logger.warning(f"No se pudo reorganizar '{document.source_path}': {exc}")
@@ -210,23 +286,24 @@ class Reorganizer:
         carpeta es un enlace, se quita el enlace (nunca su destino).
 
         Raises:
-            InvalidPathError: Si la raíz del proyecto pasa por un enlace simbólico.
+            InvalidPathError: Si `context.output_folder_name` no es válido (L-8f) o la raíz del proyecto pasa por un
+                enlace simbólico.
         """
-        output_root = Path(project.root_path) / context.output_folder_name
+        output_root = Path(project.root_path) / validate_output_folder_name(context.output_folder_name)
         await asyncio.to_thread(self.check_output_root, output_root.parent)
         if await asyncio.to_thread(output_root.is_symlink) or await asyncio.to_thread(output_root.is_dir):
             await asyncio.to_thread(_remove_dir_or_link, output_root)
 
-    async def _copy_document(self, output_root: Path, domain_slug: str, document: DomainDocument) -> None:
-        await asyncio.to_thread(self._copy_document_sync, output_root, domain_slug, document)
+    async def _copy_document(self, output_root: Path, organized_path: str, document: DomainDocument) -> None:
+        await asyncio.to_thread(self._copy_document_sync, output_root, organized_path, document)
 
     @staticmethod
-    def _copy_document_sync(output_root: Path, domain_slug: str, document: DomainDocument) -> None:
-        """Copia los artefactos de `document` sin seguir enlaces; si falla, borra lo copiado de él."""
+    def _copy_document_sync(output_root: Path, organized_path: str, document: DomainDocument) -> None:
+        """Copia los artefactos de `document` a la carpeta de `organized_path` sin seguir enlaces; si falla, borra lo copiado."""
         source = Path(document.source_path)
         markdown = Path(document.markdown_path)
         json_file = Path(document.json_path)
-        document_type, stem = resolve_document_slug_parts(document)
+        _document_type, stem = resolve_document_slug_parts(document)
 
         # Todo se comprueba antes de copiar nada: un enlace en cualquier artefacto no deja ni una copia parcial.
         for artifact in (source, markdown, json_file):
@@ -239,11 +316,11 @@ class Reorganizer:
             else:
                 images_dir = None
 
-        target_dir = ensure_no_symlinks(output_root / domain_slug / document_type / stem)
+        target_dir = ensure_no_symlinks(output_root.joinpath(*PurePosixPath(organized_path).parent.parts))
         created = not os.path.lexists(target_dir)
         try:
             target_dir.mkdir(parents=True, exist_ok=True)
-            # Con `overwrite`: mismo comportamiento que antes si dos documentos comparten `stem` (ver limitación conocida).
+            # Con `overwrite`: la carpeta es solo de este documento (L-8d); solo pisa restos de una copia anterior.
             copy_file_nofollow(source, target_dir / source.name, overwrite=True)
             copy_file_nofollow(markdown, target_dir / markdown.name, overwrite=True)
             copy_file_nofollow(json_file, target_dir / json_file.name, overwrite=True)
@@ -267,4 +344,4 @@ def _remove_dir_or_link(path: Path) -> None:
         shutil.rmtree(path)
 
 
-__all__ = ["Reorganizer", "resolve_document_slug_parts"]
+__all__ = ["Reorganizer", "assign_organized_paths", "resolve_document_slug_parts", "resolve_organized_paths"]

@@ -4,7 +4,7 @@ from doc_organize.context.context_builder import ContextBuilder
 from doc_organize.context.context_registry import ContextRegistry
 from doc_organize.context.domain_classifier import DomainClassifier, MaterialTypeClassifier
 from doc_organize.context.mkdocs_generator import MkDocsGenerator
-from doc_organize.context.reorganizer import Reorganizer
+from doc_organize.context.reorganizer import Reorganizer, resolve_organized_paths
 from doc_organize.context.site_generator import SiteGenerator, SiteResult
 from doc_organize.context.taxonomy_manifest import load_taxonomy_manifest, render_taxonomy_manifest_markdown, save_taxonomy_manifest
 from doc_organize.context.taxonomy_manifest_sampler import select_document_sample
@@ -32,6 +32,7 @@ __all__ = [
     "parse_taxonomy_template",
     "render_taxonomy_manifest_markdown",
     "render_taxonomy_template",
+    "resolve_organized_paths",
     "save_taxonomy_manifest",
     "select_document_sample",
 ]

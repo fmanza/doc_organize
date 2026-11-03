@@ -281,8 +281,16 @@ reconstruir, borra `domains/<slug>/` de cualquier dominio ya no presente. `DOMAI
 solo regenera su sección `## Documentos clasificados` — el resto (editado a mano) se
 conserva.
 
+**Escritura sin seguir enlaces (0.14.0, L-8e)**: `context.json`, `index.json` y `DOMAIN.md` (igual que `index.md`,
+`zensical.toml` y `taxonomy_manifest.md`) se escriben en un temporal con nombre aleatorio creado en exclusiva en la
+misma carpeta (`tempfile.mkstemp`: `O_CREAT | O_EXCL` y `O_NOFOLLOW` donde existe) y luego `os.replace`. Hasta 0.13.0
+el temporal tenía un nombre fijo (`context.tmp`, `index.md.tmp`...) y un enlace puesto con ese nombre desde el recurso
+de red desviaba la escritura. El fichero conserva los permisos del que sustituye.
+
 **Excepciones**: `ContextNotFoundError` (sin `context.json` todavía),
-`DomainNotFoundError`, `ContextError` (JSON corrupto o con esquema incompatible).
+`DomainNotFoundError`, `ContextError` (JSON corrupto o con esquema incompatible; desde 0.14.0 también si
+`output_folder_name` no es válido —`..`, una ruta absoluta, un nombre reservado como `Conversión`—, L-8f: nunca se
+devuelve un contexto que copiaría o borraría fuera de su sitio).
 
 ---
 
@@ -301,6 +309,8 @@ class Reorganizer:
     @staticmethod
     def check_output_root(output_root: Path) -> None                                       # 0.13.0
     async def delete_output(self, project: Project, context: Context) -> None
+
+def resolve_organized_paths(domain: Domain, project_root: str | Path) -> list[str]         # 0.14.0, L-8d
 ```
 
 Copia original + `.md` + `.json` (+ `img/<stem>/`) de cada documento clasificado a
@@ -309,6 +319,21 @@ de cada dominio vigente (se reconstruye entera) y la de cualquier dominio ya no
 presente — sin copias huérfanas entre reconstrucciones. `<tipo>` es
 `DomainDocument.material_type` cuando está definido (modo manifiesto), o la
 extensión del documento original (modo sin manifiesto, sin cambios).
+
+**Colisiones de nombre (0.14.0, L-8d)**: si dos o más documentos de un dominio comparten `<tipo>` y `<stem>` sin
+distinguir mayúsculas (en SMB/Windows «Acta» y «acta» son la misma carpeta; también se ignoran los puntos y espacios
+finales y la forma Unicode), **todos** ellos van a `<stem>-<8 hex>/`, con el SHA-256 de su `.md` relativo a la raíz del
+proyecto (determinista y sin depender del orden). Sin colisiones, las rutas son idénticas a las de 0.13.0. Hasta 0.13.0
+el segundo documento sobrescribía al primero. `img/<stem>/` y los nombres de fichero no cambian.
+
+`resolve_organized_paths(domain, project_root)` (exportada en `doc_organize`) devuelve, en el orden de
+`domain.documents`, la ruta POSIX del `.md` copiado relativa a la carpeta reorganizada
+(`calidad/pdf/acta-1a2b3c4d/acta.md`). `ContextBuilder.build()` y `reorganize()` la guardan en
+`DomainDocument.organized_path` para el consumidor; `Reorganizer` y `SiteGenerator` la recalculan siempre y nunca usan
+el valor leído de `index.json`.
+
+`reorganize()` y `delete_output()` vuelven a validar `context.output_folder_name` (`InvalidPathError`), por si se
+asignó después de construir el `Context` (L-8f).
 
 **Sin seguir enlaces simbólicos (0.13.0, L-8a)**, con el mismo criterio que la deduplicación desde 0.12.1
 (`ensure_no_symlinks` y, en POSIX, descriptores abiertos con `O_NOFOLLOW`; en Windows, comprobación con `lstat`):
@@ -505,6 +530,7 @@ class DomainDocument(BaseModel):
     material_type: str | None  # slug del tipo de material (modo manifiesto), o None
     confidence: float
     classified_by: str  # "rules" | "ai"
+    organized_path: str | None  # 0.14.0 (L-8d): .md copiado, relativo a la carpeta reorganizada; None en contextos antiguos
 
 class Domain(BaseModel):
     slug: str
@@ -517,7 +543,7 @@ class Domain(BaseModel):
 class Context(BaseModel):
     project_name: str
     tenant_id: str
-    output_folder_name: str  # default "organizado"
+    output_folder_name: str  # default "organizado"; validado con validate_output_folder_name desde 0.14.0 (L-8f)
     ai_classification_enabled: bool
     ai_fallback_threshold: float
     ai_classification_model: str | None

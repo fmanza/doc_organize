@@ -18,7 +18,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Final, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME
 
@@ -804,6 +804,15 @@ class DomainDocument(BaseModel):
     )
     confidence: float = Field(..., ge=0.0, le=1.0, description="Score de confianza de la clasificación, 0-1")
     classified_by: str = Field(default="rules", description="'rules' (Sub-fase A) o 'ai' (Sub-fase B) según qué clasificó el documento")
+    organized_path: str | None = Field(
+        default=None,
+        description=(
+            "Ruta POSIX del `.md` copiado, relativa a la carpeta reorganizada (`<dominio>/<tipo>/<carpeta>/<stem>.md`), "
+            "o `None` si aún no se ha calculado (contextos de antes de 0.14.0). La rellenan `ContextBuilder` y "
+            "`Reorganizer` con `resolve_organized_paths` (L-8d); solo informativa: `Reorganizer`/`SiteGenerator` la "
+            "recalculan siempre y nunca usan el valor leído de `index.json`"
+        ),
+    )
 
 
 class Domain(BaseModel):
@@ -902,6 +911,20 @@ class Context(BaseModel):
     )
     created_at: str = Field(..., description="Timestamp ISO 8601 de creación del contexto")
     updated_at: str = Field(..., description="Timestamp ISO 8601 de la última reconstrucción del contexto")
+
+    @field_validator("output_folder_name")
+    @classmethod
+    def _validate_output_folder_name(cls, value: str) -> str:
+        """L-8f (G32): mismo criterio que `validate_output_folder_name`; un `context.json` manipulado ("..", una ruta
+        absoluta, un nombre reservado) no se carga en vez de usarse para copiar y borrar."""
+        # Importación diferida: `projects.layout` importa este módulo (evita el ciclo).
+        from doc_organize.core.exceptions import InvalidPathError
+        from doc_organize.projects.layout import validate_output_folder_name
+
+        try:
+            return validate_output_folder_name(value)
+        except InvalidPathError as exc:
+            raise ValueError(str(exc)) from exc
 
     # Alias obsoletos de antes de 0.13.0 (sitio con MkDocs). Un `context.json` antiguo, o `Context(mkdocs_generated=...)`,
     # se siguen leyendo gracias a `validation_alias`; se retiran en 1.0.0.
