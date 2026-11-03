@@ -73,6 +73,11 @@ class ContextBuilder:
         taxonomy_manifest: TaxonomyManifest | None = None,
         taxonomy_classification_client: TaxonomyClassificationClient | None = None,
         taxonomy_template_name: str | None = None,
+        *,
+        on_progress: ProgressCallback | None = None,
+        cancel_token: CancelToken | None = None,
+        ai_max_failures: int | None = None,   # 0.14.0
+        ai_max_documents: int | None = None,  # 0.14.0
     ) -> Context
 ```
 
@@ -87,7 +92,19 @@ Orquesta Sub-fase A (siempre) + Sub-fase B (opt-in) y persiste el `Context` resu
 | `ai_classification_client` | `DomainClassificationClient \| None` | Cliente ya configurado para la Sub-fase B de 1 eje; si `enabled=True` sin cliente, la Sub-fase B no se ejecuta. Ignorado si hay `taxonomy_manifest` |
 | `taxonomy_manifest` | `TaxonomyManifest \| None` | Manifiesto de taxonomía (ver [TaxonomyManifest](#taxonomymanifest-manifiesto-de-taxonomia)) — activa la clasificación de 2 ejes (dominio + tipo de material) |
 | `taxonomy_classification_client` | `TaxonomyClassificationClient \| None` | Cliente ya configurado para la Sub-fase B de 2 ejes (una sola llamada combinada). Sin efecto si `taxonomy_manifest` es `None`, o si `enabled=False` |
+| `ai_max_failures` | `int \| None` | (0.14.0, L-3a) Detiene la Sub-fase B tras este número de errores de conexión **seguidos** (`Context.ai_classification_stopped = "connection"`). `None`: nunca para por eso. `< 1` → `ValueError` |
+| `ai_max_documents` | `int \| None` | (0.14.0, L-3b) Tope de documentos enviados a la IA en esta construcción; al alcanzarlo con documentos pendientes, para con `"budget"`. `None`: sin tope. `< 0` → `ValueError` |
 | `taxonomy_template_name` | `str \| None` | Nombre de la plantilla de `TaxonomyTemplateRegistry` de la que proviene `taxonomy_manifest`, o `None` si viene de un fichero local o si no hay manifiesto — puramente informativo, se persiste en `Context.taxonomy_template_name` |
+
+**Parada y recuento de la Sub-fase B (0.14.0, L-3a…L-3c)**: un error de autenticación (401/403,
+`DomainClassificationAuthError`/`TaxonomyClassificationAuthError`) detiene la Sub-fase B en el acto, con o sin
+`ai_max_failures`: con la clave rechazada se hace **exactamente 1 petición** en toda la construcción. Al detenerse
+(`"auth"`, `"connection"` o `"budget"`), los documentos pendientes no se leen ni se envían y quedan sin clasificar (o
+en `sin-clasificar`); siguen emitiendo su evento de progreso, el `cancel_token` se sigue comprobando entre ellos y el
+contexto se construye y persiste con normalidad. El motivo queda en `Context.ai_classification_stopped` y los
+recuentos en `Context.ai_documents_sent`, `ai_documents_classified` (al menos un eje asignado) y `ai_documents_failed`,
+con `sent = classified + failed + enviados sin asignación`. Una respuesta del servidor (incluido un 5xx) corta la racha
+de errores de conexión.
 
 **Reglas**: el catálogo de la Sub-fase B es `candidate_domains` si se dio uno, o los
 dominios que la Sub-fase A ya descubrió — nunca un dominio nuevo. Un fallo de la
@@ -447,12 +464,17 @@ las separa entre sí), aunque en despliegue las tres puedan apuntar al mismo Lit
 `DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_BASE_URL`/`_VIRTUAL_KEY` (obligatorias) y `_MODEL`
 (opcional).
 
-La muestra de documentos se selecciona con `context.select_document_sample(documents, sample_size)`
+La muestra de documentos se selecciona con `context.select_document_sample(documents, sample_size, *, roots=None)`
 (`context/taxonomy_manifest_sampler.py`): hasta `sample_size` documentos, repartidos en
 round-robin determinista entre carpetas contenedoras (hasta 2 niveles, sin rutas absolutas) para
 dar diversidad real en vez de los primeros N alfabéticos de una única carpeta. Un documento cuyo
 `.json` de conversión no se puede leer se descarta de la muestra (mismo criterio que
 `DomainClassifier`), así que la muestra final puede ser más pequeña que `sample_size`.
+Con `roots` (0.14.0, L-3d; las raíces escaneadas del proyecto), la carpeta de cada documento es relativa a la raíz
+que lo contiene (gana la más profunda, mismo criterio que `relative_source_path`, G23) y nunca muestra nombres por
+encima de ella: un documento en la propia raíz, o fuera de todas, tiene carpeta `""` (el prompt dice `(raíz)`). Sin
+`roots`, se envían hasta 2 carpetas contenedoras de `source_path`, como antes (y un documento en la raíz de un montaje
+deja ver las carpetas del montaje): **los consumidores multiusuario deben pasar `roots`**.
 
 El borrador estructurado se puede renderizar como el mismo formato de fichero que
 `load_taxonomy_manifest()` espera con `context.render_taxonomy_manifest_markdown(manifest, *,
@@ -507,6 +529,10 @@ class Context(BaseModel):
     site_built: bool                         # antes mkdocs_site_built (alias obsoleto)
     taxonomy_manifest_used: bool  # default False
     taxonomy_template_name: str | None  # default None — nombre de la plantilla usada, o None (fichero local / sin manifiesto)
+    ai_classification_stopped: Literal["auth", "connection", "budget"] | None  # 0.14.0, default None
+    ai_documents_sent: int        # 0.14.0, default 0
+    ai_documents_classified: int  # 0.14.0, default 0
+    ai_documents_failed: int      # 0.14.0, default 0
     created_at: str
     updated_at: str
 
@@ -520,6 +546,8 @@ class LiteLLMClassificationConfig(BaseModel):
     virtual_key: str
     model: str  # default "claude-classifier"
     timeout_s: float
+    retries: int            # 0.14.0, default 0 — ver «Reintentos» en ai_usage_monitoring.md
+    retry_backoff_s: float  # 0.14.0, default 0.5
 
 class TaxonomyClassificationResult(BaseModel):
     domain: str | None
@@ -533,6 +561,8 @@ class LiteLLMTaxonomyClassificationConfig(BaseModel):
     virtual_key: str
     model: str  # default "claude-classifier"
     timeout_s: float
+    retries: int            # 0.14.0, default 0
+    retry_backoff_s: float  # 0.14.0, default 0.5
 
 class TaxonomyManifestDraftResult(BaseModel):
     domains: list[TaxonomyCatalogEntry]        # min 1
@@ -544,6 +574,8 @@ class LiteLLMTaxonomyManifestDraftConfig(BaseModel):
     virtual_key: str
     model: str      # default "claude-classifier"
     timeout_s: float  # default 60.0 (prompt más grande, varios documentos a la vez)
+    retries: int            # 0.14.0, default 0
+    retry_backoff_s: float  # 0.14.0, default 0.5
 
 class TaxonomyCatalogEntry(BaseModel):
     slug: str

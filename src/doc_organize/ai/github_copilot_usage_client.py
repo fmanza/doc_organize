@@ -113,6 +113,8 @@ class GitHubCopilotUsageClient(AiHttpClientBase):
             connection_error_cls=UsageSourceConnectionError,
             generic_error_cls=UsageSourceError,
             transport=transport,
+            retries=config.retries,
+            backoff_s=config.retry_backoff_s,
         )
 
     async def get_usage(self, *, year: int | None = None, month: int | None = None) -> UsageSnapshot:

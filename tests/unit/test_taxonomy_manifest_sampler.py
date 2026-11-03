@@ -89,3 +89,75 @@ async def test_skips_documents_with_unreadable_json(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_empty_documents_returns_empty_sample(tmp_path) -> None:
     assert await select_document_sample([], sample_size=10) == []
+
+
+# --- L-3d: carpeta relativa a la raíz escaneada --------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_without_roots_document_at_root_of_mount_shows_mount_folders(tmp_path) -> None:
+    """Comportamiento de 0.13.0 (sin cambios sin `roots`): se ven las carpetas del montaje."""
+    document = _make_document(tmp_path, "", "suelto")
+
+    sample = await select_document_sample([document], sample_size=10)
+
+    assert sample[0].folder == f"{tmp_path.name}/root"
+
+
+@pytest.mark.asyncio
+async def test_with_roots_document_at_root_shows_no_folder(tmp_path) -> None:
+    document = _make_document(tmp_path, "", "suelto")
+
+    sample = await select_document_sample([document], sample_size=10, roots=[str(tmp_path / "root")])
+
+    assert sample[0].folder == ""
+
+
+@pytest.mark.asyncio
+async def test_with_roots_folder_is_relative_to_containing_root(tmp_path) -> None:
+    nested = _make_document(tmp_path, "Calidad/Normas/2024", "iso")
+    shallow = _make_document(tmp_path, "Ciberseguridad", "informe")
+
+    sample = await select_document_sample([nested, shallow], sample_size=10, roots=[str(tmp_path / "root")])
+
+    assert sorted(document.folder for document in sample) == ["Ciberseguridad", "Normas/2024"]
+
+
+@pytest.mark.asyncio
+async def test_with_roots_deepest_root_wins(tmp_path) -> None:
+    document = _make_document(tmp_path, "Calidad/Normas", "iso")
+
+    sample = await select_document_sample([document], sample_size=10, roots=[str(tmp_path / "root"), str(tmp_path / "root" / "Calidad")])
+
+    assert sample[0].folder == "Normas"
+
+
+@pytest.mark.asyncio
+async def test_with_roots_document_outside_every_root_shows_no_folder(tmp_path) -> None:
+    document = _make_document(tmp_path, "Privado/Usuario", "nota")
+
+    sample = await select_document_sample([document], sample_size=10, roots=[str(tmp_path / "otra")])
+
+    assert sample[0].folder == ""
+
+
+@pytest.mark.asyncio
+async def test_with_roots_relative_source_path_is_taken_as_is(tmp_path) -> None:
+    document = _make_document(tmp_path, "x", "a")
+    relative = document.model_copy(update={"source_path": "Calidad/../Normas/a.pdf"})
+
+    sample = await select_document_sample([relative], sample_size=10, roots=[str(tmp_path / "root")])
+
+    assert sample[0].folder == "Calidad/Normas"  # nunca sube con ".."
+
+
+@pytest.mark.asyncio
+async def test_with_roots_sample_is_deterministic(tmp_path) -> None:
+    documents = [_make_document(tmp_path, folder, f"d{index}") for index, folder in enumerate(["B", "A", "B", "C", "A"])]
+    roots = [str(tmp_path / "root")]
+
+    first = await select_document_sample(documents, sample_size=3, roots=roots)
+    second = await select_document_sample(list(reversed(documents)), sample_size=3, roots=roots)
+
+    assert [(d.folder, d.title) for d in first] == [(d.folder, d.title) for d in second]
+    assert [d.folder for d in first] == ["A", "B", "C"]

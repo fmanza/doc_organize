@@ -103,18 +103,26 @@ class LiteLLMUsageClient(AiHttpClientBase):
             connection_error_cls=UsageSourceConnectionError,
             generic_error_cls=UsageSourceError,
             transport=transport,
+            retries=config.retries,
+            backoff_s=config.retry_backoff_s,
         )
 
     async def get_usage(self, *, key: str | None = None) -> UsageSnapshot:
         """Consulta el spend acumulado de `key` (por defecto, la virtual key configurada).
 
         `Authorization` siempre usa `self.config.virtual_key` (documentado por
-        LiteLLM como la credencial esperada en ese header); `key` solo cambia
-        qué virtual key se consulta vía el parámetro `?key=`, útil si
-        `virtual_key` es en realidad la master key del proxy.
+        LiteLLM como la credencial esperada en ese header). Sin `key` (o con la
+        misma clave del Bearer) **no** se envía `?key=`: LiteLLM consulta entonces
+        la clave del header (`info_key_fn`: `key = key or user_api_key_dict.api_key`),
+        y la clave no aparece en la URL que `httpx` registra en INFO (L-3e).
+
+        Con otra `key` (p. ej. si `virtual_key` es la master key del proxy) se
+        envía `?key=<key>`, y esa URL **sí** queda en los logs de `httpx` y en los
+        de acceso de cualquier proxy intermedio. LiteLLM acepta también el hash
+        SHA-256 de la clave en ese parámetro: pásalo en vez de la clave en claro.
 
         Args:
-            key: Virtual key cuyo spend consultar. Por defecto, `self.config.virtual_key`.
+            key: Virtual key (o su hash) cuyo spend consultar. Por defecto, la del Bearer.
 
         Returns:
             Snapshot con una única línea (LiteLLM `/key/info` no desglosa por
@@ -125,11 +133,12 @@ class LiteLLMUsageClient(AiHttpClientBase):
             UsageSourceConnectionError: Error de red o timeout.
             UsageSourceError: Cualquier otro error de la API del proxy.
         """
-        target_key = key or self.config.virtual_key
+        # L-3e: la clave propia nunca va en la query (httpx escribe cada URL en INFO).
+        params = {"key": key} if key and key != self.config.virtual_key else None
         response = await self._request(
             "GET",
             "/key/info",
-            params={"key": target_key},
+            params=params,
             headers={"Authorization": f"Bearer {self.config.virtual_key}"},
             timeout_message=f"Timeout consultando LiteLLM Proxy en {self.config.base_url}",
             connection_message=f"Error de red consultando LiteLLM Proxy en {self.config.base_url}",

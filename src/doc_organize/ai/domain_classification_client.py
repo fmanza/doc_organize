@@ -137,6 +137,8 @@ class DomainClassificationClient(AiHttpClientBase):
             connection_error_cls=DomainClassificationConnectionError,
             generic_error_cls=DomainClassificationError,
             transport=transport,
+            retries=config.retries,
+            backoff_s=config.retry_backoff_s,
         )
 
     async def classify(self, *, chunks_text: str, title: str | None, candidate_domains: list[str]) -> DomainClassificationResult:
