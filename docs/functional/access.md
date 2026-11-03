@@ -1,5 +1,10 @@
 # Acceso a la Aplicación — Autenticación, Sesiones y Multi-tenant
 
+> **Obsoleto desde 0.14.0 (L-10)**: la interfaz web integrada (`doc_organize.web`, `doc_organize.auth` y los
+> subcomandos `web`, `tenant` y `user` del CLI) está congelada (solo hotfix) y se retira en 1.0.0. Usa
+> [doc_organize_web](https://github.com/fmanza/doc_organize_web). La librería y el CLI de `scan`, `project`,
+> `deduplicate` y `export` no cambian.
+
 Documento único y autocontenido sobre cómo controla `doc_organize` el acceso a su
 interfaz web y a su CLI: qué es una sesión, un tenant, un rol y un usuario; cuándo
 la aplicación exige login y cuándo no; y cómo arrancarla y probarla en local, tanto

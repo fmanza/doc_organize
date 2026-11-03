@@ -10,8 +10,8 @@ releases publicados antes de esa versión).
 
 Sub-fase B de `ContextBuilder` y clientes de `doc_organize.ai` seguros para consumidores multiusuario (peticiones de
 la Fase 8 de doc_organize_web, tareas L-3a…L-3e; cierra los huecos G33–G36) e integridad del contexto (L-8d…L-8f;
-cierra G30–G32). Aditivo y compatible: sin los
-parámetros nuevos, todo se comporta igual que en 0.13.0 salvo lo indicado en «Changed» y «Security».
+cierra G30–G32), y deprecación de la web integrada (L-10). Aditivo y compatible: sin los
+parámetros nuevos, todo se comporta igual que en 0.13.0 salvo lo indicado en «Changed», «Deprecated» y «Security».
 
 ### Added
 
@@ -51,6 +51,20 @@ parámetros nuevos, todo se comporta igual que en 0.13.0 salvo lo indicado en «
   `with`/`if` anidados unidos en `web/routes/context.py` y `web/routes/duplicates.py`, `ClassVar` en
   `_ProgressTracker._PHASES`, variable de bucle que ocultaba el parámetro `conversion_status` en
   `CacheManager.load_cache_page` y `noqa: PLE0604` justificado en `doc_organize.__all__`. Sin cambios funcionales.
+
+### Deprecated
+
+- **L-10**: la web integrada, porque doc_organize_web 0.9.0 cubre la paridad funcional (salvo roles y tenants, su
+  Fase 9, que la web integrada sigue cubriendo hasta entonces). Se retira en 1.0.0 (L-11); hasta entonces sigue
+  congelada (solo hotfix) y funciona igual:
+  - `import doc_organize.web` y `import doc_organize.auth` (también sus submódulos) emiten `DeprecationWarning`,
+    atribuido a la línea que importa (no a doc_organize ni a la maquinaria de import).
+  - Los subcomandos `web`, `tenant` y `user` del CLI escriben el aviso una vez por stderr (nunca por stdout) con el
+    enlace a https://github.com/fmanza/doc_organize_web; su ayuda lleva «[obsoleto]». Mismo código de salida.
+  - `doc_organize.main` ya no importa `doc_organize.auth` al cargarse: `scan`, `project`, `deduplicate` y `export` no
+    avisan ni cargan la web.
+  - Se quedan en la librería `core/`, `utils/`, `validators/`, `scanner/`, `converter/`, `dedup/`, `cache/`, `scan/`,
+    `context/`, `ai/`, `projects/`, `export/` y el CLI de librería.
 
 ### Security
 

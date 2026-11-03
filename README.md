@@ -19,6 +19,11 @@ por WebSocket; en modo no-loopback exige autenticación por usuario con soporte
 multi-tenant (varias organizaciones, cada una con sus propios usuarios y
 proyectos, aisladas entre sí).
 
+> **Obsoleto desde 0.14.0 (L-10)**: la interfaz web integrada (`doc_organize.web`, `doc_organize.auth` y los
+> subcomandos `web`, `tenant` y `user` del CLI) está congelada (solo hotfix) y se retira en 1.0.0. Usa
+> [doc_organize_web](https://github.com/fmanza/doc_organize_web). La librería y el CLI de `scan`, `project`,
+> `deduplicate` y `export` no cambian.
+
 ## Requisitos
 
 - Python 3.12+
@@ -55,7 +60,7 @@ python -m doc_organize export zip --project "Mi Proyecto" --preview
 python -m doc_organize export zip --project "Mi Proyecto" -o export.zip
 python -m doc_organize export errors-xlsx --output-root /ruta/salidas --state-root /ruta/estado -o errores.xlsx
 
-# Interfaz web (loopback, sin autenticación)
+# Interfaz web (loopback, sin autenticación). OBSOLETA desde 0.14.0: se retira en 1.0.0, usa doc_organize_web
 pip install doc_organize[web]
 python -m doc_organize web
 ```
