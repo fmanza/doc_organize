@@ -6,8 +6,18 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
-Documentación e instrucciones IA de la librería pura (L-13, L-14). Sin cambios de código ni de API: solo docstrings,
-guías e instrucciones.
+## [1.0.0rc2] - 2026-11-05
+
+Segunda versión candidata de la 1.0.0: la librería pura de 1.0.0rc1 (L-11, L-12) más su documentación e
+instrucciones IA (L-13, L-14). El código y la API son los de 1.0.0rc1; cambian los docstrings (y por eso el wheel), las
+guías y las instrucciones, y las rc salen ya marcadas como pre-release. La 1.0.0 final (L-15) se publica cuando
+doc_organize_web cierre su Fase 10. 1.0.0rc1 se mantiene publicada tal cual (sus SHA-256 no cambian).
+
+### Breaking changes
+
+Ninguno nuevo respecto a 1.0.0rc1. Frente a 0.14.0, todos los de [1.0.0rc1](#100rc1---2026-11-05) (tabla con cada
+elemento retirado y su sustituto); guía para quien usaba la web integrada:
+[De la web integrada a doc_organize_web](docs/guides/migracion_web.md).
 
 ### Added
 
@@ -31,10 +41,51 @@ guías e instrucciones.
   `.claude/TESTING_GUIDE.md`, `CLAUDE.md`) sin reglas de la web: fuera las de plantillas Jinja2, Tailwind y JS inline,
   WebSocket, `auth.db` y tenants; la arquitectura descrita es la real de 1.0.0.
 
+- `release.yml` publica como pre-release las versiones `aN`, `bN` y `rcN` (1.0.0rc1 se marcó a mano).
+
 ### Removed
 
 - Skills `access-doc-review` y `tenant-role-user-redesign`: validaban o rediseñaban código retirado en 1.0.0. Siguen en
   el historial de git.
+
+### Firmas finales
+
+La API pública de la 1.0.0 tal como queda en el tag `v1.0.0rc2` (verificado con `inspect.signature` y
+`model_fields`): los 84 nombres de `doc_organize.__all__`. Solo cambia, frente a 0.14.0, lo que sigue; el resto de
+firmas son las de las «Firmas finales» de 0.14.0, 0.13.0 y 0.12.0.
+
+```python
+# doc_organize.ProjectRegistry (L-12): sin tenant_id; el nombre es único en todo el registro
+async def create_project(self, name: str, base_location: str | Path) -> Project
+async def list_projects(self) -> list[Project]
+async def get_project(self, name: str) -> Project
+async def delete_project(self, name: str) -> None
+async def move_project_root(self, name: str, destination_parent: str | Path) -> Project
+
+# doc_organize.Project (L-12): sin tenant_id (un projects.json antiguo con el campo se lee y lo ignora)
+class Project(BaseModel):
+    name: str
+    root_path: str
+    created_at: str
+
+# doc_organize.Context (L-12): sin tenant_id ni las propiedades mkdocs_generated / mkdocs_site_built
+class Context(BaseModel):
+    ...
+    site_generated: bool = False  # validation_alias: "site_generated" | "mkdocs_generated" (context.json antiguos)
+    site_built: bool = False      # validation_alias: "site_built" | "mkdocs_site_built"
+
+# doc_organize.ai (L-12): solo las *_config_from_env; las *_config_from_store_or_env no existen
+def litellm_classification_config_from_env() -> LiteLLMClassificationConfig
+def litellm_taxonomy_classification_config_from_env() -> LiteLLMTaxonomyClassificationConfig
+def litellm_taxonomy_manifest_draft_config_from_env() -> LiteLLMTaxonomyManifestDraftConfig
+def litellm_usage_config_from_env() -> LiteLLMUsageConfig
+def github_copilot_usage_config_from_env() -> GitHubCopilotUsageConfig
+```
+
+- `doc_organize.__all__` pierde `MkDocsGenerator` (usa `SiteGenerator`); no gana ningún nombre.
+- CLI (`python -m doc_organize`): `project`, `scan`, `deduplicate` y `export`, con los mismos flags que en 0.14.0.
+  `web`, `tenant` y `user` terminan con `invalid choice` (código 2).
+- Extras: `export`, `site`, `ocr-gpu`, `av`, `ai`, `context`, `docs` y `dev`; sin `web`.
 
 ## [1.0.0rc1] - 2026-11-05
 
