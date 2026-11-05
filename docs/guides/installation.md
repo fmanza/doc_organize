@@ -34,20 +34,15 @@ Añade `openpyxl` para `export cache-xlsx` y `export errors-xlsx` (y las funcion
 (`export zip`) no necesita ningún extra. Sin `openpyxl`, el Excel falla con
 `MissingDependencyError` y el mensaje indica qué instalar.
 
-## Interfaz web (opcional)
+## Interfaz web
 
-```bash
-pip install doc_organize[web]
-```
-
-Añade FastAPI, Uvicorn, Jinja2 y lo necesario para `python -m doc_organize web`. Sin
-este extra, el subcomando `web` falla con un mensaje claro pidiendo instalarlo — el
-núcleo nunca arrastra estas dependencias.
+El extra `[web]` se retiró en 1.0.0 (L-11): la interfaz web es [doc_organize_web](https://github.com/fmanza/doc_organize_web), un proyecto aparte que depende de esta
+librería. `pip install doc_organize[web]` ya no instala nada adicional (pip avisa de que el extra no existe).
 
 ## Aceleración GPU para OCR (opcional)
 
 ```bash
-pip install doc_organize[web,ocr-gpu]
+pip install doc_organize[ocr-gpu]
 ```
 
 Añade `torch`/`torchvision`/`opencv-python`/`easyocr` para usar el motor OCR acelerado por
@@ -74,10 +69,10 @@ soportada con `nvidia-smi`, y la etiqueta exacta en
 pip install --force-reinstall torch --index-url https://download.pytorch.org/whl/cuXXX
 ```
 
-Ejecuta esto **dentro del mismo entorno virtual que arranca el servidor web**
-(`python -m doc_organize web`) — si lo instalaste en otro Python del sistema,
-`torch.cuda.is_available()` seguirá devolviendo `False` en el proceso real del
-servidor aunque en ese otro entorno funcione. La página de Escaneo detecta y
+Ejecuta esto **dentro del mismo entorno virtual que ejecuta `doc_organize`** (el CLI
+o la aplicación que lo usa, como doc_organize_web) — si lo instalaste en otro Python
+del sistema, `torch.cuda.is_available()` seguirá devolviendo `False` en ese proceso
+aunque en el otro entorno funcione. La página de Escaneo detecta y
 muestra este estado automáticamente (ver
 [Resolución de problemas](troubleshooting.md#el-menu-escaneo-dice-gpu-no-activa-aunque-ya-la-instale-y-funciona)
 si el mensaje no coincide con lo que esperas).
@@ -224,11 +219,10 @@ python -m venv .venv
 .venv\Scripts\activate        # Windows
 # source .venv/bin/activate   # Linux/macOS
 
-pip install -e ".[dev,web,docs]"
+pip install -e ".[dev,docs]"
 ```
 
 - `dev`: pytest, ruff, mypy y el resto de herramientas de calidad.
-- `web`: interfaz web (necesaria para correr `tests/unit/test_web_*.py`).
 - `docs`: zensical + mkdocstrings-python, para compilar esta documentación.
 - `site`: zensical, para construir el sitio navegable del contexto de un proyecto (`SiteGenerator`; mkdocs hasta 0.12.x).
 

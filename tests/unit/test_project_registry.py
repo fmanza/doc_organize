@@ -3,7 +3,6 @@
 import asyncio
 import json
 import shutil
-import warnings
 
 from pathlib import Path
 
@@ -184,78 +183,52 @@ async def test_corrupt_registry_raises_clear_error(tmp_path) -> None:
             await registry.list_projects()
 
 
-# ===== Tenant-scoping (revision 8, SS2.7.2) =====
+# ===== Sin tenants desde 1.0.0 (L-12) =====
 
 
 @pytest.mark.asyncio
-async def test_create_project_defaults_to_default_tenant(tmp_path) -> None:
+async def test_registry_with_legacy_tenant_id_is_still_read(tmp_path: Path) -> None:
+    """Un `projects.json` de 0.14.0 con `tenant_id` se sigue leyendo; el campo se ignora y no se vuelve a escribir."""
     base = tmp_path / "workspaces"
     base.mkdir()
+    (base / "Antiguo").mkdir()
+    registry_path = tmp_path / "projects.json"
+    legacy = {"name": "Antiguo", "root_path": str(base / "Antiguo"), "created_at": "2026-01-01T00:00:00+00:00", "tenant_id": "acme"}
+    registry_path.write_text(json.dumps({"projects": [legacy]}), encoding="utf-8")
 
-    async with ProjectRegistry(tmp_path / "projects.json") as registry:
-        project = await registry.create_project("Mi Proyecto", base)
+    async with ProjectRegistry(registry_path) as registry:
+        assert [p.name for p in await registry.list_projects()] == ["Antiguo"]
+        project = await registry.get_project("antiguo")
+        await registry.create_project("Nuevo", base)
 
-    assert project.tenant_id == "default"
-
-
-@pytest.mark.asyncio
-async def test_same_project_name_allowed_in_different_tenants(tmp_path) -> None:
-    # Cada tenant usa su propia base_location -- el caso realista (organizaciones
-    # distintas normalmente no comparten carpeta padre). Si dos tenants usaran la
-    # MISMA base_location con el MISMO nombre, la colision seria a nivel de
-    # sistema de archivos (root_path identico), no de registro: sigue siendo un
-    # ProjectError, igual que ya ocurre con cualquier carpeta preexistente no
-    # registrada (test_create_project_rejects_preexisting_unregistered_folder).
-    acme_base = tmp_path / "acme-workspaces"
-    acme_base.mkdir()
-    globex_base = tmp_path / "globex-workspaces"
-    globex_base.mkdir()
-
-    async with ProjectRegistry(tmp_path / "projects.json") as registry:
-        acme_project = await registry.create_project("Mi Proyecto", acme_base, tenant_id="acme-corp")
-        globex_project = await registry.create_project("Mi Proyecto", globex_base, tenant_id="globex-inc")
-
-    assert acme_project.root_path != globex_project.root_path
-    assert acme_project.tenant_id == "acme-corp"
-    assert globex_project.tenant_id == "globex-inc"
+    assert not hasattr(project, "tenant_id")
+    assert "tenant_id" not in registry_path.read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio
-async def test_same_project_name_rejected_within_same_tenant(tmp_path) -> None:
-    base = tmp_path / "workspaces"
-    base.mkdir()
+async def test_project_name_is_unique_across_the_whole_registry(tmp_path: Path) -> None:
+    first_base = tmp_path / "a"
+    second_base = tmp_path / "b"
+    first_base.mkdir()
+    second_base.mkdir()
 
     async with ProjectRegistry(tmp_path / "projects.json") as registry:
-        await registry.create_project("Mi Proyecto", base, tenant_id="acme-corp")
+        await registry.create_project("Mi Proyecto", first_base)
         with pytest.raises(ProjectAlreadyExistsError):
-            await registry.create_project("mi proyecto", base, tenant_id="acme-corp")
+            await registry.create_project("mi proyecto", second_base)
 
 
-@pytest.mark.asyncio
-async def test_list_projects_only_returns_own_tenant(tmp_path) -> None:
-    base = tmp_path / "workspaces"
-    base.mkdir()
+def test_registry_methods_have_no_tenant_id_parameter() -> None:
+    import inspect
 
-    async with ProjectRegistry(tmp_path / "projects.json") as registry:
-        await registry.create_project("Proyecto Acme", base, tenant_id="acme-corp")
-        await registry.create_project("Proyecto Globex", base, tenant_id="globex-inc")
-
-        acme_projects = await registry.list_projects(tenant_id="acme-corp")
-        globex_projects = await registry.list_projects(tenant_id="globex-inc")
-
-    assert [p.name for p in acme_projects] == ["Proyecto Acme"]
-    assert [p.name for p in globex_projects] == ["Proyecto Globex"]
-
-
-@pytest.mark.asyncio
-async def test_get_project_from_other_tenant_raises_not_found(tmp_path) -> None:
-    base = tmp_path / "workspaces"
-    base.mkdir()
-
-    async with ProjectRegistry(tmp_path / "projects.json") as registry:
-        await registry.create_project("Proyecto Acme", base, tenant_id="acme-corp")
-        with pytest.raises(ProjectNotFoundError):
-            await registry.get_project("Proyecto Acme", tenant_id="globex-inc")
+    for method in (
+        ProjectRegistry.create_project,
+        ProjectRegistry.list_projects,
+        ProjectRegistry.get_project,
+        ProjectRegistry.delete_project,
+        ProjectRegistry.move_project_root,
+    ):
+        assert "tenant_id" not in inspect.signature(method).parameters, method.__name__
 
 
 # ===== delete_project =====
@@ -388,14 +361,3 @@ async def test_move_project_root_raises_when_not_found(tmp_path) -> None:
     async with ProjectRegistry(tmp_path / "projects.json") as registry:
         with pytest.raises(ProjectNotFoundError):
             await registry.move_project_root("No Existe", destination)
-
-
-@pytest.mark.asyncio
-async def test_tenant_id_other_than_default_is_deprecated(tmp_path: Path) -> None:
-    """L-6c: los tenants pasan a doc_organize_web; usar uno distinto de `default` avisa (se retira en 1.0.0)."""
-    async with ProjectRegistry(tmp_path / "projects.json") as registry:
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", DeprecationWarning)
-            await registry.create_project("Sin tenant", tmp_path)  # tenant por defecto: sin aviso
-        with pytest.warns(DeprecationWarning, match="tenant_id"):
-            await registry.list_projects(tenant_id="acme")

@@ -4,14 +4,10 @@ CLI de doc_organize: gestión de proyectos, escaneo/conversión de documentos (F
 
 import argparse
 import asyncio
-import getpass
 import sys
-import warnings
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-from doc_organize._deprecations import web_deprecation_message
 from doc_organize.core.exceptions import DocOrganizeError, InvalidPathError
 from doc_organize.core.models import DedupEventType
 from doc_organize.export import (
@@ -27,15 +23,7 @@ from doc_organize.scan import DeduplicationSummary, ScanCommand, ScanSummary
 from doc_organize.utils.av_detector import detect_av_status
 from doc_organize.utils.logging import configure_logging, get_logger
 
-if TYPE_CHECKING:
-    from doc_organize.auth import AuthStore
-
 logger = get_logger(__name__)
-
-_DEPRECATED_COMMANDS = frozenset({"web", "tenant", "user"})
-"""Subcomandos de la web integrada, obsoletos desde 0.14.0 (L-10); se retiran en 1.0.0. `doc_organize.auth` se importa
-solo dentro de ellos: los comandos de librería (`scan`, `project`, `deduplicate`, `export`) no avisan."""
-_OBSOLETE = "[obsoleto] "
 
 __all__ = ["DeduplicationSummary", "ScanCommand", "ScanSummary", "build_parser", "main"]
 
@@ -91,62 +79,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_export_parser(subparsers, registry_flag)
 
-    auth_db_flag = argparse.ArgumentParser(add_help=False)
-    auth_db_flag.add_argument(
-        "--auth-db-path",
-        help="Ruta alternativa a la base de datos de autenticación (por defecto ~/.doc_organize/auth.db)",
-    )
-
-    templates_flag = argparse.ArgumentParser(add_help=False)
-    templates_flag.add_argument(
-        "--templates-path",
-        help="Ruta alternativa a la biblioteca de plantillas de taxonomía (por defecto ~/.doc_organize/taxonomy_templates)",
-    )
-
-    web_parser = subparsers.add_parser(
-        "web",
-        help=f"{_OBSOLETE}Arrancar la interfaz web (REQ-007)",
-        description=f"{_OBSOLETE}Arrancar la interfaz web (REQ-007). {web_deprecation_message("El subcomando 'web'")}",
-        parents=[registry_flag, auth_db_flag, templates_flag],
-    )
-    web_parser.add_argument("--host", default="127.0.0.1", help="Host de bind (por defecto 127.0.0.1)")
-    web_parser.add_argument("--port", type=int, default=8000, help="Puerto de bind (por defecto 8000)")
-
-    tenant_parser = subparsers.add_parser(
-        "tenant",
-        help=f"{_OBSOLETE}Gestión de tenants (revisión 8, §2.7.2)",
-        description=f"{_OBSOLETE}Gestión de tenants. {web_deprecation_message("El subcomando 'tenant'")}",
-    )
-    tenant_subparsers = tenant_parser.add_subparsers(dest="tenant_command", required=True)
-    tenant_create_parser = tenant_subparsers.add_parser(
-        "create", help=f"{_OBSOLETE}Crear un tenant nuevo", description=f"{_OBSOLETE}Crear un tenant nuevo.", parents=[auth_db_flag]
-    )
-    tenant_create_parser.add_argument("name", help="Nombre legible del tenant (el id se deriva como slug)")
-
-    user_parser = subparsers.add_parser(
-        "user",
-        help=f"{_OBSOLETE}Gestión de usuarios (revisión 8, §2.7.2)",
-        description=f"{_OBSOLETE}Gestión de usuarios. {web_deprecation_message("El subcomando 'user'")}",
-    )
-    user_subparsers = user_parser.add_subparsers(dest="user_command", required=True)
-    user_create_parser = user_subparsers.add_parser(
-        "create", help=f"{_OBSOLETE}Crear un usuario nuevo", description=f"{_OBSOLETE}Crear un usuario nuevo.", parents=[auth_db_flag]
-    )
-    user_create_parser.add_argument("--tenant", required=True, help="Id del tenant al que pertenece")
-    user_create_parser.add_argument("username", help="Nombre de usuario, único dentro del tenant")
-
-    set_instance_admin_parser = user_subparsers.add_parser(
-        "set-instance-admin",
-        help=f"{_OBSOLETE}Conceder o retirar is_instance_admin a un usuario existente (rediseño Tenant/Role/User)",
-        description=f"{_OBSOLETE}Conceder o retirar is_instance_admin a un usuario existente.",
-        parents=[auth_db_flag],
-    )
-    set_instance_admin_parser.add_argument("--tenant", required=True, help="Id del tenant al que pertenece el usuario")
-    set_instance_admin_parser.add_argument("username", help="Nombre de usuario existente")
-    set_instance_admin_parser.add_argument(
-        "--revoke", action="store_true", help="Retirar is_instance_admin en vez de concederlo (por defecto se concede)"
-    )
-
     return parser
 
 
@@ -177,16 +109,6 @@ def _add_export_parser(subparsers: "argparse._SubParsersAction[argparse.Argument
 def _registry(args: argparse.Namespace) -> ProjectRegistry:
     registry_path = getattr(args, "registry_path", None)
     return ProjectRegistry(registry_path) if registry_path else ProjectRegistry()
-
-
-def _auth_store(args: argparse.Namespace) -> "AuthStore":
-    # Import diferido (L-10): solo `tenant`/`user` cargan `doc_organize.auth`; su aviso ya salió por stderr en `main()`.
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        from doc_organize.auth import AuthStore
-
-    auth_db_path = getattr(args, "auth_db_path", None)
-    return AuthStore(auth_db_path) if auth_db_path else AuthStore()
 
 
 async def _resolve_scan_paths(args: argparse.Namespace) -> tuple[Path, Path, Path]:
@@ -288,57 +210,6 @@ async def _run_project_create(args: argparse.Namespace) -> int:
     return 0
 
 
-async def _run_tenant_create(args: argparse.Namespace) -> int:
-    """Crea un tenant (revisión 8, §2.7.2). El id se deriva de `args.name` (slug).
-
-    Rediseño Tenant/Role/User: ya NO aprovisiona automáticamente un rol ni un
-    usuario admin (`Role` ya no está ligado a un tenant) — usa `user create
-    --tenant <id>` a continuación, o la pantalla "Tenants y usuarios" de un
-    `is_instance_admin`, para dar de alta su primer usuario.
-    """
-    async with _auth_store(args) as store:
-        tenant = await store.create_tenant(args.name)
-    print(f"Tenant creado: '{tenant.id}' ({tenant.name}), sin usuarios todavía.")
-    return 0
-
-
-async def _run_user_create(args: argparse.Namespace) -> int:
-    """Crea un usuario dentro de `--tenant` (revisión 8, §2.7.2).
-
-    La contraseña se pide de forma interactiva (`getpass`), nunca como argumento de
-    CLI: un valor pasado como argumento queda visible en el historial de shell y en
-    la lista de procesos de la máquina — mismo motivo por el que no existe
-    `--api-token` (AUDIT_PLAN cond. 4, revisión 2).
-    """
-    password = getpass.getpass("Contraseña: ")
-    async with _auth_store(args) as store:
-        user = await store.create_user(args.tenant, args.username, password)
-    print(f"Usuario creado: '{user.username}' en tenant '{user.tenant_id}'")
-    return 0
-
-
-async def _run_user_set_instance_admin(args: argparse.Namespace) -> int:
-    """Concede o retira `is_instance_admin` a un usuario existente (rediseño
-    Tenant/Role/User).
-
-    Escape hatch de CLI: una instalación con varios tenants (creados con
-    `tenant create` antes de esta revisión) puede quedar, tras migrar, con
-    ningún `is_instance_admin` en un tenant que no sea el por defecto — sin
-    este comando, la única forma de recuperarse sería editar `auth.db` a mano.
-    """
-    async with _auth_store(args) as store:
-        users = await store.list_users(args.tenant)
-        user = next((candidate for candidate in users if candidate.username.lower() == args.username.lower()), None)
-        if user is None:
-            raise DocOrganizeError(f"No existe ningún usuario '{args.username}' en el tenant '{args.tenant}'.")
-        value = not args.revoke
-        updated = await store.set_instance_admin(args.tenant, user.id, value)
-
-    action = "concedido" if value else "retirado"
-    print(f"is_instance_admin {action} para '{updated.username}' en tenant '{updated.tenant_id}'.")
-    return 0
-
-
 async def _run_project_list(args: argparse.Namespace) -> int:
     async with _registry(args) as registry:
         projects = await registry.list_projects()
@@ -393,67 +264,20 @@ async def _run_deduplicate(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_web(args: argparse.Namespace) -> int:
-    """Arranca la interfaz web (REQ-007). Síncrona a propósito: uvicorn gestiona su
-    propio event loop, así que no se envuelve en `asyncio.run()` como el resto de
-    comandos.
-
-    Revisión 8 (§2.7.2): ya no exige `DOC_ORGANIZE_API_TOKEN` para arrancar en un
-    host no-loopback — la autenticación es multi-usuario (login usuario+contraseña
-    vía `/login`), no hay un único secreto compartido que validar al inicio.
-    Rediseño Tenant/Role/User: ya no hace falta aprovisionar nada por CLI antes de
-    exponer el host — `AuthStore` crea de fábrica el tenant por defecto y su
-    usuario `admin` en el primer arranque, pero esa cuenta no puede completar el
-    login en modo no-loopback mientras conserve la contraseña de fábrica (ver
-    `web/routes/auth.py::_FACTORY_ADMIN_LOCKOUT_MESSAGE`) — hay que cambiarla
-    desde loopback antes de exponer el servidor de verdad.
-    """
-    from doc_organize.core.models import SecurityConfig
-
-    security = SecurityConfig(bind_host=args.host, bind_port=args.port)
-
-    try:
-        import uvicorn
-
-        # El aviso de obsolescencia ya salió por stderr en `main()` (L-10): no se repite al importar.
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            from doc_organize.web import create_app
-    except ImportError as exc:
-        raise DocOrganizeError("La interfaz web requiere el extra [web]: instala con `pip install doc_organize[web]`.") from exc
-
-    registry_path = getattr(args, "registry_path", None)
-    auth_db_path = getattr(args, "auth_db_path", None)
-    templates_path = getattr(args, "templates_path", None)
-    app = create_app(security=security, registry_path=registry_path, auth_db_path=auth_db_path, templates_path=templates_path)
-    # ws_ping_timeout=None: un escaneo/OCR largo delega el trabajo pesado a un hilo
-    # (`asyncio.to_thread`), pero ese hilo compite por el GIL con el propio event
-    # loop -- si el pong tarda más de `ws_ping_timeout` (20s por defecto) en
-    # procesarse, uvicorn da la conexión por muerta y la cierra él mismo aunque el
-    # cliente siga ahí, apareciendo como "Cliente desconectado durante el escaneo"
-    # en pleno progreso. El ping (`ws_ping_interval`, sigue en 20s) se sigue
-    # enviando para no dejar el socket mudo ante NAT/firewalls intermedios; solo se
-    # desactiva el cierre automático por pong tardío.
-    uvicorn.run(app, host=args.host, port=args.port, ws_ping_timeout=None)
-    return 0
-
-
 def main(argv: list[str] | None = None) -> int:
     """Punto de entrada del CLI (`python -m doc_organize ...`).
 
     Configura el logging de todo el proceso (consola + fichero con rotación diaria,
-    ver `utils.logging.configure_logging`) antes de despachar cualquier subcomando —
-    incluido `web`, que arranca el servidor sobre el mismo proceso. Es el único punto
-    donde se llama a `configure_logging()`: `web.create_app()` no lo hace por su
-    cuenta (es una factoría pura, reutilizable embebida en otro proceso/test sin
-    imponerle esta configuración de logging global).
+    ver `utils.logging.configure_logging`) antes de despachar cualquier subcomando. Es el
+    único punto donde se llama a `configure_logging()`: la librería no lo hace por su
+    cuenta, para no imponer esa configuración global a quien la embebe.
+
+    Desde 1.0.0 no hay subcomandos `web`, `tenant` ni `user` (L-11): la interfaz web es
+    doc_organize_web.
     """
     configure_logging()
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.command in _DEPRECATED_COMMANDS:
-        # Por stderr, nunca por stdout (no rompe scripts que lean la salida), y una vez por ejecución (L-10).
-        print(f"Aviso: {web_deprecation_message(f"El subcomando '{args.command}'")}", file=sys.stderr)
 
     try:
         if args.command == "project" and args.project_command == "create":
@@ -466,14 +290,6 @@ def main(argv: list[str] | None = None) -> int:
             return asyncio.run(_run_deduplicate(args))
         if args.command == "export":
             return asyncio.run(_run_export(args))
-        if args.command == "web":
-            return _run_web(args)
-        if args.command == "tenant" and args.tenant_command == "create":
-            return asyncio.run(_run_tenant_create(args))
-        if args.command == "user" and args.user_command == "create":
-            return asyncio.run(_run_user_create(args))
-        if args.command == "user" and args.user_command == "set-instance-admin":
-            return asyncio.run(_run_user_set_instance_admin(args))
     except DocOrganizeError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

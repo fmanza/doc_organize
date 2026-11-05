@@ -41,7 +41,7 @@ sequenceDiagram
 | **Sin redundancia** | Si `/repo` y `/repo/docs` se seleccionan, solo `/repo` |
 | **Carpetas existentes** | Todas las rutas deben existir como directorios |
 | **Nombres normalizados** | Sin caracteres `<>:"\\/\|?*`, max 255 caracteres |
-| **Nombres únicos** | No duplicar nombres dentro de un tenant |
+| **Nombres únicos** | No duplicar nombres en el registro de proyectos |
 
 ## Límites y Restricciones
 

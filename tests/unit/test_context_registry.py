@@ -145,3 +145,15 @@ async def test_load_wraps_schema_mismatch_in_domain_index_as_context_error(tmp_p
 
     with pytest.raises(ContextError):
         await registry.load_context(project)
+
+
+def test_context_json_with_legacy_tenant_id_is_still_read() -> None:
+    """Un `context.json` de 0.14.0 con `tenant_id` se sigue leyendo; el campo se ignora (L-12)."""
+    from doc_organize.core.models import Context
+
+    context = Context.model_validate(
+        {"project_name": "P", "tenant_id": "acme", "created_at": "2026-01-01T00:00:00+00:00", "updated_at": "2026-01-01T00:00:00+00:00"}
+    )
+
+    assert context.project_name == "P"
+    assert "tenant_id" not in context.model_dump()

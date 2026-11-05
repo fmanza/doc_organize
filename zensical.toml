@@ -35,9 +35,6 @@ nav = [
     { "Exportación" = "functional/export.md" },
     { "Monitorización de uso IA" = "functional/ai_usage_monitoring.md" },
     { "Organización documental (dominios y contextos)" = "functional/context.md" },
-    { "Configuración de IA y plantillas" = "functional/ai_settings.md" },
-    { "Acceso a la Aplicación" = "functional/access.md" },
-    { "Panel de Administración" = "functional/admin.md" },
   ] },
   { "API" = [
     { "Descripción general" = "api/index.md" },
@@ -59,6 +56,15 @@ nav = [
     { "Deduplicación" = "examples/dedup-resolve.md" },
     { "Cache" = "examples/cache-changes.md" },
     { "Projects" = "examples/projects-registry.md" },
+  ] },
+  { "Histórico" = [
+    { "Web integrada (retirada en 1.0.0)" = "historico/index.md" },
+    { "Acceso a la aplicación" = "historico/web-access.md" },
+    { "Panel de administración" = "historico/web-admin.md" },
+    { "Configuración de IA y plantillas" = "historico/web-ai_settings.md" },
+    { "Rutas HTTP y autenticación" = "historico/web-rutas-y-autenticacion.md" },
+    { "Estado de la aplicación" = "historico/web-STATE.md" },
+    { "ADR-004: thread-safety" = "historico/ADR-004-GIL-Thread-Safety.md" },
   ] },
 ]
 

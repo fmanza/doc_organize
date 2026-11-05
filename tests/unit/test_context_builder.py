@@ -394,7 +394,7 @@ async def test_build_with_manifest_sets_material_type_name_from_catalog_entry(tm
 @pytest.mark.asyncio
 async def test_build_with_manifest_placeholder_material_type_keeps_name_unset(tmp_path):
     """El placeholder `sin-clasificar` en el eje de tipo de material tampoco tiene entrada
-    en el manifiesto -- `material_type_name` debe quedar `None` (el llamador, `MkDocsGenerator`,
+    en el manifiesto -- `material_type_name` debe quedar `None` (el llamador, `SiteGenerator`,
     es quien decide el fallback visual), no reventar el lookup."""
     project = _make_project(tmp_path)
     document = _make_document(tmp_path, "varios", "receta", "Receta de cocina con ingredientes y horno")

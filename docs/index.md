@@ -3,8 +3,8 @@
 `doc_organize` escanea carpetas de documentos, los convierte a Markdown + JSON con
 [Docling](https://github.com/docling-project/docling), detecta y resuelve duplicados,
 y mantiene un caché incremental (SHA-256) para no reconvertir lo que no ha cambiado.
-Se usa desde la línea de comandos, o desde una interfaz web opcional con
-autenticación multi-usuario y multi-tenant.
+Se usa como librería de Python o desde la línea de comandos; la interfaz web es
+[doc_organize_web](https://github.com/fmanza/doc_organize_web).
 
 ## Qué hace
 
@@ -20,17 +20,14 @@ autenticación multi-usuario y multi-tenant.
   procesa lo nuevo o modificado.
 - **Organiza en proyectos**: cada proyecto agrupa su propia carpeta de conversión,
   caché y duplicados bajo una ubicación que tú eliges.
-- **Interfaz web opcional** (extra `[web]`): las mismas operaciones desde el
-  navegador, con progreso en tiempo real por WebSocket. En modo no-loopback (host
-  distinto de `127.0.0.1`), exige autenticación por usuario con soporte
-  multi-tenant (varias organizaciones, cada una con sus propios usuarios y
-  proyectos, aisladas entre sí).
+- **Interfaz web**: [doc_organize_web](https://github.com/fmanza/doc_organize_web), un proyecto aparte, ofrece las mismas operaciones
+  desde el navegador. La web integrada (extra `[web]`) se retiró en 1.0.0; su
+  documentación está en el [histórico](historico/index.md).
 
 ## Instalación rápida
 
 ```bash
 pip install doc_organize            # núcleo: CLI, OCR en CPU incluido
-pip install doc_organize[web]       # + interfaz web
 ```
 
 Ver [Instalación](guides/installation.md) para el detalle de cada extra, y

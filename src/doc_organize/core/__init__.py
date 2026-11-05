@@ -29,7 +29,6 @@ from doc_organize.core.models import (
     Project,
     ProjectNameValidation,
     ScanResult,
-    SecurityConfig,
     ValidationResult,
 )
 
@@ -60,6 +59,5 @@ __all__ = [
     "ProjectNameValidation",
     "ProjectNotFoundError",
     "ScanResult",
-    "SecurityConfig",
     "ValidationResult",
 ]

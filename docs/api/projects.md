@@ -9,16 +9,17 @@ classDiagram
     class ProjectRegistry {
         -logger: Logger
         -projects_json_path: Path
-        +create_project(name: str, base_location: str|Path, tenant_id: str) Project
-        +list_projects(tenant_id: str) list[Project]
-        +get_project(name: str, tenant_id: str) Project
+        +create_project(name: str, base_location: str|Path) Project
+        +list_projects() list[Project]
+        +get_project(name: str) Project
+        +delete_project(name: str) None
+        +move_project_root(name: str, destination_parent: str|Path) Project
     }
     
     class Project {
         +name: str
         +root_path: Path
         +created_at: datetime
-        +tenant_id: str
     }
     
     ProjectRegistry --> Project
@@ -33,26 +34,17 @@ class ProjectRegistry:
     async def __aenter__(self) -> 'ProjectRegistry'
     async def __aexit__(self, *args) -> None
     
-    async def create_project(
-        self,
-        name: str,
-        base_location: str | Path,
-        tenant_id: str = "default"
-    ) -> Project
-    
-    async def list_projects(
-        self,
-        tenant_id: str = "default"
-    ) -> list[Project]
-    
-    async def get_project(
-        self,
-        name: str,
-        tenant_id: str = "default"
-    ) -> Project
+    async def create_project(self, name: str, base_location: str | Path) -> Project
+    async def list_projects(self) -> list[Project]
+    async def get_project(self, name: str) -> Project
+    async def delete_project(self, name: str) -> None
+    async def move_project_root(self, name: str, destination_parent: str | Path) -> Project
 ```
 
 Context manager para gestión de proyectos (registro + disk).
+
+Desde 1.0.0 no hay `tenant_id` (L-12): el nombre es único en todo el registro. Un `projects.json` antiguo con
+`tenant_id` se sigue leyendo (el campo se ignora y desaparece en la siguiente escritura).
 
 #### create_project
 
@@ -62,11 +54,10 @@ Crea nuevo proyecto (carpeta + registro).
 |---|---|---|
 | `name` | `str` | Nombre del proyecto (validado) |
 | `base_location` | `str \| Path` | Directorio padre donde crear carpeta |
-| `tenant_id` | `str` | ID de tenant (por defecto: "default") |
 
 | Retorno | Tipo | Descripción |
 |---|---|---|
-| | `Project` | Proyecto creado con `name`, `root_path`, `tenant_id`, `created_at` |
+| | `Project` | Proyecto creado con `name`, `root_path`, `created_at` |
 
 **Proceso**:
 1. Valida nombre vía `ProjectValidator.validate_name()`
@@ -78,18 +69,14 @@ Crea nuevo proyecto (carpeta + registro).
 
 **Excepciones**:
 - `ProjectNameError` — Nombre inválido
-- `ProjectAlreadyExistsError` — Nombre duplicado en tenant
+- `ProjectAlreadyExistsError` — Nombre ya registrado (sin distinguir mayúsculas)
 - `ProjectError` — Errores de I/O
 
 ---
 
 #### list_projects
 
-Lista proyectos de un tenant.
-
-| Parámetro | Tipo | Descripción |
-|---|---|---|
-| `tenant_id` | `str` | ID de tenant |
+Lista los proyectos del registro.
 
 | Retorno | Tipo | Descripción |
 |---|---|---|
@@ -106,7 +93,6 @@ Recupera proyecto por nombre.
 | Parámetro | Tipo | Descripción |
 |---|---|---|
 | `name` | `str` | Nombre del proyecto (case-insensitive) |
-| `tenant_id` | `str` | ID de tenant |
 
 | Retorno | Tipo | Descripción |
 |---|---|---|
@@ -135,7 +121,6 @@ class Project:
     name: str
     root_path: Path
     created_at: datetime
-    tenant_id: str
 ```
 
 ## Registro de Proyectos
@@ -149,8 +134,7 @@ class Project:
     {
       "name": "mi_proyecto",
       "root_path": "/home/user/docs/mi_proyecto",
-      "created_at": "2024-01-15T10:30:00",
-      "tenant_id": "default"
+      "created_at": "2024-01-15T10:30:00"
     }
   ]
 }
@@ -175,8 +159,7 @@ class Project:
 
 ## Notas Internas
 
-- **Único tenant = "default"**: Soporte futuro para multi-tenant vía campo `tenant_id`
-- **Ruta absoluta**: Cada proyecto almacena `root_path` absoluta (permite `base_location` distinta por tenant)
+- **Ruta absoluta**: Cada proyecto almacena `root_path` absoluta (permite `base_location` distinta por proyecto)
 - **Rollback automático**: Si creación falla después de crear carpeta, se borra (atomicidad)
 - **Case-insensitive**: Búsqueda por nombre ignora mayúsculas
 
@@ -187,7 +170,6 @@ Elimina un proyecto por completo: borra `root_path` en disco y quita la entrada 
 | Parámetro | Tipo | Descripción |
 |---|---|---|
 | `name` | `str` | Nombre del proyecto a eliminar |
-| `tenant_id` | `str` | ID de tenant |
 
 **Proceso**: borra primero la carpeta en disco (`shutil.rmtree`) y solo si tiene éxito
 quita la entrada del registro — si el borrado físico falla, el proyecto sigue
@@ -207,7 +189,6 @@ Mueve `root_path` de un proyecto a `<destination_parent>/<name>/`.
 |---|---|---|
 | `name` | `str` | Nombre del proyecto a mover |
 | `destination_parent` | `str \| Path` | Carpeta padre de destino, ya existente |
-| `tenant_id` | `str` | ID de tenant |
 
 | Retorno | Tipo | Descripción |
 |---|---|---|
@@ -269,8 +250,8 @@ carpeta reorganizada se borra entera al reconstruir o eliminar el contexto: `Con
 `errores_escaneo`, `historial_escaneo`, `domains`, `site`, `.cache` y los ficheros de la raíz (`context.json`,
 `zensical.toml`, `mkdocs.yml`, `taxonomy_manifest.md`, `cache.db`, `folders.json`, `scanned_folders.json`).
 `validate_output_folder_name` exige además un nombre simple (letras, dígitos, `_`, `.`, `-` y espacios; ni `.` ni `..`)
-y compara sin distinguir mayúsculas, sin puntos ni espacios finales (Windows los quita) y en forma Unicode NFC. La web
-integrada usa estas rutas y esta validación desde 0.13.0.
+y compara sin distinguir mayúsculas, sin puntos ni espacios finales (Windows los quita) y en forma Unicode NFC. doc_organize_web
+usa estas rutas y esta validación.
 
 ```python
 from doc_organize import ProjectLayout, InvalidPathError
@@ -295,19 +276,6 @@ proyecto sigue existiendo con el mismo nombre y ubicación.
 
 **Excepciones**: `ProjectError` si `root_path` no existe o algún elemento no se pudo borrar.
 
-## Rutas HTTP de gestión destructiva (admin)
-
-Todas bajo `/api/projects/{name}`, solo accesibles a un rol `admin`, y todas
-exigen `{"confirm": true}` en el payload y ausencia de una operación en curso
-(`409` si hay un escaneo/deduplicación activo sobre el mismo proyecto):
-
-| Ruta | Método | Descripción |
-|---|---|---|
-| `/impact` | `GET` | `{file_count, total_size_bytes, has_active_operation}` — resumen para la ventana modal de confirmación |
-| `/clear-history` | `POST` | Llama a `ProjectHistoryCleaner.clear()` |
-| `` (raíz) | `DELETE` | Llama a `ProjectRegistry.delete_project()` |
-| `/move` | `POST` | `{destination_path: str, confirm: bool}` → llama a `ProjectRegistry.move_project_root()` |
-
 ## Ejemplos Relacionados
 
 - [Crear y listar proyectos](../examples/projects-registry.md)
@@ -323,14 +291,14 @@ class ScannedFoldersStore:
 ```
 
 Lista persistente por proyecto (`<project.root_path>/scanned_folders.json`) de
-las carpetas guardadas desde el menú Escaneo de la web. Mismo patrón de
+las carpetas guardadas para escanear (p. ej. desde el menú Escaneo de doc_organize_web). Mismo patrón de
 concurrencia que `ProjectRegistry` (lock en proceso + escritura atómica).
 
 | Método | Descripción | Excepciones |
 |---|---|---|
 | `add_folder` | Añade `path` (o devuelve la entrada existente si ya estaba) | `InvalidPathError` si no existe o no es carpeta |
 | `remove_folder` | Elimina `path` de la lista | `ScannedFolderNotFoundError`, `ScannedFolderInUseError` si `used=True` |
-| `mark_used` | Marca `paths` como usadas (crea la entrada si no existía); llamado por `scan_websocket` tras un escaneo correcto | — |
+| `mark_used` | Marca `paths` como usadas (crea la entrada si no existía); lo llama el consumidor tras un escaneo correcto | — |
 
 ```python
 @dataclass

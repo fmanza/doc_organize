@@ -6,7 +6,6 @@ import asyncio
 import json
 import os
 import shutil
-import warnings
 
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,16 +25,6 @@ from doc_organize.validators.project_validator import ProjectValidator
 _DEFAULT_REGISTRY_PATH = Path.home() / ".doc_organize" / "projects.json"
 
 
-def _warn_if_tenant(tenant_id: str) -> None:
-    """``tenant_id`` está obsoleto (L-6c): los tenants los gestiona doc_organize_web en su BD; se retira en 1.0.0."""
-    if tenant_id != "default":
-        warnings.warn(
-            "El parámetro tenant_id de ProjectRegistry está obsoleto y se retirará en doc_organize 1.0.0",
-            DeprecationWarning,
-            stacklevel=3,
-        )
-
-
 class ProjectRegistry:
     """Registro local de proyectos: crea, lista y abre proyectos (REQ-008).
 
@@ -44,8 +33,12 @@ class ProjectRegistry:
     elegida por el usuario. Las escrituras son poco frecuentes (crear un proyecto es
     una acción deliberada y rara, no un hot path como `cache.db`), así que un
     `asyncio.Lock` en proceso + escritura atómica (fichero temporal + `os.replace`)
-    es proporcionado; si la concurrencia real desde `web/` lo exige, el mismo camino
-    que `cache.json` -> SQLite (AUDIT_PLAN revisión 1) aplicaría aquí.
+    es proporcionado.
+
+    Desde 1.0.0 no hay tenants (L-12): la unicidad del nombre es de todo el registro. Un
+    `projects.json` antiguo con `tenant_id` se sigue leyendo (el campo se ignora y desaparece
+    en la siguiente escritura); si traía el mismo nombre en dos tenants, `get_project` devuelve
+    el primero.
 
     Attributes:
         registry_path (Path): Ruta al fichero JSON del registro.
@@ -78,7 +71,7 @@ class ProjectRegistry:
     async def __aexit__(self, *exc_info: object) -> None:
         return None
 
-    async def create_project(self, name: str, base_location: str | Path, tenant_id: str = "default") -> Project:
+    async def create_project(self, name: str, base_location: str | Path) -> Project:
         """Crea un proyecto nuevo bajo `base_location` y lo registra.
 
         Orden de operaciones (para no dejar estado parcial): valida nombre y
@@ -89,28 +82,15 @@ class ProjectRegistry:
         Args:
             name: Nombre candidato del proyecto (se valida y normaliza).
             base_location: Carpeta padre, ya existente, donde crear `<name>/`.
-            tenant_id: Tenant propietario (revisión 8, §2.7.2). Por defecto `"default"`
-                — el tenant implícito usado por el CLI y por sesiones web sin
-                autenticar (loopback); en web autenticado se resuelve siempre del
-                lado servidor desde la sesión, nunca de un parámetro del cliente.
-                La unicidad del nombre es por tenant, pero `root_path` sigue siendo
-                `<base_location>/<name>/` sin subcarpeta de tenant: si dos tenants
-                usan la misma `base_location` con el mismo nombre, la segunda
-                creación falla por colisión de carpeta en disco (mismo caso que
-                una carpeta preexistente no registrada), no por `ProjectAlreadyExistsError`.
-                En la práctica, cada tenant usa su propia `base_location`.
 
         Returns:
             El `Project` creado y registrado.
 
         Raises:
             ProjectNameError: Si el nombre no es válido.
-            ProjectAlreadyExistsError: Si ya existe un proyecto con ese nombre **en el
-                mismo tenant** (case-insensitive); el mismo nombre en otro tenant no
-                colisiona.
+            ProjectAlreadyExistsError: Si ya existe un proyecto con ese nombre (case-insensitive).
             ProjectError: Si `base_location` no existe/no es carpeta, o falla la creación.
         """
-        _warn_if_tenant(tenant_id)
         validation = self._validator.validate_name(name)
         if not validation.is_valid or validation.normalized_name is None:
             raise ProjectNameError("; ".join(validation.warnings))
@@ -122,7 +102,7 @@ class ProjectRegistry:
 
         async with self._lock:
             projects = await self._load()
-            if any(p.name.lower() == normalized_name.lower() and p.tenant_id == tenant_id for p in projects):
+            if any(p.name.lower() == normalized_name.lower() for p in projects):
                 raise ProjectAlreadyExistsError(normalized_name)
 
             project_root = safe_path_join(base_path, normalized_name)
@@ -139,7 +119,6 @@ class ProjectRegistry:
                     name=normalized_name,
                     root_path=str(project_root),
                     created_at=datetime.now(UTC).isoformat(),
-                    tenant_id=tenant_id,
                 )
                 await asyncio.to_thread(
                     (project_root / "project.json").write_text,
@@ -159,35 +138,29 @@ class ProjectRegistry:
                 await asyncio.to_thread(shutil.rmtree, project_root, ignore_errors=True)
                 raise
 
-        self.logger.info(f"Proyecto creado: '{normalized_name}' en '{project_root}' (tenant '{tenant_id}')")
+        self.logger.info(f"Proyecto creado: '{normalized_name}' en '{project_root}'")
         return project
 
-    async def list_projects(self, tenant_id: str = "default") -> list[Project]:
-        """Lista los proyectos de `tenant_id` (no verifica que sus carpetas sigan existiendo)."""
-        _warn_if_tenant(tenant_id)
+    async def list_projects(self) -> list[Project]:
+        """Lista los proyectos del registro (no verifica que sus carpetas sigan existiendo)."""
         async with self._lock:
             projects = await self._load()
-        return [p for p in projects if p.tenant_id == tenant_id]
+        return projects
 
-    async def get_project(self, name: str, tenant_id: str = "default") -> Project:
-        """Devuelve el proyecto `name` de `tenant_id` (comparación de nombre case-insensitive).
-
-        Un proyecto de otro tenant nunca se encuentra, aunque el nombre coincida —
-        mismo error que "no existe" en ambos casos, para no revelar que un proyecto
-        con ese nombre existe en un tenant distinto.
+    async def get_project(self, name: str) -> Project:
+        """Devuelve el proyecto `name` (comparación de nombre case-insensitive).
 
         Raises:
-            ProjectNotFoundError: Si no hay ningún proyecto con ese nombre en `tenant_id`.
+            ProjectNotFoundError: Si no hay ningún proyecto con ese nombre.
         """
-        _warn_if_tenant(tenant_id)
         async with self._lock:
             projects = await self._load()
         for project in projects:
-            if project.name.lower() == name.lower() and project.tenant_id == tenant_id:
+            if project.name.lower() == name.lower():
                 return project
         raise ProjectNotFoundError(name)
 
-    async def delete_project(self, name: str, tenant_id: str = "default") -> None:
+    async def delete_project(self, name: str) -> None:
         """Elimina `name` del registro y borra su carpeta de trabajo por completo.
 
         Orden de operaciones (mismo criterio que `create_project`, invertido): se
@@ -198,10 +171,9 @@ class ProjectRegistry:
 
         Args:
             name: Nombre del proyecto a eliminar.
-            tenant_id: Tenant propietario.
 
         Raises:
-            ProjectNotFoundError: Si no hay ningún proyecto con ese nombre en `tenant_id`.
+            ProjectNotFoundError: Si no hay ningún proyecto con ese nombre.
             ProjectError: Si la carpeta del proyecto no se pudo borrar por completo.
 
         Example:
@@ -216,10 +188,9 @@ class ProjectRegistry:
             >>> asyncio.run(main())
             []
         """
-        _warn_if_tenant(tenant_id)
         async with self._lock:
             projects = await self._load()
-            project = next((p for p in projects if p.name.lower() == name.lower() and p.tenant_id == tenant_id), None)
+            project = next((p for p in projects if p.name.lower() == name.lower()), None)
             if project is None:
                 raise ProjectNotFoundError(name)
 
@@ -230,12 +201,12 @@ class ProjectRegistry:
                 except OSError as exc:
                     raise ProjectError(f"No se pudo eliminar la carpeta del proyecto '{root_path}': {exc}") from exc
 
-            remaining = [p for p in projects if not (p.name.lower() == name.lower() and p.tenant_id == tenant_id)]
+            remaining = [p for p in projects if p is not project]
             await self._save(remaining)
 
-        self.logger.info(f"Proyecto eliminado: '{name}' (tenant '{tenant_id}'), carpeta '{root_path}' borrada")
+        self.logger.info(f"Proyecto eliminado: '{name}', carpeta '{root_path}' borrada")
 
-    async def move_project_root(self, name: str, destination_parent: str | Path, tenant_id: str = "default") -> Project:
+    async def move_project_root(self, name: str, destination_parent: str | Path) -> Project:
         """Mueve la carpeta raíz de `name` a `<destination_parent>/<name>/`.
 
         `destination_parent` debe ser una carpeta ya existente (la carpeta padre
@@ -252,13 +223,12 @@ class ProjectRegistry:
         Args:
             name: Nombre del proyecto a mover.
             destination_parent: Carpeta padre de destino, ya existente.
-            tenant_id: Tenant propietario.
 
         Returns:
             El `Project` actualizado, con el nuevo `root_path`.
 
         Raises:
-            ProjectNotFoundError: Si no hay ningún proyecto con ese nombre en `tenant_id`.
+            ProjectNotFoundError: Si no hay ningún proyecto con ese nombre.
             ProjectError: Si `destination_parent` no existe, si el destino ya
                 contiene una carpeta con ese nombre, si la carpeta actual del
                 proyecto no existe, o si el destino es la ubicación actual.
@@ -276,7 +246,6 @@ class ProjectRegistry:
             >>> asyncio.run(main())
             True
         """
-        _warn_if_tenant(tenant_id)
         destination_base = Path(destination_parent)
         if not destination_base.is_dir():
             raise ProjectError(f"La carpeta de destino no existe o no es una carpeta: {destination_parent}")
@@ -284,7 +253,7 @@ class ProjectRegistry:
         async with self._lock:
             projects = await self._load()
             index = next(
-                (i for i, p in enumerate(projects) if p.name.lower() == name.lower() and p.tenant_id == tenant_id),
+                (i for i, p in enumerate(projects) if p.name.lower() == name.lower()),
                 None,
             )
             if index is None:
@@ -318,7 +287,7 @@ class ProjectRegistry:
                 await asyncio.to_thread(shutil.move, str(new_root), str(old_root))
                 raise
 
-        self.logger.info(f"Proyecto '{name}' movido de '{old_root}' a '{new_root}' (tenant '{tenant_id}')")
+        self.logger.info(f"Proyecto '{name}' movido de '{old_root}' a '{new_root}'")
         return updated
 
     async def _load(self) -> list[Project]:

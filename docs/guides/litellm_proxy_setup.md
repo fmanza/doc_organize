@@ -125,15 +125,13 @@ La respuesta incluye `"key": "sk-..."` — esa es la virtual key.
 
 ## 4. Configurar doc_organize
 
-**AÑADIDO (2026-09-11)**: alternativa a editar `.env` a mano — el panel
-`/admin/configuracion-ia` de la propia aplicación permite guardar estas mismas
-variables desde la web (persistidas cifradas en reposo), sin reiniciar el
-proceso. Ver [Configuración de IA y plantillas](../functional/ai_settings.md).
-Ambas vías son equivalentes y pueden combinarse; lo que sigue documenta la vía
-por `.env`, siempre disponible.
+Desde 1.0.0 la librería solo lee estas variables del entorno (`*_config_from_env()`), o
+recibe los `*Config` ya construidos por el consumidor: el panel `/admin/configuracion-ia`
+de la web integrada se retiró con ella (ver el [histórico](../historico/web-ai_settings.md));
+doc_organize_web tiene su propia configuración de IA.
 
-En el entorno donde corre `python -m doc_organize web` (o en tu `.env` de la raíz
-del proyecto, ver `.env.example`):
+En el entorno donde corre `doc_organize` (o en tu `.env` de la raíz del proyecto, ver
+`.env.example`), para las funciones `*_config_from_env()` de `doc_organize.ai`:
 
 ```bash
 DOC_ORGANIZE_LITELLM_CLASSIFICATION_BASE_URL=http://localhost:4000
@@ -143,9 +141,8 @@ DOC_ORGANIZE_LITELLM_CLASSIFICATION_MODEL=claude-classifier   # opcional, es el 
 
 Estas variables se leen explícitamente vía
 `litellm_classification_config_from_env()` (`doc_organize.ai`) — nunca de forma
-implícita. Si activas el toggle "IA" en la pantalla Contexto sin haberlas
-definido, `POST /api/projects/{name}/context` devuelve un 400 con un mensaje
-explícito en vez de un error críptico.
+implícita. Sin ellas, `litellm_classification_config_from_env()` lanza `ValueError`
+con un mensaje explícito en vez de un error críptico.
 
 **Si el proyecto tiene `taxonomy_manifest.md`** (modo de 2 ejes), configura en su
 lugar las variables de `TaxonomyClassificationClient` — son una config separada

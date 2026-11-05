@@ -160,108 +160,30 @@ PROJECT_NAME_RESERVED_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-#: Nombre por defecto de la base de datos de autenticacion (revision 8, §2.7.2).
-DEFAULT_AUTH_DB_NAME = "auth.db"
-
-#: Id del tenant implicito, creado de fabrica sin aprovisionamiento manual previo
-#: (rediseno Tenant/Role/User): lo usan el CLI y la web en modo loopback/sin
-#: autenticacion (`get_tenant_id()`), y es el unico tenant que
-#: `AuthStore._ensure_default_tenant_bootstrap()` aprovisiona automaticamente.
-DEFAULT_TENANT_ID = "default"
-
-#: Longitud maxima del identificador (slug) de un tenant (revision 8, §2.7.2).
-TENANT_ID_MAX_LENGTH = 63
-
-#: Longitud maxima de un nombre de usuario (revision 8, §2.7.2).
-USERNAME_MAX_LENGTH = 50
-
-#: Caracteres permitidos en un nombre de usuario: letras, numeros, punto, guion y guion bajo.
-USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
-
-#: Parametros de `hashlib.scrypt` para el hashing de contrasenas (revision 8, §2.7.2).
-#: n=2**17 es el minimo recomendado por OWASP (Password Storage Cheat Sheet) para scrypt
-#: con r=8, p=1. `SCRYPT_MAXMEM` debe cubrir el consumo real (~128*n*r bytes = ~128 MiB
-#: con estos parametros): sin especificarlo, `hashlib.scrypt` usa el limite por defecto
-#: de OpenSSL (32 MiB) y lanza ValueError("Memory limit exceeded") con n=2**17.
-SCRYPT_N = 2**17
-SCRYPT_R = 8
-SCRYPT_P = 1
-SCRYPT_DKLEN = 64
-SCRYPT_MAXMEM = 256 * 1024 * 1024
-
-#: Vida de una sesion de navegador desde su creacion (revision 8, §2.7.2). Fija, sin
-#: renovacion deslizante: evita una escritura en auth.db en cada peticion solo para
-#: refrescar `expires_at`.
-SESSION_LIFETIME_HOURS = 24
-
-#: Mitigacion de fuerza bruta en `POST /login` (revision de seguridad, revision 9):
-#: tras `LOGIN_MAX_ATTEMPTS` fallos consecutivos para el mismo (tenant_id, username),
-#: se bloquean nuevos intentos durante `LOGIN_LOCKOUT_SECONDS`. En memoria del
-#: proceso (ver `web.auth.LoginRateLimiter`), no persistido: suficiente para frenar
-#: el adivinado del admin/admin de bootstrap sin anadir infraestructura nueva.
-LOGIN_MAX_ATTEMPTS = 5
-LOGIN_LOCKOUT_SECONDS = 60.0
-
-#: Longitud maxima del nombre de un rol (revision 9, roles y gestion de usuarios).
-ROLE_NAME_MAX_LENGTH = 50
-
-#: Caracteres permitidos en el nombre de un rol: letras, numeros, espacios, punto,
-#: guion y guion bajo (mismo criterio que USERNAME_PATTERN, mas el espacio porque
-#: los nombres de rol son mas descriptivos, p.ej. "Editor de proyectos").
-ROLE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._\- ]+$")
-
-#: Nombre del rol admin creado automaticamente para cada tenant nuevo (revision 9).
-DEFAULT_ADMIN_ROLE_NAME = "admin"
-
-#: Usuario admin creado automaticamente para cada tenant nuevo (revision 9). La
-#: contrasena es deliberadamente conocida/publica: `User.must_change_password` se
-#: fija a `True` para forzar su cambio antes de poder usar el resto de la app en
-#: modo no-loopback (ver `AuthMiddleware`).
-DEFAULT_ADMIN_USERNAME = "admin"
-DEFAULT_ADMIN_PASSWORD = "admin"
-
 __all__ = [
     "AV_SUPPORTED_EXTENSIONS",
     "CONTEXT_FILE_NAME",
     "CONVERSION_FOLDER_NAME",
     "DEDUP_HISTORY_JSONL_NAME",
     "DEDUP_REPORT_JSON_NAME",
-    "DEFAULT_ADMIN_PASSWORD",
-    "DEFAULT_ADMIN_ROLE_NAME",
-    "DEFAULT_ADMIN_USERNAME",
-    "DEFAULT_AUTH_DB_NAME",
     "DEFAULT_CACHE_DB_NAME",
-    "DEFAULT_TENANT_ID",
     "DOMAINS_FOLDER_NAME",
     "DUPLICATES_FOLDER_NAME",
     "IGNORED_NAMES",
     "LEGACY_MKDOCS_CONFIG_NAME",
-    "LOGIN_LOCKOUT_SECONDS",
-    "LOGIN_MAX_ATTEMPTS",
     "MAX_AUTO_ERROR_RETRIES",
     "PROJECT_NAME_FORBIDDEN_CHARS",
     "PROJECT_NAME_MAX_LENGTH",
     "PROJECT_NAME_RESERVED_PATTERN",
-    "ROLE_NAME_MAX_LENGTH",
-    "ROLE_NAME_PATTERN",
     "SCAN_ERRORS_FOLDER_NAME",
     "SCAN_ERRORS_HISTORY_JSONL_NAME",
     "SCAN_FOLDERS_JSON_NAME",
     "SCAN_HISTORY_FOLDER_NAME",
     "SCAN_HISTORY_JSONL_NAME",
-    "SCRYPT_DKLEN",
-    "SCRYPT_MAXMEM",
-    "SCRYPT_N",
-    "SCRYPT_P",
-    "SCRYPT_R",
-    "SESSION_LIFETIME_HOURS",
     "SITE_CACHE_FOLDER_NAME",
     "SITE_CONFIG_FILE_NAME",
     "SITE_FOLDER_NAME",
     "SUPPORTED_EXTENSIONS",
     "TAXONOMY_MANIFEST_FILE_NAME",
-    "TENANT_ID_MAX_LENGTH",
-    "USERNAME_MAX_LENGTH",
-    "USERNAME_PATTERN",
     "VERSION_SUFFIX_PATTERN",
 ]

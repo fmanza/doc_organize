@@ -43,7 +43,7 @@ sequenceDiagram
 
 | Regla | Descripción |
 |---|---|
-| **Nombres únicos** | Por tenant; comprobación case-insensitive |
+| **Nombres únicos** | En todo el registro; comprobación case-insensitive |
 | **Registro central** | `~/.doc_organize/projects.json` fuera de proyectos |
 | **Creación atómica** | Temp file + `os.replace()` |
 | **Locking async** | Poco frecuente (crear proyecto es rara) |
@@ -52,7 +52,6 @@ sequenceDiagram
 
 ❌ No verifica si la carpeta destino existe (asume que la crea)  
 ❌ No valida que el disco tenga espacio  
-❌ No previene colisión de rutas entre tenants diferentes  
 
 ## Casos Especiales
 
@@ -92,24 +91,11 @@ carpetas del servidor que "Carpetas guardadas" (botón "Buscar…", vía
 `GET /api/fs/browse`) para elegir la ubicación (carpeta padre) del formulario
 de creación, en vez de escribir la ruta a mano.
 
-## Gestión destructiva de un proyecto (solo admin)
+## Gestión destructiva de un proyecto
 
-Cada fila de la lista de proyectos ofrece, únicamente a un rol `admin`, tres
-acciones sobre el proyecto completo. Las tres exigen confirmación explícita
-del usuario en una ventana modal que muestra primero el **impacto** (nº de
-ficheros y tamaño total bajo `root_path`, vía `GET /api/projects/{name}/impact`)
-antes de permitir continuar, y las tres se rechazan con `409` si hay un
-escaneo o deduplicación en curso para ese proyecto (mismo bloqueo por
-`(tenant_id, nombre)` que ya usan `scan_websocket`/`deduplicate_websocket`).
-
-| Acción | Efecto | Endpoint | Reversible |
-|---|---|---|---|
-| **Vaciar histórico** | Borra TODO el contenido de `root_path` (caché, historial de escaneo/errores/deduplicación, carpetas guardadas, salida de conversión) y regenera `project.json`. El proyecto sigue registrado, vacío. | `POST /api/projects/{name}/clear-history` | No |
-| **Eliminar proyecto** | Borra la carpeta de trabajo completa y quita el proyecto del registro. La ventana modal exige escribir el nombre exacto del proyecto para confirmar. | `DELETE /api/projects/{name}` | No — no hay papelera |
-| **Mover carpeta raíz** | Mueve `root_path` entero a `<destino>/<nombre>/`, arrastrando todo su contenido (todo vive ya dentro de `root_path`). El destino se elige con el mismo explorador de carpetas del servidor. | `POST /api/projects/{name}/move` | Sí — es solo una reubicación |
-
-Las tres rutas requieren `{"confirm": true}` en el cuerpo de la petición: la
-ventana modal del cliente no es la única barrera contra una acción accidental.
+`ProjectRegistry.delete_project()`, `ProjectRegistry.move_project_root()` y `ProjectHistoryCleaner.clear()` borran,
+mueven o vacían un proyecto entero (ver [Projects — API](../api/projects.md)). La confirmación del usuario y el bloqueo
+mientras hay un escaneo en curso son responsabilidad del consumidor (doc_organize_web los implementa).
 
 ## Descarga de export del proyecto (ZIP)
 

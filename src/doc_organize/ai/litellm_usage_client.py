@@ -13,7 +13,6 @@ from datetime import date
 import httpx
 
 from doc_organize.ai._http_client_base import AiHttpClientBase
-from doc_organize.ai._secrets import SecretValueReader, warn_store_config_deprecated
 from doc_organize.core.exceptions import UsageSourceAuthError, UsageSourceConnectionError, UsageSourceError
 from doc_organize.core.models import LiteLLMUsageConfig, UsageLineItem, UsageSnapshot, UsageSourceName
 from doc_organize.utils.logging import get_logger
@@ -44,26 +43,6 @@ def litellm_usage_config_from_env() -> LiteLLMUsageConfig:
     virtual_key = os.environ.get(_ENV_VAR_VIRTUAL_KEY)
     if not base_url or not virtual_key:
         raise ValueError(f"Definir {_ENV_VAR_BASE_URL} y {_ENV_VAR_VIRTUAL_KEY} para usar litellm_usage_config_from_env().")
-    return LiteLLMUsageConfig(base_url=base_url, virtual_key=virtual_key)
-
-
-async def litellm_usage_config_from_store_or_env(store: SecretValueReader) -> LiteLLMUsageConfig:
-    """Construye `LiteLLMUsageConfig` con precedencia `store` (panel de configuración IA) >
-    `DOC_ORGANIZE_LITELLM_BASE_URL`/`_VIRTUAL_KEY` del entorno.
-
-    Mismo criterio que `domain_classification_client.litellm_classification_config_from_store_or_env()`.
-
-    Returns:
-        Config lista para `LiteLLMUsageClient`.
-
-    Raises:
-        ValueError: Si, tras aplicar la precedencia, falta `base_url` o `virtual_key`.
-    """
-    warn_store_config_deprecated("litellm_usage_config_from_store_or_env")
-    base_url = await store.get(_ENV_VAR_BASE_URL.lower()) or os.environ.get(_ENV_VAR_BASE_URL)
-    virtual_key = await store.get(_ENV_VAR_VIRTUAL_KEY.lower()) or os.environ.get(_ENV_VAR_VIRTUAL_KEY)
-    if not base_url or not virtual_key:
-        raise ValueError(f"Definir {_ENV_VAR_BASE_URL} y {_ENV_VAR_VIRTUAL_KEY} (panel de configuración IA o entorno) para consultar uso de LiteLLM.")
     return LiteLLMUsageConfig(base_url=base_url, virtual_key=virtual_key)
 
 
@@ -167,4 +146,4 @@ class LiteLLMUsageClient(AiHttpClientBase):
         )
 
 
-__all__ = ["LiteLLMUsageClient", "litellm_usage_config_from_env", "litellm_usage_config_from_store_or_env"]
+__all__ = ["LiteLLMUsageClient", "litellm_usage_config_from_env"]
