@@ -1,3 +1,8 @@
+---
+name: access-doc-review
+description: access_doc_review
+disable-model-invocation: true
+---
 # Prompt: access_doc_review — Validación de la documentación de acceso/autenticación
 
 <!--

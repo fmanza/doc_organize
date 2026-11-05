@@ -1,3 +1,8 @@
+---
+name: audit-code
+description: audit_code
+disable-model-invocation: true
+---
 # Prompt: audit_code (Python library)
 
 ## Devuelve en este orden

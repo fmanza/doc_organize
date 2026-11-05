@@ -1,3 +1,8 @@
+---
+name: architecture-doc
+description: architecture_doc
+disable-model-invocation: true
+---
 # Prompt: architecture_doc — Decisión Arquitectónica (Arquetipo 5)
 
 Documenta una decisión arquitectónica (ADR) para **doc_organize** usando solo

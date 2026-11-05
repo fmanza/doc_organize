@@ -1,3 +1,8 @@
+---
+name: functional-doc
+description: functional_doc
+disable-model-invocation: true
+---
 # Prompt: functional_doc — Documentación funcional (Product Owner)
 
 <!--

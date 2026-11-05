@@ -1,3 +1,8 @@
+---
+name: landing-doc
+description: landing_doc
+disable-model-invocation: true
+---
 # Prompt: landing_doc — Páginas de Navegación Principal (Arquetipo 6)
 
 Genera o actualiza las **páginas de navegación principal** de **doc_organize** —

@@ -1,3 +1,8 @@
+---
+name: tech-debt
+description: tech_debt
+disable-model-invocation: true
+---
 # Prompt: tech_debt (Python library)
 
 ## Inputs requeridos

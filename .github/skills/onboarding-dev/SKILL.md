@@ -1,3 +1,8 @@
+---
+name: onboarding-dev
+description: onboarding_dev
+disable-model-invocation: true
+---
 # Prompt: onboarding_dev — Guía de incorporación para desarrolladores (Arquetipo 7)
 
 <!--

@@ -1,3 +1,8 @@
+---
+name: technical-doc
+description: technical_doc
+disable-model-invocation: true
+---
 # Prompt: technical_doc — Documentación técnica con Mermaid
 
 Genera o actualiza diagramas Mermaid.js y documentación técnica para módulos de **doc_organize**,

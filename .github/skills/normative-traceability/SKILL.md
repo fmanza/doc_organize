@@ -1,3 +1,8 @@
+---
+name: normative-traceability
+description: normative_traceability
+disable-model-invocation: true
+---
 # normative_traceability
 
 Genera o actualiza un documento de trazabilidad normativa para el proyecto.

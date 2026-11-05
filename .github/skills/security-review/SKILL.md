@@ -1,3 +1,8 @@
+---
+name: security-review
+description: security_review
+disable-model-invocation: true
+---
 # Prompt: security_review (Python library)
 
 ## Devuelve en este orden

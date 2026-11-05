@@ -1,3 +1,8 @@
+---
+name: version-closure
+description: version_closure
+disable-model-invocation: true
+---
 # Prompt: version_closure (Python library)
 
 ## Devuelve

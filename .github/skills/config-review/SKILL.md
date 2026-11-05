@@ -1,3 +1,8 @@
+---
+name: config-review
+description: config_review
+disable-model-invocation: true
+---
 # Prompt: config_review — Revisión y redefinición de ficheros de configuración IA
 
 ## Objetivo

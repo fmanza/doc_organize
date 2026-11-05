@@ -1,3 +1,8 @@
+---
+name: refactor
+description: refactor
+disable-model-invocation: true
+---
 # Prompt: refactor (Python library)
 
 ## Devuelve en este orden

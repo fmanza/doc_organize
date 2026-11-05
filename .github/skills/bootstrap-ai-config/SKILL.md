@@ -1,3 +1,8 @@
+---
+name: bootstrap-ai-config
+description: bootstrap_ai_config
+disable-model-invocation: true
+---
 # Prompt: bootstrap_ai_config — Trasladar la configuración IA multiplataforma a otro proyecto
 
 ## Objetivo

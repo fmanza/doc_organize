@@ -1,3 +1,8 @@
+---
+name: new-feature
+description: new_feature
+disable-model-invocation: true
+---
 # Prompt: new_feature (Python library)
 
 ## Objetivo

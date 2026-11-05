@@ -1,3 +1,8 @@
+---
+name: tenant-role-user-redesign
+description: tenant_role_user_redesign
+disable-model-invocation: true
+---
 # Prompt: new_feature — Rediseño de Tenant/Role/User y pantallas de administración
 
 <!--

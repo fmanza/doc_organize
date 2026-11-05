@@ -1,3 +1,8 @@
+---
+name: guide-doc
+description: guide_doc
+disable-model-invocation: true
+---
 # Prompt: guide_doc — Guía de usuario o configuración (Arquetipo 3)
 
 Genera o actualiza guías de instalación, configuración y uso para **doc_organize** usando solo

@@ -1,3 +1,8 @@
+---
+name: example-doc
+description: example_doc
+disable-model-invocation: true
+---
 # Prompt: example_doc — Guía de ejemplo de código (Arquetipo 4)
 
 Genera o actualiza guías de ejemplos de código para **doc_organize** usando solo

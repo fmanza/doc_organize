@@ -1,3 +1,8 @@
+---
+name: maturity-assessment
+description: maturity_assessment
+disable-model-invocation: true
+---
 # Prompt: maturity_assessment (Python library)
 
 ## Devuelve en este orden

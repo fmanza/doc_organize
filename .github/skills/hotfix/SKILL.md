@@ -1,3 +1,8 @@
+---
+name: hotfix
+description: hotfix
+disable-model-invocation: true
+---
 # Prompt: hotfix (Python library)
 
 ## Devuelve en este orden
