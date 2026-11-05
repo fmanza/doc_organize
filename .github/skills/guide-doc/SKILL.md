@@ -84,10 +84,11 @@ Genera la guía de usuario del área indicada siguiendo las instrucciones del pr
 
 | Archivo | Tipo de guía |
 |---|---|
-| `docs/guides/installation.md` | Instalación y extras opcionales (`[web]`) |
+| `docs/guides/installation.md` | Instalación y extras opcionales (`[export]`, `[ocr-gpu]`, `[av]`) |
 | `docs/guides/quick_start.md` | Inicio rápido: escaneo, conversión y caché |
 | `docs/guides/troubleshooting.md` | Solución de problemas |
-| `docs/functional/index.md` | Referencia funcional (scanner, converter, cache, dedup, auth, web) |
+| `docs/guides/migracion_web.md` | De la web integrada (retirada en 1.0.0) a doc_organize_web |
+| `docs/functional/index.md` | Referencia funcional (scanner, converter, cache, dedup, projects, context, export) |
 | `docs/api/index.md` | Referencia de API (mkdocstrings) |
 | Guías de herramientas IA | Configuración y uso de asistentes IA |
 

@@ -54,7 +54,7 @@ def _default_log_dir(env: str) -> Path:
     """Ruta de logs por defecto segun `env`, sin depender de dependencias nuevas.
 
     - `development`: `./logs`, relativa al directorio de trabajo actual (encaja
-      con ejecutar la CLI/web dentro de un proyecto concreto).
+      con ejecutar la CLI dentro de un proyecto concreto).
     - `production`: ruta persistente por usuario del sistema operativo —
       `%LOCALAPPDATA%\\doc_organize\\logs` en Windows, `~/.local/share/doc_organize/logs`
       en Linux/macOS — para no depender de cual sea el directorio de trabajo del
@@ -84,7 +84,7 @@ def configure_logging(*, env: str | None = None, log_dir: str | Path | None = No
     Los loggers de modulo (`get_logger(__name__)`, con nombre `doc_organize.xxx`) no
     instalan handlers propios: propagan aqui por jerarquia de `logging`, asi que deben
     llamar a esta funcion una unica vez al arrancar cada punto de entrada (hoy,
-    `main.py::main()`, compartido por CLI y por el comando `web`) antes de que se emita
+    `main.py::main()`) antes de que se emita
     ningun log. Si no se llama nunca (p. ej. un test que instancia un servicio
     directamente sin pasar por `main()`), Python usa su handler `lastResort`
     (WARNING+ a stderr) — no falla, simplemente no hay fichero ni nivel configurado.

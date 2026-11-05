@@ -80,8 +80,7 @@ async def select_document_sample(documents: list[ConversionResult], sample_size:
     muestra final puede tener menos de `sample_size` documentos.
 
     Args:
-        documents: Documentos ya convertidos con éxito del proyecto (p. ej.
-            `web/routes/context.py::_gather_converted_documents`).
+        documents: Documentos ya convertidos con éxito del proyecto.
         sample_size: Tope de documentos a incluir en la muestra.
         roots: Raíces escaneadas del proyecto (L-3d). Con ellas, la carpeta de cada documento es
             relativa a la raíz que lo contiene y nunca muestra nombres por encima de ella (p. ej.

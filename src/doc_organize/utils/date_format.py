@@ -2,9 +2,8 @@
 Formato de fecha/hora localizado y parametrizable para mostrar al usuario.
 
 El resto del proyecto genera timestamps con `datetime.now(timezone.utc).isoformat()`
-(disperso en varios módulos: `scan_command.py`, `auth_store.py`, `project_registry.py`,
-`scanned_folders_store.py`, `dedup/deduplication.py`, `web/routes/downloads.py`) y los
-plantillas Jinja los mostraban tal cual, en ISO 8601 UTC crudo. Este módulo centraliza
+(disperso en varios módulos: `scan_command.py`, `project_registry.py`,
+`scanned_folders_store.py`, `dedup/deduplication.py`) y las interfaces los mostraban tal cual, en ISO 8601 UTC crudo. Este módulo centraliza
 la conversión a una zona horaria y un patrón de visualización configurables, con
 formato español (`dd/mm/aaaa HH:MM:SS`) y zona horaria de España como valores por
 defecto — mismo patrón de variable de entorno `DOC_ORGANIZE_*` que
@@ -47,7 +46,7 @@ def format_datetime(value: str | datetime | None, *, pattern: str | None = None,
         horaria configurada (`tz_name`/`DOC_ORGANIZE_TIMEZONE`) no existe, se
         devuelve `value` tal cual (sin formatear) en vez de propagar la excepción:
         mismo criterio de tolerancia a datos corruptos que
-        `web/scan_errors_data.py::load_error_history` — un valor inesperado no
+        `export.load_scan_error_history` — un valor inesperado no
         debe tumbar la página, solo perder el formateo.
 
     Example:

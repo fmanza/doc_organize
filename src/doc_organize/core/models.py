@@ -93,7 +93,7 @@ class DedupEventType(str, Enum):
 
 
 class ContextBuildEventType(str, Enum):
-    """Tipo de evento de progreso emitido por `context_build_websocket()` (semáforo
+    """Tipo de evento de progreso emitido al construir un contexto (semáforo
     de "Reconstruir/Construir contexto"). `AI_CLASSIFYING_STARTED`/`AI_DOCUMENT_CLASSIFIED`
     solo se emiten si la Sub-fase B está activa; `REORGANIZE_STARTED` lleva el
     `total` de documentos a copiar, pero `AI_CLASSIFYING_STARTED` no (el total de la
@@ -117,7 +117,7 @@ class ContextBuildEventType(str, Enum):
 
 
 class ContextDeleteEventType(str, Enum):
-    """Tipo de evento de progreso emitido por `context_delete_websocket()` (semáforo
+    """Tipo de evento de progreso emitido al eliminar un contexto (semáforo
     de "Eliminar contexto"). Solo 3 pasos macro, sin bucles reales que reportar —
     a diferencia de `ContextBuildEventType`, no hay eventos por documento."""
 
@@ -462,7 +462,7 @@ class DedupEvent(VersionedEvent):
 
 
 class ContextBuildEvent(VersionedEvent):
-    """Un evento de progreso emitido por `context_build_websocket()`.
+    """Un evento de progreso emitido al construir un contexto.
 
     Mismo criterio que `ScanEvent`/`DedupEvent`: payload `dict[str, Any]` laxo.
     """
@@ -472,7 +472,7 @@ class ContextBuildEvent(VersionedEvent):
 
 
 class ContextDeleteEvent(VersionedEvent):
-    """Un evento de progreso emitido por `context_delete_websocket()`.
+    """Un evento de progreso emitido al eliminar un contexto.
 
     Mismo criterio que `ScanEvent`/`DedupEvent`: payload `dict[str, Any]` laxo.
     """
@@ -556,7 +556,7 @@ class ScannedFolder(BaseModel):
 
 
 class GpuStatus(BaseModel):
-    """Estado de soporte de GPU del entorno donde corre el servidor web (menú Escaneo).
+    """Estado de soporte de GPU del entorno donde corre doc_organize (menú Escaneo de la web).
 
     Detección de entorno software, no de permisos por usuario/rol: el mismo
     resultado aplica a cualquier sesión, porque depende únicamente de qué hay
@@ -575,7 +575,7 @@ class AvStatus(BaseModel):
     usuario/rol. A diferencia de la GPU (cuya ausencia solo degrada a CPU), sin
     `asr_installed`/`ffmpeg_installed` la conversión de audio/vídeo falla siempre
     — por eso `ready` se usa también como pre-check bloqueante en el CLI
-    (`_run_scan`), no solo como aviso informativo en la UI web.
+    (`_run_scan`), no solo como aviso informativo en una interfaz.
     """
 
     asr_installed: bool = Field(..., description="Si el backend de transcripción ASR (extra `av`, Whisper) está instalado")
@@ -748,7 +748,7 @@ class Context(BaseModel):
     )
     reorganized: bool = Field(
         default=False,
-        description="Si `Reorganizer.reorganize()` terminó con éxito para esta versión del contexto — `False` si nunca se intentó o si falló a medias (ver `web/routes/context.py::build_context`, AUDIT_CODE sesión 2026-09-08)",
+        description="Si `Reorganizer.reorganize()` terminó con éxito para esta versión del contexto — `False` si nunca se intentó o si falló a medias (AUDIT_CODE sesión 2026-09-08)",
     )
     reorganize_failed_documents: list[str] = Field(
         default_factory=list,

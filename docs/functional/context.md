@@ -31,7 +31,7 @@ fichero para ser ese tipo de material semántico.
 ```mermaid
 sequenceDiagram
     participant Usuario
-    participant API as POST /api/projects/{name}/context
+    participant API as Consumidor (CLI propio, doc_organize_web…)
     participant Builder as ContextBuilder
     participant RulesA as DomainClassifier (Sub-fase A)
     participant IA as DomainClassificationClient (Sub-fase B)
@@ -146,26 +146,22 @@ o un fichero local con `taxonomy_template_name`, se rechaza con `400` explícito
 criterio de "nunca precedencia silenciosa" que ya aplica a `candidate_domains`.
 
 `taxonomy_template_name` no es "sticky": a diferencia de `output_folder_name`, cada
-reconstrucción debe repetirlo para seguir usando la misma plantilla (aunque la UI
-preselecciona la última usada, leída de `Context.taxonomy_template_name`).
+reconstrucción debe repetirlo para seguir usando la misma plantilla (una interfaz
+puede preseleccionar la última usada, leída de `Context.taxonomy_template_name`).
 
-`GET /api/taxonomy-templates` lista las plantillas disponibles (nombre, título,
-descripción) — usado por el selector de la página "Contexto" para poblar el
-desplegable cuando el proyecto no tiene ya un `taxonomy_manifest.md` local.
+`TaxonomyTemplateRegistry.list_templates()` lista las plantillas disponibles (nombre,
+título, descripción), p. ej. para poblar un selector cuando el proyecto no tiene ya un
+`taxonomy_manifest.md` local.
 
 Si nunca se usa ninguna plantilla (`taxonomy_template_name` ausente y sin fichero
 local), el comportamiento es exactamente el mismo que antes de esta funcionalidad.
 
 ## Visualizar el Sitio Generado
 
-`GET /projects/{name}/context/site/` sirve el sitio ya construido
-(`<project.root_path>/site/`), como acción de solo lectura totalmente
-independiente de construir/reconstruir el contexto: nunca se abre
-automáticamente al terminar un `POST`, el usuario decide cuándo verlo (enlace
-"ver documentación generada" en la página del proyecto, visible solo cuando
-`site_built` es `True`). Al ser un sitio distinto por cada `Project`
-(cada uno con su propio `root_path`), la misma ruta sirve el sitio de
-cualquier proyecto sin acoplarse a la construcción de ningún otro.
+El sitio ya construido queda en `<project.root_path>/site/` (`ProjectLayout.site_dir`) cuando
+`Context.site_built` es `True`. La librería no lo sirve: abrirlo o publicarlo es cosa del
+consumidor (doc_organize_web lo sirve aislado, ver [Seguridad del sitio](#seguridad-del-sitio)).
+Cada `Project` tiene su propio sitio bajo su `root_path`, sin acoplarse a ningún otro.
 
 Un contexto construido antes de 0.13.0 (con `mkdocs.yml`) pasa a Zensical al reconstruirlo: se borra `mkdocs.yml`, se
 escribe `zensical.toml` y se vuelve a construir `site/`. `context.json` antiguo se sigue leyendo
@@ -202,7 +198,7 @@ deduplicación desde 0.12.1:
 - La carpeta reorganizada no puede ser ni pasar por un enlace: la reorganización falla entera antes de tocar nada.
 - Un documento con algún tramo enlazado (el original, el `.md`, el `.json` o sus imágenes) falla solo, sin copiar el
   destino del enlace ni dejar copias parciales; el resto sigue. Los fallos quedan en
-  `Context.reorganize_failed_documents` y la página "Contexto" los avisa.
+  `Context.reorganize_failed_documents`, para que el consumidor los avise.
 - Una ruta que pase por un enlace del sistema (p. ej. `/tmp` en macOS) falla: hay que trabajar con rutas reales.
 
 ## Reglas de Negocio
@@ -215,9 +211,9 @@ deduplicación desde 0.12.1:
 | **Copiar, nunca mover** | `Reorganizer` copia los tres artefactos (original + `.md` + `.json`); la fuente original nunca se toca |
 | **Reconstrucción limpia** | Cada `POST` reconstruye desde cero: dominios/documentos ya no vigentes se eliminan de `context.json` y de `organizado/`, sin copias huérfanas |
 | **Estado honesto ante fallo parcial** | Si la reorganización o la generación del sitio fallan a mitad, `context.json` persiste `reorganized`/`site_generated=false` — nunca se reporta éxito falso. `SiteGenerator` lanza `SiteBuildError` si no puede construir el sitio, nunca lo deja sin construir en silencio |
-| **Una operación a la vez** | `POST /api/projects/{name}/context` se rechaza con `409` si hay un escaneo, deduplicación u otra construcción de contexto en curso para el mismo proyecto |
-| **Manifiesto y catálogo simple son excluyentes** | Un proyecto con `taxonomy_manifest.md` no puede combinar `candidate_domains` en la misma petición — `400` explícito, nunca precedencia silenciosa |
-| **Fichero local, catálogo simple y plantilla son excluyentes entre sí** | Cualquier combinación de `taxonomy_manifest.md` local, `candidate_domains` y `taxonomy_template_name` en la misma petición se rechaza con `400` explícito — el fichero local, si existe, siempre gana sobre una plantilla, nunca precedencia silenciosa |
+| **Una operación a la vez** | La librería no bloquea: evitar un escaneo, una deduplicación u otra construcción de contexto simultáneos sobre el mismo proyecto es responsabilidad del consumidor (doc_organize_web encola las ejecuciones) |
+| **Manifiesto y catálogo simple son excluyentes** | Con `taxonomy_manifest`, `ContextBuilder.build()` clasifica por el manifiesto; rechazar que además llegue `candidate_domains` (en vez de ignorarlo en silencio) es responsabilidad del consumidor |
+| **Fichero local, catálogo simple y plantilla son excluyentes entre sí** | El fichero local `taxonomy_manifest.md`, si existe, gana sobre una plantilla; rechazar cualquier combinación de los tres en la misma petición es responsabilidad del consumidor |
 | **Modo manifiesto nunca excluye por completo** | Con manifiesto activo (fichero local o plantilla), un documento con los tres artefactos completos siempre se reorganiza — si un eje (dominio o tipo de material) no alcanza el umbral, se le asigna el slug `sin-clasificar` en ese eje en vez de dejarlo fuera |
 
 ## Límites y Restricciones

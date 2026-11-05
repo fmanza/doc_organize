@@ -125,8 +125,7 @@ for group in groups:
     if group.reason == DuplicateReason.FUZZY_NAME_MATCH:
         print(f"Posibles duplicados por nombre: {[d.display_name for d in group.duplicates]}")
         # canonical_doc es solo una propuesta -- nunca se resuelve sin
-        # confirmación explícita del usuario (ver web/routes/duplicates.py,
-        # POST /api/projects/{name}/duplicates/resolve).
+        # confirmación explícita del usuario (la pide el consumidor).
 ```
 
 **Importante**: los grupos `FUZZY_NAME_MATCH` nunca se mueven vía `resolve_duplicates()` llamado

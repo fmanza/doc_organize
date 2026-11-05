@@ -250,7 +250,7 @@ Para las páginas de entrada de nivel raíz del `nav` — **Inicio**, **Instalac
 # Variante B — Instalación (docs/INSTALLATION.md)
 ## 1. Requisitos Previos
 ## 2. Instalación del Paquete
-## 3. Extras Opcionales (p.ej. `[web]`, `[ocr-gpu]`)
+## 3. Extras Opcionales (p.ej. `[export]`, `[ocr-gpu]`)
 ## 4. Verificación
 ## 5. Solución de Problemas
 
@@ -298,7 +298,7 @@ subsecciones** (no listas planas).
   con nombres **consistentes entre las tres secciones**, de modo que un mismo dominio aparece bajo el
   mismo rótulo en funcional, técnica y ejemplos:
 
-  `Scanner` · `Converter` · `Deduplicación` · `Caché` · `Web` (Fase D) · `Validators` · `Utils`
+  `Scanner` · `Converter` · `Deduplicación` · `Caché` · `Projects` · `Exportación` · `Contexto` · `Validators` · `Utils`
 
 - En `Guías` los grupos son **temáticos** (how-tos transversales). Pueden reusar nombres de área de
   dominio cuando la guía trata de un módulo concreto (`Scanner`, `Converter`, `Deduplicación`,
@@ -724,8 +724,7 @@ docs/examples/
 │   ├── convert_with_ocr.py
 │   └── ...
 ├── dedup/               # Deduplicación y resolución de versiones
-├── cache/               # Caché transaccional (SQLite)
-└── web/                 # Uso de la interfaz web (Fase D)
+└── cache/               # Caché transaccional (SQLite)
 ```
 
 ### Validación antes de documentar

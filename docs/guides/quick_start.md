@@ -42,10 +42,39 @@ Flags útiles de `scan`:
 --use-gpu        # OCR acelerado por GPU (requiere el extra ocr-gpu), solo con --use-ocr
 ```
 
-## 3. Interfaz web
+## 3. Desde Python
 
-Desde 1.0.0 la librería no incluye interfaz web (L-11): usa [doc_organize_web](https://github.com/fmanza/doc_organize_web), que trabaja sobre las mismas carpetas de
-proyecto. La guía de la web integrada de 0.14.0 está en el [histórico](../historico/web-access.md).
+Lo mismo que el CLI, como librería. `ScanCommand` es la orquestación que usa `scan`; las rutas del proyecto salen de
+`ProjectLayout`:
+
+```python
+import asyncio
+
+from doc_organize import ProjectLayout, ProjectRegistry, ScanCommand
+
+
+async def main() -> None:
+    async with ProjectRegistry() as registry:
+        project = await registry.get_project("Mi Proyecto")
+    layout = ProjectLayout.for_project(project)
+
+    summary = await ScanCommand().run(
+        paths=["/ruta/a/documentos"],
+        output_dir=layout.conversion_dir,
+        cache_db=layout.cache_db,
+        folders_json=layout.folders_json,
+    )
+    print(summary.render())
+
+
+asyncio.run(main())
+```
+
+La API pública estable son los nombres de `doc_organize.__all__`: ver
+[API pública y compatibilidad](../api/publica.md).
+
+La librería no incluye interfaz web: es [doc_organize_web](https://github.com/fmanza/doc_organize_web), un proyecto
+aparte. Si venías de la web integrada (retirada en 1.0.0), lee [De la web integrada a doc_organize_web](migracion_web.md).
 
 ## 4. Uso avanzado sin proyecto
 

@@ -26,8 +26,7 @@ class ScannedFoldersStore:
     Vive en `<project.root_path>/scanned_folders.json`, junto al resto de estado
     propio del proyecto (`cache.db`, `folders.json`). Distinto de `folders.json`
     (escrito por `ScanCommand`, que solo guarda la última tanda de rutas
-    escaneadas para que `web/routes/duplicates.py` pueda re-escanear sin
-    preguntar): este fichero es una lista gestionable por el usuario desde la UI
+    escaneadas para re-escanear sin preguntar): este fichero es una lista gestionable por el usuario desde la UI
     (añadir/eliminar) que además recuerda, de forma permanente, qué carpetas se
     han usado alguna vez en un escaneo real — una carpeta usada no se puede
     eliminar de la lista.
@@ -113,7 +112,7 @@ class ScannedFoldersStore:
     async def mark_used(self, project: Project, paths: list[str]) -> None:
         """Marca `paths` como usadas, añadiéndolas a la lista si no estaban ya.
 
-        Llamado por `web/routes/scan.py::scan_websocket` tras un escaneo
+        Lo llama el consumidor tras un escaneo
         correcto — cubre tanto las carpetas elegidas desde la lista persistente
         como cualquier ruta indicada por otra vía (CLI, API directa), para que
         la lista siga siendo un historial completo de lo realmente escaneado.

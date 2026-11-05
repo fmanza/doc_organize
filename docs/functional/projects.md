@@ -67,29 +67,15 @@ sequenceDiagram
 ## Lista persistente de carpetas de escaneo
 
 `ScannedFoldersStore` guarda, por proyecto (`<root_path>/scanned_folders.json`),
-qué carpetas se han añadido para escanear desde la sección "Carpetas guardadas"
-del Dashboard del proyecto — distinto del registro central `projects.json` de
-arriba.
+qué carpetas se han añadido para escanear — distinto del registro central
+`projects.json` de arriba.
 
-- **Añadir**: desde la UI, escribiendo la ruta o con el botón "Buscar…" (explorador
-  de carpetas del propio servidor, vía `GET /api/fs/browse`).
-- **Usar**: tanto "Buscar duplicados" (página Duplicados) como "Escanear" (página
-  Escanear) procesan siempre **todas** las carpetas guardadas de la lista — no hay
-  selección manual por checkbox; una carpeta añadida después de una ejecución
-  previa se incluye automáticamente en la siguiente sin ninguna acción extra.
-  "Escanear" solo requiere que exista al menos una carpeta guardada — ya no
-  depende de haber ejecutado antes "Buscar duplicados" (ambas acciones viven hoy
-  en páginas distintas).
-- **Eliminar**: solo las carpetas que **nunca** se han usado en un escaneo real
+- **Añadir**: `add_folder(project, path)`; la ruta debe existir y ser una carpeta.
+- **Usar**: `mark_used(project, paths)` tras un escaneo correcto; quien escanea o
+  deduplica suele procesar todas las carpetas de la lista (`list_folders`).
+- **Eliminar**: `remove_folder(project, path)`; solo las carpetas que **nunca** se han usado en un escaneo real
   pueden eliminarse de la lista — una vez usada, queda marcada `used=True` de
   forma permanente, como historial de qué se ha escaneado.
-
-## Explorador de carpeta padre al crear un proyecto
-
-La página principal de proyectos (`/`) reutiliza el mismo explorador de
-carpetas del servidor que "Carpetas guardadas" (botón "Buscar…", vía
-`GET /api/fs/browse`) para elegir la ubicación (carpeta padre) del formulario
-de creación, en vez de escribir la ruta a mano.
 
 ## Gestión destructiva de un proyecto
 
@@ -99,22 +85,14 @@ mientras hay un escaneo en curso son responsabilidad del consumidor (doc_organiz
 
 ## Descarga de export del proyecto (ZIP)
 
-El enlace "Descargar export" del panel lateral (`GET /downloads/projects/{name}/export.zip`)
-descarga un ZIP con `Conversión/`, `cache_export.json` y `duplicados/DEDUP_REPORT.json` (si existe).
-
-Antes de descargar, el panel muestra una estimación de tamaño y nº de archivos
-(`GET /downloads/projects/{name}/export-preview`), calculada sobre el estado actual del proyecto —
-es informativa: si el proyecto cambia entre la carga de la página y la descarga real, puede no
-coincidir exactamente.
-
-Si el navegador soporta la File System Access API (`showDirectoryPicker`, disponible en Chrome/Edge
-sobre un contexto seguro como `localhost`), el botón abre un selector de carpeta y escribe el ZIP
-ahí directamente. En el resto de navegadores (Firefox, Safari) no hay selector: la descarga sigue
-el comportamiento estándar del navegador (carpeta de descargas configurada).
+`write_project_zip()` (subcomando `export zip`) escribe un ZIP con `Conversión/`, `cache_export.json`
+y `duplicados/DEDUP_REPORT.json` (si existe). `preview_project_zip()` (`export zip --preview`) estima
+antes el tamaño y el número de ficheros sobre el estado actual del proyecto; es informativa: si el
+proyecto cambia entre la estimación y la escritura, puede no coincidir. Ver [Exportación](export.md).
 
 ## Detección de GPU (entorno, no permisos)
 
-La página de Escaneo detecta, en cada carga, si el entorno del servidor tiene
+`detect_gpu_status()` detecta si el entorno donde corre doc_organize tiene
 soporte de GPU para OCR acelerado (`torch` instalado + `torch.cuda.is_available()`)
 y muestra un mensaje con instrucciones si el soporte no está instalado o no está
 activo. Es una detección puramente de entorno software — no depende de rol ni

@@ -87,24 +87,21 @@ DEFAULT_CACHE_DB_NAME = "cache.db"
 MAX_AUTO_ERROR_RETRIES = 3
 
 #: Nombre del fichero que registra la última tanda de rutas escaneadas/deduplicadas
-#: por proyecto (escrito por `ScanCommand._resolve_scan_paths`, releído por
-#: `web/routes/duplicates.py` para re-escanear sin pedir las carpetas de nuevo).
+#: por proyecto (escrito por `ScanCommand._resolve_scan_paths`, releído para
+#: re-escanear sin pedir las carpetas de nuevo).
 SCAN_FOLDERS_JSON_NAME = "folders.json"
 
 #: Carpeta donde `DocumentConverter` escribe el `.md`/`.json` de cada documento
-#: convertido, dentro de la raíz del proyecto (`main.py`, `web/routes/scan.py`,
-#: `web/routes/downloads.py`, y `web/routes/context.py::_gather_converted_documents`
-#: para reconstruir `ConversionResult` a partir de `cache.db`). Antes repetida como
+#: convertido, dentro de la raíz del proyecto (`main.py`, `projects.layout`, y quien
+#: necesite reconstruir `ConversionResult` a partir de `cache.db`). Antes repetida como
 #: literal en cada uno de esos ficheros, sin nada que garantizara que no divergieran
-#: (AUDIT_CODE, sesión 2026-09-10 — el nombre también forma parte del denylist de
-#: `web/routes/context.py::_RESERVED_OUTPUT_FOLDER_NAMES`, para que `output_folder_name`
-#: no pueda coincidir con ella).
+#: (AUDIT_CODE, sesión 2026-09-10 — el nombre también forma parte de
+#: `RESERVED_OUTPUT_FOLDER_NAMES`, para que `output_folder_name` no pueda coincidir con ella).
 CONVERSION_FOLDER_NAME = "Conversión"
 
 #: Carpeta donde `DeduplicationManager.resolve_duplicates`/`finalize_report` mueve
 #: los documentos descartados de cada proyecto, y donde escribe
-#: `DEDUP_REPORT_JSON_NAME`/`DEDUP_HISTORY_JSONL_NAME` (releídos por
-#: `web/routes/duplicates.py` y `web/routes/downloads.py`).
+#: `DEDUP_REPORT_JSON_NAME`/`DEDUP_HISTORY_JSONL_NAME` (los relee `doc_organize.export`).
 DUPLICATES_FOLDER_NAME = "duplicados"
 
 #: Fichero con el resultado de la última deduplicación (solo el último run) y
@@ -118,7 +115,7 @@ DEDUP_HISTORY_JSONL_NAME = "DEDUP_HISTORY.jsonl"
 #: proyecto (gestión de errores de escaneo agrupados por ejecución): una línea JSON
 #: (`ScanErrorReport`) por ejecución de `ScanCommand.run_streaming()` que produjo
 #: al menos un error, añadida por `ScanCommand._persist_error_report` y releída por
-#: `web/routes/scan_errors.py`. Constantes (no una única `Path` ya compuesta) para
+#: `doc_organize.export.load_scan_error_history`. Constantes (no una única `Path` ya compuesta) para
 #: que cada llamador pueda construir la ruta absoluta con su propia raíz de proyecto.
 SCAN_ERRORS_FOLDER_NAME = "errores_escaneo"
 SCAN_ERRORS_HISTORY_JSONL_NAME = "SCAN_ERRORS_HISTORY.jsonl"
@@ -126,7 +123,7 @@ SCAN_ERRORS_HISTORY_JSONL_NAME = "SCAN_ERRORS_HISTORY.jsonl"
 #: Carpeta y fichero del histórico de duración de ejecuciones de escaneo, dentro de
 #: la raíz del proyecto: una línea JSON (`ScanRunReport`) por cada llamada a
 #: `ScanCommand.run_streaming()` (completada o no), añadida por
-#: `scan.scan_history_store.append_scan_run` y releída por `web/routes/scan.py`.
+#: `scan.scan_history_store.append_scan_run` y releída por `list_scan_runs`.
 #: A diferencia de `SCAN_ERRORS_HISTORY_JSONL_NAME`, se registra toda ejecución,
 #: no solo las que producen error.
 SCAN_HISTORY_FOLDER_NAME = "historial_escaneo"

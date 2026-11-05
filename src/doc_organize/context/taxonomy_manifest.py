@@ -71,7 +71,7 @@ async def load_taxonomy_manifest(project: Project) -> TaxonomyManifest | None:
 async def save_taxonomy_manifest(project: Project, raw_markdown: str) -> TaxonomyManifest:
     """Guarda `raw_markdown` como `<project.root_path>/taxonomy_manifest.md`, tras validarlo.
 
-    Usado por `web/routes/context.py::save_taxonomy_manifest_endpoint` para persistir el
+    Pensado para persistir el
     borrador que el usuario revisó/editó (`draft_taxonomy_manifest` genera el texto vía
     `render_taxonomy_manifest_markdown`, pero nunca lo escribía a disco -- ver el docstring de
     esa función). Valida ANTES de escribir, con los mismos `_extract_front_matter`/
@@ -140,7 +140,7 @@ def render_taxonomy_manifest_markdown(
     edite y guarde a mano como `<project.root_path>/taxonomy_manifest.md` (o como una plantilla
     nueva de `TaxonomyTemplateRegistry`).
 
-    Usado por `web/routes/context.py::draft_taxonomy_manifest` para componer la respuesta de un
+    Pensado para componer la respuesta de un
     borrador propuesto por IA (`ai.TaxonomyManifestDraftClient`) — nunca escribe nada en disco por
     sí mismo; no existe hoy ningún endpoint que persista `taxonomy_manifest.md` por el usuario, así
     que "confirmar" el borrador es siempre una acción manual fuera de esta función.

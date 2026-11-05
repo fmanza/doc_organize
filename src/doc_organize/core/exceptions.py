@@ -70,8 +70,8 @@ class ProjectNotFoundError(ProjectError):
     """No hay ningun proyecto registrado con ese nombre.
 
     El mensaje se construye aqui (antes se repetia como f-string en cada
-    llamador: `ProjectRegistry.get_project`/`delete_project`/`move_project_root`
-    y `web/dependencies.py::require_project_access`) para que las 4 copias no
+    llamador: `ProjectRegistry.get_project`/`delete_project`/`move_project_root`) para que
+    las copias no
     puedan divergir entre si (AUDIT_CODE, sesión 2026-09-10 — cluster S1192
     "No existe ningún proyecto llamado").
     """

@@ -45,8 +45,7 @@ sequenceDiagram
    similitud aproximada es solo una propuesta, nunca se aplica sin confirmación (ver más abajo)
 3. **Resolución**: Mueve no-canónicos a `duplicates_dir`, preservando estructura original
 4. **Auditoría**: Escribe `DEDUP_REPORT.json` (solo el último run) y añade una
-   línea a `DEDUP_HISTORY.jsonl` (histórico acumulado, consultable en la
-   pestaña "Histórico de deduplicaciones" de la página Duplicados)
+   línea a `DEDUP_HISTORY.jsonl` (histórico acumulado)
 5. **Retorno**: Reporte con resumen ejecutivo
 
 ### Similitud aproximada de nombre (`fuzzy_threshold`)
@@ -59,28 +58,16 @@ que no quedaron agrupados por hash exacto ni por conflicto de versión, usando
 grafo de similitud (pares con score ≥ `fuzzy_threshold`), con `reason=DuplicateReason.FUZZY_NAME_MATCH`.
 
 **Nunca se resuelven automáticamente**: al ser coincidencias probabilísticas por nombre (no por
-contenido), los grupos `FUZZY_NAME_MATCH` quedan excluidos de "Buscar duplicados" (la acción
-masiva vía `ScanCommand.deduplicate_streaming()`/WS `/scan/deduplicate`, que sigue llamando a
-`find_duplicates()` sin `fuzzy_threshold`). Solo se resuelven desde el formulario interactivo de
-la pestaña "Revisar Duplicados" (`POST /api/projects/{name}/duplicates/resolve`), donde el usuario
-elige explícitamente qué archivo conservar de cada grupo — el mismo `fuzzy_threshold` usado para
-detectarlos debe reenviarse en esa petición, o el re-escaneo propio del endpoint no volverá a
-encontrar esos grupos.
+contenido), los grupos `FUZZY_NAME_MATCH` quedan excluidos de la deduplicación masiva
+(`ScanCommand.deduplicate_streaming()` y el subcomando `deduplicate`, que llaman a
+`find_duplicates()` sin `fuzzy_threshold`). Solo deben resolverse tras una confirmación
+explícita del usuario, grupo a grupo y eligiendo qué archivo conservar: la librería da las
+primitivas (`find_duplicates(fuzzy_threshold=…)`, `move_group()`, `finalize_report()`) y la
+confirmación es responsabilidad del consumidor (doc_organize_web la hace con una vista previa
+y grupos confirmados).
 
-Además, cada grupo `FUZZY_NAME_MATCH` lleva su **propia** casilla "incluir este grupo en esta
-resolución" en el formulario, **desactivada por defecto**: aunque el usuario envíe el formulario,
-un grupo fuzzy no activado explícitamente queda pendiente (no se mueve nada, sigue apareciendo en
-el siguiente re-escaneo) — ver `fuzzy_group_toggles` en la referencia técnica. Esta casilla es
-independiente de la elección de "qué archivo conservar" (el radio button de cada fila): decide si
-el grupo se toca en absoluto, no cuál de sus archivos se conserva.
-
-`resolve_duplicates()` tiene tres llamadores: el botón "Buscar duplicados" de
-la pestaña "Buscar duplicados" de la página Duplicados y el subcomando
-`deduplicate` (CLI), ambos vía `ScanCommand.deduplicate_streaming()`
-(progreso en vivo por grupo — WebSocket `WS /api/projects/{name}/scan/deduplicate`
-en la web); y el formulario interactivo de resolución manual de esa misma
-pestaña, que llama a `DeduplicationManager` directamente. Internamente,
-`resolve_duplicates()` y `deduplicate_streaming()` comparten las mismas dos
+`ScanCommand.deduplicate_streaming()` (el subcomando `deduplicate` del CLI, con progreso por
+grupo) y `DeduplicationManager.resolve_duplicates()` comparten las mismas dos
 primitivas (`DeduplicationManager.move_group()` por grupo,
 `DeduplicationManager.finalize_report()` para la persistencia) — solo difieren
 en si yieldean progreso entre medias. Los tres alimentan el mismo

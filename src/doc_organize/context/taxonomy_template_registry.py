@@ -31,9 +31,9 @@ def default_templates_dir() -> Path:
     """Carpeta de plantillas de usuario por defecto: `~/.doc_organize/taxonomy_templates/`.
 
     Fuera de cualquier `project.root_path` (cada proyecto puede vivir en una ubicación
-    distinta elegida por el usuario) — mismo criterio que `ProjectRegistry`/`AuthStore`
-    (`~/.doc_organize/projects.json`, `~/.doc_organize/auth.db`): una única biblioteca
-    compartida por toda la instalación de doc_organize, no por proyecto ni por tenant.
+    distinta elegida por el usuario) — mismo criterio que `ProjectRegistry`
+    (`~/.doc_organize/projects.json`): una única biblioteca compartida por toda la
+    instalación de doc_organize, no por proyecto.
     Se calcula al crear un registro sin carpeta, no al importar el módulo (L-8c).
     """
     return Path.home() / ".doc_organize" / "taxonomy_templates"
@@ -55,8 +55,7 @@ class TaxonomyTemplateRegistry:
     con el mismo nombre que una empaquetada tiene prioridad — nunca al revés.
 
     Un proyecto que quiere usar una plantilla la referencia por nombre en la
-    petición de construcción de contexto (`BuildContextRequest.taxonomy_template_name`,
-    ver `web/routes/context.py`); si el proyecto además tiene su propio
+    petición de construcción de contexto (`taxonomy_template_name`); si el proyecto además tiene su propio
     `taxonomy_manifest.md`, ese fichero local siempre gana — es el "override" sin
     tocar la plantilla compartida, sin necesidad de ningún mecanismo nuevo.
 

@@ -20,8 +20,8 @@ Analiza el módulo [NOMBRE_MÓDULO] de doc_organize y la documentación existent
 No asumas dependencias, motores, APIs ni capacidades que no aparezcan en el código real,
 `pyproject.toml`, README, `docs/` o `zensical.toml`.
 
-Módulos IMPLEMENTADOS en v0.1.0: core/, utils/, __init__.py (todos parcialmente vacíos)
-Módulos PLANEADOS (TODO): scanner/, converter/, cache/, dedup/, workflow/, web/
+Módulos IMPLEMENTADOS (1.0.0): core/, utils/, validators/, scanner/, converter/, dedup/, cache/, projects/, ai/,
+context/, scan/, export/ y el CLI (main.py). Sin web/ ni auth/ (retirados en 1.0.0; la web es doc_organize_web).
 
 Genera documentación técnica en Markdown siguiendo el Arquetipo 2 con estas secciones en este orden exacto:
 

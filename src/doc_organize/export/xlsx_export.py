@@ -5,7 +5,7 @@ vuelcan según se generan. Ese modo guarda el XML de cada hoja en un temporal de
 `save()`; si la escritura se cancela o falla, aquí se borran en el momento en vez de esperar a que acabe el proceso.
 
 Los valores de texto que vienen de rutas o mensajes de error se protegen contra la inyección de fórmulas (OWASP
-CSV/Excel Formula Injection) con `_excel_safe`, igual que hacía la web.
+CSV/Excel Formula Injection) con `_excel_safe`.
 """
 
 import contextlib

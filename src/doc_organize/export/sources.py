@@ -50,8 +50,8 @@ async def load_cache_entries(cache_dbs: Iterable[str | Path]) -> list[CacheEntry
 def load_scan_error_history(history_logs: Iterable[str | Path]) -> list[ScanErrorReport]:
     """Ejecuciones con errores de uno o varios `SCAN_ERRORS_HISTORY.jsonl`, las más recientes primero.
 
-    Lee línea a línea. Una línea inválida (p. ej. un corte a mitad de escritura) se ignora con un aviso, igual que la
-    página de errores de la web; los ficheros que no existen se omiten.
+    Lee línea a línea. Una línea inválida (p. ej. un corte a mitad de escritura) se ignora con un aviso, igual que
+    `scan_history_store.list_scan_runs`; los ficheros que no existen se omiten.
 
     Args:
         history_logs: Rutas a los históricos (p. ej. `[layout.scan_errors_log]`).

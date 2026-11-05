@@ -16,7 +16,8 @@ caché y sus duplicados.
 > **1.0.0 (L-11)**: la interfaz web integrada (`doc_organize.web`, `doc_organize.auth`, los subcomandos `web`,
 > `tenant` y `user` del CLI y el extra `[web]`), obsoleta desde 0.14.0, se ha retirado. Usa [doc_organize_web](https://github.com/fmanza/doc_organize_web), que ofrece
 > lo mismo (usuarios, tenants, roles y progreso en tiempo real) sobre esta librería. El CLI de `scan`, `project`,
-> `deduplicate` y `export` no cambia; ver el [CHANGELOG](CHANGELOG.md) para el resto de cambios incompatibles.
+> `deduplicate` y `export` no cambia. Guía: [De la web integrada a doc_organize_web](docs/guides/migracion_web.md);
+> cambios incompatibles: [CHANGELOG](CHANGELOG.md#100rc1---2026-11-05).
 
 ## Requisitos
 
