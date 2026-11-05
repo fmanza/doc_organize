@@ -3,8 +3,7 @@ Histórico de duración de cada ejecución de `ScanCommand.run_streaming()`
 (`historial_escaneo/SCAN_HISTORY.jsonl`, dentro de la raíz del proyecto).
 
 Mismo patrón append-only que `SCAN_ERRORS_HISTORY.jsonl`
-(`ScanCommand._persist_error_report`) y `DEDUP_HISTORY.jsonl`
-(`web/routes/duplicates.py`): una línea JSON por ejecución. A diferencia del
+(`ScanCommand._persist_error_report`) y `DEDUP_HISTORY.jsonl`: una línea JSON por ejecución. A diferencia del
 histórico de errores (que solo registra ejecuciones con al menos un error),
 aquí se registra TODA ejecución -- incluidas las que no llegaron a
 `COMPLETED` (`completed=False`) -- porque el objetivo es visibilidad de
@@ -57,8 +56,8 @@ async def append_scan_run(history_path: Path, report: ScanRunReport) -> None:
 def list_scan_runs(history_path: Path) -> list[ScanRunReport]:
     """Lee `history_path` (JSONL, una línea por ejecución) -- devuelve las
     ejecuciones más recientes primero. Mismo criterio de tolerancia a líneas
-    corruptas que `web/scan_errors_data.py::load_error_history`: una línea
-    inválida se ignora en vez de tumbar la página con un 500.
+    corruptas que `export.load_scan_error_history`: una línea
+    inválida se ignora en vez de tumbar a quien la lee.
 
     Example:
         >>> list_scan_runs(Path("/ruta/que/no/existe/SCAN_HISTORY.jsonl"))

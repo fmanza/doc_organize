@@ -119,7 +119,7 @@ Cuenta entradas de `cache_entries`, opcionalmente filtradas por `search`.
 **Operación**:
 - `SELECT COUNT(*)` sobre `cache_entries`, con `WHERE file_path LIKE ?` si `search`
 - Comparación insensible a mayúsculas/tildes (función SQL `py_lower` registrada por conexión)
-- Usado por el Cache Viewer web para calcular el número de páginas
+- Útil para calcular el número de páginas de un listado paginado
 
 ---
 
@@ -238,18 +238,12 @@ CREATE TABLE cache_entries (
 - **Limpieza manual**: Entradas obsoletas persisten hasta limpieza manual
 - **Escala**: Soporta ~100k-1M entradas sin problemas de rendimiento
 
-## Exportación (Web)
+## Exportación a Excel
 
-`GET /downloads/projects/{name}/cache-export.xlsx` (`web/routes/downloads.py`) descarga
-un Excel con **todas** las entradas de `cache.db` (ignora cualquier filtro `?q=` activo
-en el Cache Viewer), ordenadas por `file_path`. Columnas: Archivo, Carpeta, Ruta
-completa, Hash SHA-256 (completo, sin truncar), Estado, Conversión, Última
-actualización (UTC). Usa `pandas`/`openpyxl` (ya declaradas como dependencias: `pandas`
-en `dependencies`, `openpyxl` en el extra `web`) — mismo patrón que
-`export.zip` (fichero temporal generado vía `asyncio.to_thread`, servido con
-`FileResponse` y borrado después con `BackgroundTask`). Los valores derivados de
-nombres de fichero se neutralizan si empiezan por un carácter disparador de fórmula
-(`=`, `+`, `-`, `@`) para evitar inyección de fórmulas al abrir el fichero en Excel/LibreOffice.
+`doc_organize.export.write_cache_xlsx()` (subcomando `export cache-xlsx`, extra `export`) escribe un Excel con
+**todas** las entradas de una o varias `cache.db`, ordenadas por `file_path`. Los valores que empiezan por un carácter
+disparador de fórmula (`=`, `+`, `-`, `@`) se neutralizan para evitar inyección de fórmulas al abrir el fichero en
+Excel o LibreOffice. Ver [Exportación](export.md).
 
 ## Ejemplos Relacionados
 

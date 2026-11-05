@@ -8,7 +8,7 @@ ausencia solo degrada a CPU, sin estas dos dependencias la conversión de
 audio/vídeo (`AV_SUPPORTED_EXTENSIONS`) falla siempre — por eso
 `detect_av_status()` se usa también como pre-check bloqueante en
 `main.py::_run_scan` para `include_audio_video=True`, no solo como aviso
-informativo en la web. `.txt` no depende de esto: forma parte de
+informativo en una interfaz. `.txt` no depende de esto: forma parte de
 `SUPPORTED_EXTENSIONS` (siempre activo), no de este flag.
 """
 

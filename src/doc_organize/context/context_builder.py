@@ -187,12 +187,12 @@ class ContextBuilder:
                 hay `taxonomy_manifest`.
             output_folder_name: Nombre de la carpeta de salida reorganizada, relativa
                 a `root_path` — solo tiene efecto en la primera construcción de un
-                proyecto; `web/routes/context.py` reutiliza el valor ya persistido en
+                proyecto; el consumidor reutiliza el valor ya persistido en
                 reconstrucciones posteriores (el campo queda fijo tras la primera vez).
             on_ai_progress: Si se da, se invoca `await on_ai_progress(index, total, source_path)`
                 tras cada documento intentado en la Sub-fase B (clasificado o no),
-                `index` empezando en 1 — usado por `web/routes/context.py::context_build_websocket`
-                para retransmitir progreso en tiempo real (semáforo). `None` (default)
+                `index` empezando en 1 — pensado para que el consumidor
+                retransmita el progreso en tiempo real (semáforo). `None` (default)
                 no tiene efecto ninguno: los llamadores existentes no cambian de
                 comportamiento.
             taxonomy_manifest: Manifiesto de taxonomía del proyecto (ver

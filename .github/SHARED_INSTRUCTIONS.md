@@ -18,95 +18,77 @@ Actúa como senior de ingeniería Python especializado en:
 
 ---
 
-## Proyecto: doc_organize (v0.1.0 Alpha)
+## Proyecto: doc_organize (1.0.0, librería pura)
 
-`doc_organize` es una librería Python (en fase Alpha temprana) para:
-- **Escaneo**: identificar y catalogar documentos en carpetas (PDF, DOCX, XLSX, PPTX)
-- **Conversión**: transformar documentos a Markdown/JSON preservando estructura (párrafos, títulos, listas, tablas)
-- **Deduplicación**: eliminar archivos duplicados por hash SHA256
-- **Caché transaccional**: almacenamiento eficiente con respaldo a BD local
-- **Organización en pipelines**: composición modular de operaciones (scan → convert → dedup → cache)
+`doc_organize` es una librería Python con CLI para:
+- **Escaneo**: identificar y catalogar documentos en carpetas (PDF, DOCX, XLSX, PPTX, imágenes; audio/vídeo con el extra `av`)
+- **Conversión**: transformar documentos a Markdown + JSON con Docling, con detección y reprocesado de OCR
+- **Deduplicación**: duplicados exactos (SHA-256), conflictos de versión y similitud aproximada de nombre
+- **Caché incremental**: SQLite (WAL), para no reconvertir lo que no ha cambiado
+- **Proyectos**: registro local (`~/.doc_organize/projects.json`) y rutas de cada proyecto (`ProjectLayout`)
+- **Contexto documental**: clasificación por dominios (reglas + IA opcional vía LiteLLM Proxy), reorganización y sitio
+  navegable con Zensical
+- **Exportación**: ZIP en streaming y Excel de caché y de errores
+
+**No incluye interfaz web ni autenticación** desde 1.0.0 (L-11): eso es
+[doc_organize_web](https://github.com/fmanza/doc_organize_web), un proyecto aparte que usa esta librería. No añadas
+servidores HTTP, plantillas, usuarios, tenants, roles ni sesiones a la librería: el test
+`tests/unit/test_library_architecture.py` falla si `src/` importa FastAPI, Starlette, uvicorn, Jinja2 o
+`python-multipart`, o si reaparecen `doc_organize.web` o `doc_organize.auth`. Lo que la web necesite de la librería se
+pide como API nueva (parámetros, funciones sin Docling, eventos de progreso), no copiando lógica de la web aquí.
 
 **Versión canónica**: consultar `pyproject.toml` antes de cerrar releases.
 **Python**: `>=3.12` según `pyproject.toml`.
-
-### Capacidades principales (v0.1.0 MVP)
-
-- **Scanner**: escaneo recursivo de carpetas con identificación de tipos de archivo
-- **Converter**: conversión de formatos documento → Markdown/JSON (con Docling backend)
-- **Metadata**: extracción de metadatos (nombre, tamaño, hash, tipo, marcas de tiempo)
-- **Deduplicator**: identificación y eliminación de documentos duplicados por hash
-- **Cache**: almacenamiento eficiente con transaccionalidad
-- **Workflow orchestration**: pipeline composable de operaciones batch
+**API pública (SemVer)**: los nombres de `doc_organize.__all__`; ver `docs/api/publica.md`.
 
 ---
 
-## Arquitectura real (v0.1.0)
-
-### Módulos implementados
+## Arquitectura real (1.0.0)
 
 ```text
 src/doc_organize/
-  __init__.py           # API pública (en desarrollo)
-  core/
-    __init__.py         # Tipos base, excepciones (VACÍO — TODO v0.1.0)
-  utils/
-    __init__.py         # Utilidades comunes (VACÍO — TODO v0.1.0)
+  __init__.py     # API pública, importada bajo demanda (PEP 562): no carga Docling hasta usarlo
+  core/           # Nivel 1: modelos Pydantic, excepciones, constantes, progreso (CancelToken, ProgressEvent)
+  utils/          # Nivel 1: hashing, rutas seguras, logging, detectores de GPU/AV/Office, formato de fechas
+  validators/     # Nivel 2: FolderValidator, ProjectValidator
+  scanner/        # Nivel 2: DocumentScanner
+  converter/      # Nivel 2: DocumentConverter (adaptador de Docling), OCRScheduler
+  dedup/          # Nivel 2: DeduplicationManager
+  cache/          # Nivel 2: CacheManager (SQLite + WAL, también en solo lectura)
+  projects/       # Nivel 2: ProjectRegistry, ProjectLayout, ScannedFoldersStore, ProjectHistoryCleaner
+  ai/             # Nivel 2: clientes HTTP de IA (LiteLLM Proxy, GitHub Copilot) con su *Config explícita
+  context/        # Nivel 3: ContextBuilder, ContextRegistry, Reorganizer, SiteGenerator, plantillas de taxonomía
+  scan/           # Nivel 3: ScanCommand (escaneo + caché + conversión, deduplicación bajo demanda)
+  export/         # Nivel 3: ZIP y Excel de un proyecto (Excel con el extra `export`)
+  main.py         # Nivel 3: CLI (`project`, `scan`, `deduplicate`, `export`)
 ```
 
-### Módulos planeados (v0.1.0+)
+Las dependencias van solo hacia abajo (ver `.github/instructions/architecture.instructions.md`, regla #6). Los
+consumidores (el CLI y doc_organize_web) reciben progreso por callbacks o iteradores de eventos (`ScanEvent`,
+`DedupEvent`, `ContextBuildEvent`, `ProgressEvent`) y cancelan con `CancelToken`; la librería no sabe si detrás hay un
+terminal, un WebSocket o SSE.
 
-```text
-src/doc_organize/
-  scanner/              # DocumentScanner: escaneo recursivo, identificación tipos [TODO v0.1.0]
-  converter/            # DocumentConverter: formato → Markdown/JSON con Docling [TODO v0.1.0]
-  cache/                # CacheManager: almacenamiento eficiente con transacciones [TODO v0.1.0]
-  dedup/                # DeduplicatorService: hash SHA256, identificación duplicados [TODO v0.1.0]
-  workflow/             # PipelineOrchestrator: composición de operaciones batch [TODO v0.2.0]
-  web/                  # FastAPI webapp con UI para gestión [TODO v0.2.0]
-```
-
-### Responsabilidades por módulo (v0.1.0+)
-
-| Módulo | Responsabilidad | Estado |
-|---|---|---|
-| `core/` | Tipos base: `Document`, `DocumentMetadata`, `Conversion`, excepciones | TODO v0.1.0 |
-| `utils/` | Logging, config, helpers comunes (`safe_path_join`, `validate_format`) | TODO v0.1.0 |
-| `scanner/` | Escaneo recursivo, identificación de tipo de archivo, catalogación | TODO v0.1.0 |
-| `converter/` | Conversión de formato (PDF, DOCX, XLSX, PPTX → Markdown/JSON) vía Docling | TODO v0.1.0 |
-| `cache/` | Almacenamiento eficiente con transacciones locales (SQLite) | TODO v0.1.0 |
-| `dedup/` | Deduplicación por hash SHA256, identificación de duplicados | TODO v0.1.0 |
-| `workflow/` | Orquestación de pipelines batch, composición de operaciones | TODO v0.2.0 |
-| `web/` | Web UI con FastAPI para gestión de documentos | TODO v0.2.0 |
-
-### API pública recomendada (v0.1.0 MVP)
+### Ejemplo de uso
 
 ```python
-from doc_organize.scanner import DocumentScanner
-from doc_organize.converter import DocumentConverter
-from doc_organize.cache import CacheManager
-from doc_organize.dedup import DeduplicatorService
+from doc_organize import ProjectLayout, ProjectRegistry, ScanCommand
 
-# Ejemplo: escanear documentos
-scanner = DocumentScanner("/path/to/documents")
-docs = scanner.scan()  # → [Document, ...]
-
-# Ejemplo: convertir a Markdown
-converter = DocumentConverter()
-for doc in docs:
-    markdown = converter.convert(doc, output_format="markdown")
-    print(markdown)
-
-# Ejemplo: deduplicar
-dedup = DeduplicatorService()
-unique_docs = dedup.deduplicate(docs)  # por SHA256 hash
+async with ProjectRegistry() as registry:
+    project = await registry.get_project("Mi Proyecto")
+layout = ProjectLayout.for_project(project)
+summary = await ScanCommand().run(
+    paths=["/ruta/a/documentos"],
+    output_dir=layout.conversion_dir,
+    cache_db=layout.cache_db,
+    folders_json=layout.folders_json,
+)
 ```
 
 ---
 
 ## Principios de diseño
 
-### Procesamiento de documentos (v0.1.0)
+### Procesamiento de documentos
 - Validar rutas de entrada antes de procesar; lanza `InvalidPathError` si no existe o no es legible.
 - Soportar múltiples formatos: PDF, DOCX, XLSX, PPTX (vía Docling backend).
 - Convertir todos los formatos a Markdown o JSON como destinos canónicos.
@@ -121,8 +103,8 @@ unique_docs = dedup.deduplicate(docs)  # por SHA256 hash
 
 ### SOLID operativo
 - **SRP**: cada módulo (`scanner/`, `converter/`, `dedup/`, `cache/`) tiene un responsabilidad única.
-- **OCP**: extensión vía plugins sin modificar módulos core (futuro v0.2.0).
-- **LSP**: interfaces claras entre módulos (ej. `Document` como contrato común).
+- **OCP**: extensión por adaptadores/Strategy (motor de OCR, formato) sin modificar módulos estables.
+- **LSP**: interfaces claras entre módulos (los modelos de `core/models.py` como contrato común).
 - **ISP**: métodos pequeños y focalizados; evitar clases monolíticas.
 - **DIP**: dependencias inyectadas (logger, config) en lugar de estado global.
 
@@ -142,99 +124,6 @@ unique_docs = dedup.deduplicate(docs)  # por SHA256 hash
 - Usa f-strings para strings con parámetros.
 - Evita `.format()`, `%` formatting y concatenación para interpolación.
 - Strings estáticos, docstrings y ejemplos sin parámetros están permitidos.
-
-### Plantillas Jinja2 (módulo `web/`)
-
-Aplica a las plantillas de `src/doc_organize/web/templates/` (9 ficheros a fecha de esta
-revisión), renderizadas vía `fastapi.templating.Jinja2Templates`.
-
-**Sintaxis y espaciado**
-- Deja un espacio tras `{{`/`{%` y antes de `}}`/`%}`: `{{ project.name }}`, `{% if condicion %}`.
-  - ❌ Incorrecto: `{{project.name}}`, `{%if condicion%}`
-  - ✅ Correcto: `{{ project.name }}`, `{% if condicion %}`
-- Usa el control de espacios en blanco (`{%- -%}`) solo cuando sea necesario eliminar un salto
-  de línea concreto del HTML resultante; no lo apliques por defecto en todos los bloques.
-
-**Estructura y organización**
-- Extensión de fichero: usa `.html.j2` en toda plantilla de `web/templates/` — permite que el
-  editor active resaltado de sintaxis Jinja2 sobre el HTML, distinguiéndola de HTML estático. Al
-  crear una plantilla nueva, referencia el nombre completo con `.html.j2` tanto en
-  `{% extends "..." %}` como en el segundo argumento de `TemplateResponse(request, "...", ...)` —
-  `Jinja2Templates` no añade la extensión automáticamente.
-- Herencia limitada a 2 niveles hoy (`base.html.j2` → página). Si se necesita un nivel intermedio
-  de "layout" compartido por varias páginas, no superar 3 niveles en total.
-- En bloques que superen ~15-20 líneas, nombra el `endblock` para legibilidad:
-  `{% block content %} ... {% endblock content %}`. Los `endblock` de las plantillas actuales
-  son anónimos (`{% endblock %}`); nómbralos al tocar o crear una plantilla nueva.
-- Antes de instanciar un nuevo `Jinja2Templates(...)` en un router, valora si el módulo puede
-  depender de una instancia compartida en vez de crear la suya propia (patrón actual: cada
-  fichero de `web/routes/` y `web/app.py` crea la suya); centralizarla en `web/dependencies.py`
-  es preferible para routers nuevos, sin que esto implique refactorizar los existentes.
-
-**Lógica y buenas prácticas**
-- La lógica de negocio y la preparación de datos van en las rutas (`web/routes/*.py`); la
-  plantilla solo presenta el contexto ya resuelto.
-- Usa el filtro `default` para valores opcionales: `{{ variable | default('—') }}`.
-- No desactives el autoescape de Jinja2 ni uses el filtro `| safe` sobre contenido derivado de
-  entrada de usuario (nombres de proyecto, rutas de carpeta, etc.). Ninguna plantilla actual usa
-  `| safe`; mantenlo así salvo necesidad justificada y contenido explícitamente saneado.
-- Si aparecen 3 o más fragmentos de HTML repetidos (botones, tarjetas, filas de tabla), extráelos
-  a macros en `web/templates/macros/` e impórtalos con
-  `{% from "macros/nombre.html.j2" import macro_nombre %}`. No existen macros todavía en el
-  proyecto; créalas cuando surja la repetición real, no de forma anticipada.
-
-**CSS y componentes — Tailwind CSS (obligatorio)**
-- Tailwind CSS es **obligatorio** para todo el CSS de `web/templates/` (decisión de producto, no
-  técnica — ver `.ai/DECISIONS_LOG.md`, revisión 14). Se carga vía CDN en `base.html.j2`
-  (`<script src="https://cdn.tailwindcss.com">`, play CDN, sin toolchain de build). No añadas
-  `<style>` propio, ficheros `.css`, ni otro framework CSS a una plantilla salvo que se decida
-  explícitamente sustituir Tailwind.
-- Escribe las clases de Tailwind directamente en el HTML de la plantilla/macro (utility-first). No
-  extraigas CSS a fichero ni definas clases propias que reimplementen una utilidad ya existente en
-  Tailwind (p.ej. no crear `.error` cuando `text-red-700` cubre lo mismo).
-- Tailwind (vía preflight) resetea el estilo por defecto de `a`, `button`, `input`, `table`, etc. —
-  cualquier etiqueta de estas necesita sus propias clases explícitas (color, subrayado, padding,
-  borde) en cada plantilla; no asumas que el navegador aplicará un estilo "razonable" por defecto.
-- Al crear una macro con estilo propio (tarjeta, alerta, botón), dale una clase contenedora única
-  y estable con prefijo `c-` (p.ej. `.c-tarjeta`) además de las utilidades Tailwind, para poder
-  referenciar/testear el componente sin depender de las clases utilitarias exactas.
-- Para clases puramente visuales condicionadas por estado, usa el operador ternario inline de
-  Jinja2 en la plantilla en vez de construir la clase en Python:
-  `<div class="{{ 'text-green-700' if exito else 'text-red-700' }}">`.
-- Si el CSS de una página necesita algo que Tailwind CDN no cubre (p.ej. una animación puntual),
-  añade un punto de extensión en el `<head>` de `base.html.j2`: `{% block estilos_adicionales %}{%
-  endblock %}` — no reintroduzcas un bloque `<style>` global en `base.html.j2`.
-- El CDN de Tailwind requiere red disponible en el navegador cliente en cada carga de página (sin
-  fallback offline); si eso se vuelve un problema real, evaluar un build local (`@tailwindcss/cli`)
-  como decisión aparte, registrada en `.ai/DECISIONS_LOG.md`.
-
-**JavaScript inline (`<script>` en plantillas)**
-- Todo el JS del módulo `web/` vive inline en `<script>` dentro de la plantilla que lo usa — no hay
-  toolchain de build ni bundler (mismo motivo que Tailwind se carga vía CDN, ver "CSS y
-  componentes" arriba). No introduzcas ficheros `.js` externos ni un sistema de módulos
-  (`import`/`export`) sin decidirlo aparte.
-- Si un mismo valor (estado, fase, nombre de evento) se repite 3 o más veces dentro de un bloque
-  `<script>`, extráelo a un objeto de constantes al principio del bloque (p.ej.
-  `const SCAN_PHASE = { IDLE: "idle", STARTED: "started", ... }`) en vez de repetir strings
-  sueltos — mismo umbral que ya aplica a macros Jinja2 repetidas (ver "Lógica y buenas prácticas"
-  arriba). Con 1-2 usos, un literal inline sigue siendo preferible a una abstracción prematura.
-  Ejemplo real: `SCAN_PHASE` en `folder_selector.html.j2` (semáforo de estado del escaneo).
-- El proyecto no tiene infraestructura de test para JS (no hay Jest/Vitest/Playwright instalado ni
-  decidido — cualquier propuesta de añadirla es una decisión de producto, regístrala en
-  `.ai/DECISIONS_LOG.md` antes de introducirla). Esto es una decisión implícita aceptada, no un
-  olvido: mantén el JS inline simple (funciones puras y cortas, sin lógica de negocio) para que
-  sea auditable a simple vista. Si un bloque de JS crece lo suficiente como para necesitar tests
-  reales, es señal de que esa lógica debería salir de la plantilla hacia un endpoint/backend
-  testeable en Python, no de que haga falta montar un framework de test JS.
-
-**Fuentes de componentes para asistentes IA**
-- Al pedir a una IA que genere una macro nueva, dale como entrada un componente HTML ya
-  maquetado con clases Tailwind (p.ej. de Tailwind UI, Flowbite u otra librería de componentes
-  libres) y pide explícitamente su conversión a macro Jinja2 reutilizable con una clase
-  contenedora `.c-*` — no le pidas que lo diseñe desde cero sin referencia.
-- Escribir las clases directamente en el HTML de la plantilla/macro (en vez de en un `.css`
-  aparte) es lo que permite a la IA trabajar sin alternar entre ficheros de contexto distintos;
-  no rompas ese patrón introduciendo CSS externo.
 
 ---
 
@@ -259,9 +148,8 @@ zensical build --strict                     # sitio estático en /site, con vali
 - Fixtures en `tests/conftest.py`: documentos mock (PDF vacío, DOCX simple, etc.)
 - Tests de integración opcionales en `tests/integration/` marcados con `pytest.mark.integration`
 - Cobertura target: ≥80% de líneas ejecutables en módulos core
-- Módulo `web/`: rutas, WebSockets y lógica Python cubiertos con pytest
-  (`tests/unit/test_web_*.py`). El JS inline de las plantillas (`web/templates/*.html.j2`) no
-  tiene test dedicado — ver política en "Plantillas Jinja2 → JavaScript inline" arriba.
+- Arquitectura: `tests/unit/test_library_architecture.py` (sin frameworks web ni `web/`/`auth/`) y
+  `tests/unit/test_ai_architecture.py` deben seguir en verde; no los relajes para que pase un cambio.
 
 ### Documentación obligatoria
 
@@ -406,11 +294,11 @@ chore:    mantenimiento (deps, config, herramientas)
 
 **Ejemplo**:
 ```
-feat: añadir Cache Viewer a la interfaz web (Fase D-2c)
+feat: filtros por ruta relativa en CacheManager (L-10e)
 
-- Añade GET /api/projects/{name}/cache en web/routes/cache.py
-- Tests en tests/unit/test_web_cache.py
-- Actualiza docstring y §2.7.4 del PLAN
+- Añade relative_to= y conversion_status= a count_entries/load_cache_page
+- Tests en tests/unit/test_cache_manager.py
+- Actualiza docs/api/cache.md y docs/api/publica.md
 ```
 
 ### Ramas y publicación

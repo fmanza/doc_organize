@@ -1,15 +1,15 @@
 # Desplegar un LiteLLM Proxy (Sub-fase B: clasificación de dominios por IA)
 
 La organización documental por dominios (`doc_organize.context`) clasifica cada
-documento por reglas primero (Sub-fase A). Si activas el toggle **"Clasificación
-asistida por IA"** en la pantalla Contexto de un proyecto, los documentos que las
+documento por reglas primero (Sub-fase A). Si activas la clasificación asistida por
+IA (`ContextBuilder.build(ai_classification_enabled=True, ...)`), los documentos que las
 reglas dejan sin clasificar pasan por un **LiteLLM Proxy** (Sub-fase B) — nunca se
 llama a un proveedor de IA directamente. Esta guía explica cómo levantar ese proxy
 en local con Docker.
 
 Un proyecto con `taxonomy_manifest.md` (clasificación de 2 ejes: dominio + tipo de
 material) usa el mismo proxy pero un cliente y unas variables de entorno propias
-(`TaxonomyClassificationClient`, §4) — el mismo toggle "IA" activa una llamada
+(`TaxonomyClassificationClient`, §4) — la misma opción activa una llamada
 combinada que resuelve ambos ejes a la vez, en vez de la llamada de 1 eje.
 
 No necesitas esta guía si no vas a usar la Sub-fase B: la clasificación por reglas
@@ -159,10 +159,8 @@ Un proyecto sin manifiesto solo necesita las variables de 1 eje; uno con
 manifiesto solo necesita las de 2 ejes — no hace falta definir ambos juegos a la
 vez salvo que el mismo despliegue de doc_organize sirva proyectos de los dos tipos.
 
-**AÑADIDO (auditoría de parametrización, 2026-09-10)**: esta guía no mencionaba
-las variables del endpoint `POST /api/projects/{name}/context/taxonomy-manifest-draft`
-(botón "Proponer con IA" al crear un `taxonomy_manifest.md` nuevo) — quedó sin
-actualizar al añadirse ese endpoint. Config propia (ISP, mismo criterio que
+El borrador de manifiesto por IA (`TaxonomyManifestDraftClient`, para proponer un
+`taxonomy_manifest.md` nuevo) usa sus propias variables. Config propia (ISP, mismo criterio que
 separa las dos configs de arriba):
 
 ```bash

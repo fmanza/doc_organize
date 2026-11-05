@@ -121,7 +121,7 @@ class DomainClassifier:
         """Sanea cada dominio candidato con `_slugify()` antes de aceptarlo.
 
         Sin esto, un `candidate_domains` recibido tal cual desde una petición
-        HTTP (`web/routes/context.py::BuildContextRequest`) acababa como
+        HTTP acababa como
         `Domain.slug` sin validar, y de ahí directamente en rutas de disco
         (`ContextRegistry._domain_dir`, `Reorganizer.reorganize`,
         `SiteGenerator`) — un valor como `"../../otro-sitio"` podía escapar de

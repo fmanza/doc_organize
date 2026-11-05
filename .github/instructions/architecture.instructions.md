@@ -3,8 +3,8 @@ applyTo: "src/**/*.py"
 ---
 # Arquitectura OO, SOLID y Patrones
 
-> **TL;DR** — 2 capas (Foundation → Core Services), más `web/` (Fase D) como orquestador de alto
-> nivel. Separar escaneo, conversión, deduplicación y caché en módulos independientes (SRP). Cada
+> **TL;DR** — 3 niveles (Foundation → Core Services → Orquestación: `scan/`, `context/`, `export/`,
+> CLI). Librería pura: sin web ni autenticación (las da doc_organize_web). Separar escaneo, conversión, deduplicación y caché en módulos independientes (SRP). Cada
 > servicio recibe/devuelve los modelos de `core/models.py` (Pydantic), nunca tipos ad-hoc (LSP).
 > Extender por adaptadores/Strategy cuando aparezca un nuevo motor de OCR o formato, nunca editando
 > flujos base estables (OCP). Orquestar desde `Protocol`/`ABC` cuando haga falta abstraer un
@@ -12,7 +12,9 @@ applyTo: "src/**/*.py"
 
 ## Objetivo
 Definir reglas de arquitectura para `doc_organize`, una librería de escaneo, conversión (vía
-Docling), deduplicación y caché de documentos, con una interfaz web opcional.
+Docling), deduplicación y caché de documentos, con CLI. Desde 1.0.0 no incluye interfaz web ni
+autenticación: no añadas servidores HTTP, plantillas, usuarios ni tenants (`tests/unit/test_library_architecture.py`
+lo impide); la web es doc_organize_web, un consumidor más de la API pública.
 
 ## Principios de diseño
 - Claridad antes que abstracción: cada capa y cada clase deben tener un límite explícito.
@@ -32,7 +34,7 @@ Docling), deduplicación y caché de documentos, con una interfaz web opcional.
 - `Adapter`: aislar la API de Docling detrás de `doc_organize.converter.DocumentConverter`, para no
   acoplar el resto de la librería a su interfaz interna.
 - `Template Method`: pipeline común de escaneo/conversión con pasos extensibles.
-- `Facade`: API de alto nivel en `web/` (Fase D) para orquestar scanner + converter + dedup + cache.
+- `Facade`: `ScanCommand` (`scan/`) orquesta scanner + converter + dedup + cache para el CLI y los consumidores.
 - `Builder`: construcción incremental de reportes (p.ej. `DeduplicationReport`, `ScanResult`).
 - No introducir patrones si una solución simple y explícita cubre el caso sin deuda.
 
@@ -67,9 +69,9 @@ class DocumentScanner:
         self.logger.info(f"Escaneo completado: {len(documents)} documentos en {duration:.2f}s")
 ```
 
-**Level 3 (`web/`, Fase D):** Clases que orquestan servicios, logging enriquecido con contexto
+**Level 3 (`scan/`, `context/`, `export/`):** Clases que orquestan servicios, logging enriquecido con contexto
 ```python
-# web/routes/conversion.py (futuro)
+# scan/ (ilustrativo)
 from doc_organize.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -136,7 +138,7 @@ Ante cualquier nueva clase, función o módulo:
   necesario y expón en su `__init__.py`.
 
 ### REGLA #6 — JERARQUÍA DE DEPENDENCIAS (sin inversiones)
-La base de código sigue 2 niveles (más `web/` en Fase D). Las dependencias fluyen **solo hacia
+La base de código sigue 3 niveles. Las dependencias fluyen **solo hacia
 abajo**; nunca hacia arriba ni en horizontal entre módulos de nivel equivalente:
 
 ```
@@ -144,10 +146,10 @@ Level 1 — Foundation
   core/         utils/
 
 Level 2 — Core Services (independientes entre sí, solo dependen de Level 1)
-  validators/   scanner/      converter/    dedup/    cache/
+  validators/   scanner/      converter/    dedup/    cache/    projects/    ai/
 
-Level 3 — Orquestación (Fase D)
-  web/          (orquesta validators/scanner/converter/dedup/cache)
+Level 3 — Orquestación
+  scan/   context/   export/   main.py (CLI)
 ```
 
 **Reglas explícitas:**

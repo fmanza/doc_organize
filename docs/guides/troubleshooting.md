@@ -12,7 +12,7 @@ apt-get install -y libgomp1    # Debian/Ubuntu
 # equivalente en otras distros: busca el paquete "libgomp" con tu gestor
 ```
 
-Ver también [Instalación → Núcleo (CLI)](installation.md#nucleo-cli).
+Ver también [Instalación → Núcleo (CLI)](installation.md#nucleo-cli-y-libreria).
 
 ## Un documento escaneado nunca sale de "OCR pendiente"
 
@@ -27,10 +27,10 @@ El motor por defecto (RapidOCR) corre en CPU. Si tienes GPU disponible, instala
 el extra `ocr-gpu` y añade `--use-gpu` (junto con `--use-ocr`) para usar EasyOCR
 acelerado por CUDA.
 
-## El menú Escaneo dice "GPU no activa" aunque ya la instalé y funciona
+## `detect_gpu_status()` dice "GPU no activa" aunque ya la instalé y funciona
 
-Primero, comprueba el estado real desde el mismo entorno donde corre el
-servidor (no desde otra terminal/Python que tengas a mano):
+Primero, comprueba el estado real desde el mismo entorno donde corre
+doc_organize (no desde otra terminal/Python que tengas a mano):
 
 ```bash
 # reemplaza .venv por el entorno virtual real de tu instalación

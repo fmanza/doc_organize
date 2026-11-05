@@ -3,7 +3,7 @@
 Desde la 0.10.0, la API pública de doc_organize son los nombres de `doc_organize.__all__`. Siguen
 [SemVer](https://semver.org/lang/es/): una versión MINOR (0.x.0) puede añadir nombres o parámetros opcionales y marcar
 cosas como obsoletas (`DeprecationWarning`), pero no romperlas; los cambios incompatibles se reservan para una MAJOR
-(1.0.0). Lo que no está en `__all__` (módulos internos, `web/`, `auth/`) puede cambiar sin aviso.
+(1.0.0). Lo que no está en `__all__` (módulos internos) puede cambiar sin aviso.
 
 ```python
 import doc_organize

@@ -23,6 +23,7 @@ nav = [
     { "Resolución de problemas" = "guides/troubleshooting.md" },
     { "Descarga Offline" = "guides/downloads.md" },
     { "Desplegar un LiteLLM Proxy" = "guides/litellm_proxy_setup.md" },
+    { "De la web integrada a doc_organize_web" = "guides/migracion_web.md" },
   ] },
   { "Funcionalidad" = [
     { "Descripción general" = "functional/index.md" },
@@ -56,15 +57,6 @@ nav = [
     { "Deduplicación" = "examples/dedup-resolve.md" },
     { "Cache" = "examples/cache-changes.md" },
     { "Projects" = "examples/projects-registry.md" },
-  ] },
-  { "Histórico" = [
-    { "Web integrada (retirada en 1.0.0)" = "historico/index.md" },
-    { "Acceso a la aplicación" = "historico/web-access.md" },
-    { "Panel de administración" = "historico/web-admin.md" },
-    { "Configuración de IA y plantillas" = "historico/web-ai_settings.md" },
-    { "Rutas HTTP y autenticación" = "historico/web-rutas-y-autenticacion.md" },
-    { "Estado de la aplicación" = "historico/web-STATE.md" },
-    { "ADR-004: thread-safety" = "historico/ADR-004-GIL-Thread-Safety.md" },
   ] },
 ]
 

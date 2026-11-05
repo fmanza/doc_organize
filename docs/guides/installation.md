@@ -4,13 +4,13 @@
 
 - Python 3.12 o superior.
 
-## Núcleo (CLI)
+## Núcleo (CLI y librería)
 
 ```bash
 pip install doc_organize
 ```
 
-Instala el CLI y todo lo necesario para escanear, convertir, deduplicar y cachear
+Instala el CLI, la librería y todo lo necesario para escanear, convertir, deduplicar y cachear
 documentos, **incluido OCR en CPU** (vía el extra `docling[rapidocr]`, que forma
 parte de las dependencias obligatorias — no hace falta ningún paso adicional para
 que el OCR funcione).
@@ -36,8 +36,9 @@ Añade `openpyxl` para `export cache-xlsx` y `export errors-xlsx` (y las funcion
 
 ## Interfaz web
 
-El extra `[web]` se retiró en 1.0.0 (L-11): la interfaz web es [doc_organize_web](https://github.com/fmanza/doc_organize_web), un proyecto aparte que depende de esta
-librería. `pip install doc_organize[web]` ya no instala nada adicional (pip avisa de que el extra no existe).
+El extra `[web]` se retiró en 1.0.0 (L-11): la interfaz web es [doc_organize_web](https://github.com/fmanza/doc_organize_web),
+un proyecto aparte que depende de esta librería y se despliega con Docker. `pip install doc_organize[web]` ya no instala
+nada adicional (pip avisa de que el extra no existe). Ver [De la web integrada a doc_organize_web](migracion_web.md).
 
 ## Aceleración GPU para OCR (opcional)
 
@@ -72,10 +73,9 @@ pip install --force-reinstall torch --index-url https://download.pytorch.org/whl
 Ejecuta esto **dentro del mismo entorno virtual que ejecuta `doc_organize`** (el CLI
 o la aplicación que lo usa, como doc_organize_web) — si lo instalaste en otro Python
 del sistema, `torch.cuda.is_available()` seguirá devolviendo `False` en ese proceso
-aunque en el otro entorno funcione. La página de Escaneo detecta y
-muestra este estado automáticamente (ver
-[Resolución de problemas](troubleshooting.md#el-menu-escaneo-dice-gpu-no-activa-aunque-ya-la-instale-y-funciona)
-si el mensaje no coincide con lo que esperas).
+aunque en el otro entorno funcione. `detect_gpu_status()` detecta este estado (ver
+[Resolución de problemas](troubleshooting.md#detect_gpu_status-dice-gpu-no-activa-aunque-ya-la-instale-y-funciona)
+si el resultado no coincide con lo que esperas).
 
 ⚠️ **Linux + `opencv-python`**: el paquete `opencv-python` (incluido en el extra
 `ocr-gpu`) enlaza con librerías gráficas del sistema (`libGL`). En servidores o

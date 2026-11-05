@@ -10,6 +10,11 @@ Este fichero proporciona guía a Claude Code cuando trabaja con código de doc_o
 
 Esta página contiene **solo especificidades de doc_organize**.
 
+**Librería pura desde 1.0.0**: sin interfaz web ni autenticación (ni `web/`, ni `auth/`, ni extra `[web]`, ni
+plantillas Jinja, WebSocket, `auth.db` o tenants). Eso es [doc_organize_web](https://github.com/fmanza/doc_organize_web),
+un consumidor más de la API pública. `tests/unit/test_library_architecture.py` falla si vuelven; lo que la web necesite
+se pide como API nueva de la librería. Migración: [docs/guides/migracion_web.md](docs/guides/migracion_web.md).
+
 ---
 
 ## Slash commands disponibles
@@ -98,4 +103,4 @@ class MyService:
 
 ---
 
-*Actualizado: 2026-04-27*
+*Actualizado: 2026-11-05*

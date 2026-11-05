@@ -117,7 +117,8 @@ docs/examples/
 ├── converter/             # Conversión a Markdown/JSON con Docling
 ├── dedup/                # Detección y resolución de duplicados
 ├── cache/                 # Caché incremental (SQLite + WAL)
-└── web/                  # API FastAPI, auth multi-tenant, WebSocket
+├── projects/              # Registro de proyectos y rutas (ProjectLayout)
+└── export/                # ZIP y Excel de un proyecto
 ```
 
 ## Output esperado

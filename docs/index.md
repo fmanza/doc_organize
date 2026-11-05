@@ -21,8 +21,8 @@ Se usa como librería de Python o desde la línea de comandos; la interfaz web e
 - **Organiza en proyectos**: cada proyecto agrupa su propia carpeta de conversión,
   caché y duplicados bajo una ubicación que tú eliges.
 - **Interfaz web**: [doc_organize_web](https://github.com/fmanza/doc_organize_web), un proyecto aparte, ofrece las mismas operaciones
-  desde el navegador. La web integrada (extra `[web]`) se retiró en 1.0.0; su
-  documentación está en el [histórico](historico/index.md).
+  desde el navegador. La web integrada (extra `[web]`) se retiró en 1.0.0:
+  ver [De la web integrada a doc_organize_web](guides/migracion_web.md).
 
 ## Instalación rápida
 

@@ -87,7 +87,7 @@ class ContextRegistry:
         """Borra `context.json` + `domains/` de `project`, si existen.
 
         Idempotente (no falla si ya no hay nada que borrar) — igual criterio que
-        una operación DELETE HTTP, ver `web/routes/context.py::delete_context_endpoint`.
+        una operación DELETE HTTP.
         """
         async with self._lock:
             await asyncio.to_thread(self._context_path(project).unlink, missing_ok=True)

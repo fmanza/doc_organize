@@ -2,10 +2,9 @@
 Orquestación de escaneo + caché + conversión, y deduplicación bajo demanda.
 
 Extraído de `main.py` en Fase D-2b (§2.7.3): `ScanCommand` es un módulo de
-orquestación Level 3 (`architecture.instructions.md`) usado por dos entry points
-distintos — el CLI (`main.py`, Fase D-1) y la interfaz web (`web/routes/scan.py`,
-Fase D-2b) — así que no debe pertenecer a ninguno de los dos; vive en su propio
-módulo para que ninguno dependa del otro.
+orquestación Level 3 (`architecture.instructions.md`) usado por el CLI (`main.py`)
+y por consumidores como doc_organize_web, así que no pertenece a ninguno; vive en su
+propio módulo para que ninguno dependa del otro.
 
 `run`/`run_streaming` (escanear+cachear+convertir) y `deduplicate_streaming`
 (buscar y mover duplicados) son dos acciones independientes, no un único
@@ -102,8 +101,8 @@ class ScanSummary:
 @dataclass
 class DeduplicationSummary:
     """Resumen imprimible del resultado de `ScanCommand.deduplicate_streaming()`
-    (su evento `COMPLETED`), uso interno, no un modelo de dominio — el WebSocket
-    retransmite `DedupEvent` tal cual, ver `web/routes/scan.py`."""
+    (su evento `COMPLETED`), uso interno, no un modelo de dominio — un consumidor
+    retransmite `DedupEvent` tal cual."""
 
     groups_found: int = 0
     moved: int = 0
@@ -274,7 +273,7 @@ class ScanCommand:
     es una capa de pegamento — Level 3 según `architecture.instructions.md` — que
     solo llama a los servicios ya implementados de Level 2 con las rutas resueltas
     por `ProjectRegistry` o por flags explícitos, sin cambiar ninguno de sus
-    contratos. Compartida por el CLI (`main.py`) y la web (`web/routes/scan.py`).
+    contratos. Compartida por el CLI (`main.py`) y doc_organize_web.
 
     Attributes:
         logger (logging.Logger): Logger estructurado de la instancia.
@@ -410,8 +409,8 @@ class ScanCommand:
         """Orquesta escaneo + caché + conversión, emitiendo progreso.
 
         Fase D-2b (`§2.7.3`): misma orquestación que antes vivía solo en `run()`,
-        ahora factorizada aquí para que `web/routes/scan.py` pueda retransmitir cada
-        evento por WebSocket sin duplicar la lógica del pipeline. Cada fase delega en
+        ahora factorizada aquí para que un consumidor pueda retransmitir cada
+        evento (p. ej. por WebSocket o SSE) sin duplicar la lógica del pipeline. Cada fase delega en
         un método privado (reduce la complejidad ciclomática de este método a la de
         "qué fases hay y en qué orden", no al detalle de cada una).
 
@@ -616,7 +615,7 @@ class ScanCommand:
                 # en cuanto recibe "completed", así que si esta escritura quedara
                 # para después de que el generador se reanude tras el yield,
                 # competiría con esa desconexión -- comprobado en la práctica
-                # (`test_scan_websocket_loopback_full_pipeline_empty_paths` era
+                # (un test del WebSocket de escaneo de la web integrada era
                 # intermitente con esta escritura en el `finally`). Aquí, en
                 # cambio, ya es un hecho consumado antes de que el cliente pueda
                 # reaccionar al evento.
@@ -730,7 +729,7 @@ class ScanCommand:
         """Valida `paths`, persiste el resultado en `folders_json`, devuelve
         `(rutas limpias, avisos de validación)`.
 
-        `folders_json` es releído más tarde por `web/routes/duplicates.py` (Fase D-2c,
+        `folders_json` se relee más tarde (Fase D-2c,
         `§2.7.4`) para re-escanear el proyecto sin que el usuario tenga que volver a
         indicar las carpetas.
         """
@@ -834,7 +833,7 @@ class ScanCommand:
         docstring): no convierte ni cachea nada, solo escanea para poder
         calcular hashes, detecta duplicados y los mueve. Reutiliza
         `_resolve_scan_paths()` para que `folders_json` quede escrito igual que
-        tras un escaneo — así `web/routes/duplicates.py` funciona aunque el
+        tras un escaneo — así deduplicar de nuevo funciona aunque el
         usuario solo haya deduplicado y no haya llegado a escanear todavía.
 
         Llama a `DeduplicationManager.finalize_report()` siempre, incluso sin
@@ -1310,8 +1309,8 @@ class ScanCommand:
 
     async def _persist_error_report(self, error_log_path: Path, report: ScanErrorReport) -> None:
         """Añade `report` como una línea JSON a `error_log_path` (crea la carpeta
-        contenedora si falta). Mismo patrón append-only que `DEDUP_HISTORY.jsonl`
-        (`web/routes/duplicates.py`): una línea por ejecución, nunca se reescribe.
+        contenedora si falta). Mismo patrón append-only que `DEDUP_HISTORY.jsonl`:
+        una línea por ejecución, nunca se reescribe.
 
         No propaga el fallo si la escritura falla (permiso denegado, disco lleno,
         ruta bloqueada...): mismo criterio que `_persist_scan_run` (AUDIT_CODE,

@@ -6,6 +6,36 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+Documentación e instrucciones IA de la librería pura (L-13, L-14). Sin cambios de código ni de API: solo docstrings,
+guías e instrucciones.
+
+### Added
+
+- Guía [De la web integrada a doc_organize_web](docs/guides/migracion_web.md): qué sustituye a cada pantalla y a cada
+  endpoint (tabla de `PARIDAD.md` de doc_organize_web), que los datos no se migran (doc_organize_web guarda los
+  proyectos en su `config.db` y empieza limpio) y cómo desplegar la web.
+- Sección «Breaking changes» en [1.0.0rc1](#100rc1---2026-11-05), con cada elemento retirado y su sustituto.
+- Inicio rápido con un ejemplo de uso como librería (`ProjectRegistry`, `ProjectLayout`, `ScanCommand`).
+
+### Changed
+
+- Navegación del sitio sin la web: la sección «Histórico» sale del `nav` (las páginas siguen publicadas y se enlazan
+  desde la guía de migración). Instalación e inicio rápido solo hablan del CLI y la librería.
+- Guías funcionales (contexto, deduplicación, proyectos, LiteLLM, resolución de problemas) en términos de librería, sin
+  pantallas, botones ni endpoints de la web integrada. Las reglas que imponía la web (una operación a la vez, campos
+  excluyentes al construir el contexto, confirmar los grupos por similitud) se documentan como responsabilidad del
+  consumidor.
+- Docstrings y comentarios de `src/` sin referencias a `web/`, `auth/`, `AuthStore` ni plantillas Jinja (se
+  renderizan en la referencia de la API).
+- Instrucciones IA (`.github/SHARED_INSTRUCTIONS.md`, `instructions/architecture` y `docs`, skills,
+  `.claude/TESTING_GUIDE.md`, `CLAUDE.md`) sin reglas de la web: fuera las de plantillas Jinja2, Tailwind y JS inline,
+  WebSocket, `auth.db` y tenants; la arquitectura descrita es la real de 1.0.0.
+
+### Removed
+
+- Skills `access-doc-review` y `tenant-role-user-redesign`: validaban o rediseñaban código retirado en 1.0.0. Siguen en
+  el historial de git.
+
 ## [1.0.0rc1] - 2026-11-05
 
 Librería pura (L-11, L-12): se retiran la web integrada, `auth/` y lo que quedó obsoleto en 0.14.0. doc_organize_web
@@ -14,6 +44,22 @@ al cerrar la Fase 10 de doc_organize_web. Lo que se queda (escaneo, caché, dedu
 clientes de IA y `*_config_from_env`, `projects.layout`, diagnóstico y los comandos `scan`, `project`, `deduplicate`
 y `export` del CLI) se comporta igual que en 0.14.0. También se retira lo obsoleto desde 0.13.0 (`MkDocsGenerator` y
 los alias `mkdocs_*` de `Context`).
+
+### Breaking changes
+
+| Retirado | Sustituto |
+|---|---|
+| `doc_organize.web` (FastAPI, plantillas Jinja, WebSocket) y `python -m doc_organize web` | [doc_organize_web](https://github.com/fmanza/doc_organize_web); ver [De la web integrada a doc_organize_web](docs/guides/migracion_web.md) |
+| `doc_organize.auth` (`AuthStore`, usuarios, tenants, roles, sesiones, `auth.db`) | Usuarios, tenants y roles de doc_organize_web, en su `config.db` (sin migración) |
+| Subcomandos `tenant` y `user`, y los flags `--auth-db-path` y `--templates-path` | `python -m app.cli create-admin` y las pantallas de administración de doc_organize_web |
+| Extra `[web]` | `pip install doc_organize` (el CLI y la librería no lo necesitaban); la web se despliega aparte |
+| `InstanceSecretsStore`, `secrets_cipher` y las cinco `*_config_from_store_or_env` (con `SecretValueReader`) | Construir el `*Config` en el consumidor, o las `*_config_from_env()` |
+| `Project.tenant_id`, `Context.tenant_id` y el parámetro `tenant_id` de `ProjectRegistry` | Ninguno: el nombre de un proyecto es único en todo el registro. Los JSON antiguos se siguen leyendo |
+| `MkDocsGenerator` | `SiteGenerator` |
+| `Context.mkdocs_generated` / `Context.mkdocs_site_built` | `Context.site_generated` / `Context.site_built` (un `context.json` antiguo con las claves `mkdocs_*` se sigue leyendo) |
+| `Tenant`, `Role`, `User`, `Session`, `SecurityConfig`, `DirectoryListing` (`core.models`) | Ninguno (solo los usaba la web) |
+| `AuthError` y subclases, `SecretsCipherError`, `SecretsEncryptionNotConfiguredError` (`core.exceptions`) | Ninguno (solo los usaba `auth/`) |
+| Constantes de autenticación de `core.constants` (`DEFAULT_TENANT_ID`, `SCRYPT_*`, `LOGIN_*`…) | Ninguno |
 
 ### Removed
 

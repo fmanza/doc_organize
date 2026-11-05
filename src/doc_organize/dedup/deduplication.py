@@ -184,8 +184,7 @@ class DeduplicationManager:
         Público (no un detalle interno de `resolve_duplicates()`):
         `ScanCommand.deduplicate_streaming()` también lo llama, tras su propio
         bucle con progreso por grupo -- mismo criterio de "no importar símbolos
-        privados entre módulos" ya establecido en el proyecto (ver
-        `web/scan_errors_data.py`).
+        privados entre módulos" ya establecido en el proyecto.
 
         `started_at` es opcional (compatibilidad con llamadores no adaptados):
         cuando se pasa, `duration_seconds` cubre desde ahí hasta que este método
@@ -238,8 +237,8 @@ class DeduplicationManager:
         `DEDUP_HISTORY.jsonl` (histórico acumulado de todas las ejecuciones).
 
         Composición de `move_group()` (bucle, sin progreso) + `finalize_report()`
-        (persistencia) -- la vía "todo de una vez" usada por el resolver
-        interactivo (`web/routes/duplicates.py`). `ScanCommand.
+        (persistencia) -- la vía "todo de una vez" de un resolver
+        interactivo. `ScanCommand.
         deduplicate_streaming()` usa las mismas dos primitivas por separado, con
         eventos de progreso entre medias.
 

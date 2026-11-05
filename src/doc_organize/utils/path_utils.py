@@ -274,9 +274,9 @@ def paths_within_roots(paths: list[str], allowed_roots: list[str] | None) -> boo
     autenticación) y siempre devuelve `True`. Con una lista (posiblemente vacía),
     un rol restringido sin `allowed_roots` configuradas no puede indicar ninguna
     ruta externa — evita que eluda su `project_names` apuntando el escaneo (o el
-    explorador de carpetas) a una ruta arbitraria del servidor. Compartida por
-    `web/routes/scan.py` (WebSocket de escaneo) y `web/routes/filesystem.py`
-    (explorador de carpetas), que aplican la misma restricción por rol.
+    explorador de carpetas) a una ruta arbitraria del servidor. Pensada para
+    que un consumidor (escaneo, explorador de carpetas) aplique la misma
+    restricción por rol.
     """
     if allowed_roots is None:
         return True

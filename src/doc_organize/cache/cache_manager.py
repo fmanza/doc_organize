@@ -79,12 +79,12 @@ class CacheManager:
 
     Unica fuente de verdad de hashing: `compute_hash()` delega en
     `utils.hash_utils.hash_file()`, nunca reimplementa SHA-256. El modo WAL
-    permite lecturas concurrentes mientras la web app escribe.
+    permite lecturas concurrentes mientras otro proceso escribe.
 
     Con `read_only=True` (L-10e, G21) abre la caché con la URI `mode=ro`: no
     cambia el modo de diario, no crea la tabla ni migra columnas, y
     `save_entries`/`clear` lanzan `CacheError`. Pensado para leer la caché que
-    otro proceso escribe (la API de la web mientras el worker escanea).
+    otro proceso escribe (p. ej. la API de doc_organize_web mientras su worker escanea).
 
     Attributes:
         db_path (Path): Ruta al archivo SQLite de cache.
@@ -154,8 +154,8 @@ class CacheManager:
     async def _migrate_schema(self) -> None:
         """Anade columnas nuevas a `cache_entries` si faltan (bases de datos creadas
         antes de esta revision). SQLite no soporta `ADD COLUMN IF NOT EXISTS`, de ahi
-        la comprobacion manual via `PRAGMA table_info` — mismo patron que
-        `AuthStore._migrate_schema()`."""
+        la comprobacion manual via `PRAGMA table_info` — migración aditiva
+        de columnas."""
         cursor = await self._connection.execute("PRAGMA table_info(cache_entries)")
         columns = {row[1] for row in await cursor.fetchall()}
 
@@ -270,7 +270,7 @@ class CacheManager:
     ) -> list[CacheEntry]:
         """Lee una pagina de `cache_entries`, ordenada por `file_path` para paginacion estable.
 
-        Pensado para la vista web del Cache Viewer (listas largas); no sustituye a
+        Pensado para listados paginados (listas largas); no sustituye a
         `load_cache()`, que sigue siendo la fuente completa para `get_changes()` y
         la exportacion ZIP.
 

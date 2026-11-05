@@ -504,7 +504,7 @@ El borrador estructurado se puede renderizar como el mismo formato de fichero qu
 `load_taxonomy_manifest()` espera con `context.render_taxonomy_manifest_markdown(manifest, *,
 reasoning, sample_document_count, total_document_count)` (`context/taxonomy_manifest.py`) — front
 matter YAML + una nota/tabla de prosa indicando que es un borrador generado por IA pendiente de
-revisión. No escribe nada en disco; el llamador (`web/routes/context.py`) decide qué hacer con el
+revisión. No escribe nada en disco; el llamador decide qué hacer con el
 texto devuelto.
 
 **Excepciones**: `TaxonomyManifestDraftAuthError` (401/403), `TaxonomyManifestDraftConnectionError`

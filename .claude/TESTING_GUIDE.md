@@ -94,22 +94,21 @@ async def converter():
         yield c
 ```
 
-### Fixtures por Módulo: auth/
+### Fixtures por Módulo: projects/
 
 ```python
-from doc_organize.auth import AuthStore
+from doc_organize.projects import ProjectRegistry
 
 @pytest.fixture
-async def auth_store(tmp_path):
-    async with AuthStore(tmp_path / "auth.db") as store:
-        yield store
+async def registry(tmp_path):
+    async with ProjectRegistry(tmp_path / "projects.json") as registry:
+        yield registry
 
-# Uso: crear un tenant+usuario real (SQLite en tmp_path, no un mock)
-async def test_authenticate_succeeds(auth_store):
-    tenant = await auth_store.create_tenant("Acme Corp")
-    await auth_store.create_user(tenant.id, "alice", "s3cr3t-password")
-    user = await auth_store.authenticate(tenant.id, "alice", "s3cr3t-password")
-    assert user is not None
+# Uso: un registro real en tmp_path (JSON en disco, no un mock)
+async def test_create_and_get_project(registry, tmp_path):
+    await registry.create_project("Mi Proyecto", tmp_path)
+    project = await registry.get_project("mi proyecto")
+    assert project.name == "Mi Proyecto"
 ```
 
 ---

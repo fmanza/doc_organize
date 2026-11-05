@@ -14,7 +14,7 @@ contexto de organización documental y del sitio (L-8b, G28) y los nombres que n
 
 También define dónde va la salida de cada documento (``resolve_output_paths``, ``resolve_images_dir``) y su ruta
 relativa a la carpeta escaneada (``relative_source_path``): sin Docling, para que un consumidor que no convierte (la
-API de la web, G20) calcule las mismas rutas que ``DocumentConverter``.
+API de doc_organize_web, G20) calcule las mismas rutas que ``DocumentConverter``.
 """
 
 import re

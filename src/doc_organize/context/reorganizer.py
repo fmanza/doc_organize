@@ -186,9 +186,8 @@ class Reorganizer:
 
         Args:
             on_document_copied: Si se da, se invoca `await on_document_copied(index, total, source_path)`
-                tras copiar cada documento (`index` empezando en 1) — usado por
-                `web/routes/context.py::context_build_websocket` para retransmitir
-                progreso en tiempo real (semáforo). `None` (default) no tiene efecto
+                tras copiar cada documento (`index` empezando en 1) — pensado para
+                que el consumidor retransmita el progreso en tiempo real (semáforo). `None` (default) no tiene efecto
                 ninguno: los llamadores existentes no cambian de comportamiento.
             on_document_failed: Si se da, se invoca `await on_document_failed(index, total, source_path, error)`
                 por cada documento que no se pudo copiar (mismo `index` que habría tenido en
@@ -280,7 +279,7 @@ class Reorganizer:
     async def delete_output(self, project: Project, context: Context) -> None:
         """Borra `<project.root_path>/<context.output_folder_name>/` por completo, si existe.
 
-        Usado al eliminar el contexto de un proyecto (ver `web/routes/context.py`)
+        Usado al eliminar el contexto de un proyecto
         para volver al estado anterior a la primera construcción — sin esto, la
         copia física quedaría huérfana en disco tras borrar `context.json`. Si la
         carpeta es un enlace, se quita el enlace (nunca su destino).

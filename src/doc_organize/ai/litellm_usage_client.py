@@ -50,7 +50,7 @@ class LiteLLMUsageClient(AiHttpClientBase):
     """Consulta el spend acumulado de una virtual key de LiteLLM Proxy (`GET /key/info`).
 
     Usar como context manager async para garantizar el cierre del cliente HTTP
-    interno, igual convención que `CacheManager`/`AuthStore`.
+    interno, igual convención que `CacheManager`.
 
     Attributes:
         config (LiteLLMUsageConfig): Configuración de acceso al proxy.

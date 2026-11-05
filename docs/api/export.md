@@ -1,7 +1,6 @@
 # Exportación — Referencia Técnica
 
-`doc_organize.export` (desde la 0.11.0, tarea L-7). Nivel 3: usa `cache/` y `projects/layout` y no importa `web/`,
-`auth/` ni Docling. Funcionalidad: [Exportación](../functional/export.md).
+`doc_organize.export` (desde la 0.11.0, tarea L-7). Nivel 3: usa `cache/` y `projects/layout` y no importa Docling. Funcionalidad: [Exportación](../functional/export.md).
 
 ## API pública
 
