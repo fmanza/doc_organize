@@ -12,8 +12,6 @@ Modelos Pydantic v2 usados en todos los módulos:
 - ScanRunReport: duración de una ejecución de escaneo (histórico de tiempos)
 """
 
-import warnings
-
 from enum import Enum
 from pathlib import Path
 from typing import Any, Final, Literal
@@ -494,104 +492,21 @@ class ValidationResult(BaseModel):
 class Project(BaseModel):
     """Un proyecto de doc_organize: una carpeta de trabajo con nombre que agrega el estado de scan/convert/dedup/cache (REQ-008).
 
-    `tenant_id` vale `"default"` por defecto (revisión 8, §2.7.2): los proyectos creados
-    vía CLI o una sesión web loopback/sin auth viven todos en este tenant implícito, y
-    cualquier entrada del registro escrita antes de la revisión 8 (sin el campo) se
-    parsea también como `"default"` — sin necesidad de script de migración. La
-    unicidad del nombre de proyecto es por tenant (ver `ProjectRegistry.create_project`),
-    no global.
+    Sin `tenant_id` desde 1.0.0 (L-12): un `projects.json` antiguo que lo traiga se sigue leyendo y el campo se
+    ignora. Los tenants los gestiona doc_organize_web en su base de datos.
     """
 
-    name: str = Field(..., description="Nombre único del proyecto dentro de su tenant (validado por ProjectValidator)")
+    name: str = Field(..., description="Nombre único del proyecto en el registro (validado por ProjectValidator)")
     root_path: str = Field(..., description="Ruta absoluta a la carpeta de trabajo del proyecto")
     created_at: str = Field(..., description="Timestamp ISO 8601 de creación del proyecto")
-    tenant_id: str = Field(
-        default="default",
-        description="Tenant propietario (por defecto el tenant implícito 'default'). Obsoleto: se retira en 1.0.0 (L-6c)",
-    )
 
 
-_ISO_TIMESTAMP_DESC = "Timestamp ISO 8601 de creación"
 _HTTP_TIMEOUT_DESC = "Timeout de las peticiones HTTP, en segundos"
 _HTTP_RETRIES_DESC = (
     "Reintentos ante timeout o error de red/transporte (nunca ante una respuesta HTTP, ni 4xx ni 5xx); 0 (por defecto) "
     "no reintenta. Ojo: reintentar un POST que hizo timeout puede cobrarse dos veces si el proxy sí lo recibió (L-3b)"
 )
 _HTTP_RETRY_BACKOFF_DESC = "Espera base entre reintentos, en segundos: se duplica en cada intento (0.5, 1, 2...) (L-3b)"
-
-
-class Tenant(BaseModel):
-    """Una organización/espacio de trabajo que agrupa usuarios y proyectos (revisión 8, §2.7.2)."""
-
-    id: str = Field(..., description="Identificador del tenant (slug), derivado de su nombre")
-    name: str = Field(..., description="Nombre legible del tenant")
-    created_at: str = Field(..., description=_ISO_TIMESTAMP_DESC)
-
-
-class Role(BaseModel):
-    """Un conjunto de permisos con nombre, vinculado solo a usuarios, no a un tenant
-    (revisión 9, roles y gestión de usuarios; rediseño Tenant/Role/User: se retira
-    `tenant_id` — un mismo rol puede asignarse a usuarios de tenants distintos).
-
-    `is_admin=True` ve todos los proyectos del tenant **del usuario que lo tiene
-    asignado** (presentes y futuros) — `project_names` debe entonces estar vacío
-    (impuesto por `AuthStore.create_role`/`update_role`, no por este modelo, para
-    que el modelo siga siendo un simple contenedor de datos). Un rol no-admin solo
-    ve los proyectos de su propio tenant listados en `project_names`.
-
-    El acceso de escaneo ya no se declara aquí (`allowed_scan_roots` retirado):
-    es implícito — la raíz de cada proyecto en `project_names` (ver
-    `web/dependencies.py::get_allowed_scan_roots`).
-    """
-
-    id: str = Field(..., description="UUID4 del rol")
-    name: str = Field(..., description="Único globalmente (no por tenant, ver docstring de la clase)")
-    is_admin: bool = Field(default=False, description="Si este rol ve todos los proyectos del tenant del usuario que lo tiene")
-    project_names: list[str] = Field(default_factory=list, description="Proyectos a los que este rol puede acceder (se ignora si is_admin)")
-    created_at: str = Field(..., description=_ISO_TIMESTAMP_DESC)
-
-
-class User(BaseModel):
-    """Un usuario que pertenece exactamente a un tenant y exactamente a un rol (revisión 8 §2.7.2, revisión 9).
-
-    Nunca incluye el hash/salt de la contraseña: esos campos viven solo en
-    `auth.db` (AuthStore), así que ningún endpoint puede serializarlos
-    accidentalmente en una respuesta JSON.
-    """
-
-    id: str = Field(..., description="UUID4 del usuario")
-    tenant_id: str = Field(..., description="Tenant al que pertenece este usuario")
-    username: str = Field(..., description="Único dentro del tenant (no globalmente)")
-    role_id: str = Field(..., description="Rol asignado a este usuario (revisión 9)")
-    must_change_password: bool = Field(
-        default=False, description="True hasta que el usuario cambie una contraseña asignada por bootstrap (revisión 9)"
-    )
-    is_blocked: bool = Field(
-        default=False,
-        description=(
-            "Si `True`, no puede autenticarse (`AuthStore.authenticate` devuelve `None`) y sus sesiones "
-            "activas ya se invalidaron en el momento en que se marcó (rediseño Tenant/Role/User)"
-        ),
-    )
-    is_instance_admin: bool = Field(
-        default=False,
-        description=(
-            "Nivel de instancia, independiente de `Role.is_admin` (que solo da acceso a los proyectos del "
-            "propio tenant): solo un `is_instance_admin=True` puede ver la pantalla cruzada de tenants, "
-            "crear/eliminar tenants, y gestionar roles/usuarios de cualquier tenant (rediseño Tenant/Role/User)"
-        ),
-    )
-    created_at: str = Field(..., description=_ISO_TIMESTAMP_DESC)
-
-
-class Session(BaseModel):
-    """Una sesión de navegador activa, creada al hacer login (revisión 8, §2.7.2)."""
-
-    token: str = Field(..., description="Token de sesión opaco (valor de la cookie doc_organize_session)")
-    user_id: str = Field(..., description="Usuario al que pertenece esta sesión")
-    tenant_id: str = Field(..., description="Tenant del usuario, copiado aquí para evitar un join en las consultas")
-    created_at: str = Field(..., description=_ISO_TIMESTAMP_DESC)
-    expires_at: str = Field(..., description="Timestamp ISO 8601 de expiración (vida fija)")
 
 
 class ProjectNameValidation(BaseModel):
@@ -625,19 +540,6 @@ class CacheConfig(BaseModel):
     cache_db_path: str = Field(default=DEFAULT_CACHE_DB_NAME, description="Ruta a la base de datos SQLite de cache")
     enable_wal: bool = Field(default=True, description="Activar modo WAL para concurrencia")
     auto_backup: bool = Field(default=True, description="Backup automático de cache.db antes de escrituras masivas")
-
-
-class SecurityConfig(BaseModel):
-    """Configuración de seguridad de la app web.
-
-    `api_token_env_var` (bearer token compartido) se eliminó en la revisión 8
-    (§2.7.2): la autenticación es ahora por usuario (cookie de sesión tras
-    `/login`), así que ya no hay un único secreto compartido que leer del entorno.
-    """
-
-    bind_host: str = Field(default="127.0.0.1", description="Host al que hacer bind")
-    bind_port: int = Field(default=8000, description="Puerto al que hacer bind")
-    require_auth_if_not_loopback: bool = Field(default=True, description="Exigir autenticación si no es loopback")
 
 
 class ScannedFolder(BaseModel):
@@ -699,14 +601,6 @@ class OfficeStatus(BaseModel):
 
     libreoffice_installed: bool = Field(..., description="Si el binario `soffice`/`libreoffice` esta disponible en el PATH del sistema")
     instructions: str | None = Field(default=None, description="Instrucciones para instalar LibreOffice, si `libreoffice_installed` es `False`")
-
-
-class DirectoryListing(BaseModel):
-    """Resultado de listar el contenido de una carpeta del servidor (explorador de carpetas de escaneo)."""
-
-    current_path: str = Field(..., description="Ruta absoluta listada")
-    parent_path: str | None = Field(default=None, description="Ruta absoluta de la carpeta padre, o `None` si no hay/no es accesible")
-    entries: list[str] = Field(default_factory=list, description="Nombres de las subcarpetas inmediatas, ordenados alfabéticamente")
 
 
 # ===== Modelos de monitorización de uso/coste de IA (fase 2, `doc_organize.ai`) =====
@@ -836,10 +730,11 @@ class Context(BaseModel):
     Persistido por `ContextRegistry` en `<project.root_path>/context.json` (metadatos +
     resumen de dominios) más `<project.root_path>/domains/<slug>/{DOMAIN.md,index.json}`
     por dominio (ver §3 del `00_REQUEST.md` de la sesión que originó este modelo).
+
+    Sin `tenant_id` desde 1.0.0 (L-12): un `context.json` antiguo que lo traiga se sigue leyendo y el campo se ignora.
     """
 
     project_name: str = Field(..., description="Nombre del proyecto propietario de este contexto")
-    tenant_id: str = Field(default="default", description="Tenant propietario, igual que `Project.tenant_id`")
     output_folder_name: str = Field(default="organizado", description="Nombre de la carpeta de salida reorganizada, relativa a `root_path`")
     ai_classification_enabled: bool = Field(default=False, description="Si la Sub-fase B (IA) está activa para este proyecto — opt-in explícito")
     ai_fallback_threshold: float = Field(default=0.5, description="Score mínimo (Sub-fase A) por debajo del cual se intenta la Sub-fase B")
@@ -925,34 +820,6 @@ class Context(BaseModel):
             return validate_output_folder_name(value)
         except InvalidPathError as exc:
             raise ValueError(str(exc)) from exc
-
-    # Alias obsoletos de antes de 0.13.0 (sitio con MkDocs). Un `context.json` antiguo, o `Context(mkdocs_generated=...)`,
-    # se siguen leyendo gracias a `validation_alias`; se retiran en 1.0.0.
-    @property
-    def mkdocs_generated(self) -> bool:
-        """Obsoleto desde 0.13.0 (se retira en 1.0.0): usar `site_generated`."""
-        _warn_deprecated_context_field("mkdocs_generated", "site_generated")
-        return self.site_generated
-
-    @mkdocs_generated.setter
-    def mkdocs_generated(self, value: bool) -> None:
-        _warn_deprecated_context_field("mkdocs_generated", "site_generated")
-        self.site_generated = value
-
-    @property
-    def mkdocs_site_built(self) -> bool:
-        """Obsoleto desde 0.13.0 (se retira en 1.0.0): usar `site_built`."""
-        _warn_deprecated_context_field("mkdocs_site_built", "site_built")
-        return self.site_built
-
-    @mkdocs_site_built.setter
-    def mkdocs_site_built(self, value: bool) -> None:
-        _warn_deprecated_context_field("mkdocs_site_built", "site_built")
-        self.site_built = value
-
-
-def _warn_deprecated_context_field(old: str, new: str) -> None:
-    warnings.warn(f"Context.{old} está obsoleto desde 0.13.0 y se retira en 1.0.0: usa Context.{new}.", DeprecationWarning, stacklevel=3)
 
 
 class DomainClassificationResult(BaseModel):
@@ -1115,7 +982,6 @@ __all__ = [
     "DedupEvent",
     "DedupEventType",
     "DeduplicationReport",
-    "DirectoryListing",
     "DirectoryTree",
     "DirectoryTreeNode",
     "DoclingConfig",
@@ -1137,7 +1003,6 @@ __all__ = [
     "OfficeStatus",
     "Project",
     "ProjectNameValidation",
-    "Role",
     "ScanErrorEntry",
     "ScanErrorReport",
     "ScanEvent",
@@ -1145,15 +1010,11 @@ __all__ = [
     "ScanResult",
     "ScanRunReport",
     "ScannedFolder",
-    "SecurityConfig",
-    "Session",
     "TaxonomyCatalogEntry",
     "TaxonomyClassificationResult",
     "TaxonomyManifest",
-    "Tenant",
     "UsageLineItem",
     "UsageSnapshot",
     "UsageSourceName",
-    "User",
     "ValidationResult",
 ]

@@ -3,7 +3,6 @@
 import importlib.util
 import subprocess
 import tomllib
-import warnings
 
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,7 +10,6 @@ from pathlib import Path
 import pytest
 
 from doc_organize.context import site_generator as site_generator_module
-from doc_organize.context.mkdocs_generator import MkDocsGenerator
 from doc_organize.context.reorganizer import Reorganizer
 from doc_organize.context.site_generator import SiteGenerator, SiteResult
 from doc_organize.core.exceptions import DocOrganizeError, InvalidPathError, SiteBuildError
@@ -350,36 +348,26 @@ async def test_delete_site_with_custom_site_dir(tmp_path):
     assert not (tmp_path / "publicado").exists()
 
 
-# --- Alias obsoletos -------------------------------------------------------------------------------------------------
+# --- Retirados en 1.0.0 (alias de antes de 0.13.0) -------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_mkdocs_generator_is_a_deprecated_alias_of_site_generator(tmp_path):
-    with pytest.warns(DeprecationWarning, match="SiteGenerator"):
-        generator = MkDocsGenerator()
-    project = _make_project(tmp_path)
+def test_mkdocs_generator_no_longer_exists():
+    import doc_organize
+    import doc_organize.context
 
-    result = await generator.generate(project, _make_context(project, []), build=False)
-
-    assert isinstance(generator, SiteGenerator)
-    assert result.config_path == tmp_path / "zensical.toml"
+    assert "MkDocsGenerator" not in doc_organize.__all__
+    assert not hasattr(doc_organize.context, "MkDocsGenerator")
+    with pytest.raises(ImportError):
+        import doc_organize.context.mkdocs_generator
 
 
-def test_context_mkdocs_fields_are_deprecated_aliases_of_site_fields():
+def test_legacy_context_json_mkdocs_keys_are_still_read_but_properties_are_gone():
     legacy = Context.model_validate({"project_name": "x", "created_at": "a", "updated_at": "b", "mkdocs_generated": True, "mkdocs_site_built": True})
+
     assert (legacy.site_generated, legacy.site_built) == (True, True)
-    assert set(legacy.model_dump()) >= {"site_generated", "site_built"}
     assert "mkdocs_generated" not in legacy.model_dump()
-
-    with pytest.warns(DeprecationWarning, match="site_built"):
-        assert legacy.mkdocs_site_built is True
-    with pytest.warns(DeprecationWarning, match="site_generated"):
-        legacy.mkdocs_generated = False
-    assert legacy.site_generated is False
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
-        assert Context(project_name="x", created_at="a", updated_at="b", site_built=True).site_built is True
+    assert not hasattr(legacy, "mkdocs_generated")
+    assert not hasattr(legacy, "mkdocs_site_built")
 
 
 @pytest.mark.asyncio

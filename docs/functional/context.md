@@ -109,14 +109,15 @@ en el placeholder `sin-clasificar` por no alcanzar el umbral en ese eje).
 
 ## Plantillas de Manifiesto (biblioteca compartida entre proyectos)
 
-> La gestión de esta biblioteca (crear/editar/borrar plantillas) se hace desde
-> `/admin/plantillas-taxonomia` — ver [Panel de Administración](admin.md).
+> La biblioteca se gestiona con `TaxonomyTemplateRegistry` (crear, editar y borrar plantillas); el panel
+> `/admin/plantillas-taxonomia` de la web integrada se retiró en 1.0.0 (ver el
+> [histórico](../historico/web-admin.md)).
 
 Además del `taxonomy_manifest.md` propio de un proyecto, `doc_organize` mantiene una
 **biblioteca de plantillas** reutilizables entre proyectos — mismo formato de fichero
 (front matter YAML + prosa libre), pero fuera de cualquier `project.root_path`:
 `~/.doc_organize/taxonomy_templates/<nombre>.md` (gestionada por el usuario; ruta
-alternativa vía `doc_organize web --templates-path`), más un par de plantillas de
+alternativa con `TaxonomyTemplateRegistry(templates_dir)`), más un par de plantillas de
 ejemplo empaquetadas con la propia librería ("sgi-iso27001", "calidad") que sirven de
 fallback de solo lectura cuando no hay una plantilla de usuario con ese nombre.
 
@@ -168,7 +169,8 @@ cualquier proyecto sin acoplarse a la construcción de ningún otro.
 
 Un contexto construido antes de 0.13.0 (con `mkdocs.yml`) pasa a Zensical al reconstruirlo: se borra `mkdocs.yml`, se
 escribe `zensical.toml` y se vuelve a construir `site/`. `context.json` antiguo se sigue leyendo
-(`mkdocs_generated`/`mkdocs_site_built` pasan a `site_generated`/`site_built`).
+(sus claves `mkdocs_generated`/`mkdocs_site_built` se leen como `site_generated`/`site_built`; las propiedades
+`Context.mkdocs_generated`/`mkdocs_site_built` se retiraron en 1.0.0).
 
 ## Seguridad del sitio
 
@@ -190,7 +192,7 @@ Los `.md` del sitio salen de documentos de terceros: son **contenido no confiabl
 
 Quien sirva el sitio debe tratarlo como contenido de terceros: servirlo desde **otro origen** que la aplicación (sin
 sus cookies), o con una cabecera `Content-Security-Policy` restrictiva (por ejemplo `sandbox`, que deja el sitio en un
-origen opaco). La web integrada (congelada, se retira en 1.0.0) lo sirve en el mismo origen, como hacía con MkDocs.
+origen opaco).
 
 ## Reorganizar sin seguir enlaces simbólicos
 

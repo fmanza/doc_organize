@@ -1,8 +1,7 @@
 # doc_organize
 
-> Escanea, convierte a Markdown/JSON, deduplica y cachea documentos — por línea de
-> comandos o desde una interfaz web opcional con autenticación multi-usuario y
-> multi-tenant.
+> Escanea, convierte a Markdown/JSON, deduplica y cachea documentos — librería de
+> Python y línea de comandos. La interfaz web es [doc_organize_web](https://github.com/fmanza/doc_organize_web).
 
 ## Descripción
 
@@ -14,15 +13,10 @@ incremental para no reconvertir lo que no ha cambiado. Cada conjunto de trabajo
 se organiza como un **proyecto**: una carpeta raíz propia con su conversión, su
 caché y sus duplicados.
 
-Incluye una interfaz web opcional (extra `[web]`) con progreso en tiempo real
-por WebSocket; en modo no-loopback exige autenticación por usuario con soporte
-multi-tenant (varias organizaciones, cada una con sus propios usuarios y
-proyectos, aisladas entre sí).
-
-> **Obsoleto desde 0.14.0 (L-10)**: la interfaz web integrada (`doc_organize.web`, `doc_organize.auth` y los
-> subcomandos `web`, `tenant` y `user` del CLI) está congelada (solo hotfix) y se retira en 1.0.0. Usa
-> [doc_organize_web](https://github.com/fmanza/doc_organize_web). La librería y el CLI de `scan`, `project`,
-> `deduplicate` y `export` no cambian.
+> **1.0.0 (L-11)**: la interfaz web integrada (`doc_organize.web`, `doc_organize.auth`, los subcomandos `web`,
+> `tenant` y `user` del CLI y el extra `[web]`), obsoleta desde 0.14.0, se ha retirado. Usa [doc_organize_web](https://github.com/fmanza/doc_organize_web), que ofrece
+> lo mismo (usuarios, tenants, roles y progreso en tiempo real) sobre esta librería. El CLI de `scan`, `project`,
+> `deduplicate` y `export` no cambia; ver el [CHANGELOG](CHANGELOG.md) para el resto de cambios incompatibles.
 
 ## Requisitos
 
@@ -36,7 +30,6 @@ proyectos, aisladas entre sí).
 ```bash
 pip install doc_organize            # núcleo: CLI, OCR en CPU incluido
 pip install doc_organize[export]    # + Excel de caché y de errores (`export cache-xlsx`/`errors-xlsx`)
-pip install doc_organize[web]       # + interfaz web
 ```
 
 ### Desarrollo
@@ -45,7 +38,7 @@ pip install doc_organize[web]       # + interfaz web
 python -m venv .venv
 source .venv/bin/activate  # En Windows: .venv\Scripts\activate
 
-pip install -e ".[dev,web,docs]"
+pip install -e ".[dev,docs]"
 ```
 
 ## Uso básico
@@ -60,9 +53,6 @@ python -m doc_organize export zip --project "Mi Proyecto" --preview
 python -m doc_organize export zip --project "Mi Proyecto" -o export.zip
 python -m doc_organize export errors-xlsx --output-root /ruta/salidas --state-root /ruta/estado -o errores.xlsx
 
-# Interfaz web (loopback, sin autenticación). OBSOLETA desde 0.14.0: se retira en 1.0.0, usa doc_organize_web
-pip install doc_organize[web]
-python -m doc_organize web
 ```
 
 Ver la [documentación completa](https://fmanza.github.io/doc_organize) —
@@ -127,10 +117,8 @@ doc_organize/
 │   ├── dedup/              # DeduplicationManager (Nivel 2)
 │   ├── cache/               # CacheManager, SQLite+WAL (Nivel 2)
 │   ├── projects/             # ProjectRegistry (Nivel 2)
-│   ├── auth/                  # AuthStore: usuarios/tenants/sesiones (Nivel 2)
-│   ├── scan/                   # ScanCommand: orquestación compartida CLI/web (Nivel 3)
+│   ├── scan/                   # ScanCommand: orquestación del escaneo (Nivel 3)
 │   ├── export/                 # ZIP en streaming y Excel de un proyecto (Nivel 3, Excel con extra [export])
-│   ├── web/                     # interfaz web opcional, FastAPI (Nivel 3, extra [web])
 │   └── main.py                   # CLI (Nivel 3)
 ├── tests/
 │   ├── unit/

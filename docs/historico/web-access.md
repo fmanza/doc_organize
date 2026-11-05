@@ -1,15 +1,16 @@
 # Acceso a la Aplicación — Autenticación, Sesiones y Multi-tenant
 
-> **Obsoleto desde 0.14.0 (L-10)**: la interfaz web integrada (`doc_organize.web`, `doc_organize.auth` y los
-> subcomandos `web`, `tenant` y `user` del CLI) está congelada (solo hotfix) y se retira en 1.0.0. Usa
-> [doc_organize_web](https://github.com/fmanza/doc_organize_web). La librería y el CLI de `scan`, `project`,
-> `deduplicate` y `export` no cambian.
+!!! note "Histórico"
+    La web integrada (autenticación, sesiones y tenants) se retiró en doc_organize 1.0.0 (L-11), tras quedar obsoleta en 0.14.0 (L-10). La sustituye
+    [doc_organize_web](https://github.com/fmanza/doc_organize_web). Este documento se conserva como estaba en
+    0.14.0 para consulta; los módulos, rutas y comandos que cita ya no existen en la librería.
+
 
 Documento único y autocontenido sobre cómo controla `doc_organize` el acceso a su
 interfaz web y a su CLI: qué es una sesión, un tenant, un rol y un usuario; cuándo
 la aplicación exige login y cuándo no; y cómo arrancarla y probarla en local, tanto
 en el modo por defecto (sin autenticación) como simulando un despliegue expuesto
-("producción"). Complementa a [Panel de Administración](admin.md) (gestión de
+("producción"). Complementa a [Panel de Administración](web-admin.md) (gestión de
 roles/usuarios desde la web) y a [Inicio rápido](../guides/quick_start.md) (arranque
 básico del servidor); aquí se profundiza en el mecanismo de autenticación en sí.
 
@@ -26,7 +27,7 @@ verificarlo por sí mismo antes de exponer un servidor a una red que no controla
 ✅ Diferencia entre modo **loopback** (uso local de un único usuario, sin login) y
 modo **no-loopback** (multi-usuario, con login obligatorio)
 ✅ Aprovisionamiento de fábrica (automático, sin CLI previa) y por API/UI
-(`/admin/roles`, `/admin/users`, `/admin/tenants` — ver [Panel de Administración](admin.md))
+(`/admin/roles`, `/admin/users`, `/admin/tenants` — ver [Panel de Administración](web-admin.md))
 ✅ Cómo ejecutar el servidor en local para probar ambos modos, y qué verificar antes
 de exponerlo en un entorno real
 ❌ No cubre el control de acceso *dentro* de un proyecto ya autorizado (qué puede
@@ -167,7 +168,7 @@ restricciones (no hay sesión de la que leer un rol).
 | **Resetear una contraseña fuerza `must_change_password=True`** | Nunca se deja una contraseña reseteada por un admin sin que el usuario la cambie en su próximo login |
 | **Bloquear invalida sesiones al instante** | `set_user_blocked(..., True)` borra todas las sesiones de ese usuario en la MISMA transacción — no espera a que expiren solas (hasta 24h) |
 | **Logout es selectivo** | `DELETE FROM sessions WHERE token = ?` — cerrar una sesión no afecta a otras sesiones del mismo usuario en otros navegadores/dispositivos |
-| **Bootstrap de fábrica automático e indivisible, solo para el tenant por defecto** | Al abrir `AuthStore`, si `DEFAULT_TENANT_ID` no existe se crea junto con un rol admin global y un usuario `admin`/`admin` (`is_instance_admin=True`) en una única transacción. Un tenant adicional (`tenant create`) no recibe este bootstrap — ver [Panel de Administración](admin.md#tenants-y-usuarios-admintenants) |
+| **Bootstrap de fábrica automático e indivisible, solo para el tenant por defecto** | Al abrir `AuthStore`, si `DEFAULT_TENANT_ID` no existe se crea junto con un rol admin global y un usuario `admin`/`admin` (`is_instance_admin=True`) en una única transacción. Un tenant adicional (`tenant create`) no recibe este bootstrap — ver [Panel de Administración](web-admin.md#tenants-y-usuarios-admintenants) |
 | **La cuenta de fábrica no puede completar el login en modo no-loopback** | Mientras conserve la contraseña de fábrica, `POST /login` la rechaza (`403`) en vez de crear una sesión — hay que cambiarla desde loopback primero (decisión de diseño, ver más abajo) |
 | **Un tenant solo se elimina vacío** | Cero usuarios y cero proyectos asociados (`TenantInUseError`, `409`) |
 | **`is_instance_admin` nunca se autoconcede, y nunca llega a cero** | Solo otro `is_instance_admin` puede concederlo/retirarlo; retirar el último lanza `InstanceAdminRequiredError` (`409`) |
@@ -311,7 +312,7 @@ más allá de tu propia máquina implica, como mínimo:
   — es quien puede crear/eliminar tenants y tocar configuración de instancia
   (IA, plantillas de taxonomía); considera crear un segundo usuario con ese
   nivel antes de dejar de usar la cuenta de fábrica del día a día.
-- Ver también [Panel de Administración](admin.md) para la gestión continua de
+- Ver también [Panel de Administración](web-admin.md) para la gestión continua de
   tenants/roles/usuarios una vez expuesto (no hace falta volver a la CLI para
   altas/bajas del día a día).
 
@@ -369,7 +370,7 @@ hay que crear dos roles con nombres distintos a propósito
 
 ## Referencias
 
-- [Panel de Administración](admin.md) — gestión de tenants/roles/usuarios desde
+- [Panel de Administración](web-admin.md) — gestión de tenants/roles/usuarios desde
   la web, una vez autenticado
 - [Inicio rápido](../guides/quick_start.md) — arranque básico del servidor y
   primer escaneo

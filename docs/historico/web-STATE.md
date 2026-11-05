@@ -1,5 +1,10 @@
 # FastAPI Application State (app.state) — Thread-Safety Invariants
 
+!!! note "Histórico"
+    La web integrada (`src/doc_organize/web/STATE.md`, invariantes de `app.state`) se retiró en doc_organize 1.0.0 (L-11), tras quedar obsoleta en 0.14.0 (L-10). La sustituye
+    [doc_organize_web](https://github.com/fmanza/doc_organize_web). Este documento se conserva como estaba en
+    0.14.0 para consulta; los módulos, rutas y comandos que cita ya no existen en la librería.
+
 ## Overview
 
 `app.state` is a namespace object attached to FastAPI's application instance for storing shared application-level data. In doc_organize, we use `app.state` to cache expensive resources and avoid repeated initialization.

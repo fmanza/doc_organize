@@ -29,21 +29,19 @@ async def main():
         
         p1 = await registry.create_project(
             name="proyecto_importante",
-            base_location=base_location,
-            tenant_id="default"
+            base_location=base_location
         )
         print(f"  ✅ {p1.name} → {p1.root_path}")
         
         p2 = await registry.create_project(
             name="research_2024",
-            base_location=base_location,
-            tenant_id="default"
+            base_location=base_location
         )
         print(f"  ✅ {p2.name} → {p2.root_path}")
         
         # Listar proyectos
         print("\n📋 Proyectos registrados:")
-        projects = await registry.list_projects(tenant_id="default")
+        projects = await registry.list_projects()
         for proj in projects:
             print(f"  • {proj.name}")
             print(f"    Ubicación: {proj.root_path}")
@@ -51,10 +49,9 @@ async def main():
         
         # Recuperar proyecto específico
         print("\n🔍 Recuperando proyecto...")
-        proj = await registry.get_project("proyecto_importante", tenant_id="default")
+        proj = await registry.get_project("proyecto_importante")
         print(f"  Nombre: {proj.name}")
         print(f"  Ruta: {proj.root_path}")
-        print(f"  Tenant: {proj.tenant_id}")
 
 if __name__ == "__main__":
     import asyncio
@@ -80,7 +77,6 @@ $ python examples/projects_example.py
 🔍 Recuperando proyecto...
   Nombre: proyecto_importante
   Ruta: /home/user/Documentos/doc_organize_projects/proyecto_importante
-  Tenant: default
 ```
 
 ## Explicación

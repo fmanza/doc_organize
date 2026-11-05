@@ -400,8 +400,7 @@ except SiteBuildError as exc:
     ...  # configuración escrita, sitio sin construir: mostrar exc al administrador
 ```
 
-`MkDocsGenerator` queda como alias obsoleto de `SiteGenerator` (`DeprecationWarning` al crearlo; se retira en 1.0.0):
-es la misma clase, así que su `generate` devuelve `SiteResult` y lanza `SiteBuildError`.
+`MkDocsGenerator`, alias obsoleto de `SiteGenerator` desde 0.13.0, se retiró en 1.0.0: usa `SiteGenerator`.
 
 ---
 
@@ -542,7 +541,6 @@ class Domain(BaseModel):
 
 class Context(BaseModel):
     project_name: str
-    tenant_id: str
     output_folder_name: str  # default "organizado"; validado con validate_output_folder_name desde 0.14.0 (L-8f)
     ai_classification_enabled: bool
     ai_fallback_threshold: float
@@ -551,8 +549,8 @@ class Context(BaseModel):
     unclassified_documents: list[str]
     reorganized: bool
     reorganize_failed_documents: list[str]   # 0.13.0
-    site_generated: bool                     # antes mkdocs_generated (alias obsoleto)
-    site_built: bool                         # antes mkdocs_site_built (alias obsoleto)
+    site_generated: bool                     # un context.json antiguo con mkdocs_generated se lee aquí
+    site_built: bool                         # ídem con mkdocs_site_built
     taxonomy_manifest_used: bool  # default False
     taxonomy_template_name: str | None  # default None — nombre de la plantilla usada, o None (fichero local / sin manifiesto)
     ai_classification_stopped: Literal["auth", "connection", "budget"] | None  # 0.14.0, default None
@@ -620,21 +618,6 @@ class TaxonomyTemplateSummary(BaseModel):
     title: str | None
     description: str | None
 ```
-
-## Rutas HTTP
-
-Todas bajo `/projects/{name}/context` (página) y `/api/projects/{name}/context`
-(JSON), protegidas por `require_project_access`:
-
-| Ruta | Método | Descripción |
-|---|---|---|
-| `/projects/{name}/context` | `GET` | Página HTML — lista de dominios, o estado vacío si no hay contexto todavía |
-| `/api/projects/{name}/context` | `POST` | Construye/reconstruye: `{candidate_domains?, threshold?, ai_classification_enabled?, taxonomy_template_name?}` → `409` si hay otra operación en curso; `400` si la IA está activada sin el proxy correspondiente configurado (1 eje o 2 ejes según haya o no manifiesto), o si se combinan entre sí `taxonomy_manifest.md` local, `candidate_domains` y `taxonomy_template_name` (cualquier par es excluyente — ver `TaxonomyTemplateRegistry`). Si existe `taxonomy_manifest.md`, se carga automáticamente — no hace falta pasar nada en el payload para activar el modo manifiesto (ni para que `ai_classification_enabled` use el cliente de 2 ejes) |
-| `/api/projects/{name}/context` | `GET` | Devuelve el contexto ya construido — `404` si no existe todavía |
-| `/api/projects/{name}/context/taxonomy-manifest-draft` | `POST` | Pide a la IA un borrador de manifiesto de taxonomía: `{sample_size?}` (1-60, default 25) → `TaxonomyManifestDraftResponse` (`manifest`, `manifest_markdown`, `reasoning`, `sample_document_count`, `total_document_count`). Endpoint de solo lectura (sin lock de operación, nunca escribe nada en disco) — distinto de `ai_classification_enabled` en `POST .../context` (Sub-fase B: elige DENTRO de un catálogo ya confirmado), aquí la IA propone el catálogo mismo. `400` si el proyecto no tiene documentos convertidos (o ninguno con `.json` legible), o si `DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_*` no está configurado; `502` si el LiteLLM Proxy falla o responde algo que no cumple el schema esperado |
-| `/api/taxonomy-templates` | `GET` | Lista las plantillas disponibles (`TaxonomyTemplateRegistry.list_templates()`) — biblioteca compartida, no ligada a ningún proyecto ni tenant |
-| `/projects/{name}/context/site` | `GET` | Redirige a `.../site/` (barra final — las páginas del sitio usan URLs relativas que la necesitan) |
-| `/projects/{name}/context/site/{file_path}` | `GET` | Sirve el sitio ya construido (`<project.root_path>/site/{file_path}`) — `404` si `site_built` es `False` o si `file_path` no resuelve dentro de `site/`. Acción de solo lectura, independiente de `POST .../context` (nunca se dispara automáticamente tras un build) |
 
 ## Dependencias
 

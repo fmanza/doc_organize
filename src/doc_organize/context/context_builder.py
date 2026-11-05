@@ -294,7 +294,6 @@ class ContextBuilder:
         now = datetime.now(UTC).isoformat()
         context = Context(
             project_name=project.name,
-            tenant_id=project.tenant_id,
             output_folder_name=output_folder_name,
             ai_classification_enabled=ai_classification_enabled,
             ai_fallback_threshold=threshold,

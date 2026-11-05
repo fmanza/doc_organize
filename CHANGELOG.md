@@ -6,6 +6,65 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [1.0.0rc1] - 2026-11-05
+
+Librería pura (L-11, L-12): se retiran la web integrada, `auth/` y lo que quedó obsoleto en 0.14.0. doc_organize_web
+0.10.0 cubre la paridad completa (su `PARIDAD.md`, todas las filas ✅). **Incompatible (MAJOR)**. La 1.0.0 final sale
+al cerrar la Fase 10 de doc_organize_web. Lo que se queda (escaneo, caché, deduplicación, contexto, exportación,
+clientes de IA y `*_config_from_env`, `projects.layout`, diagnóstico y los comandos `scan`, `project`, `deduplicate`
+y `export` del CLI) se comporta igual que en 0.14.0. También se retira lo obsoleto desde 0.13.0 (`MkDocsGenerator` y
+los alias `mkdocs_*` de `Context`).
+
+### Removed
+
+- **L-11**: `doc_organize.web` entero (aplicación FastAPI, rutas, plantillas Jinja, `ai_settings_config`,
+  `scan_errors_data`, `pagination`) y `doc_organize.auth` entero (`AuthStore`, `InstanceSecretsStore`,
+  `secrets_cipher`, tiendas de tenants, usuarios, roles y sesiones, migraciones). También el módulo interno de
+  avisos de L-10 (`_deprecations`).
+- **L-11**: los subcomandos `web`, `tenant` y `user` del CLI y sus flags `--auth-db-path` y `--templates-path`.
+  argparse los rechaza como cualquier comando desconocido (código de salida 2).
+- **L-11**: el extra `[web]`, y de `dev` FastAPI, uvicorn, Starlette, Jinja2, `python-multipart` y `cryptography`
+  (este último solo lo usaba `auth/secrets_cipher.py`).
+- **L-12**: `tenant_id` de `Project` y de `Context`, y el parámetro `tenant_id` de `ProjectRegistry.create_project`,
+  `list_projects`, `get_project`, `delete_project` y `move_project_root`. El nombre de un proyecto pasa a ser único
+  en todo el registro.
+- **L-12**: las cinco `*_config_from_store_or_env` de `doc_organize.ai` y `ai/_secrets.py` (`SecretValueReader`). Se
+  quedan las `*_config_from_env` y los clientes, que reciben el `*Config` del consumidor.
+- De `core`, lo que solo usaban la web y `auth/`: los modelos `Tenant`, `Role`, `User`, `Session`, `SecurityConfig` y
+  `DirectoryListing`; `AuthError` y sus subclases (`Tenant*`, `User*`, `Role*`, `InstanceAdminRequiredError`,
+  `SecretsCipherError`, `SecretsEncryptionNotConfiguredError`); y las constantes de autenticación
+  (`DEFAULT_AUTH_DB_NAME`, `DEFAULT_TENANT_ID`, `SCRYPT_*`, `SESSION_LIFETIME_HOURS`, `LOGIN_*`, `USERNAME_*`,
+  `ROLE_NAME_*`, `TENANT_ID_MAX_LENGTH`, `DEFAULT_ADMIN_*`). Ninguno estaba en `doc_organize.__all__`.
+- Lo obsoleto desde 0.13.0: `MkDocsGenerator` (alias de `SiteGenerator`; sale de `doc_organize.__all__` y de
+  `doc_organize.context`) y las propiedades `Context.mkdocs_generated` / `mkdocs_site_built`. Un `context.json`
+  antiguo con esas claves se sigue leyendo (`site_generated` / `site_built`).
+- Tests de lo retirado: los 16 `tests/unit/test_web_*`, `tests/unit/auth/` y los de `AuthStore`,
+  `InstanceSecretsStore`, `secrets_cipher`, cambio de contraseña, `app.state` y configuración de IA por familias.
+
+### Changed
+
+- Un `projects.json` o `context.json` de 0.14.0 con `tenant_id` se sigue leyendo: el campo se ignora, y desaparece de
+  `projects.json` en la siguiente escritura del registro. Si un registro antiguo tenía el mismo nombre en dos tenants
+  (solo ocurre si se usó `tenant create` en la web integrada), `get_project` devuelve el primero y `project list`
+  muestra los dos; renombra o elimina uno de ellos.
+- `ProjectAlreadyExistsError` ya no menciona el tenant en su mensaje.
+- La documentación de la web integrada (acceso, panel de administración, configuración de IA, rutas HTTP,
+  `web/STATE.md` y `docs/adr/ADR-004-GIL-Thread-Safety.md`) pasa a `docs/historico/` con una nota, sin borrarse.
+
+### Added
+
+- `tests/unit/test_library_architecture.py`: falla si `src/` vuelve a importar FastAPI, Starlette, uvicorn, Jinja2 o
+  `python-multipart`, si reaparecen `doc_organize.web` o `doc_organize.auth`, si `_EXPORTS` expone algo de web, auth o
+  tenants, o si `pyproject.toml` vuelve a declarar el extra `[web]` o esas dependencias.
+
+### Migración desde 0.14.0
+
+- Interfaz web, usuarios, tenants y roles: [doc_organize_web](https://github.com/fmanza/doc_organize_web).
+- `registry.create_project(name, base, tenant_id=...)` → `registry.create_project(name, base)` (ídem en el resto de
+  métodos de `ProjectRegistry`); `project.tenant_id` ya no existe.
+- `*_config_from_store_or_env(store)` → construir el `*Config` en el consumidor, o `*_config_from_env()`.
+- `MkDocsGenerator()` → `SiteGenerator()`; `context.mkdocs_generated` / `mkdocs_site_built` → `site_generated` / `site_built`.
+
 ## [0.14.0] - 2026-11-03
 
 Sub-fase B de `ContextBuilder` y clientes de `doc_organize.ai` seguros para consumidores multiusuario (peticiones de

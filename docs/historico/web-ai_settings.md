@@ -1,12 +1,13 @@
 # Configuración de IA y biblioteca de plantillas desde la web
 
-> **Obsoleto desde 0.14.0 (L-10)**: la interfaz web integrada (`doc_organize.web`, `doc_organize.auth` y los
-> subcomandos `web`, `tenant` y `user` del CLI) está congelada (solo hotfix) y se retira en 1.0.0. Usa
-> [doc_organize_web](https://github.com/fmanza/doc_organize_web). La librería y el CLI de `scan`, `project`,
-> `deduplicate` y `export` no cambian.
+!!! note "Histórico"
+    La web integrada (configuración de IA y plantillas) se retiró en doc_organize 1.0.0 (L-11), tras quedar obsoleta en 0.14.0 (L-10). La sustituye
+    [doc_organize_web](https://github.com/fmanza/doc_organize_web). Este documento se conserva como estaba en
+    0.14.0 para consulta; los módulos, rutas y comandos que cita ya no existen en la librería.
+
 
 > Para una visión de conjunto de todo el panel `/admin` (incluyendo Roles y
-> Usuarios), ver [Panel de Administración](admin.md).
+> Usuarios), ver [Panel de Administración](web-admin.md).
 
 Cierra los huecos detectados en la auditoría de parametrización de 2026-09-10:
 antes de esta funcionalidad, las 5 familias de credenciales de IA

@@ -1,5 +1,10 @@
 # ADR-004: GIL-Based Thread-Safety for Application State (v0.9.2)
 
+!!! note "Histórico"
+    La web integrada, a la que se refiere este ADR (`app.state` de FastAPI), se retiró en doc_organize 1.0.0 (L-11), tras quedar obsoleta en 0.14.0 (L-10). La sustituye
+    [doc_organize_web](https://github.com/fmanza/doc_organize_web). Este documento se conserva como estaba en
+    0.14.0 (antes en `docs/adr/`) para consulta; los módulos, rutas y comandos que cita ya no existen en la librería.
+
 **Status**: Accepted (v0.9.2)  
 **Context**: doc_organize v0.9.0 uses mutable application state (`app.state`) shared across FastAPI handlers. Some attributes are mutated during request handling (rate limiting, scan tracking, project metadata) without explicit locking.  
 **Decision**: Accept reliance on Python GIL for thread-safety in v0.9.2; document assumptions; plan migration path for v0.10+.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_organize"
-version = "0.14.0"
+version = "1.0.0rc1"
 description = "Sistema de extracción de contenido de documentos en Markdown y JSON documentación y organización."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -58,13 +58,6 @@ dev = [
     "types-openpyxl>=3.1",
     "openpyxl>=3.1",  # tests de doc_organize.export (extra `export`)
     "black>=23.0",
-    # Web dependencies for type checking and testing (have native type hints)
-    "fastapi>=0.100",
-    "uvicorn>=0.23",
-    "starlette>=0.35",
-    "python-multipart>=0.0.6",
-    "jinja2>=3.1.0",
-    "cryptography>=41.0",  # auth/secrets_cipher.py (extra web); sin él mypy y los tests fallan en el CI
     # Test PDF generation fixtures (matplotlib used to create native PDFs)
     "matplotlib>=3.5",
 ]
@@ -80,17 +73,6 @@ export = [
 # Sitio navegable del contexto de un proyecto (`SiteGenerator` ejecuta `zensical build`; con mkdocs hasta 0.12.x, L-8).
 site = [
     "zensical>=0.0.71",
-]
-web = [
-    "fastapi>=0.100",
-    "uvicorn>=0.23",
-    "jinja2>=3.1.0",
-    "python-multipart>=0.0.6",
-    "openpyxl>=3.1",  # web/routes/downloads.py usa doc_organize.export (mismo requisito que el extra `export`)
-    # Cifrado en reposo de credenciales de IA guardadas desde el panel de
-    # configuración (auth/secrets_cipher.py, Fernet) -- auditoría de parametrización,
-    # 2026-09-10.
-    "cryptography>=41.0",
 ]
 ocr-gpu = [
     "torch>=2.0",

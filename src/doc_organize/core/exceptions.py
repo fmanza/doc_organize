@@ -63,7 +63,7 @@ class ProjectAlreadyExistsError(ProjectError):
     """Ya existe un proyecto registrado con ese nombre (comparacion case-insensitive)."""
 
     def __init__(self, name: str) -> None:
-        super().__init__(f"Ya existe un proyecto llamado '{name}' en este tenant.")
+        super().__init__(f"Ya existe un proyecto llamado '{name}'.")
 
 
 class ProjectNotFoundError(ProjectError):
@@ -94,76 +94,6 @@ class ScannedFolderNotFoundError(ScannedFolderError):
 
 class ScannedFolderInUseError(ScannedFolderError):
     """La carpeta ya se ha usado en un escaneo; no se puede eliminar de la lista."""
-
-
-class AuthError(DocOrganizeError):
-    """Error base para autenticacion multi-usuario/multi-tenant (revision 8, §2.7.2)."""
-
-
-class TenantAlreadyExistsError(AuthError):
-    """Ya existe un tenant registrado con ese identificador."""
-
-    def __init__(self, tenant_id: str) -> None:
-        super().__init__(f"Ya existe un tenant con id '{tenant_id}'.")
-
-
-class TenantNotFoundError(AuthError):
-    """No hay ningun tenant registrado con ese identificador."""
-
-    def __init__(self, tenant_id: str) -> None:
-        super().__init__(f"No existe ningún tenant con id '{tenant_id}'.")
-
-
-class TenantInUseError(AuthError):
-    """El tenant no se puede eliminar: tiene usuarios y/o proyectos asociados
-    (rediseno Tenant/Role/User: un tenant solo se borra vacio en ambos sentidos)."""
-
-
-class UserAlreadyExistsError(AuthError):
-    """Ya existe un usuario con ese nombre dentro del tenant."""
-
-    def __init__(self, username: str, tenant_id: str) -> None:
-        super().__init__(f"Ya existe un usuario '{username}' en el tenant '{tenant_id}'.")
-
-
-class UserNotFoundError(AuthError):
-    """No hay ningun usuario registrado con ese id dentro del tenant."""
-
-    def __init__(self, user_id: str, tenant_id: str) -> None:
-        super().__init__(f"No existe ningún usuario '{user_id}' en el tenant '{tenant_id}'.")
-
-
-class RoleAlreadyExistsError(AuthError):
-    """Ya existe un rol con ese nombre (global, revision Tenant/Role/User: `Role`
-    ya no esta ligado a un tenant, `name` es unico en toda la instalacion)."""
-
-    def __init__(self, name: str) -> None:
-        super().__init__(f"Ya existe un rol '{name}'.")
-
-
-class RoleNotFoundError(AuthError):
-    """No hay ningun rol registrado con ese id."""
-
-    def __init__(self, role_id: str) -> None:
-        super().__init__(f"No existe ningún rol '{role_id}'.")
-
-
-class RoleInUseError(AuthError):
-    """El rol/usuario no se puede eliminar o modificar: lo usan otros usuarios, o
-    es el ultimo rol/usuario admin (del tenant, o del sistema segun el caso)."""
-
-
-class InstanceAdminRequiredError(AuthError):
-    """No se puede retirar `is_instance_admin` al ultimo usuario que lo tiene
-    (guarda global, no por tenant -- revision Tenant/Role/User)."""
-
-
-class SecretsCipherError(AuthError):
-    """Error cifrando/descifrando un secreto de `InstanceSecretsStore` (clave inválida, o no coincide con la usada para guardarlo)."""
-
-
-class SecretsEncryptionNotConfiguredError(SecretsCipherError):
-    """`DOC_ORGANIZE_SECRETS_KEY` no está definida -- no se puede cifrar ni descifrar ningún secreto."""
 
 
 class UsageSourceError(DocOrganizeError):
@@ -265,7 +195,6 @@ class TaxonomyManifestDraftConnectionError(TaxonomyManifestDraftError):
 
 
 __all__ = [
-    "AuthError",
     "CacheError",
     "CacheNotFoundError",
     "ContextError",
@@ -278,7 +207,6 @@ __all__ = [
     "DomainClassificationError",
     "DomainNotFoundError",
     "IncompleteConversionArtifactsError",
-    "InstanceAdminRequiredError",
     "InvalidPathError",
     "MissingDependencyError",
     "ModelsNotAvailableError",
@@ -288,14 +216,9 @@ __all__ = [
     "ProjectNameError",
     "ProjectNotFoundError",
     "ProjectNotScannedError",
-    "RoleAlreadyExistsError",
-    "RoleInUseError",
-    "RoleNotFoundError",
     "ScannedFolderError",
     "ScannedFolderInUseError",
     "ScannedFolderNotFoundError",
-    "SecretsCipherError",
-    "SecretsEncryptionNotConfiguredError",
     "SiteBuildError",
     "TaxonomyClassificationAuthError",
     "TaxonomyClassificationConnectionError",
@@ -305,12 +228,7 @@ __all__ = [
     "TaxonomyManifestDraftError",
     "TaxonomyManifestError",
     "TaxonomyTemplateError",
-    "TenantAlreadyExistsError",
-    "TenantInUseError",
-    "TenantNotFoundError",
     "UsageSourceAuthError",
     "UsageSourceConnectionError",
     "UsageSourceError",
-    "UserAlreadyExistsError",
-    "UserNotFoundError",
 ]

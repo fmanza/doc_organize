@@ -8,7 +8,7 @@ Un proyecto tiene dos raíces:
   informes de deduplicación). SQLite no es fiable sobre SMB/NFS, así que un consumidor puede ponerlo en un disco
   local. Por defecto es la misma ``output_root``: las rutas son las de siempre.
 
-Es la única fuente de estas rutas, también para la web integrada (congelada, se retira en 1.0.0). Incluye las del
+Es la única fuente de estas rutas, también para doc_organize_web. Incluye las del
 contexto de organización documental y del sitio (L-8b, G28) y los nombres que no puede usar la carpeta reorganizada
 (``RESERVED_OUTPUT_FOLDER_NAMES``).
 

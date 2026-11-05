@@ -4,11 +4,7 @@ import ast
 
 from pathlib import Path
 
-import pytest
-
 import doc_organize.ai as ai_package
-
-from doc_organize.ai.domain_classification_client import litellm_classification_config_from_store_or_env
 
 AI_DIR = Path(ai_package.__file__).parent
 FORBIDDEN = ("doc_organize.auth", "doc_organize.web")
@@ -32,20 +28,3 @@ def test_ai_does_not_import_auth_or_web() -> None:
     }
 
     assert offenders == {}
-
-
-class _FakeStore:
-    """Cualquier objeto con `async get(clave)` sirve (no hace falta `InstanceSecretsStore`)."""
-
-    async def get(self, key: str) -> str | None:
-        return {"doc_organize_litellm_classification_base_url": "https://litellm.example.internal"}.get(key)
-
-
-@pytest.mark.asyncio
-async def test_store_config_accepts_any_reader_and_is_deprecated(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_CLASSIFICATION_VIRTUAL_KEY", "sk-prueba")
-
-    with pytest.warns(DeprecationWarning, match="1.0.0"):
-        config = await litellm_classification_config_from_store_or_env(_FakeStore())
-
-    assert config.base_url == "https://litellm.example.internal"

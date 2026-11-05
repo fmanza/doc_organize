@@ -150,13 +150,11 @@ _JOIN = re.compile(
 
 
 def test_only_project_layout_builds_project_paths() -> None:
-    """Fuera de `web/` (congelada, se retira en 1.0.0) ningún módulo construye estas rutas por su cuenta (L-4)."""
+    """Ningún módulo construye estas rutas por su cuenta (L-4)."""
     offenders = [
         str(path.relative_to(SRC))
         for path in SRC.rglob("*.py")
-        if "web" not in path.relative_to(SRC).parts
-        and path.name not in {"layout.py", "constants.py"}
-        and _JOIN.search(path.read_text(encoding="utf-8"))
+        if path.name not in {"layout.py", "constants.py"} and _JOIN.search(path.read_text(encoding="utf-8"))
     ]
 
     assert offenders == []

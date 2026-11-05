@@ -1,15 +1,16 @@
 # Panel de Administración (`/admin`)
 
-> **Obsoleto desde 0.14.0 (L-10)**: la interfaz web integrada (`doc_organize.web`, `doc_organize.auth` y los
-> subcomandos `web`, `tenant` y `user` del CLI) está congelada (solo hotfix) y se retira en 1.0.0. Usa
-> [doc_organize_web](https://github.com/fmanza/doc_organize_web). La librería y el CLI de `scan`, `project`,
-> `deduplicate` y `export` no cambian.
+!!! note "Histórico"
+    La web integrada (panel de administración) se retiró en doc_organize 1.0.0 (L-11), tras quedar obsoleta en 0.14.0 (L-10). La sustituye
+    [doc_organize_web](https://github.com/fmanza/doc_organize_web). Este documento se conserva como estaba en
+    0.14.0 para consulta; los módulos, rutas y comandos que cita ya no existen en la librería.
+
 
 Documento único y autocontenido sobre el panel `/admin`: qué es, quién puede
 usarlo, cómo se accede, y el detalle de sus 5 páginas (Roles, Usuarios,
 Tenants y usuarios, Configuración de IA, Plantillas de taxonomía). Incluye
-contenido ya cubierto por [Configuración de IA y plantillas](ai_settings.md) y
-[Organización documental](context.md) — se duplica aquí a propósito para que
+contenido ya cubierto por [Configuración de IA y plantillas](web-ai_settings.md) y
+[Organización documental](../functional/context.md) — se duplica aquí a propósito para que
 este documento sirva como referencia completa sin tener que saltar de página.
 
 ## Objetivo
@@ -62,7 +63,7 @@ El bloque "Admin" del sidebar incluye también un enlace **"Proyectos"** a `/`
 (`web/app.py`, no `routes/admin.py`) — no es una página nueva ni una sexta
 página de `/admin`: es la misma pantalla de creación/listado de proyectos que
 ya usa cualquier usuario para elegir con qué proyecto trabajar, documentada en
-[Projects — Registro y Gestión de Proyectos](projects.md). Se enlaza también
+[Projects — Registro y Gestión de Proyectos](../functional/projects.md). Se enlaza también
 desde aquí porque ahí mismo viven las acciones de mantenimiento restringidas a
 `is_admin`/`is_instance_admin` (crear, mover, vaciar histórico y eliminar un
 proyecto — `/api/projects/*`, con confirmación explícita e irreversibles salvo
@@ -103,7 +104,7 @@ exigen, a nivel de endpoint (`require_admin` en `web/routes/projects.py`).
   usuario `admin`/`admin` con `must_change_password=True` **e**
   `is_instance_admin=True` — sin aprovisionamiento manual previo. Mientras esa
   contraseña de fábrica siga activa, esa cuenta ni siquiera puede completar el
-  login en modo no-loopback (ver [Acceso a la Aplicación](access.md)). Un
+  login en modo no-loopback (ver [Acceso a la Aplicación](web-access.md)). Un
   tenant adicional no recibe este bootstrap: su primer usuario lo da de alta
   un `is_instance_admin` desde "Tenants y usuarios", o `user create` por CLI.
   Con `must_change_password=True` activo, toda la aplicación (incluido
@@ -164,7 +165,7 @@ baja — actualizar un rol existente solo es posible vía API.
 
 `allowed_scan_roots` se retiró: el acceso de escaneo de un rol no-admin es
 ahora implícito (la carpeta de cada proyecto en `project_names`), ver
-[Acceso a la Aplicación](access.md).
+[Acceso a la Aplicación](web-access.md).
 
 ### Formulario de creación
 
@@ -468,7 +469,7 @@ copiar el fichero. **Precedencia**: si el proyecto ya tiene su propio
 usa cuando no hay fichero local. Combinar manifiesto (local o plantilla) con
 `candidate_domains`, o fichero local con `taxonomy_template_name`, se
 rechaza con `400` explícito. Más detalle en
-[Organización documental (dominios y contextos)](context.md).
+[Organización documental (dominios y contextos)](../functional/context.md).
 
 ---
 
@@ -550,11 +551,11 @@ contexto.
 
 ## Referencias
 
-- [Configuración de IA y plantillas](ai_settings.md) — documento original de
+- [Configuración de IA y plantillas](web-ai_settings.md) — documento original de
   esta funcionalidad, con las notas de la sesión que la introdujo.
-- [Organización documental (dominios y contextos)](context.md) — modo
+- [Organización documental (dominios y contextos)](../functional/context.md) — modo
   manifiesto de taxonomía desde la perspectiva de un proyecto.
-- [Projects — Registro y Gestión de Proyectos](projects.md) — la página `/`
+- [Projects — Registro y Gestión de Proyectos](../functional/projects.md) — la página `/`
   enlazada como "Proyectos" desde el sidebar Admin.
 - [Desplegar un LiteLLM Proxy](../guides/litellm_proxy_setup.md) — guía
   complementaria para las familias `litellm_*`.
