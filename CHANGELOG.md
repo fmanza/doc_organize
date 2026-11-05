@@ -6,6 +6,45 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+### Planificado (1.1.0)
+
+- **L-16** (petición de doc_organize_web, hueco G38):
+  1. `ScanOptions.max_documents`: parar de forma ordenada tras convertir N documentos, guardar la caché y que el
+     evento final indique que quedan documentos pendientes.
+  2. Atender el `CancelToken` entre documentos también en la fase OCR (hoy solo se atiende en la conversión).
+  3. Investigar el crecimiento de memoria de Docling/RapidOCR durante un escaneo largo: 521 documentos con OCR
+     agotaron 6 GiB en 2 h 13 min.
+
+## [1.0.0] - 2026-11-06
+
+Versión final de la librería pura (L-15). El código y la API son exactamente los de
+[1.0.0rc2](#100rc2---2026-11-05): solo cambian la versión y este CHANGELOG. Se publica tras cerrar doc_organize_web su
+Fase 10 (v1.0.0rc1 de doc_organize_web, validada con doc_organize 1.0.0rc2: 495 tests de backend, E2E 18/18, carga con
+100 000 documentos y las variantes GPU, LibreOffice y AV).
+
+### Breaking changes
+
+Frente a 0.14.0, los de [1.0.0rc1](#100rc1---2026-11-05) (tabla con cada elemento retirado y su sustituto). En
+resumen:
+
+- Sin web integrada ni autenticación: fuera `doc_organize.web`, `doc_organize.auth`, el extra `[web]`, los
+  subcomandos `web`, `tenant` y `user` y los flags `--auth-db-path` y `--templates-path`. La web es
+  [doc_organize_web](https://github.com/fmanza/doc_organize_web).
+- Sin multi-tenant: `Project.tenant_id`, `Context.tenant_id` y el parámetro `tenant_id` de `ProjectRegistry`
+  desaparecen; el nombre de un proyecto es único en todo el registro (los JSON antiguos se siguen leyendo).
+- Sin secretos de instancia: `InstanceSecretsStore`, `secrets_cipher` y las `*_config_from_store_or_env`; se usan las
+  `*_config_from_env()` o se construye el `*Config` en el consumidor.
+- Sin lo obsoleto desde 0.13.0: `MkDocsGenerator` (usa `SiteGenerator`) y `Context.mkdocs_generated` /
+  `Context.mkdocs_site_built` (usa `site_generated` / `site_built`).
+- Sin los modelos, excepciones y constantes que solo usaban la web y `auth/` (`Tenant`, `User`, `AuthError`,
+  `DEFAULT_TENANT_ID`…).
+
+Guía para quien usaba la web integrada: [De la web integrada a doc_organize_web](docs/guides/migracion_web.md).
+
+### Firmas finales
+
+Las de [1.0.0rc2](#100rc2---2026-11-05), sin cambios.
+
 ## [1.0.0rc2] - 2026-11-05
 
 Segunda versión candidata de la 1.0.0: la librería pura de 1.0.0rc1 (L-11, L-12) más su documentación e
