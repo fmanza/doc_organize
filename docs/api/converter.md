@@ -176,7 +176,7 @@ class ConversionResult:
 
 - **Pool de convertidores**: Cachea por `(use_ocr, use_gpu, extract_images, use_picture_description)` para evitar reinicialización
 - **Non-blocking**: Usa `asyncio.to_thread()` para I/O CPU-intensivo
-- **Detección OCR**: Si `parse_score == NaN`, marca `ocr_required=True`
+- **Detección OCR**: Si el documento es PDF/imagen (`InputFormat.PDF`/`IMAGE`) y `parse_score == NaN`, marca `ocr_required=True`. El resto de formatos (docx, xlsx, pptx, html…) usan `SimplePipeline`, que no calcula `parse_score` (queda `NaN` por defecto): nunca requieren OCR (desde 1.0.1)
 - **Errores capturados**: Nunca relanza en `convert_document()`
 - **`InputFormat.IMAGE`**: configurado explícitamente con las mismas opciones que `InputFormat.PDF` (`StandardPdfPipeline`) — sin esto, docling aplicaba sus valores por defecto (`do_ocr=True`) a imágenes sueltas, ignorando `use_ocr`
 - **`extract_images`**: usa `DoclingDocument.save_as_markdown(artifacts_dir=..., image_mode=ImageRefMode.REFERENCED)` con un `artifacts_dir` relativo `img/<stem>` (namespaced por documento, para que dos documentos en el mismo `output_dir` no compartan imágenes); si el documento no genera ninguna imagen, la carpeta vacía se borra y `images_dir` queda `None`

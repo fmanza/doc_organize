@@ -15,6 +15,25 @@ releases publicados antes de esa versión).
   3. Investigar el crecimiento de memoria de Docling/RapidOCR durante un escaneo largo: 521 documentos con OCR
      agotaron 6 GiB en 2 h 13 min.
 
+## [1.0.1] - 2026-11-06
+
+Corrección (G39 / L-17, petición de doc_organize_web). Sin cambios de API.
+
+### Corregido
+
+- Con OCR activado, los documentos que no son PDF ni imagen (`.docx`, `.xlsx`, `.pptx`, `.html`…) ya no pasan por la
+  fase `ocr` ni se convierten dos veces, y `ScanSummary.ocr_required` ya no los cuenta. `DocumentConverter._needs_ocr`
+  usaba solo `confidence.parse_score` siendo `NaN`. Docling solo calcula ese valor en `StandardPdfPipeline`; en
+  `SimplePipeline` se queda `NaN` por defecto. Ahora un documento requiere OCR solo si es `InputFormat.PDF` o
+  `InputFormat.IMAGE` y su `parse_score` es `NaN`.
+
+### Caché existente
+
+- Las entradas `OCR_PENDING` de otros formatos que ya hay en la caché **se reprocesan una sola vez** en el siguiente
+  escaneo con OCR (`ScanOptions(use_ocr=True)` / `--use-ocr`) y quedan en `SUCCESS`. No hace falta migrar nada ni
+  borrar la caché. Ese reproceso usa el mismo camino que ya recoge los `OCR_PENDING` sin cambios, y ahora devuelve
+  `ocr_required=False`. Mientras no se escanee con OCR, esas entradas siguen apareciendo como `OCR_PENDING`.
+
 ## [1.0.0] - 2026-11-06
 
 Versión final de la librería pura (L-15). El código y la API son exactamente los de

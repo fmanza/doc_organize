@@ -465,8 +465,14 @@ class DocumentConverter:
     # (objeto real de Docling, `follow_imports = "skip"` para `docling.*`).
     @staticmethod
     def _needs_ocr(docling_result: Any) -> bool:
-        """`True` si el documento no tiene capa de texto nativa (`parse_score`
-        es `NaN`) — señal confirmada empiricamente en el spike de REQ-004."""
+        """`True` si el documento es PDF/imagen y no tiene capa de texto nativa
+        (`parse_score` es `NaN`) — señal confirmada empiricamente en el spike de REQ-004.
+
+        Solo `StandardPdfPipeline` (PDF/imagen) calcula `parse_score`; en `SimplePipeline`
+        (docx, xlsx, pptx, html...) se queda en su valor por defecto (`NaN`) aunque el
+        documento tenga texto, asi que esos formatos nunca requieren OCR (G39, 1.0.1)."""
+        if docling_result.input.format not in (InputFormat.PDF, InputFormat.IMAGE):
+            return False
         parse_score = docling_result.confidence.parse_score
         return math.isnan(parse_score)
 

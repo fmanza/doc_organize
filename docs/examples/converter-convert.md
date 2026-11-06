@@ -72,7 +72,7 @@ JSON: /tmp/doc_organize/output/report.json
 
 1. **Creación**: Se crea instancia de `DocumentConverter` (context manager)
 2. **Conversión**: Se convierte documento a Markdown + JSON
-3. **Detección OCR**: Si `parse_score=NaN`, marca `ocr_required=True`
+3. **Detección OCR**: Si es PDF/imagen y `parse_score=NaN`, marca `ocr_required=True` (el resto de formatos nunca lo requieren)
 4. **Retorno**: `ConversionResult` con rutas de salida
 5. **OCR diferido**: Si necesario, llamar a `OCRScheduler` en segunda pasada
 
