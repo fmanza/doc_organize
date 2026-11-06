@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
+from stat import S_ISDIR, S_ISLNK
 from typing import Self
 
 from doc_organize.core.constants import AV_SUPPORTED_EXTENSIONS, IGNORED_NAMES, SUPPORTED_EXTENSIONS
@@ -203,16 +204,27 @@ class DocumentScanner:
         (TOCTOU: fichero borrado/movido por otra app mientras el escaneo está en
         curso) — el llamador omite ese hijo del árbol en vez de dejar que la
         excepción aborte el escaneo completo por un único fichero (AUDIT_CODE,
-        sesión 2026-09-03)."""
+        sesión 2026-09-03).
+
+        Un `lstat()` con reintentos (G11) decide si es enlace, carpeta o fichero:
+        así un error de E/S no se confunde con «no es un enlace» ni «no es una
+        carpeta» (hasta Python 3.13, `is_symlink()` e `is_dir()` se tragan o
+        propagan ese error según la versión)."""
+        extension = path.suffix.lower().lstrip(".")
         try:
-            # Una junction de Windows apunta a otra carpeta igual que un symlink: tampoco se sigue (G11, 1.1.0).
-            is_link = path.is_symlink() or path.is_junction()
-        except OSError:
-            # Según la versión de Python, `is_symlink()` propaga el error de `lstat()` en vez de devolver False.
+            st = retry_io(path.lstat, retries=self._io_retries, backoff_s=self._io_retry_backoff_s, what=f"leer '{path}'")
+        except FileNotFoundError as exc:
+            self.logger.warning(f"No se pudo leer '{path}' (¿se eliminó durante el escaneo?): {exc}")
             return None
-        if is_link:
+        except OSError as exc:
+            self.logger.warning(f"No se pudo leer '{path}': {exc}")
+            if unreadable_files is not None and extension in allowed_extensions:
+                unreadable_files[str(path)] = f"No se pudieron leer sus metadatos: {exc}"
+            return None
+        # Una junction de Windows apunta a otra carpeta igual que un symlink: tampoco se sigue (G11, 1.1.0).
+        if S_ISLNK(st.st_mode) or path.is_junction():
             return DirectoryTreeNode(name=path.name, type="file", path=str(path))
-        if path.is_dir():
+        if S_ISDIR(st.st_mode):
             return self._build_dir_node(path, files, allowed_extensions, exclude_dir, unreadable, unreadable_files)
         return self._build_file_node(path, files, allowed_extensions, unreadable_files)
 

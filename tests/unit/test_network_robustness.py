@@ -168,17 +168,17 @@ async def test_scanner_records_file_that_exhausts_retries_and_keeps_the_folder(s
 
 
 @pytest.mark.asyncio
-async def test_scanner_retries_stat_on_transient_error(source: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    original_stat = Path.stat
-    failures = {"left": 1}
+async def test_scanner_retries_metadata_read_on_transient_error(source: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    original_lstat = Path.lstat
+    failures = {"left": 10**6}
 
-    def _flaky_stat(self: Path, *args: Any, **kwargs: Any) -> os.stat_result:
+    def _flaky_lstat(self: Path) -> os.stat_result:
         if self.name == "c.pdf" and failures["left"] > 0:
             failures["left"] -= 1
             raise _eio(str(self))
-        return original_stat(self, *args, **kwargs)
+        return original_lstat(self)
 
-    monkeypatch.setattr(Path, "stat", _flaky_stat)
+    monkeypatch.setattr(Path, "lstat", _flaky_lstat)
 
     async with DocumentScanner() as scanner:
         without_retries = await scanner.scan_folders([str(source)])
@@ -186,6 +186,7 @@ async def test_scanner_retries_stat_on_transient_error(source: Path, monkeypatch
     async with DocumentScanner(io_retries=1, io_retry_backoff_s=0) as scanner:
         with_retries = await scanner.scan_folders([str(source)])
 
+    # El error de E/S no se confunde con «no es un fichero»: queda anotado (hasta 1.0.1 se omitía en silencio).
     assert list(without_retries.unreadable_files) == [str(source / "c.pdf")]
     assert len(with_retries.documents) == 3 and with_retries.unreadable_files == {}
 
