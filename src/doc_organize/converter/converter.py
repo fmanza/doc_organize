@@ -178,6 +178,7 @@ class DocumentConverter:
         *,
         include_root_name: bool = False,
         json_source_path: Literal["relative", "absolute"] = "relative",
+        timeout_s: float | None = None,
     ) -> ConversionResult:
         """Convierte `source_doc` a Markdown + JSON bajo `output_dir`.
 
@@ -215,6 +216,13 @@ class DocumentConverter:
             json_source_path: `source_path` del `.json`: `"relative"` (por defecto
                 desde 0.12.0, ruta relativa a la raiz escaneada, sin rutas del
                 servidor, G23) o `"absolute"` (la ruta completa, como antes).
+            timeout_s: Segundos maximos para que Docling convierta el documento
+                (G11, 1.1.0). Si se superan, el resultado es un error con esa causa
+                y no se escribe salida. El hilo de Docling no se puede interrumpir:
+                sigue hasta terminar en segundo plano y su resultado se descarta;
+                el convertidor de ese modo se descarta tambien, para que el
+                siguiente documento no comparta instancia con ese hilo (vuelve a
+                cargar los modelos). `None` (por defecto): sin limite.
 
         Returns:
             ConversionResult con las rutas de salida, si tuvo exito, y si el
@@ -255,7 +263,9 @@ class DocumentConverter:
         await self._ensure_models(docling_converter, (use_ocr, use_gpu, extract_images, use_picture_description), source_doc.extension)
 
         try:
-            docling_result = await asyncio.to_thread(docling_converter.convert, source_doc.full_path)
+            docling_result = await self._run_docling(
+                docling_converter, source_doc.full_path, (use_ocr, use_gpu, extract_images, use_picture_description), timeout_s
+            )
             ocr_required = self._needs_ocr(docling_result)
             # do_picture_description solo se configura para InputFormat.PDF/IMAGE en
             # _get_docling (StandardPdfPipeline) — el resto de formatos usan SimplePipeline,
@@ -322,6 +332,33 @@ class DocumentConverter:
             images_dir=str(images_dir) if images_dir else None,
             picture_description_applied=picture_description_applied,
         )
+
+    async def _run_docling(
+        self, docling_converter: DoclingConverter, full_path: str, key: tuple[bool, bool, bool, bool], timeout_s: float | None
+    ) -> Any:
+        """`docling_converter.convert(full_path)` en un hilo, con limite de tiempo opcional (G11).
+
+        `asyncio.wait` en vez de `wait_for` para no confundir un `TimeoutError` lanzado por el propio Docling con el
+        limite de tiempo.
+
+        Raises:
+            TimeoutError: Se supero `timeout_s`; el convertidor de `key` se descarta.
+        """
+        if timeout_s is None:
+            return await asyncio.to_thread(docling_converter.convert, full_path)
+        task = asyncio.ensure_future(asyncio.to_thread(docling_converter.convert, full_path))
+        try:
+            done, _pending = await asyncio.wait({task}, timeout=timeout_s)
+        except BaseException:
+            task.cancel()
+            raise
+        if not done:
+            task.cancel()  # deja de esperarlo; el hilo sigue hasta terminar y su resultado se pierde
+            if self._docling_by_mode is not None:
+                self._docling_by_mode.pop(key, None)
+            self._initialized_modes.discard(key)
+            raise TimeoutError(f"Superado el tiempo máximo de conversión por documento ({timeout_s:g} s)")
+        return task.result()
 
     @staticmethod
     def resolve_output_paths(

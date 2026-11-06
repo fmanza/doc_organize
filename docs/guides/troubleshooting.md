@@ -27,6 +27,63 @@ El motor por defecto (RapidOCR) corre en CPU. Si tienes GPU disponible, instala
 el extra `ocr-gpu` y añade `--use-gpu` (junto con `--use-ocr`) para usar EasyOCR
 acelerado por CUDA.
 
+## Memoria en escaneos largos
+
+Un escaneo con OCR de cientos de documentos puede agotar la memoria de un proceso con límite, como un contenedor de
+6 GiB. Desde 1.1.0:
+
+- **Por tramos**: `ScanOptions(max_documents=N)` para el escaneo de forma ordenada tras N conversiones. Guarda la
+  caché y deja `stopped_reason="max_documents"` y `remaining` en el resumen. Lanza cada tramo en un proceso nuevo para
+  que el sistema recupere toda la memoria entre tramos (ver [Escaneo](../api/scan.md#escaneos-por-tramos-max_documents-g38)).
+  Es la única medida que acota la memoria pase lo que pase dentro de Docling.
+- **Liberación periódica**: durante la conversión, cada 10 documentos se recogen los ciclos de referencias
+  (`gc.collect()`). En Linux con glibc, además, se devuelve al sistema la memoria libre del *heap* (`malloc_trim`). No
+  hay que configurarlo. Cuesta unos 40 ms por documento repartidos, porque un `gc.collect()` con los modelos de Docling
+  cargados tarda unos 0,35 s.
+
+Medidas de 1.1.0 con `tests/integration/test_scan_memory_growth.py`. Son documentos sintéticos: una quinta parte cada
+uno de PDF con texto, PDF escaneado, `.docx`, `.xlsx` y `.html`, todos con OCR. El RSS se mide cada 50 conversiones.
+
+| Entorno | Liberación periódica | RSS a las 50 conversiones | Al terminar la primera pasada | Final (tras el OCR) |
+|---|---|---|---|---|
+| Linux (Docker, Python 3.12, 200 documentos) | no¹ | 1 433 MiB | 1 512 MiB | 1 822 MiB |
+| Linux (Docker, Python 3.12, 200 documentos) | sí (1.1.0) | 1 035 MiB | 1 037 MiB | 814 MiB |
+| Windows 11 (Python 3.14, 150 documentos) | no (1.0.1) | 2 475 MiB | 2 988 MiB | 5 332 MiB |
+| Windows 11 (Python 3.14, 150 documentos) | sí (1.1.0) | 2 310 MiB | 2 690 MiB | 3 042 MiB |
+
+¹ El código de 1.1.0 antes de añadir la liberación, que en memoria se comporta como 1.0.1. Con la liberación, el
+escaneo de Linux tardó 91 s en lugar de 128 s; en Windows la primera pasada tardó unos 6 s más (24,7 s frente a 18,2 s).
+
+Lo que se vio al aislar cada causa:
+
+- Los `.docx` (python-docx sobre lxml) y las imágenes de página del OCR (PIL/numpy) quedan en ciclos de referencias.
+  El recolector de Python se dispara por número de objetos, no por bytes, así que tarda en liberarlos. En Windows, sin
+  recolección explícita, un `.docx` dejaba unos 5 MiB y un PDF escaneado unos 40 MiB por documento. En Linux el `.docx`
+  crece en dientes de sierra y se estabiliza.
+- En Windows, el pipeline PDF de Docling (modelo de *layout*) deja además unos 9 MiB por documento en memoria nativa.
+  No se libera con `gc.collect()`, ni con un hilo único, ni creando un convertidor nuevo. En Linux no aparece. El
+  remedio en Windows es partir el escaneo en tramos.
+- El pico dentro de un documento crece poco con las páginas: un PDF escaneado de 40 páginas con OCR llegó a 2,9 GiB
+  (1 página: 1,6 GiB).
+- Cargar los modelos cuesta alrededor de 1 GiB la primera vez (primera pasada y OCR por separado). Los de la primera
+  pasada se sueltan antes de cargar los del OCR.
+
+Con documentos sintéticos no se ha reproducido el agotamiento de 6 GiB que vio doc_organize_web con 521 documentos
+reales. Si vuelve a pasar, mide con tus documentos (`DOC_ORGANIZE_MEMORY_TEST=1`, ver el test) y usa `max_documents`.
+
+## Carpetas de red: cortes, ficheros bloqueados y documentos que no terminan
+
+- `ScanOptions(io_retries=3, io_retry_backoff_s=1.0)` repite listar, leer y hashear ante errores de E/S transitorios,
+  esperando 1 s, luego 2 s y luego 4 s. El fichero que agota los reintentos no aborta la carpeta: sale en los avisos
+  del evento `SCANNED`, en `ScanSummary.io_errors` y en el informe de errores, y no se da por eliminado.
+  `ScanCommand.deduplicate_streaming(io_retries=...)` hace lo mismo al buscar duplicados y al copiar (`mode="copy"`).
+- `ScanOptions(document_timeout_s=600)` deja en error el documento que tarde más de 10 minutos y sigue con el
+  siguiente.
+- `ScanOptions(reuse_unchanged_hashes=True)` no vuelve a leer los ficheros cuyo tamaño y fecha coinciden con la
+  caché, así que un escaneo incremental de una carpeta de red grande no la lee entera.
+
+Ver [Escaneo](../api/scan.md#carpetas-de-red-io_retries-document_timeout_s-reuse_unchanged_hashes-g11).
+
 ## `detect_gpu_status()` dice "GPU no activa" aunque ya la instalé y funciona
 
 Primero, comprueba el estado real desde el mismo entorno donde corre

@@ -8,7 +8,9 @@ from typing import Literal
 
 from doc_organize.converter.converter import DocumentConverter
 from doc_organize.core.models import ConversionResult, DocumentMetadata
+from doc_organize.core.progress import CancelToken
 from doc_organize.utils.logging import get_logger
+from doc_organize.utils.memory import MemoryReleaser, release_memory
 
 
 class OCRScheduler:
@@ -60,6 +62,9 @@ class OCRScheduler:
         *,
         include_root_name: bool = False,
         json_source_path: Literal["relative", "absolute"] = "relative",
+        timeout_s: float | None = None,
+        cancel_token: CancelToken | None = None,
+        max_documents: int | None = None,
     ) -> list[ConversionResult]:
         """Reconvierte `docs` con OCR activado y escribe los resultados en `output_dir`.
 
@@ -86,11 +91,26 @@ class OCRScheduler:
             include_root_name: igual que en `DocumentConverter.convert_document` (L-10c);
                 debe coincidir con la primera pasada.
             json_source_path: igual que en `DocumentConverter.convert_document` (G23).
+            timeout_s: limite por documento, igual que en `DocumentConverter.convert_document` (G11, 1.1.0).
+            cancel_token: si se cancela, para **entre documentos** sin lanzar excepcion (G38, 1.1.0): el documento en
+                curso termina y se devuelven los resultados de los ya procesados.
+            max_documents: procesa como mucho estos documentos (G38, 1.1.0); `None`, todos.
+
+        Returns:
+            Un `ConversionResult` por documento procesado, en el orden de `docs`. Con `cancel_token` o
+            `max_documents` puede tener menos elementos que `docs`: los que faltan son los del final, sin procesar.
         """
         results: list[ConversionResult] = []
         total = len(docs)
+        extra: dict[str, float] = {"timeout_s": timeout_s} if timeout_s is not None else {}
+        releaser = MemoryReleaser()  # G38: los ciclos que deja cada documento se liberan cada pocos documentos
         async with DocumentConverter(artifacts_path=self._artifacts_path, allow_model_downloads=self._allow_model_downloads) as converter:
             for index, doc in enumerate(docs, start=1):
+                if cancel_token is not None and cancel_token.cancelled:
+                    self.logger.info(f"OCR cancelado tras {index - 1} de {total} documentos")
+                    break
+                if max_documents is not None and index > max_documents:
+                    break
                 if progress_callback is not None:
                     await progress_callback(doc, index, total)
                 result = await converter.convert_document(
@@ -103,11 +123,14 @@ class OCRScheduler:
                     scan_roots=scan_roots,
                     include_root_name=include_root_name,
                     json_source_path=json_source_path,
+                    **extra,
                 )
                 results.append(result)
+                releaser.after_document()
+        release_memory()
 
         succeeded = sum(1 for result in results if result.success)
-        self.logger.info(f"OCR procesado: {succeeded}/{len(docs)} documentos convertidos correctamente")
+        self.logger.info(f"OCR procesado: {succeeded}/{len(results)} documentos convertidos correctamente ({total} candidatos)")
         return results
 
 

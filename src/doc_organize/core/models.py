@@ -154,6 +154,42 @@ class DocumentMetadata(BaseModel):
     modified_time: float = Field(..., description="Timestamp Unix de la última modificación")
     sha256_hash: str = Field(..., description="Hash SHA-256 (cadena hexadecimal de 64 caracteres)")
 
+    @classmethod
+    def from_cache_entry(cls, entry: "CacheEntry") -> "DocumentMetadata":
+        """Metadatos de un documento a partir de su entrada de caché, sin leer ni rehashear el fichero (G25, 1.1.0).
+
+        Pensado para buscar duplicados con `DeduplicationManager.find_duplicates` desde la caché. `display_name` es
+        el nombre del fichero y `extension` su sufijo en minúsculas, como los calcula `DocumentScanner`.
+
+        Args:
+            entry: Entrada guardada por un escaneo de 1.1.0 o posterior (con `size_bytes`).
+
+        Returns:
+            DocumentMetadata con el hash, el tamaño y la fecha de modificación de la caché.
+
+        Raises:
+            ValueError: La entrada no tiene `size_bytes` (la escribió una versión anterior a 1.1.0); se rellena en el
+                siguiente escaneo del documento.
+
+        Example:
+            >>> entry = CacheEntry(file_path="/repo/Informe.PDF", sha256_hash="ab" * 32, timestamp=1693152000.0,
+            ...                    status=DocumentStatus.UNCHANGED, size_bytes=2048)
+            >>> doc = DocumentMetadata.from_cache_entry(entry)
+            >>> doc.display_name, doc.extension, doc.size_bytes
+            ('Informe.PDF', 'pdf', 2048)
+        """
+        if entry.size_bytes is None:
+            raise ValueError(f"La entrada de caché de '{entry.file_path}' no tiene tamaño (anterior a 1.1.0): vuelve a escanear")
+        path = Path(entry.file_path)
+        return cls(
+            full_path=entry.file_path,
+            display_name=path.name,
+            extension=path.suffix.lower().lstrip("."),
+            size_bytes=entry.size_bytes,
+            modified_time=entry.timestamp,
+            sha256_hash=entry.sha256_hash,
+        )
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -277,11 +313,14 @@ class CacheEntry(BaseModel):
 
     file_path: str = Field(..., description="Ruta absoluta al fichero (PK en cache.db)")
     sha256_hash: str = Field(..., description="SHA-256 del fichero")
-    timestamp: float = Field(..., description="Timestamp Unix de la última actualización de la entrada")
+    timestamp: float = Field(..., description="Fecha de modificación del fichero (timestamp Unix) cuando se escaneó")
     status: DocumentStatus = Field(..., description="Estado del documento (new/unchanged/modified/deleted)")
     conversion_status: ConversionStatus | None = Field(default=None, description="Estado de progreso de la conversión")
     error_message: str | None = Field(default=None, description="Mensaje de error de la última conversión fallida")
     error_retry_count: int = Field(default=0, description="Fallos consecutivos sin cambios en el fichero (0 si el último intento tuvo éxito)")
+    size_bytes: int | None = Field(
+        default=None, description="Tamaño del fichero en bytes cuando se escaneó (None en entradas anteriores a 1.1.0, G25)"
+    )
 
 
 class ScanErrorEntry(BaseModel):
@@ -380,6 +419,13 @@ class ScanResult(BaseModel):
         default_factory=list,
         description="Carpetas que no se pudieron listar (permiso denegado, montaje caído); su contenido falta de `documents`",
     )
+    unreadable_files: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Ficheros descubiertos que no se pudieron leer tras agotar los reintentos (ruta → error, G11, 1.1.0); faltan "
+            "de `documents` pero no han desaparecido. Un fichero borrado durante el escaneo no aparece aquí"
+        ),
+    )
 
 
 #: Versión del esquema de los eventos de progreso (L-6b). Sube cuando cambian los campos de `to_dict()` o el
@@ -433,6 +479,28 @@ class ScanOptions(BaseModel):
     root_name_in_output: bool = Field(default=False, description="Incluir el nombre de la carpeta escaneada en la ruta de salida")
     json_source_path: Literal["relative", "absolute"] = Field(
         default="relative", description="`source_path` del JSON de cada documento: relativo a la carpeta escaneada o absoluto"
+    )
+    max_documents: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Parar de forma ordenada tras N conversiones de Docling (primera pasada y OCR cuentan por separado); "
+            "lo pendiente sigue en la llamada siguiente (G38, 1.1.0). None: sin límite"
+        ),
+    )
+    document_timeout_s: float | None = Field(
+        default=None, gt=0, description="Segundos máximos por documento y pasada; el que los supera queda en error (G11). None: sin límite"
+    )
+    io_retries: int = Field(
+        default=0, ge=0, description="Reintentos ante errores de E/S transitorios al listar, leer, hashear y copiar (G11). 0: ninguno"
+    )
+    io_retry_backoff_s: float = Field(default=1.0, ge=0, description="Espera antes del primer reintento de E/S; se duplica en cada reintento (G11)")
+    reuse_unchanged_hashes: bool = Field(
+        default=False,
+        description=(
+            "No rehashear un fichero cuyo tamaño y fecha de modificación coinciden con la caché: se reutiliza su hash (G11). "
+            "No detecta un cambio que conserve tamaño y fecha"
+        ),
     )
 
 

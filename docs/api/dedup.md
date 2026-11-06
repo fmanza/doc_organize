@@ -39,6 +39,8 @@ classDiagram
 
 ```python
 class DeduplicationManager:
+    def __init__(self, *, io_retries: int = 0, io_retry_backoff_s: float = 1.0) -> None  # 1.1.0
+
     def find_duplicates(
         self,
         docs: list[DocumentMetadata],
@@ -65,6 +67,13 @@ class DeduplicationManager:
         relative_to: Path | None = None,
     ) -> tuple[int, int, list[str]]
 ```
+
+Con `io_retries > 0` (1.1.0, G11) cada copia de `mode="copy"` se reintenta ante un `OSError` transitorio; una copia a
+medias no se queda en `duplicados/`. Mover no se reintenta: un movimiento a medias entre volúmenes podría dejar el
+fichero en los dos sitios. Lo que agota los reintentos queda en `failed_paths`.
+
+`find_duplicates` solo necesita `DocumentMetadata`; desde 1.1.0 se pueden construir desde la caché sin rehashear el
+origen con `DocumentMetadata.from_cache_entry` (ver [Scanner](scanner.md#documentmetadata-desde-la-cache-110-g25)).
 
 #### find_duplicates (Síncrono)
 

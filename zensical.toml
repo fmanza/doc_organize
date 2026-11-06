@@ -41,6 +41,7 @@ nav = [
     { "Descripción general" = "api/index.md" },
     { "API pública y compatibilidad" = "api/publica.md" },
     { "Validadores" = "api/validators.md" },
+    { "Escaneo (ScanCommand)" = "api/scan.md" },
     { "Scanner" = "api/scanner.md" },
     { "Converter" = "api/converter.md" },
     { "Deduplicación" = "api/dedup.md" },

@@ -55,6 +55,7 @@ from doc_organize.scan.scan_history_store import append_scan_run
 from doc_organize.scanner import DocumentScanner
 from doc_organize.utils.date_format import format_duration
 from doc_organize.utils.logging import get_logger
+from doc_organize.utils.memory import MemoryReleaser, release_memory
 from doc_organize.validators import FolderValidator
 
 logger = get_logger(__name__)
@@ -80,6 +81,13 @@ class ScanSummary:
     duration_seconds: float = 0.0
     discovery_duration_seconds: float = 0.0
     total_conversion_seconds: float = 0.0
+    #: Ficheros que no se pudieron leer tras agotar los reintentos de E/S (G11, 1.1.0).
+    io_errors: int = 0
+    #: Conversiones que quedaron sin hacer al parar por `ScanOptions.max_documents` (G38, 1.1.0): documentos sin
+    #: convertir más candidatos de OCR sin procesar. Se hacen en la llamada siguiente.
+    remaining: int = 0
+    #: `"max_documents"` si el escaneo paró al llegar al límite; `None` si terminó todo (G38, 1.1.0).
+    stopped_reason: str | None = None
 
     def render(self) -> str:
         lines = [
@@ -90,6 +98,10 @@ class ScanSummary:
         ]
         if self.error_retries_capped:
             lines.append(f"Sin reintentar (límite de {MAX_AUTO_ERROR_RETRIES} reintentos alcanzado): {self.error_retries_capped}")
+        if self.io_errors:
+            lines.append(f"No se pudieron leer (errores de E/S): {self.io_errors}")
+        if self.stopped_reason == "max_documents":
+            lines.append(f"Parado al llegar al máximo de documentos: quedan {self.remaining} conversiones pendientes")
         lines.append(
             f"Descubrimiento de ficheros: {format_duration(self.discovery_duration_seconds)} "
             f"| Conversión (total acumulado): {format_duration(self.total_conversion_seconds)}"
@@ -167,6 +179,8 @@ def _conversion_kwargs(options: ScanOptions) -> dict[str, Any]:
         kwargs["include_root_name"] = True
     if options.json_source_path != "relative":
         kwargs["json_source_path"] = options.json_source_path
+    if options.document_timeout_s is not None:
+        kwargs["timeout_s"] = options.document_timeout_s
     return kwargs
 
 
@@ -174,6 +188,26 @@ def _is_under_any(path: str, folders: Sequence[str]) -> bool:
     """Si `path` está dentro de alguna de `folders` (rutas ya resueltas por el mismo escaneo)."""
     candidate = Path(path)
     return any(candidate.is_relative_to(folder) for folder in folders)
+
+
+class _DocumentBudget:
+    """Conversiones de Docling que le quedan a un escaneo con `ScanOptions.max_documents` (G38, 1.1.0)."""
+
+    def __init__(self, limit: int | None) -> None:
+        self._left = limit
+
+    @property
+    def left(self) -> int | None:
+        """Conversiones que quedan; `None` sin límite."""
+        return self._left
+
+    @property
+    def exhausted(self) -> bool:
+        return self._left is not None and self._left <= 0
+
+    def consume(self, count: int = 1) -> None:
+        if self._left is not None:
+            self._left -= count
 
 
 class _CacheCheckpoint:
@@ -356,12 +390,18 @@ class ScanCommand:
             cancel_token: Si se cancela, el escaneo para **entre documentos**: guarda en `cache_db` lo ya convertido
                 (un escaneo posterior continúa desde ahí), escribe el `ScanErrorReport` de lo procesado (si hay
                 `error_log_path` y errores), registra la ejecución como incompleta y emite `CANCELLED` como último
-                evento en lugar de `COMPLETED`.
+                evento en lugar de `COMPLETED`. Desde 1.1.0 también entre documentos de la fase OCR (G38): lo ya
+                procesado con OCR se guarda y el resto sigue `ocr_pending`.
 
         Durante la conversión, lo convertido se guarda en `cache_db` cada `ScanOptions.cache_save_every` documentos o
         `cache_save_seconds` segundos, y también si el escaneo termina por una excepción o se cierra el generador
         (L-10a): el siguiente escaneo no reconvierte lo ya hecho. En la fase de OCR los resultados llegan al final del
-        lote, así que un corte durante el OCR deja esos documentos en `ocr_pending`.
+        lote (o al pararlo), así que una excepción o un `kill` durante el OCR deja esos documentos en `ocr_pending`.
+
+        Con `ScanOptions.max_documents` (G38, 1.1.0) el escaneo para de forma ordenada tras ese número de conversiones
+        de Docling (la primera pasada y la de OCR cuentan por separado), guarda la caché y termina con `COMPLETED`;
+        su resumen trae `stopped_reason="max_documents"` y `remaining` (conversiones pendientes, que hace la llamada
+        siguiente con los mismos argumentos).
 
         El resto de argumentos se describe en `_run_pipeline`.
         """
@@ -474,31 +514,45 @@ class ScanCommand:
 
             clean_paths, path_warnings = await self._resolve_scan_paths(paths, folders_json)
 
-            async with DocumentScanner() as scanner:
+            # G11: con `reuse_unchanged_hashes`, la caché se lee antes del recorrido para no rehashear lo que no cambió.
+            known_entries: dict[str, CacheEntry] | None = None
+            scan_kwargs: dict[str, Any] = {}
+            if opts.reuse_unchanged_hashes and not force:
+                async with CacheManager(cache_db) as cache:
+                    known_entries = await cache.load_cache()
+                scan_kwargs["known_entries"] = known_entries
+
+            async with DocumentScanner(io_retries=opts.io_retries, io_retry_backoff_s=opts.io_retry_backoff_s) as scanner:
                 # exclude_dir=output_dir: sin esto, si una de `clean_paths` contiene el
                 # `output_dir` de un escaneo previo con `extract_images=True`, el escaneo
                 # redescubre las imagenes ya extraidas (`img/<stem>/*.png`) como
                 # documentos nuevos; una reconversion posterior en el mismo pase borra esa
                 # carpeta (`shutil.rmtree` en `DocumentConverter._write_outputs`) y la
                 # "conversion" de esa imagen falla con FileNotFoundError.
-                scan_result = await scanner.scan_folders(clean_paths, include_audio_video=include_audio_video, exclude_dir=output_dir.resolve())
+                scan_result = await scanner.scan_folders(
+                    clean_paths, include_audio_video=include_audio_video, exclude_dir=output_dir.resolve(), **scan_kwargs
+                )
             summary.scanned = len(scan_result.documents)
             summary.discovery_duration_seconds = scan_result.scan_duration_seconds
             unreadable_dirs = scan_result.unreadable_dirs
+            unreadable_files = scan_result.unreadable_files
+            summary.io_errors = len(unreadable_files)
             path_warnings = [
                 *path_warnings,
                 *(f"No se pudo leer la carpeta '{folder}': sus documentos no se procesan en este escaneo." for folder in unreadable_dirs),
+                *(f"No se pudo leer '{path}': {error}. No se procesa en este escaneo." for path, error in unreadable_files.items()),
                 *self._output_collision_warnings(scan_result.documents, output_dir, clean_paths, opts),
             ]
 
             async with CacheManager(cache_db) as cache:
-                cached_entries = await cache.load_cache()
+                cached_entries = known_entries if known_entries is not None else await cache.load_cache()
                 if force:
                     current_paths = {doc.full_path for doc in scan_result.documents}
                     orphaned_paths = set(cached_entries) - current_paths
                     # L-10d: lo que cuelga de una carpeta que no se pudo listar no ha desaparecido (p. ej. un montaje de
                     # red caído): ni se borra su salida ni se pierde su entrada de caché.
-                    unlisted_paths = {path for path in orphaned_paths if _is_under_any(path, unreadable_dirs)}
+                    # G11: lo mismo con un fichero que no se pudo leer.
+                    unlisted_paths = {path for path in orphaned_paths if _is_under_any(path, unreadable_dirs) or path in unreadable_files}
                     await self._delete_orphaned_outputs(
                         orphaned_paths - unlisted_paths, output_dir, clean_paths, include_root_name=opts.root_name_in_output
                     )
@@ -554,6 +608,7 @@ class ScanCommand:
                 entries: list[CacheEntry] = []
                 ocr_candidates: list[DocumentMetadata] = []
                 cache_checkpoint = _CacheCheckpoint(cache, opts.cache_save_every, opts.cache_save_seconds)
+                budget = _DocumentBudget(opts.max_documents)
 
                 try:
                     async for event in self._convert_documents(
@@ -571,6 +626,7 @@ class ScanCommand:
                         cancel_token=cancel_token,
                         options=opts,
                         cache_checkpoint=cache_checkpoint,
+                        budget=budget,
                     ):
                         yield event
 
@@ -588,14 +644,20 @@ class ScanCommand:
                             clean_paths,
                             cancel_token=cancel_token,
                             options=opts,
+                            budget=budget,
                         ):
                             yield event
+                    if summary.remaining:
+                        summary.stopped_reason = "max_documents"
+                        self.logger.info(f"Escaneo parado al llegar a max_documents={opts.max_documents}: quedan {summary.remaining}")
                 except OperationCancelledError:
                     # L-2: lo ya convertido se guarda (un escaneo posterior continúa desde ahí; los pendientes de OCR
                     # quedan con `ocr_pending`); el `finally` registra la ejecución como incompleta. L-10d: también los
                     # errores de lo procesado.
                     await cache.save_entries(entries)
-                    await self._write_error_report(error_log_path, scan_run_id, summary, entries, error_retries_capped_paths, cached_entries)
+                    await self._write_error_report(
+                        error_log_path, scan_run_id, summary, entries, error_retries_capped_paths, cached_entries, unreadable_files
+                    )
                     self.logger.info(f"Escaneo cancelado tras {summary.converted} documentos convertidos")
                     yield ScanEvent(event=ScanEventType.CANCELLED, data=asdict(summary))
                     return
@@ -606,7 +668,9 @@ class ScanCommand:
                     raise
 
                 await cache.save_entries(entries)
-                await self._write_error_report(error_log_path, scan_run_id, summary, entries, error_retries_capped_paths, cached_entries)
+                await self._write_error_report(
+                    error_log_path, scan_run_id, summary, entries, error_retries_capped_paths, cached_entries, unreadable_files
+                )
 
             summary.duration_seconds = time.monotonic() - start
             if history_log_path is not None:
@@ -668,11 +732,23 @@ class ScanCommand:
         entries: list[CacheEntry],
         capped_paths: set[str],
         cached_entries: dict[str, CacheEntry],
+        unreadable_files: dict[str, str] | None = None,
     ) -> None:
-        """Añade el `ScanErrorReport` de esta ejecución a `error_log_path`, si se indicó y hubo errores."""
+        """Añade el `ScanErrorReport` de esta ejecución a `error_log_path`, si se indicó y hubo errores.
+
+        Incluye los ficheros que no se pudieron leer al escanear (G11, `unreadable_files`).
+        """
         if error_log_path is None:
             return
         error_entries = self._collect_error_entries(entries, capped_paths, cached_entries)
+        if unreadable_files:
+            error_entries = sorted(
+                [
+                    *error_entries,
+                    *(ScanErrorEntry(file_path=path, error_message=error, error_retry_count=1) for path, error in unreadable_files.items()),
+                ],
+                key=lambda entry: entry.file_path,
+            )
         if error_entries:
             report = ScanErrorReport(
                 scan_run_id=scan_run_id,
@@ -791,6 +867,8 @@ class ScanCommand:
         relative_to: Path | None = None,
         on_progress: ProgressCallback | None = None,
         cancel_token: CancelToken | None = None,
+        io_retries: int = 0,
+        io_retry_backoff_s: float = 1.0,
     ) -> AsyncIterator[DedupEvent]:
         """Busca y mueve duplicados en `paths`, emitiendo progreso (detalle en `_dedup_pipeline`).
 
@@ -800,11 +878,23 @@ class ScanCommand:
             on_progress: Recibe un `ProgressEvent` por evento (L-2); un fallo del callback no para la operación.
             cancel_token: Si se cancela, para **entre grupos**: los grupos ya movidos quedan en el informe
                 (`DEDUP_REPORT.json`) y el último evento es `CANCELLED` en lugar de `COMPLETED`.
+            io_retries: Reintentos ante errores de E/S transitorios al listar, hashear y copiar (G11, 1.1.0; ver
+                `ScanOptions.io_retries`). Un fichero que no se puede leer no entra en la búsqueda; uno que no se puede
+                copiar queda en `failed_paths`.
+            io_retry_backoff_s: Espera antes del primer reintento; se duplica en cada uno.
         """
         tracker = _ProgressTracker("deduplicate", on_progress, self.logger)
         async with contextlib.aclosing(
             self._dedup_pipeline(
-                paths, duplicates_dir, folders_json, report_dir=report_dir, mode=mode, relative_to=relative_to, cancel_token=cancel_token
+                paths,
+                duplicates_dir,
+                folders_json,
+                report_dir=report_dir,
+                mode=mode,
+                relative_to=relative_to,
+                cancel_token=cancel_token,
+                io_retries=io_retries,
+                io_retry_backoff_s=io_retry_backoff_s,
             )
         ) as events:
             async for event in events:
@@ -821,6 +911,8 @@ class ScanCommand:
         mode: DedupMode = "move",
         relative_to: Path | None = None,
         cancel_token: CancelToken | None = None,
+        io_retries: int = 0,
+        io_retry_backoff_s: float = 1.0,
     ) -> AsyncGenerator[DedupEvent, None]:
         """Busca y mueve duplicados en `paths`, a petición explícita del usuario,
         emitiendo progreso (mismo criterio que `run_streaming()` para Escanear:
@@ -859,7 +951,7 @@ class ScanCommand:
         started_at = datetime.now(UTC)
         duplicates_dir = Path(duplicates_dir)
         DeduplicationManager.check_duplicates_dir(duplicates_dir)
-        dedup_manager = DeduplicationManager()
+        dedup_manager = DeduplicationManager(io_retries=io_retries, io_retry_backoff_s=io_retry_backoff_s)
         groups: list[DuplicateGroup] = []
         exact_moved = 0
         version_resolved = 0
@@ -876,7 +968,7 @@ class ScanCommand:
 
             clean_paths, warnings = await self._resolve_scan_paths(paths, folders_json)
 
-            async with DocumentScanner() as scanner:
+            async with DocumentScanner(io_retries=io_retries, io_retry_backoff_s=io_retry_backoff_s) as scanner:
                 scan_result = await scanner.scan_folders(clean_paths)
 
             groups = dedup_manager.find_duplicates(scan_result.documents)
@@ -963,6 +1055,7 @@ class ScanCommand:
         cancel_token: CancelToken | None = None,
         options: ScanOptions | None = None,
         cache_checkpoint: _CacheCheckpoint | None = None,
+        budget: _DocumentBudget | None = None,
     ) -> AsyncIterator[ScanEvent]:
         """Convierte cada documento, yieldeando `FILE_STARTED` (antes de convertirlo)
         y `FILE_CONVERTED` (al terminar) por unidad.
@@ -986,13 +1079,19 @@ class ScanCommand:
 
         `options` aporta lo añadido en 0.12.0 (carpeta de modelos, nombre de la raíz,
         `source_path` del JSON); `cache_checkpoint` guarda la caché por el camino (L-10a).
+        Con `budget` agotado (G38) para antes del siguiente documento y suma lo que falta a
+        `summary.remaining`.
         """
         options = options or ScanOptions()
         conversion_kwargs = _conversion_kwargs(options)
         total = len(docs_to_process)
+        releaser = MemoryReleaser()  # G38: ver `utils.memory`
         async with DocumentConverter(artifacts_path=options.artifacts_path, allow_model_downloads=options.allow_model_downloads) as converter:
             for index, doc in enumerate(docs_to_process, start=1):
                 checkpoint(cancel_token)  # L-2: parada entre documentos
+                if budget is not None and budget.exhausted:
+                    summary.remaining += total - index + 1
+                    break
                 yield ScanEvent(
                     event=ScanEventType.FILE_STARTED,
                     data={"path": doc.full_path, "index": index, "total": total},
@@ -1006,6 +1105,9 @@ class ScanCommand:
                     scan_roots=scan_roots,
                     **conversion_kwargs,
                 )
+                if budget is not None:
+                    budget.consume()
+                releaser.after_document()
                 if doc.full_path in new_set:
                     status = DocumentStatus.NEW
                 elif doc.full_path in modified_set:
@@ -1034,6 +1136,8 @@ class ScanCommand:
                         "duration_seconds": result.duration_seconds,
                     },
                 )
+        # Los modelos de la primera pasada se sueltan antes de cargar los del OCR.
+        release_memory()
 
     @staticmethod
     def _collect_stale_error_paths(
@@ -1099,6 +1203,8 @@ class ScanCommand:
         scan_roots: Sequence[str],
         *,
         options: ScanOptions | None = None,
+        cancel_token: CancelToken | None = None,
+        max_documents: int | None = None,
     ) -> AsyncGenerator[ScanEvent | list[ConversionResult]]:
         """Ejecuta `OCRScheduler.process_with_ocr()` en paralelo, yieldeando un
         `OCR_FILE_STARTED` según arranca cada documento y terminando con la lista de
@@ -1124,6 +1230,13 @@ class ScanCommand:
         """
         options = options or ScanOptions()
         progress_queue: asyncio.Queue[ScanEvent | list[ConversionResult] | Exception] = asyncio.Queue()
+        # G38: parada entre documentos dentro del lote (cancelación o tope); solo si se piden, para no cambiar la
+        # llamada de siempre (compatibilidad con quien sustituye `process_with_ocr`).
+        stop_kwargs: dict[str, Any] = {}
+        if cancel_token is not None:
+            stop_kwargs["cancel_token"] = cancel_token
+        if max_documents is not None:
+            stop_kwargs["max_documents"] = max_documents
 
         async def _on_progress(doc: DocumentMetadata, index: int, total: int) -> None:
             await progress_queue.put(ScanEvent(event=ScanEventType.OCR_FILE_STARTED, data={"path": doc.full_path, "index": index, "total": total}))
@@ -1140,6 +1253,7 @@ class ScanCommand:
                     scan_roots=scan_roots,
                     progress_callback=_on_progress,
                     **_conversion_kwargs(options),
+                    **stop_kwargs,
                 )
             except (
                 OSError,
@@ -1184,6 +1298,7 @@ class ScanCommand:
         *,
         cancel_token: CancelToken | None = None,
         options: ScanOptions | None = None,
+        budget: _DocumentBudget | None = None,
     ) -> AsyncIterator[ScanEvent]:
         """Reprocesa `ocr_candidates` con OCR, yieldeando `OCR_STARTED`, un
         `OCR_FILE_STARTED`/`OCR_PROCESSED` por unidad, en ese orden relativo.
@@ -1200,9 +1315,18 @@ class ScanCommand:
 
         El progreso en vivo del batch (`OCR_FILE_STARTED`) lo produce `_stream_ocr_batch`
         -- ver su docstring para el porqué de la tarea+cola detrás.
+
+        Cancelación y `budget` (G38, 1.1.0): el lote para entre documentos y devuelve lo ya
+        procesado, que se registra en `entries` antes de lanzar `OperationCancelledError` (el
+        llamador lo guarda en la caché); lo que falta sigue `OCR_PENDING`. Con `budget`
+        agotado lo que falta se suma a `summary.remaining`.
         """
         if not ocr_candidates:
             return
+        if budget is not None and budget.exhausted:
+            summary.remaining += len(ocr_candidates)
+            return
+        checkpoint(cancel_token)
         total = len(ocr_candidates)
         yield ScanEvent(event=ScanEventType.OCR_STARTED, data={"to_process": total})
 
@@ -1212,19 +1336,32 @@ class ScanCommand:
         # `_stream_ocr_batch.aclose()` -- y por tanto su `finally` cancele la tarea de
         # OCR en curso -- en vez de dejarlo a merced del recolector de basura.
         async with contextlib.aclosing(
-            self._stream_ocr_batch(ocr_candidates, output_dir, use_gpu, extract_images, use_picture_description, scan_roots, options=options)
+            self._stream_ocr_batch(
+                ocr_candidates,
+                output_dir,
+                use_gpu,
+                extract_images,
+                use_picture_description,
+                scan_roots,
+                options=options,
+                cancel_token=cancel_token,
+                max_documents=budget.left if budget is not None else None,
+            )
         ) as ocr_stream:
             async for item in ocr_stream:
                 if isinstance(item, ScanEvent):
-                    # L-2: el lote corre en un hilo; se para antes del siguiente documento (el actual termina).
-                    checkpoint(cancel_token)
                     yield item
                 else:
                     ocr_results = item
 
+        if budget is not None:
+            budget.consume(len(ocr_results))
+        if not (cancel_token is not None and cancel_token.cancelled):
+            summary.remaining += total - len(ocr_results)
         summary.ocr_processed = sum(1 for result in ocr_results if result.success)
         entries_by_path = {entry.file_path: entry for entry in entries}
-        for doc, result in zip(ocr_candidates, ocr_results, strict=True):
+        # Con parada a mitad (G38), `ocr_results` es un prefijo de `ocr_candidates`: el resto sigue OCR_PENDING.
+        for doc, result in zip(ocr_candidates[: len(ocr_results)], ocr_results, strict=True):
             previous = entries_by_path.get(doc.full_path)
             status = previous.status if previous else DocumentStatus.UNCHANGED
             if previous is not None:
@@ -1240,6 +1377,8 @@ class ScanCommand:
                 data={"path": doc.full_path, "success": result.success, "duration_seconds": result.duration_seconds},
             )
         entries[:] = list(entries_by_path.values())
+        # L-2: el lote corre en un hilo y paró antes del siguiente documento; lo procesado ya está en `entries`.
+        checkpoint(cancel_token)
 
     @staticmethod
     def _build_entry(
@@ -1260,6 +1399,7 @@ class ScanCommand:
             file_path=doc.full_path,
             sha256_hash=doc.sha256_hash,
             timestamp=doc.modified_time,
+            size_bytes=doc.size_bytes,
             status=status,
             conversion_status=conversion_status,
             error_message=result.error,

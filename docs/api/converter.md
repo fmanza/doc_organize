@@ -55,6 +55,7 @@ class DocumentConverter:
         *,
         include_root_name: bool = False,
         json_source_path: Literal["relative", "absolute"] = "relative",
+        timeout_s: float | None = None,  # 1.1.0
     ) -> ConversionResult
     
     # Alias de doc_organize.projects.layout (desde 0.12.0, sin Docling)
@@ -83,6 +84,7 @@ Context manager para conversión de documentos.
 | `scan_roots` | `Sequence[str]` | Carpetas raíz indicadas por el usuario al escanear. Si `source_doc.full_path` cuelga de alguna, `output_dir` replica esa jerarquía relativa a la raíz (no la ruta absoluta completa del disco de origen). Vacío por defecto: sin ninguna raíz conocida, la salida se aplana a `output_dir/<stem>` |
 | `include_root_name` | `bool` | Antepone el nombre de la raíz a la ruta de salida (`2024/x/a.md`), para que varias raíces no colisionen (0.12.0). Por defecto `False` |
 | `json_source_path` | `"relative" \| "absolute"` | `source_path` del `.json`: relativo a la raíz escaneada, en POSIX (por defecto desde 0.12.0), o la ruta absoluta (lo de antes) |
+| `timeout_s` | `float \| None` | 1.1.0. Segundos máximos de Docling para este documento. Si se superan, el resultado es `success=False` con esa causa y no se escribe salida. El hilo de Docling sigue hasta terminar en segundo plano (no se puede interrumpir) y su resultado se descarta; el convertidor de ese modo se descarta también y el siguiente documento vuelve a cargar los modelos. `None`: sin límite |
 
 | Retorno | Tipo | Descripción |
 |---|---|---|
@@ -106,6 +108,8 @@ Context manager para conversión de documentos.
 
 ```python
 class OCRScheduler:
+    def __init__(self, *, artifacts_path: Path | str | None = None, allow_model_downloads: bool = True) -> None
+
     async def process_with_ocr(
         self,
         docs: list[DocumentMetadata],
@@ -113,7 +117,14 @@ class OCRScheduler:
         use_gpu: bool = False,
         extract_images: bool = False,
         use_picture_description: bool = False,
-        scan_roots: Sequence[str] = ()
+        scan_roots: Sequence[str] = (),
+        progress_callback: Callable[[DocumentMetadata, int, int], Awaitable[None]] | None = None,
+        *,
+        include_root_name: bool = False,
+        json_source_path: Literal["relative", "absolute"] = "relative",
+        timeout_s: float | None = None,           # 1.1.0
+        cancel_token: CancelToken | None = None,  # 1.1.0
+        max_documents: int | None = None,         # 1.1.0
     ) -> list[ConversionResult]
 ```
 
@@ -127,10 +138,15 @@ Reconvierte batch de documentos con OCR.
 | `extract_images` | `bool` | Igual que en `convert_document`; propagado desde la primera pasada para que un documento con OCR no pierda esta opción |
 | `use_picture_description` | `bool` | Igual que en `convert_document`, propagado desde la primera pasada |
 | `scan_roots` | `Sequence[str]` | Igual que en `convert_document`; debe coincidir con la primera pasada para que ambas calculen la misma ruta de salida para un mismo documento |
+| `progress_callback` | `Callable \| None` | `await progress_callback(doc, index, total)` justo antes de cada documento |
+| `include_root_name`, `json_source_path` | | Igual que en `convert_document`; deben coincidir con la primera pasada |
+| `timeout_s` | `float \| None` | 1.1.0. Límite por documento, igual que en `convert_document` |
+| `cancel_token` | `CancelToken \| None` | 1.1.0. Si se cancela, para **entre documentos** sin lanzar excepción: el documento en curso termina |
+| `max_documents` | `int \| None` | 1.1.0. Procesa como mucho estos documentos |
 
 | Retorno | Tipo | Descripción |
 |---|---|---|
-| | `list[ConversionResult]` | Resultados con OCR completado |
+| | `list[ConversionResult]` | Un resultado por documento procesado, en el orden de `docs`. Con `cancel_token` o `max_documents` puede tener menos elementos que `docs`: los que faltan son los del final, sin procesar |
 
 ---
 

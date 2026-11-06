@@ -5,13 +5,17 @@ Escaneo recursivo de documentos (REQ-002).
 import asyncio
 import time
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
+from stat import S_ISDIR, S_ISLNK
 from typing import Self
 
 from doc_organize.core.constants import AV_SUPPORTED_EXTENSIONS, IGNORED_NAMES, SUPPORTED_EXTENSIONS
-from doc_organize.core.models import DirectoryTree, DirectoryTreeNode, DocumentMetadata, ScanResult
+from doc_organize.core.models import CacheEntry, DirectoryTree, DirectoryTreeNode, DocumentMetadata, ScanResult
 from doc_organize.utils.hash_utils import hash_file
+from doc_organize.utils.io_retry import retry_io, retry_io_async
 from doc_organize.utils.logging import get_logger
 
 _DEFAULT_MAX_CONCURRENT_HASHES = 8
@@ -37,7 +41,14 @@ class DocumentScanner:
     (acotada por un semaforo) delegando en `utils.hash_utils.hash_file()`,
     la unica fuente de verdad de hashing del proyecto. Los symlinks no se
     seleccion: se representan como nodo opaco en el arbol, sin recursion ni
-    hashing (evita bucles y fugas fuera de las carpetas seleccionadas).
+    hashing (evita bucles y fugas fuera de las carpetas seleccionadas); las
+    *junctions* de Windows se tratan igual desde 1.1.0. Solo se resuelve la
+    propia carpeta raiz indicada.
+
+    Con `io_retries > 0` (G11, 1.1.0) listar una carpeta, leer los metadatos de
+    un fichero y calcular su hash se repiten ante errores de E/S transitorios
+    (`utils.io_retry`); el fichero que agota los reintentos queda en
+    `ScanResult.unreadable_files` en vez de abortar la carpeta.
 
     Attributes:
         logger (logging.Logger): Logger estructurado de la instancia.
@@ -55,9 +66,18 @@ class DocumentScanner:
         {'txt': 1}
     """
 
-    def __init__(self, max_concurrent_hashes: int = _DEFAULT_MAX_CONCURRENT_HASHES) -> None:
+    def __init__(self, max_concurrent_hashes: int = _DEFAULT_MAX_CONCURRENT_HASHES, *, io_retries: int = 0, io_retry_backoff_s: float = 1.0) -> None:
+        """Crea el escáner.
+
+        Args:
+            max_concurrent_hashes: Hashes SHA-256 calculados a la vez.
+            io_retries: Reintentos ante errores de E/S transitorios (G11, 1.1.0); 0 por defecto.
+            io_retry_backoff_s: Espera antes del primer reintento; se duplica en cada uno.
+        """
         self.logger = get_logger(__name__)
         self._max_concurrent_hashes = max_concurrent_hashes
+        self._io_retries = io_retries
+        self._io_retry_backoff_s = io_retry_backoff_s
 
     async def __aenter__(self) -> Self:
         return self
@@ -65,7 +85,14 @@ class DocumentScanner:
     async def __aexit__(self, *exc_info: object) -> None:
         return None
 
-    async def scan_folders(self, paths: list[str], include_audio_video: bool = False, exclude_dir: Path | None = None) -> ScanResult:
+    async def scan_folders(
+        self,
+        paths: list[str],
+        include_audio_video: bool = False,
+        exclude_dir: Path | None = None,
+        *,
+        known_entries: Mapping[str, CacheEntry] | None = None,
+    ) -> ScanResult:
         """Escanea recursivamente `paths` y devuelve documentos, resumen y arbol.
 
         Args:
@@ -88,28 +115,34 @@ class DocumentScanner:
                 reconversion posterior borre esa carpeta a mitad de escaneo
                 (`shutil.rmtree` en `_write_outputs`) y el intento de "convertir"
                 esa imagen falle con `FileNotFoundError`.
+            known_entries: Entradas de caché por ruta (G11, 1.1.0). Si un fichero
+                tiene entrada con el mismo `size_bytes` y la misma fecha de
+                modificación (`timestamp`), se reutiliza su `sha256_hash` sin leer
+                el fichero. `None` (por defecto): se hashea todo.
 
         Returns:
             ScanResult con la lista de documentos descubiertos (con hash
             SHA-256 ya calculado), el conteo por extension, el arbol de
             directorios y las carpetas que no se pudieron listar
             (`unreadable_dirs`, L-10d): su contenido falta de `documents`, asi
-            que quien compare contra una caché no debe darlo por eliminado.
+            que quien compare contra una caché no debe darlo por eliminado. Lo
+            mismo con `unreadable_files` (G11): ficheros que no se pudieron leer.
         """
         start = time.monotonic()
         allowed_extensions = SUPPORTED_EXTENSIONS | AV_SUPPORTED_EXTENSIONS if include_audio_video else SUPPORTED_EXTENSIONS
         root_nodes: list[DirectoryTreeNode] = []
         discovered: list[_DiscoveredFile] = []
         unreadable_dirs: list[str] = []
+        unreadable_files: dict[str, str] = {}
 
         for raw_path in paths:
             root = Path(raw_path).expanduser().resolve()
-            node, files, unreadable = await asyncio.to_thread(self._walk_sync, root, allowed_extensions, exclude_dir)
+            node, files, unreadable = await asyncio.to_thread(self._walk_sync, root, allowed_extensions, exclude_dir, unreadable_files)
             root_nodes.append(node)
             discovered.extend(files)
             unreadable_dirs.extend(unreadable)
 
-        documents = await self._hash_all(discovered)
+        documents = await self._hash_all(discovered, known_entries or {}, unreadable_files)
 
         summary: dict[str, int] = {}
         for doc in documents:
@@ -125,10 +158,21 @@ class DocumentScanner:
 
         duration = time.monotonic() - start
         self.logger.info(f"Escaneo completado: {len(documents)} documentos en {duration:.2f}s")
-        return ScanResult(documents=documents, summary=summary, tree=tree, scan_duration_seconds=duration, unreadable_dirs=unreadable_dirs)
+        return ScanResult(
+            documents=documents,
+            summary=summary,
+            tree=tree,
+            scan_duration_seconds=duration,
+            unreadable_dirs=unreadable_dirs,
+            unreadable_files=dict(sorted(unreadable_files.items())),
+        )
 
     def _walk_sync(
-        self, root: Path, allowed_extensions: frozenset[str], exclude_dir: Path | None = None
+        self,
+        root: Path,
+        allowed_extensions: frozenset[str],
+        exclude_dir: Path | None = None,
+        unreadable_files: dict[str, str] | None = None,
     ) -> tuple[DirectoryTreeNode, list[_DiscoveredFile], list[str]]:
         """Recorrido sincrono de un arbol de directorios (se ejecuta en un hilo).
 
@@ -137,7 +181,7 @@ class DocumentScanner:
         """
         files: list[_DiscoveredFile] = []
         unreadable: list[str] = []
-        node = self._build_node(root, files, allowed_extensions, exclude_dir, unreadable)
+        node = self._build_node(root, files, allowed_extensions, exclude_dir, unreadable, unreadable_files)
         if node is None:
             # Solo ocurre si la propia raiz desaparece entre la validacion previa
             # (FolderValidator) y este recorrido -- caso extremo; se degrada a un
@@ -154,22 +198,35 @@ class DocumentScanner:
         allowed_extensions: frozenset[str],
         exclude_dir: Path | None = None,
         unreadable: list[str] | None = None,
+        unreadable_files: dict[str, str] | None = None,
     ) -> DirectoryTreeNode | None:
         """Devuelve `None` si `path` desapareció entre `iterdir()` y esta llamada
         (TOCTOU: fichero borrado/movido por otra app mientras el escaneo está en
         curso) — el llamador omite ese hijo del árbol en vez de dejar que la
         excepción aborte el escaneo completo por un único fichero (AUDIT_CODE,
-        sesión 2026-09-03)."""
+        sesión 2026-09-03).
+
+        Un `lstat()` con reintentos (G11) decide si es enlace, carpeta o fichero:
+        así un error de E/S no se confunde con «no es un enlace» ni «no es una
+        carpeta» (hasta Python 3.13, `is_symlink()` e `is_dir()` se tragan o
+        propagan ese error según la versión)."""
+        extension = path.suffix.lower().lstrip(".")
         try:
-            is_symlink = path.is_symlink()
-        except OSError:
-            # Según la versión de Python, `is_symlink()` propaga el error de `lstat()` en vez de devolver False.
+            st = retry_io(path.lstat, retries=self._io_retries, backoff_s=self._io_retry_backoff_s, what=f"leer '{path}'")
+        except FileNotFoundError as exc:
+            self.logger.warning(f"No se pudo leer '{path}' (¿se eliminó durante el escaneo?): {exc}")
             return None
-        if is_symlink:
+        except OSError as exc:
+            self.logger.warning(f"No se pudo leer '{path}': {exc}")
+            if unreadable_files is not None and extension in allowed_extensions:
+                unreadable_files[str(path)] = f"No se pudieron leer sus metadatos: {exc}"
+            return None
+        # Una junction de Windows apunta a otra carpeta igual que un symlink: tampoco se sigue (G11, 1.1.0).
+        if S_ISLNK(st.st_mode) or path.is_junction():
             return DirectoryTreeNode(name=path.name, type="file", path=str(path))
-        if path.is_dir():
-            return self._build_dir_node(path, files, allowed_extensions, exclude_dir, unreadable)
-        return self._build_file_node(path, files, allowed_extensions)
+        if S_ISDIR(st.st_mode):
+            return self._build_dir_node(path, files, allowed_extensions, exclude_dir, unreadable, unreadable_files)
+        return self._build_file_node(path, files, allowed_extensions, unreadable_files)
 
     def _build_dir_node(
         self,
@@ -178,17 +235,19 @@ class DocumentScanner:
         allowed_extensions: frozenset[str],
         exclude_dir: Path | None,
         unreadable: list[str] | None = None,
+        unreadable_files: dict[str, str] | None = None,
     ) -> DirectoryTreeNode:
         children: list[DirectoryTreeNode] = []
         for entry in self._list_dir_entries(path, exclude_dir, unreadable):
-            child = self._build_node(entry, files, allowed_extensions, exclude_dir, unreadable)
+            child = self._build_node(entry, files, allowed_extensions, exclude_dir, unreadable, unreadable_files)
             if child is not None:
                 children.append(child)
         return DirectoryTreeNode(name=path.name or str(path), type="dir", path=str(path), children=children)
 
     def _list_dir_entries(self, path: Path, exclude_dir: Path | None, unreadable: list[str] | None = None) -> list[Path]:
         try:
-            entries = sorted(path.iterdir(), key=lambda p: p.name)
+            listed = retry_io(lambda: list(path.iterdir()), retries=self._io_retries, backoff_s=self._io_retry_backoff_s, what=f"listar '{path}'")
+            entries = sorted(listed, key=lambda p: p.name)
         except OSError as exc:
             # Se sigue con el resto del arbol (una subcarpeta sin permisos no debe abortar el escaneo), pero se anota:
             # sus documentos no aparecen y no deben tratarse como eliminados (L-10d, G19).
@@ -198,13 +257,20 @@ class DocumentScanner:
             return []
         return [entry for entry in entries if entry.name not in IGNORED_NAMES and entry != exclude_dir]
 
-    def _build_file_node(self, path: Path, files: list[_DiscoveredFile], allowed_extensions: frozenset[str]) -> DirectoryTreeNode | None:
+    def _build_file_node(
+        self, path: Path, files: list[_DiscoveredFile], allowed_extensions: frozenset[str], unreadable_files: dict[str, str] | None = None
+    ) -> DirectoryTreeNode | None:
+        extension = path.suffix.lower().lstrip(".")
         try:
-            stat = path.stat()
-        except OSError as exc:
+            stat = retry_io(path.stat, retries=self._io_retries, backoff_s=self._io_retry_backoff_s, what=f"leer '{path}'")
+        except FileNotFoundError as exc:
             self.logger.warning(f"No se pudo leer '{path}' (¿se eliminó durante el escaneo?): {exc}")
             return None
-        extension = path.suffix.lower().lstrip(".")
+        except OSError as exc:
+            self.logger.warning(f"No se pudo leer '{path}': {exc}")
+            if unreadable_files is not None and extension in allowed_extensions:
+                unreadable_files[str(path)] = f"No se pudieron leer sus metadatos: {exc}"
+            return None
         if extension in allowed_extensions:
             files.append(
                 _DiscoveredFile(
@@ -217,20 +283,35 @@ class DocumentScanner:
             )
         return DirectoryTreeNode(name=path.name, type="file", path=str(path), size_bytes=stat.st_size)
 
-    async def _hash_all(self, files: list[_DiscoveredFile]) -> list[DocumentMetadata]:
+    async def _hash_all(
+        self, files: list[_DiscoveredFile], known_entries: Mapping[str, CacheEntry], unreadable_files: dict[str, str]
+    ) -> list[DocumentMetadata]:
         semaphore = asyncio.Semaphore(self._max_concurrent_hashes)
 
         async def _hash_one(item: _DiscoveredFile) -> DocumentMetadata | None:
-            async with semaphore:
-                try:
-                    digest = await hash_file(str(item.full_path))
-                except OSError as exc:
-                    # TOCTOU: el fichero desapareció (o dejó de ser legible) entre
-                    # el recorrido de directorios y esta fase de hashing -- se omite
-                    # del resultado en vez de abortar TODO el escaneo por un único
-                    # fichero (AUDIT_CODE, sesión 2026-09-03).
-                    self.logger.warning(f"No se pudo calcular el hash de '{item.full_path}' (¿se eliminó durante el escaneo?): {exc}")
-                    return None
+            known = known_entries.get(str(item.full_path))
+            if known is not None and known.size_bytes == item.size_bytes and known.timestamp == item.modified_time:
+                digest = known.sha256_hash
+            else:
+                async with semaphore:
+                    try:
+                        digest = await retry_io_async(
+                            partial(hash_file, str(item.full_path)),
+                            retries=self._io_retries,
+                            backoff_s=self._io_retry_backoff_s,
+                            what=f"hash de '{item.full_path}'",
+                        )
+                    except FileNotFoundError as exc:
+                        # TOCTOU: el fichero desapareció entre el recorrido de directorios y
+                        # esta fase de hashing -- se omite del resultado en vez de abortar TODO
+                        # el escaneo por un único fichero (AUDIT_CODE, sesión 2026-09-03).
+                        self.logger.warning(f"No se pudo calcular el hash de '{item.full_path}' (¿se eliminó durante el escaneo?): {exc}")
+                        return None
+                    except OSError as exc:
+                        # G11: sigue ahí pero no se pudo leer (p. ej. corte de red que agotó los reintentos).
+                        self.logger.warning(f"No se pudo calcular el hash de '{item.full_path}': {exc}")
+                        unreadable_files[str(item.full_path)] = f"No se pudo calcular su hash: {exc}"
+                        return None
             return DocumentMetadata(
                 full_path=str(item.full_path),
                 display_name=item.display_name,

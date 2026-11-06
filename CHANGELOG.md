@@ -6,14 +6,72 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
-### Planificado (1.1.0)
+## [1.1.0] - 2026-11-06
 
-- **L-16** (petición de doc_organize_web, hueco G38):
-  1. `ScanOptions.max_documents`: parar de forma ordenada tras convertir N documentos, guardar la caché y que el
-     evento final indique que quedan documentos pendientes.
-  2. Atender el `CancelToken` entre documentos también en la fase OCR (hoy solo se atiende en la conversión).
-  3. Investigar el crecimiento de memoria de Docling/RapidOCR durante un escaneo largo: 521 documentos con OCR
-     agotaron 6 GiB en 2 h 13 min.
+Peticiones de doc_organize_web (L-16 / G38, L-9 / G11 y G25). Sin cambios incompatibles: todo lo nuevo es opcional y,
+con los valores por defecto, un escaneo se comporta como en 1.0.1, salvo en lo que lista «Cambios de comportamiento».
+Firmas en [Escaneo](docs/api/scan.md) y en las páginas de API de cada módulo.
+
+### Añadido
+
+- **Escaneos por tramos (G38)**: `ScanOptions.max_documents: int | None = None`. El escaneo para de forma ordenada
+  tras N conversiones de Docling, contando por separado la primera pasada y la de OCR. Guarda la caché y el informe de
+  errores, y termina con `COMPLETED`. `ScanSummary` gana `remaining` (conversiones pendientes) y
+  `stopped_reason` (`"max_documents"` o `None`). La llamada siguiente hace solo lo que falta.
+- **Timeout por documento (G11)**: `ScanOptions.document_timeout_s: float | None = None` y
+  `DocumentConverter.convert_document(timeout_s=)`. El documento que lo supera queda en `ERROR` con la causa y el
+  escaneo sigue. El hilo de Docling no se puede interrumpir: termina en segundo plano y su resultado se descarta. Su
+  convertidor se descarta también, así que hay un pico temporal de memoria.
+- **Reintentos de E/S (G11)**: `ScanOptions.io_retries: int = 0` e `io_retry_backoff_s: float = 1.0`, con espera
+  exponencial. Cubren listar carpetas, leer metadatos y calcular hashes (`DocumentScanner(io_retries=,
+  io_retry_backoff_s=)`) y copiar a duplicados (`DeduplicationManager(...)` y
+  `ScanCommand.deduplicate_streaming(io_retries=, io_retry_backoff_s=)`). No se reintentan `FileNotFoundError`,
+  `NotADirectoryError`, `IsADirectoryError` ni `FileExistsError`. Mover duplicados no se reintenta.
+- **Sin rehashear lo que no cambia (G11)**: `ScanOptions.reuse_unchanged_hashes: bool = False` y
+  `DocumentScanner.scan_folders(known_entries=)`. Si tamaño y fecha de modificación coinciden con la caché, se
+  reutiliza el hash.
+- **Ficheros que no se pueden leer (G11)**: `ScanResult.unreadable_files` (ruta → error) y `ScanSummary.io_errors`.
+- **Duplicados desde la caché (G25)**: `CacheEntry.size_bytes: int | None = None`, guardado por cada escaneo (columna
+  nueva en `cache.db` con migración aditiva). `DocumentMetadata.from_cache_entry(entry)` construye los metadatos sin
+  leer el fichero y lanza `ValueError` si la entrada es anterior a 1.1.0. Los `CacheEntry` serializados antes se siguen
+  leyendo, y `CacheManager(read_only=True)` abre una caché antigua sin la columna (la lee como `None`).
+- **OCR por partes (G38)**: `OCRScheduler.process_with_ocr(timeout_s=, cancel_token=, max_documents=)`. Para entre
+  documentos y devuelve los resultados ya procesados.
+- `tests/integration/test_scan_memory_growth.py`: medida del RSS cada 50 conversiones en un escaneo sintético largo con
+  OCR. Solo corre con `DOC_ORGANIZE_MEMORY_TEST=1`, no en el CI. Resultados en
+  [Memoria en escaneos largos](docs/guides/troubleshooting.md#memoria-en-escaneos-largos).
+
+### Cambios de comportamiento
+
+- **Cancelar durante el OCR conserva lo procesado (G38)**: el `CancelToken` se atiende entre documentos del lote de
+  OCR. Lo ya procesado se guarda en la caché como `SUCCESS` y el resto sigue `OCR_PENDING`. Hasta 1.0.1 la cancelación
+  también paraba entre documentos, pero descartaba los resultados del lote, así que tras partir el escaneo se rehacía
+  todo el OCR.
+- **Liberación de memoria (G38)**: durante la conversión y el OCR se hace `gc.collect()` cada 10 documentos y, en Linux
+  con glibc, `malloc_trim(0)`. También al acabar la primera pasada, antes de cargar los modelos del OCR. Con documentos
+  sintéticos: en Linux el RSS de la primera pasada queda plano (1 037 MiB a los 200 documentos, frente a 1 512 MiB); en
+  Windows el final baja de 5 332 a 3 042 MiB. Cuesta unos 40 ms por documento repartidos.
+- **Un fichero que se lista pero no se puede leer** (no uno borrado durante el escaneo) aparece en los avisos de
+  `SCANNED`, en el `ScanErrorReport` y en `ScanSummary.io_errors`. Con `force` ya no se da por eliminado: se conservan
+  su salida y su entrada de caché, como con las carpetas ilegibles desde 0.12.0. Antes se omitía en silencio.
+- **Las *junctions* de Windows no se siguen**, igual que los enlaces simbólicos. Una *junction* dentro de la carpeta
+  escaneada podía llevar el escaneo fuera de ella.
+- El evento `COMPLETED` (y `ScanSummary`) lleva siempre tres claves nuevas: `io_errors`, `remaining` y
+  `stopped_reason`.
+
+### Documentación
+
+- Página nueva [Escaneo](docs/api/scan.md): `ScanCommand`, todos los campos de `ScanOptions` y `ScanSummary`.
+- [Scanner](docs/api/scanner.md): corregida la firma, que documentaba un `scan(paths, ignore_patterns)` inexistente en
+  lugar de `scan_folders`. [Cache](docs/api/cache.md): corregido el esquema, al que le faltaban dos columnas y que
+  listaba un `PRAGMA synchronous=NORMAL` que el código nunca fija.
+
+### Investigado sin reproducir
+
+- El agotamiento de 6 GiB con 521 documentos reales (G38) no se reproduce con documentos sintéticos en Linux. Ni
+  siquiera un PDF escaneado de 40 páginas con OCR pasa de 2,9 GiB de pico. En Windows queda un crecimiento nativo de
+  unos 9 MiB por PDF en el pipeline de *layout* de Docling que no se libera desde Python. Para acotar la memoria en
+  cualquier caso: `max_documents` con un proceso nuevo por tramo.
 
 ## [1.0.1] - 2026-11-06
 
