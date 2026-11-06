@@ -6,6 +6,32 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-06
+
+Petición de doc_organize_web (G40 / L-18). Sin cambios incompatibles: con los valores por defecto las páginas de la
+caché salen en el mismo orden que en 1.1.1. Firmas en [Cache](docs/api/cache.md).
+
+### Añadido
+
+- **Orden de las páginas de la caché (G40)**: `CacheManager.load_cache_page(..., order_by: CacheOrderBy = "file_path",
+  descending: bool = False)`. `CacheOrderBy` (en `doc_organize.cache`) admite `"file_path"`, `"timestamp"`,
+  `"conversion_status"`, `"status"`, `"size_bytes"` y `"error_retry_count"`. Los empates se resuelven siempre por
+  `file_path` ascendente, también en descendente, así que el orden es total y el mismo en cualquier caché. Los `NULL`
+  (`size_bytes` de entradas anteriores a 1.1.0, `conversion_status` sin valor) van al final en los dos sentidos. Se
+  combina con `search`, `relative_to` y `conversion_status` igual que antes; `count_entries` no cambia. Un `order_by`
+  que no está en la lista lanza `ValueError`: nunca se pasa un nombre libre al SQL.
+- Una caché anterior a 1.1.0 abierta con `read_only=True` (sin la columna `size_bytes`) se puede ordenar por
+  `size_bytes`: todas las entradas empatan y quedan por `file_path`.
+
+### Rendimiento
+
+- Sin índices nuevos ni migración. Cada conexión de `CacheManager` fija `PRAGMA temp_store=MEMORY` (afecta solo a la
+  conexión, no al fichero, así que vale en solo lectura) y, para un orden que no es `file_path`, ordena solo las
+  claves y después lee las filas de la página. Con 100 000 entradas, una página con offset alto tarda ~80–150 ms en
+  cualquier orden y dirección, con o sin filtros (disco local, Windows, Python 3.14); antes, ordenando filas completas
+  con el valor por defecto de SQLite, ~1 s. Se descartaron los índices: daban ~7 ms, pero multiplicaban por cuatro el
+  tamaño de `cache.db` (cada uno repite `file_path`) y el coste de cada escritura del escaneo.
+
 ## [1.1.1] - 2026-11-06
 
 Corrección. Sin cambios de API.

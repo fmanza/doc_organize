@@ -12,7 +12,7 @@ classDiagram
         +load_cache() dict[str, CacheEntry]
         +read_only: bool
         +count_entries(search, relative_to, conversion_status) int
-        +load_cache_page(limit, offset, search, relative_to, conversion_status) list[CacheEntry]
+        +load_cache_page(limit, offset, search, relative_to, conversion_status, order_by, descending) list[CacheEntry]
         +get_changes(cache: dict, current_docs: list) tuple
         +save_entries(entries: list[CacheEntry]) void
     }
@@ -56,6 +56,8 @@ class CacheManager:
         *,
         relative_to: str | Path | None = None,
         conversion_status: ConversionStatus | str | None = None,
+        order_by: CacheOrderBy = "file_path",
+        descending: bool = False,
     ) -> list[CacheEntry]
     
     def get_changes(
@@ -125,7 +127,7 @@ Cuenta entradas de `cache_entries`, opcionalmente filtradas por `search`.
 
 #### load_cache_page (Async)
 
-Lee una página de `cache_entries`, ordenada por `file_path` para paginación estable.
+Lee una página de `cache_entries`, ordenada por `file_path` (o por `order_by`, desde 1.2.0) para paginación estable.
 
 | Parámetro | Tipo | Descripción |
 |---|---|---|
@@ -134,13 +136,41 @@ Lee una página de `cache_entries`, ordenada por `file_path` para paginación es
 | `search` | `str \| None` | Subcadena a buscar en `file_path`. `None` no filtra |
 | `relative_to` | `str \| Path \| None` | Igual que en `count_entries` (0.12.0) |
 | `conversion_status` | `ConversionStatus \| str \| None` | Igual que en `count_entries` (0.12.0) |
+| `order_by` | `CacheOrderBy` | Columna de orden (1.2.0): `"file_path"` (por defecto), `"timestamp"`, `"conversion_status"`, `"status"`, `"size_bytes"` o `"error_retry_count"` |
+| `descending` | `bool` | Orden descendente de `order_by` (1.2.0). Por defecto `False` |
 
 | Retorno | Tipo | Descripción |
 |---|---|---|
 | | `list[CacheEntry]` | Entradas de la página solicitada |
 
+| Excepción | Cuándo |
+|---|---|
+| `ValueError` | `order_by` no es una de las columnas de `CacheOrderBy` (nunca se pasa un nombre libre al SQL) |
+
+**Orden** (1.2.0):
+
+- Los empates se resuelven siempre por `file_path` ascendente, también con `descending=True`. El orden es total y
+  determinista: las páginas de varias cachés (una por carpeta) se pueden juntar con el mismo criterio.
+- Los `NULL` van al final en los dos sentidos: `size_bytes` de entradas anteriores a 1.1.0 y `conversion_status` sin
+  valor. En una caché anterior a 1.1.0 abierta con `read_only=True` (sin la columna `size_bytes`), ordenar por
+  `size_bytes` deja todas las entradas empatadas y quedan por `file_path`.
+- `status` y `conversion_status` se ordenan por el texto de su valor (`"error"` < `"ocr_pending"` < `"success"`).
+- `CacheOrderBy` se importa de `doc_organize.cache`.
+
+```python
+from doc_organize.cache import CacheManager
+
+async with CacheManager(project / "cache.db", read_only=True) as cache:
+    mayores = await cache.load_cache_page(50, 0, order_by="size_bytes", descending=True)
+```
+
 **Operación**:
-- `SELECT ... ORDER BY file_path LIMIT ? OFFSET ?`, con el mismo filtro `search` que `count_entries`
+- Con `order_by="file_path"`: `SELECT ... ORDER BY file_path LIMIT ? OFFSET ?`, con el mismo filtro `search` que
+  `count_entries`
+- Con otra columna: se ordenan solo las claves (`rowid`) en una subconsulta con los mismos filtros y se leen las filas
+  de la página. No hay índices nuevos ni migración: cada conexión fija `PRAGMA temp_store=MEMORY`, que no cambia el
+  fichero, para que SQLite no vuelque la ordenación a disco. Con 100 000 entradas, una página con offset alto tarda
+  ~80–150 ms en cualquier orden (disco local, Windows, Python 3.14), frente a ~1 s sin ese PRAGMA
 - No sustituye a `load_cache()`: sigue siendo la fuente completa que usan `get_changes()` y la exportación ZIP; `load_cache_page()` es solo para listas largas en la vista web
 
 ---
