@@ -11,6 +11,7 @@ import stat
 import uuid
 
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,7 @@ from rapidfuzz import fuzz, process, utils
 from doc_organize.core.constants import DEDUP_HISTORY_JSONL_NAME, DEDUP_REPORT_JSON_NAME, VERSION_SUFFIX_PATTERN
 from doc_organize.core.exceptions import InvalidPathError
 from doc_organize.core.models import DeduplicationReport, DedupMode, DocumentMetadata, DuplicateGroup, DuplicateReason
+from doc_organize.utils.io_retry import retry_io_async
 from doc_organize.utils.logging import get_logger
 from doc_organize.utils.path_utils import _copy_nofollow, _open_dir_nofollow, ensure_no_symlinks
 
@@ -60,8 +62,18 @@ class DeduplicationManager:
         1
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, io_retries: int = 0, io_retry_backoff_s: float = 1.0) -> None:
+        """Crea el gestor.
+
+        Args:
+            io_retries: Reintentos de cada copia (`mode="copy"`) ante errores de E/S transitorios (G11, 1.1.0); 0 por
+                defecto. Mover no se reintenta: un movimiento a medias entre volúmenes puede dejar el fichero en los
+                dos sitios.
+            io_retry_backoff_s: Espera antes del primer reintento; se duplica en cada uno.
+        """
         self.logger = get_logger(__name__)
+        self._io_retries = io_retries
+        self._io_retry_backoff_s = io_retry_backoff_s
 
     def find_duplicates(self, docs: list[DocumentMetadata], fuzzy_threshold: int | None = None) -> list[DuplicateGroup]:
         """Agrupa `docs` en duplicados exactos (mismo hash), conflictos de
@@ -153,7 +165,12 @@ class DeduplicationManager:
                 continue
             try:
                 if mode == "copy":
-                    await self._move_to_duplicates(Path(doc.full_path), duplicates_dir, doc.sha256_hash, copy=True, **extra)
+                    await retry_io_async(
+                        partial(self._move_to_duplicates, Path(doc.full_path), duplicates_dir, doc.sha256_hash, copy=True, **extra),
+                        retries=self._io_retries,
+                        backoff_s=self._io_retry_backoff_s,
+                        what=f"copiar '{doc.full_path}' a duplicados",
+                    )
                 else:
                     await self._move_to_duplicates(Path(doc.full_path), duplicates_dir, doc.sha256_hash, **extra)
             except OSError as exc:
@@ -452,7 +469,12 @@ class DeduplicationManager:
         if _NOFOLLOW_DIR_FD:
             _transfer_nofollow(source_abs, target, copy=copy)
         elif copy:
-            shutil.copy2(source_abs, target, follow_symlinks=False)
+            try:
+                shutil.copy2(source_abs, target, follow_symlinks=False)
+            except OSError:
+                # Una copia a medias no debe quedarse en duplicados/ (ni desviar un reintento al nombre con sufijo, G11).
+                target.unlink(missing_ok=True)
+                raise
         else:
             shutil.move(source_abs, target)
 

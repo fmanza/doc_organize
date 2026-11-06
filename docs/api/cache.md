@@ -196,14 +196,21 @@ Guarda/actualiza entradas en caché (upsert transaccional).
 ### Salida
 
 ```python
-@dataclass
-class CacheEntry:
+class CacheEntry(BaseModel):
     file_path: str
     sha256_hash: str
-    timestamp: float  # Unix timestamp
+    timestamp: float  # fecha de modificación del fichero (Unix) cuando se escaneó
     status: DocumentStatus
-    conversion_status: ConversionStatus
+    conversion_status: ConversionStatus | None = None
+    error_message: str | None = None
+    error_retry_count: int = 0
+    size_bytes: int | None = None  # 1.1.0 (G25); None en entradas anteriores
 ```
+
+`timestamp` y `size_bytes` permiten construir un `DocumentMetadata` desde la caché
+(`DocumentMetadata.from_cache_entry`, ver [Scanner](scanner.md#documentmetadata-desde-la-cache-110-g25)) y no rehashear
+lo que no cambió (`ScanOptions.reuse_unchanged_hashes`). Un `CacheEntry` serializado antes de 1.1.0 (sin
+`size_bytes`) se sigue leyendo.
 
 ## Schema SQLite
 
@@ -213,13 +220,21 @@ CREATE TABLE cache_entries (
     sha256_hash TEXT NOT NULL,
     timestamp REAL NOT NULL,
     status TEXT NOT NULL,
-    conversion_status TEXT
+    conversion_status TEXT,
+    error_message TEXT,
+    error_retry_count INTEGER NOT NULL DEFAULT 0,
+    size_bytes INTEGER  -- 1.1.0
 );
 ```
 
+Al abrirla en escritura, una caché anterior gana las columnas que le falten (`ALTER TABLE ... ADD COLUMN`, migración
+aditiva). En solo lectura no se migra: una caché sin `size_bytes` se abre igual y esa columna se lee como `None`.
+
 **Pragmas**:
 - `PRAGMA journal_mode=WAL` — Write-Ahead Logging para concurrencia
-- `PRAGMA synchronous=NORMAL` — Balance entre seguridad y rendimiento
+
+> Corregido en 1.1.0: hasta esta versión, esta página listaba también `PRAGMA synchronous=NORMAL`, que el código nunca
+> ha fijado, y omitía las columnas `error_message` y `error_retry_count`.
 
 ## Dependencias
 

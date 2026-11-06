@@ -21,20 +21,22 @@ CREATE TABLE IF NOT EXISTS cache_entries (
     status TEXT NOT NULL,
     conversion_status TEXT,
     error_message TEXT,
-    error_retry_count INTEGER NOT NULL DEFAULT 0
+    error_retry_count INTEGER NOT NULL DEFAULT 0,
+    size_bytes INTEGER
 )
 """
 
 _UPSERT = """
-INSERT INTO cache_entries (file_path, sha256_hash, timestamp, status, conversion_status, error_message, error_retry_count)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO cache_entries (file_path, sha256_hash, timestamp, status, conversion_status, error_message, error_retry_count, size_bytes)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(file_path) DO UPDATE SET
     sha256_hash=excluded.sha256_hash,
     timestamp=excluded.timestamp,
     status=excluded.status,
     conversion_status=excluded.conversion_status,
     error_message=excluded.error_message,
-    error_retry_count=excluded.error_retry_count
+    error_retry_count=excluded.error_retry_count,
+    size_bytes=excluded.size_bytes
 """
 
 
@@ -108,6 +110,7 @@ class CacheManager:
         self.read_only = read_only
         self.logger = get_logger(__name__)
         self._conn: aiosqlite.Connection | None = None
+        self._has_size_column = True
 
     async def __aenter__(self) -> Self:
         """Abre la conexion (y, en escritura, prepara WAL, tabla y columnas).
@@ -143,6 +146,7 @@ class CacheManager:
         except Exception as exc:  # p. ej. sqlite3.DatabaseError si el fichero no es una base SQLite
             await self.__aexit__()
             raise CacheError(f"No se pudo leer la caché '{self.db_path}': {exc}") from exc
+        self._has_size_column = "size_bytes" in columns
         missing = set(_COLUMNS) - columns
         if missing:
             await self.__aexit__()
@@ -165,6 +169,9 @@ class CacheManager:
             altered = True
         if "error_retry_count" not in columns:
             await self._connection.execute("ALTER TABLE cache_entries ADD COLUMN error_retry_count INTEGER NOT NULL DEFAULT 0")
+            altered = True
+        if "size_bytes" not in columns:
+            await self._connection.execute("ALTER TABLE cache_entries ADD COLUMN size_bytes INTEGER")
             altered = True
         if altered:
             await self._connection.commit()
@@ -208,19 +215,31 @@ class CacheManager:
     async def load_cache(self) -> dict[str, CacheEntry]:
         """Lee todas las entradas de `cache.db`."""
         cache: dict[str, CacheEntry] = {}
-        query = "SELECT file_path, sha256_hash, timestamp, status, conversion_status, error_message, error_retry_count FROM cache_entries"
+        query = f"SELECT {self._select_columns()} FROM cache_entries"
         async with self._connection.execute(query) as cursor:
-            async for file_path, sha256_hash, timestamp, status, conversion_value, error_message, error_retry_count in cursor:
-                cache[file_path] = CacheEntry(
-                    file_path=file_path,
-                    sha256_hash=sha256_hash,
-                    timestamp=timestamp,
-                    status=DocumentStatus(status),
-                    conversion_status=ConversionStatus(conversion_value) if conversion_value else None,
-                    error_message=error_message,
-                    error_retry_count=error_retry_count,
-                )
+            async for row in cursor:
+                entry = self._row_to_entry(row)
+                cache[entry.file_path] = entry
         return cache
+
+    def _select_columns(self) -> str:
+        """Columnas del `SELECT`; `size_bytes` como `NULL` en una caché antigua abierta en solo lectura (G25)."""
+        size_column = "size_bytes" if self._has_size_column else "NULL"
+        return ", ".join((*_COLUMNS, size_column))
+
+    @staticmethod
+    def _row_to_entry(row: tuple[object, ...] | aiosqlite.Row) -> CacheEntry:
+        file_path, sha256_hash, timestamp, status, conversion_value, error_message, error_retry_count, size_bytes = row
+        return CacheEntry(
+            file_path=file_path,
+            sha256_hash=sha256_hash,
+            timestamp=timestamp,
+            status=DocumentStatus(status),
+            conversion_status=ConversionStatus(conversion_value) if conversion_value else None,
+            error_message=error_message,
+            error_retry_count=error_retry_count,
+            size_bytes=size_bytes,
+        )
 
     async def count_entries(
         self,
@@ -296,23 +315,13 @@ class CacheManager:
             []
         """
         where, params = self._build_filters(search, relative_to, conversion_status)
-        query = f"SELECT {', '.join(_COLUMNS)} FROM cache_entries{where} ORDER BY file_path LIMIT ? OFFSET ?"
+        query = f"SELECT {self._select_columns()} FROM cache_entries{where} ORDER BY file_path LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
         entries: list[CacheEntry] = []
         async with self._connection.execute(query, params) as cursor:
-            async for file_path, sha256_hash, timestamp, status, conversion_value, error_message, error_retry_count in cursor:
-                entries.append(
-                    CacheEntry(
-                        file_path=file_path,
-                        sha256_hash=sha256_hash,
-                        timestamp=timestamp,
-                        status=DocumentStatus(status),
-                        conversion_status=ConversionStatus(conversion_value) if conversion_value else None,
-                        error_message=error_message,
-                        error_retry_count=error_retry_count,
-                    )
-                )
+            async for row in cursor:
+                entries.append(self._row_to_entry(row))
         return entries
 
     async def compute_hash(self, file_path: str) -> str:
@@ -375,6 +384,7 @@ class CacheManager:
                 entry.conversion_status.value if entry.conversion_status else None,
                 entry.error_message,
                 entry.error_retry_count,
+                entry.size_bytes,
             )
             for entry in entries
         ]
