@@ -4,7 +4,6 @@ Persistencia plana del contexto de organización documental de un proyecto.
 
 import asyncio
 import json
-import shutil
 
 from pathlib import Path
 from typing import Any
@@ -16,6 +15,7 @@ from doc_organize.core.exceptions import ContextError, ContextNotFoundError, Dom
 from doc_organize.core.models import Context, Domain, DomainDocument, Project
 from doc_organize.utils.atomic_write import write_text_atomic
 from doc_organize.utils.logging import get_logger
+from doc_organize.utils.path_utils import remove_tree
 
 _CONTEXT_FILE_NAME = CONTEXT_FILE_NAME
 _DOMAINS_DIR_NAME = DOMAINS_FOLDER_NAME
@@ -93,7 +93,7 @@ class ContextRegistry:
             await asyncio.to_thread(self._context_path(project).unlink, missing_ok=True)
             domains_root = Path(project.root_path) / _DOMAINS_DIR_NAME
             if await asyncio.to_thread(domains_root.is_dir):
-                await asyncio.to_thread(shutil.rmtree, domains_root)
+                await asyncio.to_thread(remove_tree, domains_root)
 
     async def get_domain(self, project: Project, slug: str) -> Domain:
         """Devuelve el dominio `slug` del contexto de `project`.
@@ -195,7 +195,7 @@ class ContextRegistry:
             return
         stale_dirs = await asyncio.to_thread(self._list_stale_domain_dirs, domains_root, current_slugs)
         for stale_dir in stale_dirs:
-            await asyncio.to_thread(shutil.rmtree, stale_dir)
+            await asyncio.to_thread(remove_tree, stale_dir)
             self.logger.info(f"Dominio obsoleto eliminado tras reconstruir el contexto: {stale_dir}")
 
     @staticmethod

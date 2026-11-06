@@ -5,7 +5,6 @@ Copia física de los documentos clasificados a la carpeta reorganizada del proye
 import asyncio
 import hashlib
 import os
-import shutil
 import unicodedata
 
 from collections.abc import Awaitable, Callable
@@ -15,7 +14,7 @@ from doc_organize.core.exceptions import IncompleteConversionArtifactsError, Inv
 from doc_organize.core.models import Context, Domain, DomainDocument, Project
 from doc_organize.projects.layout import validate_output_folder_name
 from doc_organize.utils.logging import get_logger
-from doc_organize.utils.path_utils import copy_file_nofollow, copy_tree_nofollow, ensure_no_symlinks, ensure_tree_has_no_symlinks
+from doc_organize.utils.path_utils import copy_file_nofollow, copy_tree_nofollow, ensure_no_symlinks, ensure_tree_has_no_symlinks, remove_tree
 
 logger = get_logger(__name__)
 
@@ -331,7 +330,7 @@ class Reorganizer:
                 copy_tree_nofollow(images_dir, target_dir / "img" / stem)
         except OSError:
             if created:
-                shutil.rmtree(target_dir, ignore_errors=True)
+                remove_tree(target_dir, ignore_errors=True)
             raise
 
 
@@ -340,7 +339,7 @@ def _remove_dir_or_link(path: Path) -> None:
     if path.is_symlink() or path.is_junction():
         os.unlink(path)
     elif path.is_dir():
-        shutil.rmtree(path)
+        remove_tree(path)
 
 
 __all__ = ["Reorganizer", "assign_organized_paths", "resolve_document_slug_parts", "resolve_organized_paths"]

@@ -1,18 +1,18 @@
 """Vaciado del histórico/contenido de conversión de un proyecto (REQ-008)."""
 
 import asyncio
-import shutil
 
 from pathlib import Path
 
 from doc_organize.core.exceptions import ProjectError
 from doc_organize.core.models import Project
 from doc_organize.utils.logging import get_logger
+from doc_organize.utils.path_utils import remove_tree
 
 
 def _remove_entry(entry: Path) -> None:
     if entry.is_dir() and not entry.is_symlink():
-        shutil.rmtree(entry)
+        remove_tree(entry)
     else:
         entry.unlink()
 

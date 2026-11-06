@@ -6,6 +6,22 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-06
+
+Corrección. Sin cambios de API.
+
+### Corregido
+
+- En Windows, `ProjectRegistry.delete_project` fallaba con `ProjectError` («Acceso denegado», `WinError 5`) si el
+  proyecto contenía un fichero de solo lectura, y dejaba el proyecto registrado y borrado a medias. Esos ficheros llegan
+  al proyecto porque las copias (duplicados en modo copia, salida del `Reorganizer`) usan `shutil.copy2`, que conserva
+  el atributo de solo lectura del original (carpetas de red, CDs, descargas). Ahora se quita el atributo y se reintenta
+  el borrado; nunca a través de un enlace o una *junction*, y cualquier otro error se propaga como antes. Mismo
+  arreglo en `move_project_root` entre volúmenes (copiar y borrar el origen), `Reorganizer.delete_output` y
+  reconstrucción, `ProjectHistoryCleaner.clear` y `ContextRegistry.delete_context`. En Linux y macOS no cambia nada.
+- Un proyecto que quedó borrado a medias con 1.1.0 o anterior se termina de borrar llamando otra vez a
+  `delete_project`.
+
 ## [1.1.0] - 2026-11-06
 
 Peticiones de doc_organize_web (L-16 / G38, L-9 / G11 y G25). Sin cambios incompatibles: todo lo nuevo es opcional y,

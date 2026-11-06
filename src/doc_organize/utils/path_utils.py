@@ -11,6 +11,7 @@ import os
 import shutil
 import stat
 
+from collections.abc import Callable
 from pathlib import Path
 
 from doc_organize.core.exceptions import InvalidPathError
@@ -287,12 +288,72 @@ def paths_within_roots(paths: list[str], allowed_roots: list[str] | None) -> boo
     return all(any(is_subpath(path, root) for root in allowed_roots) for path in paths)
 
 
+def remove_tree(path: str | Path, *, ignore_errors: bool = False) -> None:
+    """`shutil.rmtree` que también borra ficheros y carpetas con el atributo de solo lectura de Windows (1.1.1).
+
+    `shutil.copy2` conserva ese atributo, así que una copia de un original de solo lectura (carpeta de red, CD,
+    descarga) dejaba `rmtree` en `PermissionError` a mitad de borrado. Se quita el atributo y se reintenta solo en
+    ese caso: nunca a través de un enlace o unión (no se toca su destino) ni ante otros errores, que se propagan
+    igual que antes. En POSIX el atributo no existe y el comportamiento no cambia.
+
+    Args:
+        path: Carpeta a borrar entera.
+        ignore_errors: Como en `shutil.rmtree`: no propagar errores (se deja lo que no se pudo borrar).
+
+    Example:
+        >>> import os, stat, tempfile
+        >>> from pathlib import Path
+        >>> folder = Path(tempfile.mkdtemp())
+        >>> (folder / "copia.pdf").write_text("x")
+        1
+        >>> os.chmod(folder / "copia.pdf", stat.S_IREAD)
+        >>> remove_tree(folder)
+        >>> folder.exists()
+        False
+    """
+    try:
+        shutil.rmtree(path, onexc=_clear_readonly_and_retry)
+    except OSError:
+        if not ignore_errors:
+            raise
+
+
+def _clear_readonly_and_retry(func: Callable[..., object], path: str, exc: BaseException) -> None:
+    if not isinstance(exc, PermissionError) or func not in (os.unlink, os.remove, os.rmdir):
+        raise exc
+    try:
+        st = os.lstat(path)
+    except OSError:
+        raise exc from None
+    is_readonly = bool(getattr(st, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_READONLY)
+    is_link = stat.S_ISLNK(st.st_mode) or getattr(st, "st_reparse_tag", 0) != 0
+    if not is_readonly or is_link:
+        raise exc
+    os.chmod(path, stat.S_IMODE(st.st_mode) | stat.S_IWRITE)
+    func(path)
+
+
+def move_tree(source: str | Path, target: str | Path) -> None:
+    """Mueve la carpeta `source` a `target` como `shutil.move`, borrando el origen con `remove_tree` (1.1.1).
+
+    En el mismo volumen es un `os.rename`. Entre volúmenes, copia (`copytree` con `symlinks=True`, como
+    `shutil.move`) y después borra el origen, también si tiene ficheros de solo lectura.
+    """
+    try:
+        os.rename(source, target)
+    except OSError:
+        shutil.copytree(source, target, symlinks=True)
+        remove_tree(source)
+
+
 __all__ = [
     "copy_file_nofollow",
     "copy_tree_nofollow",
     "ensure_no_symlinks",
     "ensure_tree_has_no_symlinks",
     "is_subpath",
+    "move_tree",
     "paths_within_roots",
+    "remove_tree",
     "safe_path_join",
 ]
