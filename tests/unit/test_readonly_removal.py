@@ -40,7 +40,8 @@ def test_remove_tree_deletes_readonly_files_and_folders(tmp_path: Path) -> None:
     folder = tmp_path / "proyecto"
     _readonly_file(folder / "duplicados" / "copia.pdf")
     _readonly_file(folder / "raiz.txt")
-    os.chmod(folder / "duplicados", stat.S_IREAD | stat.S_IEXEC)
+    if sys.platform == "win32":  # en POSIX una carpeta sin escritura sí impide borrar su contenido, como antes
+        os.chmod(folder / "duplicados", stat.S_IREAD | stat.S_IEXEC)
 
     remove_tree(folder)
 
