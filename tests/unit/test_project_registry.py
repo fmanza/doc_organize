@@ -265,7 +265,7 @@ async def test_delete_project_keeps_registry_entry_if_folder_removal_fails(tmp_p
     async with ProjectRegistry(tmp_path / "projects.json") as registry:
         await registry.create_project("Proyecto", base)
 
-        def _boom(path):
+        def _boom(path, **_kwargs):
             raise OSError("fallo simulado al borrar la carpeta")
 
         monkeypatch.setattr(shutil, "rmtree", _boom)

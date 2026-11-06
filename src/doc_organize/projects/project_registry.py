@@ -19,7 +19,7 @@ from doc_organize.core.exceptions import (
 )
 from doc_organize.core.models import Project
 from doc_organize.utils.logging import get_logger
-from doc_organize.utils.path_utils import safe_path_join
+from doc_organize.utils.path_utils import move_tree, remove_tree, safe_path_join
 from doc_organize.validators.project_validator import ProjectValidator
 
 _DEFAULT_REGISTRY_PATH = Path.home() / ".doc_organize" / "projects.json"
@@ -197,7 +197,7 @@ class ProjectRegistry:
             root_path = Path(project.root_path)
             if root_path.exists():
                 try:
-                    await asyncio.to_thread(shutil.rmtree, root_path)
+                    await asyncio.to_thread(remove_tree, root_path)
                 except OSError as exc:
                     raise ProjectError(f"No se pudo eliminar la carpeta del proyecto '{root_path}': {exc}") from exc
 
@@ -211,9 +211,9 @@ class ProjectRegistry:
 
         `destination_parent` debe ser una carpeta ya existente (la carpeta padre
         de destino, elegida por el usuario, no la ruta final) — igual que
-        `base_location` en `create_project`. Usa `shutil.move`, que ya resuelve
-        internamente "rename atómico si es el mismo volumen, si no copiar y
-        borrar el origen" — no hace falta reimplementar esa lógica aquí.
+        `base_location` en `create_project`. Usa `move_tree`: rename atómico si es
+        el mismo volumen, si no copiar y borrar el origen (como `shutil.move`, pero
+        el borrado también puede con ficheros de solo lectura de Windows, 1.1.1).
 
         Si el movimiento físico tiene éxito pero no se puede persistir el
         registro actualizado, se revierte el movimiento (misma carpeta física de
@@ -270,7 +270,7 @@ class ProjectRegistry:
                 raise ProjectError(f"La carpeta actual del proyecto no existe: {old_root}")
 
             try:
-                await asyncio.to_thread(shutil.move, str(old_root), str(new_root))
+                await asyncio.to_thread(move_tree, old_root, new_root)
             except OSError as exc:
                 raise ProjectError(f"No se pudo mover la carpeta del proyecto de '{old_root}' a '{new_root}': {exc}") from exc
             updated = project.model_copy(update={"root_path": str(new_root)})
@@ -284,7 +284,7 @@ class ProjectRegistry:
                 self.logger.warning(
                     f"Error al guardar proyecto '{name}' tras mover a '{new_root}': {exc}. Revirtiendo cambios de ubicación...", exc_info=True
                 )
-                await asyncio.to_thread(shutil.move, str(new_root), str(old_root))
+                await asyncio.to_thread(move_tree, new_root, old_root)
                 raise
 
         self.logger.info(f"Proyecto '{name}' movido de '{old_root}' a '{new_root}'")

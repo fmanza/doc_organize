@@ -171,9 +171,11 @@ Elimina un proyecto por completo: borra `root_path` en disco y quita la entrada 
 |---|---|---|
 | `name` | `str` | Nombre del proyecto a eliminar |
 
-**Proceso**: borra primero la carpeta en disco (`shutil.rmtree`) y solo si tiene éxito
+**Proceso**: borra primero la carpeta en disco y solo si tiene éxito
 quita la entrada del registro — si el borrado físico falla, el proyecto sigue
-registrado para poder reintentarlo.
+registrado para poder reintentarlo. Desde 1.1.1 también borra en Windows los ficheros
+con atributo de solo lectura (p. ej. copias de originales de solo lectura); los enlaces
+y *junctions* se quitan sin tocar su destino.
 
 **Excepciones**:
 - `ProjectNotFoundError` — No existe ese proyecto
@@ -194,8 +196,8 @@ Mueve `root_path` de un proyecto a `<destination_parent>/<name>/`.
 |---|---|---|
 | | `Project` | Proyecto actualizado, con el nuevo `root_path` |
 
-**Proceso**: usa `shutil.move` (rename atómico si es el mismo volumen, copiar+borrar si
-no) y, si el movimiento físico tiene éxito pero no se puede persistir el registro
+**Proceso**: rename atómico si es el mismo volumen; si no, copia y borra el origen
+(como `shutil.move`; desde 1.1.1 el borrado también puede con ficheros de solo lectura de Windows) y, si el movimiento físico tiene éxito pero no se puede persistir el registro
 actualizado, revierte el movimiento antes de propagar el error.
 
 **Excepciones**:
