@@ -3,7 +3,7 @@ Cache transaccional (SQLite + WAL) de hashes de documentos (REQ-006).
 """
 
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self, get_args
 
 import aiosqlite
 
@@ -46,6 +46,11 @@ def _py_lower(value: str | None) -> str | None:
 
 
 _COLUMNS = ("file_path", "sha256_hash", "timestamp", "status", "conversion_status", "error_message", "error_retry_count")
+
+CacheOrderBy = Literal["file_path", "timestamp", "conversion_status", "status", "size_bytes", "error_retry_count"]
+"""Columnas por las que `CacheManager.load_cache_page` puede ordenar (G40, 1.2.0)."""
+
+_ORDER_BY_COLUMNS: frozenset[str] = frozenset(get_args(CacheOrderBy))
 
 
 def _py_relpath(file_path: str | None, root: str | None) -> str | None:
@@ -128,6 +133,10 @@ class CacheManager:
             await self._conn.execute(_SCHEMA)
             await self._conn.commit()
             await self._migrate_schema()
+        # Ordenaciones en memoria (G40): con el valor por defecto SQLite vuelca a ficheros temporales en disco al ordenar
+        # una página con offset alto por una columna sin índice (~1 s con 100 000 entradas; ~0,1 s así). Solo afecta a
+        # esta conexión: no cambia el fichero, así que vale también en solo lectura.
+        await self._connection.execute("PRAGMA temp_store=MEMORY")
         # SQLite LIKE/LOWER() solo pliegan mayusculas para ASCII: sin esto, buscar
         # "cafe" no encontraria "CAFE" en nombres de archivo en espanol con tildes.
         await self._connection.create_function("py_lower", 1, _py_lower, deterministic=True)
@@ -286,8 +295,10 @@ class CacheManager:
         *,
         relative_to: str | Path | None = None,
         conversion_status: ConversionStatus | str | None = None,
+        order_by: CacheOrderBy = "file_path",
+        descending: bool = False,
     ) -> list[CacheEntry]:
-        """Lee una pagina de `cache_entries`, ordenada por `file_path` para paginacion estable.
+        """Lee una pagina de `cache_entries`, ordenada por `file_path` (o por `order_by`) para paginacion estable.
 
         Pensado para listados paginados (listas largas); no sustituye a
         `load_cache()`, que sigue siendo la fuente completa para `get_changes()` y
@@ -300,9 +311,18 @@ class CacheManager:
                 mayusculas/tildes. `None` o cadena vacia no filtra.
             relative_to (str | Path | None): Igual que en `count_entries` (G22).
             conversion_status (ConversionStatus | str | None): Igual que en `count_entries`.
+            order_by (CacheOrderBy): Columna de orden (G40, 1.2.0). Los empates se resuelven siempre por
+                `file_path` ascendente, asi que el orden es total y el mismo en cualquier caché. `conversion_status` y
+                `status` se ordenan por el texto de su valor (`"error"` < `"ocr_pending"` < `"success"`).
+            descending (bool): Orden descendente de `order_by` (el desempate por `file_path` sigue ascendente). Los
+                `NULL` (`size_bytes` de entradas anteriores a 1.1.0, `conversion_status` sin valor) van al final en
+                los dos sentidos.
 
         Returns:
-            list[CacheEntry]: Entradas de la pagina solicitada, ordenadas por `file_path`.
+            list[CacheEntry]: Entradas de la pagina solicitada, en ese orden.
+
+        Raises:
+            ValueError: Si `order_by` no es una de las columnas de `CacheOrderBy`.
 
         Example:
             >>> import asyncio, tempfile
@@ -310,12 +330,20 @@ class CacheManager:
             >>> async def main():
             ...     db_path = Path(tempfile.mkdtemp()) / "cache.db"
             ...     async with CacheManager(db_path) as cache:
-            ...         return await cache.load_cache_page(limit=50, offset=0)
+            ...         return await cache.load_cache_page(limit=50, offset=0, order_by="size_bytes", descending=True)
             >>> asyncio.run(main())
             []
         """
+        order_clause = self._order_clause(order_by, descending)
         where, params = self._build_filters(search, relative_to, conversion_status)
-        query = f"SELECT {self._select_columns()} FROM cache_entries{where} ORDER BY file_path LIMIT ? OFFSET ?"
+        if order_by == "file_path":
+            query = f"SELECT {self._select_columns()} FROM cache_entries{where} ORDER BY {order_clause} LIMIT ? OFFSET ?"
+        else:
+            # Se ordenan solo las claves y luego se leen las filas de la página: ordenar filas completas cuesta el doble.
+            query = (
+                f"SELECT {self._select_columns()} FROM cache_entries WHERE rowid IN "
+                f"(SELECT rowid FROM cache_entries{where} ORDER BY {order_clause} LIMIT ? OFFSET ?) ORDER BY {order_clause}"
+            )
         params.extend([limit, offset])
 
         entries: list[CacheEntry] = []
@@ -323,6 +351,16 @@ class CacheManager:
             async for row in cursor:
                 entries.append(self._row_to_entry(row))
         return entries
+
+    def _order_clause(self, order_by: str, descending: bool) -> str:
+        """`ORDER BY` de `load_cache_page`; solo con nombres de `CacheOrderBy`, nunca con texto del llamador (G40)."""
+        if order_by not in _ORDER_BY_COLUMNS:
+            raise ValueError(f"order_by no válido: {order_by!r}; usa uno de {', '.join(get_args(CacheOrderBy))}.")
+        direction = "DESC" if descending else "ASC"
+        if order_by == "file_path":
+            return f"file_path {direction}"
+        column = "NULL" if order_by == "size_bytes" and not self._has_size_column else order_by
+        return f"{column} IS NULL, {column} {direction}, file_path ASC"
 
     async def compute_hash(self, file_path: str) -> str:
         """Delega en `utils.hash_utils.hash_file()` — no reimplementa el hashing."""
@@ -393,4 +431,4 @@ class CacheManager:
         self.logger.info(f"Cache actualizado: {len(entries)} entradas")
 
 
-__all__ = ["CacheManager"]
+__all__ = ["CacheManager", "CacheOrderBy"]
