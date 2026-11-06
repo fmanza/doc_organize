@@ -40,7 +40,7 @@ sequenceDiagram
 
 1. **Entrada**: Documento + directorio salida
 2. **Conversión rápida**: Docling extrae texto sin OCR
-3. **Detección OCR**: Si `parse_score=NaN`, marcar como `ocr_required=True`
+3. **Detección OCR**: Si es PDF/imagen y `parse_score=NaN`, marcar como `ocr_required=True` (docx, xlsx, pptx, html… nunca requieren OCR)
 4. **Si OCR requerido**: `OCRScheduler` reconvierte con OCR (segunda pasada)
 5. **Salida**: Markdown (legible) + JSON (estructura)
 
