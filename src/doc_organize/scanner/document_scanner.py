@@ -3,11 +3,14 @@ Escaneo recursivo de documentos (REQ-002).
 """
 
 import asyncio
+import os
+import re
 import time
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from functools import partial
+from fnmatch import translate
+from functools import cached_property, partial
 from pathlib import Path
 from stat import S_ISDIR, S_ISLNK
 from typing import Self
@@ -19,6 +22,76 @@ from doc_organize.utils.io_retry import retry_io, retry_io_async
 from doc_organize.utils.logging import get_logger
 
 _DEFAULT_MAX_CONCURRENT_HASHES = 8
+
+
+def resolve_exclusion(path: str | Path) -> Path:
+    """Ruta absoluta de una exclusión, como la ve el recorrido (G41, 1.3.0).
+
+    Se resuelve la carpeta padre y se conserva el último tramo: así una exclusión que es un enlace o una *junction* se
+    compara con la entrada del enlace (que el recorrido nunca sigue), no con su destino.
+    """
+    candidate = Path(path).expanduser()
+    if not candidate.name:
+        return candidate.resolve()
+    return candidate.parent.resolve() / candidate.name
+
+
+def _key(path: str | Path) -> str:
+    """Clave de comparación de rutas: `os.path.normcase` (sin mayúsculas y con un solo separador en Windows)."""
+    return os.path.normcase(str(path))
+
+
+@dataclass(frozen=True)
+class EntryFilter:
+    """Qué entradas se saltan en el recorrido: `IGNORED_NAMES`, rutas excluidas y patrones de nombre (G41, 1.3.0).
+
+    Las rutas se comparan con `normcase` sobre rutas resueltas (`resolve_exclusion`); los patrones, con `fnmatchcase`
+    (`fnmatch.translate`) sobre el nombre en minúsculas, igual en cualquier sistema. Uso interno de `DocumentScanner` y `ScanCommand`.
+    """
+
+    excluded: frozenset[str] = frozenset()
+    patterns: tuple[str, ...] = ()
+
+    @classmethod
+    def build(cls, exclude_paths: Iterable[str | Path] = (), ignore_patterns: Iterable[str] = ()) -> "EntryFilter":
+        return cls(
+            excluded=frozenset(_key(resolve_exclusion(path)) for path in exclude_paths),
+            patterns=tuple(pattern.lower() for pattern in ignore_patterns),
+        )
+
+    def excludes_path(self, path: str | Path) -> bool:
+        """Si `path` es una ruta excluida (no mira patrones ni `IGNORED_NAMES`)."""
+        return bool(self.excluded) and _key(path) in self.excluded
+
+    @cached_property
+    def _pattern_regex(self) -> re.Pattern[str] | None:
+        # Una sola expresión para todos los patrones: una comparación por entrada en vez de una por patrón.
+        return re.compile("|".join(translate(pattern) for pattern in self.patterns)) if self.patterns else None
+
+    def matches_name(self, name: str) -> bool:
+        """Si `name` encaja con algún patrón (`fnmatch` sobre el nombre en minúsculas, igual en cualquier sistema)."""
+        regex = self._pattern_regex
+        return regex is not None and regex.match(name.lower()) is not None
+
+    def skips(self, entry: Path) -> bool:
+        """Si el recorrido debe saltarse `entry` (ni ella ni su contenido)."""
+        return entry.name in IGNORED_NAMES or self.excludes_path(entry) or self.matches_name(entry.name)
+
+    def covers_cached(self, path: str, roots: Sequence[str]) -> bool:
+        """Si una ruta de la caché cae bajo una exclusión o algún tramo bajo su raíz encaja con un patrón.
+
+        Sirve para contar sin recorrer el disco (`ScanSummary.excluded_cached`); `roots` son las carpetas escaneadas,
+        ya resueltas.
+        """
+        key = _key(path)
+        if any(key == excluded or key.startswith(excluded.rstrip(os.sep) + os.sep) for excluded in self.excluded):
+            return True
+        if not self.patterns:
+            return False
+        for root in roots:
+            if key.startswith(_key(root).rstrip(os.sep) + os.sep):
+                return any(self.matches_name(part) for part in Path(path).parts[len(Path(root).parts) :])
+        return False
 
 
 @dataclass
@@ -92,6 +165,8 @@ class DocumentScanner:
         exclude_dir: Path | None = None,
         *,
         known_entries: Mapping[str, CacheEntry] | None = None,
+        exclude_paths: Sequence[str | Path] = (),
+        ignore_patterns: Sequence[str] = (),
     ) -> ScanResult:
         """Escanea recursivamente `paths` y devuelve documentos, resumen y arbol.
 
@@ -119,6 +194,14 @@ class DocumentScanner:
                 tiene entrada con el mismo `size_bytes` y la misma fecha de
                 modificación (`timestamp`), se reutiliza su `sha256_hash` sin leer
                 el fichero. `None` (por defecto): se hashea todo.
+            exclude_paths: Carpetas o ficheros que no se recorren, ni ellos ni su
+                contenido (G41, 1.3.0). Rutas absolutas; se resuelve su carpeta
+                padre, así que un enlace excluido se compara como enlace. Una que
+                no existe no es un error; una que es una de `paths` deja esa raíz
+                vacía. Lo excluido no va a `unreadable_dirs`/`unreadable_files`.
+            ignore_patterns: Patrones `fnmatch` sobre el nombre de cada entrada
+                (fichero o carpeta, nunca la ruta), sin distinguir mayúsculas; se
+                suman a `IGNORED_NAMES` (G41, 1.3.0). No se aplican a las raíces.
 
         Returns:
             ScanResult con la lista de documentos descubiertos (con hash
@@ -134,10 +217,14 @@ class DocumentScanner:
         discovered: list[_DiscoveredFile] = []
         unreadable_dirs: list[str] = []
         unreadable_files: dict[str, str] = {}
+        entry_filter = EntryFilter.build([*([exclude_dir] if exclude_dir is not None else []), *exclude_paths], ignore_patterns)
 
         for raw_path in paths:
             root = Path(raw_path).expanduser().resolve()
-            node, files, unreadable = await asyncio.to_thread(self._walk_sync, root, allowed_extensions, exclude_dir, unreadable_files)
+            if entry_filter.covers_cached(str(root), ()):  # la raíz es una exclusión o cuelga de una
+                root_nodes.append(DirectoryTreeNode(name=root.name or str(root), type="dir", path=str(root), children=[]))
+                continue
+            node, files, unreadable = await asyncio.to_thread(self._walk_sync, root, allowed_extensions, entry_filter, unreadable_files)
             root_nodes.append(node)
             discovered.extend(files)
             unreadable_dirs.extend(unreadable)
@@ -171,7 +258,7 @@ class DocumentScanner:
         self,
         root: Path,
         allowed_extensions: frozenset[str],
-        exclude_dir: Path | None = None,
+        entry_filter: EntryFilter | None = None,
         unreadable_files: dict[str, str] | None = None,
     ) -> tuple[DirectoryTreeNode, list[_DiscoveredFile], list[str]]:
         """Recorrido sincrono de un arbol de directorios (se ejecuta en un hilo).
@@ -181,7 +268,7 @@ class DocumentScanner:
         """
         files: list[_DiscoveredFile] = []
         unreadable: list[str] = []
-        node = self._build_node(root, files, allowed_extensions, exclude_dir, unreadable, unreadable_files)
+        node = self._build_node(root, files, allowed_extensions, entry_filter or EntryFilter(), unreadable, unreadable_files)
         if node is None:
             # Solo ocurre si la propia raiz desaparece entre la validacion previa
             # (FolderValidator) y este recorrido -- caso extremo; se degrada a un
@@ -196,7 +283,7 @@ class DocumentScanner:
         path: Path,
         files: list[_DiscoveredFile],
         allowed_extensions: frozenset[str],
-        exclude_dir: Path | None = None,
+        entry_filter: EntryFilter,
         unreadable: list[str] | None = None,
         unreadable_files: dict[str, str] | None = None,
     ) -> DirectoryTreeNode | None:
@@ -225,7 +312,7 @@ class DocumentScanner:
         if S_ISLNK(st.st_mode) or path.is_junction():
             return DirectoryTreeNode(name=path.name, type="file", path=str(path))
         if S_ISDIR(st.st_mode):
-            return self._build_dir_node(path, files, allowed_extensions, exclude_dir, unreadable, unreadable_files)
+            return self._build_dir_node(path, files, allowed_extensions, entry_filter, unreadable, unreadable_files)
         return self._build_file_node(path, files, allowed_extensions, unreadable_files)
 
     def _build_dir_node(
@@ -233,18 +320,18 @@ class DocumentScanner:
         path: Path,
         files: list[_DiscoveredFile],
         allowed_extensions: frozenset[str],
-        exclude_dir: Path | None,
+        entry_filter: EntryFilter,
         unreadable: list[str] | None = None,
         unreadable_files: dict[str, str] | None = None,
     ) -> DirectoryTreeNode:
         children: list[DirectoryTreeNode] = []
-        for entry in self._list_dir_entries(path, exclude_dir, unreadable):
-            child = self._build_node(entry, files, allowed_extensions, exclude_dir, unreadable, unreadable_files)
+        for entry in self._list_dir_entries(path, entry_filter, unreadable):
+            child = self._build_node(entry, files, allowed_extensions, entry_filter, unreadable, unreadable_files)
             if child is not None:
                 children.append(child)
         return DirectoryTreeNode(name=path.name or str(path), type="dir", path=str(path), children=children)
 
-    def _list_dir_entries(self, path: Path, exclude_dir: Path | None, unreadable: list[str] | None = None) -> list[Path]:
+    def _list_dir_entries(self, path: Path, entry_filter: EntryFilter, unreadable: list[str] | None = None) -> list[Path]:
         try:
             listed = retry_io(lambda: list(path.iterdir()), retries=self._io_retries, backoff_s=self._io_retry_backoff_s, what=f"listar '{path}'")
             entries = sorted(listed, key=lambda p: p.name)
@@ -255,7 +342,7 @@ class DocumentScanner:
             if unreadable is not None:
                 unreadable.append(str(path))
             return []
-        return [entry for entry in entries if entry.name not in IGNORED_NAMES and entry != exclude_dir]
+        return [entry for entry in entries if not entry_filter.skips(entry)]
 
     def _build_file_node(
         self, path: Path, files: list[_DiscoveredFile], allowed_extensions: frozenset[str], unreadable_files: dict[str, str] | None = None

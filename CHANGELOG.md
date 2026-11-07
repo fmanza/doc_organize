@@ -6,6 +6,38 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-07
+
+Petición de doc_organize_web (G41 / L-19). Sin cambios incompatibles: con los valores por defecto el escaneo recorre
+lo mismo que en 1.2.0. Firmas en [Escaneo](docs/api/scan.md#exclusiones-exclude_paths-ignore_patterns-g41) y
+[Scanner](docs/api/scanner.md).
+
+### Añadido
+
+- **Exclusiones en el escaneo (G41)**: `ScanOptions.exclude_paths: list[str] = []` (carpetas o ficheros, rutas
+  absolutas, que no se recorren ni ellos ni su contenido) e `ignore_patterns: list[str] = []` (patrones `fnmatch` sobre
+  el nombre de cada fichero o carpeta, sin distinguir mayúsculas, que se suman a `IGNORED_NAMES`). También en
+  `DocumentScanner.scan_folders(..., exclude_paths=, ignore_patterns=)`, *keyword-only*; `exclude_dir` sigue igual.
+  - Las rutas excluidas se comparan resueltas con `os.path.normcase` (sin mayúsculas en Windows, exactas en POSIX). Se
+    resuelve su carpeta padre, así que excluir un enlace o una *junction* lo quita sin seguirlo. Una exclusión que no
+    existe no es un error; una que es la carpeta escaneada, o la contiene, deja esa raíz vacía.
+  - Los patrones no se aplican a las carpetas escaneadas. Cada uno: no vacío, sin `/` ni `\`, hasta 64 caracteres
+    (`ValidationError` si no).
+  - Lo excluido no es un error: no va a `unreadable_dirs`/`unreadable_files`, ni a `io_errors`, ni a los avisos.
+- **Lo ya convertido**: sin `force` se conservan su salida y su entrada de caché, y al quitar la exclusión vuelve como
+  `unchanged` (no se reconvierte). Con `force` cuenta como eliminado, igual que un fichero borrado: se borran su salida
+  y su entrada de caché, y si después se quita la exclusión vuelve como `new`. Siguen protegidos los documentos de
+  carpetas o ficheros que no se pudieron leer.
+- `ScanSummary.excluded_cached` (clave nueva de `COMPLETED`): entradas de la caché anterior al escaneo bajo una
+  exclusión o que encajan con un patrón en algún tramo de su ruta bajo la carpeta escaneada. Se cuenta desde la caché,
+  sin recorrer el disco.
+
+### Rendimiento
+
+- Los patrones se compilan en una sola expresión (`fnmatch.translate`): con 30 patrones, recorrer 100 000 entradas
+  tarda lo mismo que sin ellos (~3,7 s en disco local, Windows, Python 3.14, sin contar el hash). Excluir solo quita
+  trabajo.
+
 ## [1.2.0] - 2026-11-06
 
 Petición de doc_organize_web (G40 / L-18). Sin cambios incompatibles: con los valores por defecto las páginas de la

@@ -452,6 +452,10 @@ class VersionedEvent(BaseModel):
         return {"schema_version": dumped["schema_version"], "event": dumped["event"], "data": dumped["data"]}
 
 
+#: Longitud máxima de un patrón de `ScanOptions.ignore_patterns` (G41, 1.3.0).
+MAX_IGNORE_PATTERN_LENGTH: Final = 64
+
+
 class ScanOptions(BaseModel):
     """Opciones de un escaneo (G13): sustituyen a los indicadores sueltos de `ScanCommand.run`/`run_streaming`.
 
@@ -502,6 +506,40 @@ class ScanOptions(BaseModel):
             "No detecta un cambio que conserve tamaño y fecha"
         ),
     )
+    exclude_paths: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Carpetas o ficheros (rutas absolutas) que no se recorren, ni ellos ni su contenido (G41, 1.3.0). "
+            "Sin `force`, lo ya convertido se conserva; con `force`, cuenta como eliminado"
+        ),
+    )
+    ignore_patterns: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Patrones `fnmatch` sobre el nombre de cada fichero o carpeta (nunca la ruta), sin distinguir mayúsculas, "
+            f"que no se recorren; se suman a `IGNORED_NAMES` (G41, 1.3.0). Hasta {MAX_IGNORE_PATTERN_LENGTH} caracteres, "
+            "sin separadores"
+        ),
+    )
+
+    @field_validator("exclude_paths")
+    @classmethod
+    def _non_empty_paths(cls, paths: list[str]) -> list[str]:
+        if any(not path.strip() for path in paths):
+            raise ValueError("exclude_paths no admite rutas vacías")
+        return paths
+
+    @field_validator("ignore_patterns")
+    @classmethod
+    def _valid_patterns(cls, patterns: list[str]) -> list[str]:
+        for pattern in patterns:
+            if not pattern.strip():
+                raise ValueError("ignore_patterns no admite patrones vacíos")
+            if "/" in pattern or "\\" in pattern:
+                raise ValueError(f"ignore_patterns son patrones de nombre, sin separadores: {pattern!r}")
+            if len(pattern) > MAX_IGNORE_PATTERN_LENGTH:
+                raise ValueError(f"ignore_patterns admite hasta {MAX_IGNORE_PATTERN_LENGTH} caracteres: {pattern!r}")
+        return patterns
 
 
 class ScanEvent(VersionedEvent):
