@@ -53,6 +53,7 @@ from doc_organize.dedup import DeduplicationManager
 from doc_organize.projects.layout import resolve_images_dir, resolve_output_paths
 from doc_organize.scan.scan_history_store import append_scan_run
 from doc_organize.scanner import DocumentScanner
+from doc_organize.scanner.document_scanner import EntryFilter
 from doc_organize.utils.date_format import format_duration
 from doc_organize.utils.logging import get_logger
 from doc_organize.utils.memory import MemoryReleaser, release_memory
@@ -88,6 +89,9 @@ class ScanSummary:
     remaining: int = 0
     #: `"max_documents"` si el escaneo paró al llegar al límite; `None` si terminó todo (G38, 1.1.0).
     stopped_reason: str | None = None
+    #: Entradas de la caché anterior al escaneo bajo `ScanOptions.exclude_paths` o que encajan con `ignore_patterns`
+    #: (G41, 1.3.0): sin `force` se conservan; con `force` se han borrado. Se cuenta desde la caché, sin recorrer el disco.
+    excluded_cached: int = 0
 
     def render(self) -> str:
         lines = [
@@ -102,6 +106,8 @@ class ScanSummary:
             lines.append(f"No se pudieron leer (errores de E/S): {self.io_errors}")
         if self.stopped_reason == "max_documents":
             lines.append(f"Parado al llegar al máximo de documentos: quedan {self.remaining} conversiones pendientes")
+        if self.excluded_cached:
+            lines.append(f"Documentos de la caché excluidos del escaneo: {self.excluded_cached}")
         lines.append(
             f"Descubrimiento de ficheros: {format_duration(self.discovery_duration_seconds)} "
             f"| Conversión (total acumulado): {format_duration(self.total_conversion_seconds)}"
@@ -521,6 +527,11 @@ class ScanCommand:
                 async with CacheManager(cache_db) as cache:
                     known_entries = await cache.load_cache()
                 scan_kwargs["known_entries"] = known_entries
+            # G41: solo si hay exclusiones, para que quien sustituye `scan_folders` siga recibiendo la llamada de antes.
+            if opts.exclude_paths:
+                scan_kwargs["exclude_paths"] = opts.exclude_paths
+            if opts.ignore_patterns:
+                scan_kwargs["ignore_patterns"] = opts.ignore_patterns
 
             async with DocumentScanner(io_retries=opts.io_retries, io_retry_backoff_s=opts.io_retry_backoff_s) as scanner:
                 # exclude_dir=output_dir: sin esto, si una de `clean_paths` contiene el
@@ -546,6 +557,12 @@ class ScanCommand:
 
             async with CacheManager(cache_db) as cache:
                 cached_entries = known_entries if known_entries is not None else await cache.load_cache()
+                if opts.exclude_paths or opts.ignore_patterns:
+                    # G41: lo excluido no aparece en el recorrido; sin `force` su entrada sigue en la caché (no se toca)
+                    # y con `force` cuenta como huérfano más abajo, igual que un fichero borrado.
+                    entry_filter = EntryFilter.build(opts.exclude_paths, opts.ignore_patterns)
+                    resolved_roots = [str(Path(root).expanduser().resolve()) for root in clean_paths]
+                    summary.excluded_cached = sum(1 for path in cached_entries if entry_filter.covers_cached(path, resolved_roots))
                 if force:
                     current_paths = {doc.full_path for doc in scan_result.documents}
                     orphaned_paths = set(cached_entries) - current_paths

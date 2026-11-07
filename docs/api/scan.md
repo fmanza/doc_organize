@@ -78,6 +78,8 @@ de 1.0.
 | `io_retries` | `int ≥ 0` | `0` | **1.1.0.** Reintentos ante errores de E/S transitorios |
 | `io_retry_backoff_s` | `float ≥ 0` | `1.0` | **1.1.0.** Espera antes del primer reintento; se duplica en cada uno |
 | `reuse_unchanged_hashes` | `bool` | `False` | **1.1.0.** Reutilizar el hash de la caché si coinciden tamaño y fecha |
+| `exclude_paths` | `list[str]` | `[]` | **1.3.0.** Carpetas o ficheros (rutas absolutas) que no se recorren, ni ellos ni su contenido |
+| `ignore_patterns` | `list[str]` | `[]` | **1.3.0.** Patrones `fnmatch` de nombre (fichero o carpeta) que no se recorren, sin distinguir mayúsculas |
 
 ### Escaneos por tramos (`max_documents`, G38)
 
@@ -131,6 +133,42 @@ convertido, y lo ya procesado con OCR, se guarda en la caché; el resto de candi
 - **Enlaces**: los enlaces simbólicos, y desde 1.1.0 las *junctions* de Windows, no se siguen. Solo se resuelve la
   carpeta raíz indicada.
 
+### Exclusiones (`exclude_paths`, `ignore_patterns`, G41)
+
+Desde 1.3.0, un escaneo puede dejar fuera subcarpetas o ficheros concretos y nombres que encajan con un patrón:
+
+```python
+options = ScanOptions(
+    exclude_paths=["/mnt/origen/expedientes/borradores", "/mnt/origen/expedientes/old/2023"],
+    ignore_patterns=["~$*", "@eaDir", "#recycle", "$RECYCLE.BIN", "System Volume Information"],
+)
+```
+
+- **`exclude_paths`**: rutas absolutas (una relativa se resuelve contra el directorio actual, como las carpetas
+  escaneadas). Se resuelve su carpeta padre y se conserva el último tramo, así que excluir un enlace o una *junction*
+  lo quita del árbol sin seguirlo. Se comparan con `os.path.normcase`: sin distinguir mayúsculas en Windows, exactas
+  en POSIX. Una exclusión que no existe no es un error; una que es la carpeta escaneada, o la contiene, deja esa raíz
+  vacía.
+- **`ignore_patterns`**: patrones `fnmatch` (`*`, `?`, `[…]`) sobre el **nombre** de cada fichero o carpeta, nunca
+  sobre la ruta, y sin distinguir mayúsculas en ningún sistema. Una carpeta que encaja no se recorre. No se aplican a
+  las carpetas escaneadas. Se suman a los nombres que se ignoran siempre (`.git`, `__pycache__`, `.DS_Store`). Cada
+  patrón: no vacío, sin `/` ni `\` y de hasta 64 caracteres (`ValidationError` si no).
+- **No es un error**: lo excluido no aparece en `ScanResult.unreadable_dirs`/`unreadable_files`, ni en
+  `ScanSummary.io_errors`, ni en los avisos.
+
+Qué pasa con lo que ya estaba convertido:
+
+| Situación | Sin `force` | Con `force` |
+|---|---|---|
+| Pasa a estar excluido o a encajar con un patrón | Se conservan su salida y su entrada de caché; no se procesa | Cuenta como eliminado, igual que un fichero borrado: se borran su salida y su entrada de caché |
+| Se quita la exclusión o el patrón | Vuelve al recorrido como `unchanged`: no se reconvierte | Igual |
+| Se quita después de un `force` que lo borró | Vuelve como `new` y se reconvierte | Igual |
+
+Con `force` siguen protegidos los documentos de carpetas o ficheros que no se pudieron leer (L-10d, G11).
+`ScanSummary.excluded_cached` cuenta cuántas entradas de la caché anterior al escaneo quedan bajo una exclusión o
+encajan con un patrón (en algún tramo de su ruta bajo la carpeta escaneada); se calcula desde la caché, sin recorrer
+el disco. Con `force`, son las que se han borrado por estar excluidas.
+
 ## ScanSummary
 
 ```python
@@ -152,7 +190,8 @@ class ScanSummary:
     io_errors: int = 0                # 1.1.0: ficheros que no se pudieron leer (G11)
     remaining: int = 0                # 1.1.0: conversiones pendientes por max_documents (G38)
     stopped_reason: str | None = None # 1.1.0: "max_documents" o None
+    excluded_cached: int = 0          # 1.3.0: entradas de la caché bajo exclusiones o patrones (G41)
 ```
 
-El evento `COMPLETED` lleva estos campos en `data` (`dataclasses.asdict`). Los tres campos nuevos se añaden siempre,
+El evento `COMPLETED` lleva estos campos en `data` (`dataclasses.asdict`). Los campos nuevos se añaden siempre,
 con sus valores por defecto si no aplican.

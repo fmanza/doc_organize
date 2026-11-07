@@ -10,7 +10,7 @@ classDiagram
         -logger: Logger
         -supported_extensions: frozenset
         -ignored_names: frozenset
-        +scan_folders(paths: list[str], include_audio_video: bool, exclude_dir: Path, known_entries) ScanResult
+        +scan_folders(paths: list[str], include_audio_video: bool, exclude_dir: Path, known_entries, exclude_paths, ignore_patterns) ScanResult
     }
     
     class ScanResult {
@@ -56,6 +56,8 @@ class DocumentScanner:
         exclude_dir: Path | None = None,
         *,
         known_entries: Mapping[str, CacheEntry] | None = None,  # 1.1.0
+        exclude_paths: Sequence[str | Path] = (),                # 1.3.0
+        ignore_patterns: Sequence[str] = (),                     # 1.3.0
     ) -> ScanResult
 ```
 
@@ -67,6 +69,8 @@ Escanea carpetas recursivamente y calcula el SHA-256 de forma concurrente (hasta
 | `include_audio_video` | `bool` | Añade las extensiones de audio y vídeo (extra `av`) |
 | `exclude_dir` | `Path \| None` | Carpeta (resuelta) que se omite del recorrido, p. ej. la salida del proyecto |
 | `known_entries` | `Mapping[str, CacheEntry] \| None` | 1.1.0. Entradas de caché por ruta: si el tamaño y la fecha de modificación coinciden, se reutiliza su hash sin leer el fichero |
+| `exclude_paths` | `Sequence[str \| Path]` | 1.3.0. Carpetas o ficheros que no se recorren, ni ellos ni su contenido; un enlace excluido se quita sin seguirlo (ver [Exclusiones](scan.md#exclusiones-exclude_paths-ignore_patterns-g41)) |
+| `ignore_patterns` | `Sequence[str]` | 1.3.0. Patrones `fnmatch` sobre el nombre de cada entrada, sin distinguir mayúsculas; no se aplican a las raíces |
 | `io_retries` | `int` | 1.1.0. Reintentos ante `OSError` transitorios al listar, leer metadatos y hashear (ver [Escaneo](scan.md#carpetas-de-red-io_retries-document_timeout_s-reuse_unchanged_hashes-g11)) |
 | `io_retry_backoff_s` | `float` | 1.1.0. Espera antes del primer reintento; se duplica en cada uno |
 
