@@ -137,7 +137,19 @@ class SiteBuildError(DocOrganizeError):
 
     `SiteGenerator.generate(build=True)` la lanza en lugar de devolver un sitio sin construir: la configuración
     (`zensical.toml` + `index.md`) ya está escrita cuando se lanza.
+
+    Attributes:
+        cause (str | None): Motivo en una línea, listo para mostrar: la última línea de la salida de `zensical build`
+            (la del error, p. ej. `RuntimeError: ...`), o el motivo propio si no llegó a ejecutarse o se pasó de
+            tiempo. Desde 1.4.0; `None` solo si zensical falló sin escribir nada.
+        output_tail (str | None): Final de la salida de error de `zensical build` (como mucho 2000 caracteres), para
+            diagnóstico. Desde 1.4.0; `None` si no llegó a ejecutarse o se pasó de tiempo.
     """
+
+    def __init__(self, message: str, *, cause: str | None = None, output_tail: str | None = None) -> None:
+        super().__init__(message)
+        self.cause = cause
+        self.output_tail = output_tail
 
 
 class IncompleteConversionArtifactsError(ContextError):

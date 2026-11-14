@@ -312,6 +312,222 @@ async def test_real_build_produces_site_and_keeps_embedded_html_as_zensical_does
     assert "<script>alert('titulo')" not in page
 
 
+# --- Límite del buscador de Zensical (1.4.0) -------------------------------------------------------------------------
+
+_PAGE = "calidad/pdf/x/x.md"
+
+
+def _words(count: int) -> str:
+    return " ".join(f"w{index}" for index in range(count))
+
+
+def _site_with_page(tmp_path, content: str | bytes) -> tuple[Project, Context, Path]:
+    project = _make_project(tmp_path)
+    context = _make_context(project, [Domain(slug="calidad", name="Calidad", documents=[_document("x", "Informe X")])])
+    page = tmp_path / "organizado" / "calidad" / "pdf" / "x" / "x.md"
+    page.parent.mkdir(parents=True)
+    if isinstance(content, bytes):
+        page.write_bytes(content)
+    else:
+        page.write_text(content, encoding="utf-8", newline="")
+    return project, context, page
+
+
+@pytest.fixture
+def small_search_limit(monkeypatch):
+    """Con 3 entradas (índice + página, con margen) el máximo baja a 2**(16 - 2) = 16 384 posiciones (umbral 14 745)."""
+    monkeypatch.setattr(site_generator_module, "_SEARCH_POSITION_BITS", 16)
+
+
+@pytest.mark.asyncio
+async def test_page_with_an_oversized_section_is_excluded_from_search(tmp_path, small_search_limit):
+    body = _words(20_000) + "\n"
+    project, context, page = _site_with_page(tmp_path, body)
+
+    result = await SiteGenerator().generate(project, context, build=False)
+
+    assert result.search_excluded == (_PAGE,)
+    assert page.read_text(encoding="utf-8") == "---\nsearch:\n  exclude: true\n---\n\n" + body
+
+
+@pytest.mark.asyncio
+async def test_long_page_split_by_headings_stays_in_search(tmp_path, small_search_limit):
+    body = "\n\n".join(f"## Parte {index}\n\n{_words(5_000)}" for index in range(4))
+    project, context, page = _site_with_page(tmp_path, body)
+
+    result = await SiteGenerator().generate(project, context, build=False)
+
+    assert result.search_excluded == ()
+    assert page.read_text(encoding="utf-8") == body
+
+
+@pytest.mark.asyncio
+async def test_exclusion_keeps_the_existing_front_matter(tmp_path, small_search_limit):
+    project, context, page = _site_with_page(tmp_path, "---\ntitle: Informe\ntags: [a]\n---\n\n" + _words(20_000))
+
+    result = await SiteGenerator().generate(project, context, build=False)
+
+    assert result.search_excluded == (_PAGE,)
+    assert page.read_text(encoding="utf-8").startswith("---\nsearch:\n  exclude: true\ntitle: Informe\ntags: [a]\n---\n\n")
+
+
+@pytest.mark.asyncio
+async def test_generating_twice_does_not_duplicate_the_exclusion(tmp_path, small_search_limit):
+    project, context, page = _site_with_page(tmp_path, _words(20_000))
+    await SiteGenerator().generate(project, context, build=False)
+    first = page.read_text(encoding="utf-8")
+
+    result = await SiteGenerator().generate(project, context, build=False)
+
+    assert result.search_excluded == (_PAGE,)
+    assert page.read_text(encoding="utf-8") == first
+
+
+@pytest.mark.asyncio
+async def test_a_search_key_of_its_own_is_left_untouched(tmp_path, small_search_limit):
+    content = "---\nsearch:\n  boost: 2\n---\n\n" + _words(20_000)
+    project, context, page = _site_with_page(tmp_path, content)
+
+    result = await SiteGenerator().generate(project, context, build=False)
+
+    assert result.search_excluded == ()
+    assert page.read_text(encoding="utf-8") == content
+
+
+@pytest.mark.asyncio
+async def test_a_leading_thematic_break_is_not_taken_for_front_matter(tmp_path, small_search_limit):
+    body = "---\n\n" + _words(20_000) + "\n\n---\n"
+    project, context, page = _site_with_page(tmp_path, body)
+
+    await SiteGenerator().generate(project, context, build=False)
+
+    assert page.read_text(encoding="utf-8") == "---\nsearch:\n  exclude: true\n---\n\n" + body
+
+
+@pytest.mark.asyncio
+async def test_exclusion_keeps_crlf_line_endings_and_bom(tmp_path, small_search_limit):
+    project, context, page = _site_with_page(tmp_path, ("﻿# Informe\r\n\r\n" + _words(20_000) + "\r\n").encode())
+
+    await SiteGenerator().generate(project, context, build=False)
+
+    raw = page.read_bytes()
+    assert raw.startswith("﻿---\r\nsearch:\r\n  exclude: true\r\n---\r\n\r\n# Informe\r\n".encode())
+    assert b"\r\r\n" not in raw
+
+
+@pytest.mark.asyncio
+async def test_page_that_is_not_utf8_is_not_rewritten(tmp_path, small_search_limit):
+    content = _words(20_000).encode() + b"\xff"
+    project, context, page = _site_with_page(tmp_path, content)
+
+    result = await SiteGenerator().generate(project, context, build=False)
+
+    assert result.search_excluded == ()
+    assert page.read_bytes() == content
+
+
+@pytest.mark.asyncio
+async def test_a_big_section_fits_in_a_small_site(tmp_path):
+    """El máximo depende del tamaño del sitio: con pocas entradas, 70 000 palabras en una sección caben."""
+    project, context, page = _site_with_page(tmp_path, _words(70_000))
+
+    result = await SiteGenerator().generate(project, context, build=False)
+
+    assert result.search_excluded == ()
+    assert page.read_text(encoding="utf-8") == _words(70_000)
+
+
+def test_search_profile_counts_entries_and_largest_section_like_zensical():
+    count = site_generator_module._search_profile
+    assert count("# Título\n\ntexto\n\n## A\n\nuno dos\n") == (2, 2)  # el `#` inicial se funde con la página
+    assert count("## A\n\nx\n\n## B\n\ny\n") == (3, 1)
+    assert count("Título\n======\n\nuno\n\nOtro\n----\n\ndos tres\n") == (2, 2)  # setext
+    assert count("```\n## no es título\n## tampoco\n```\n") == (1, 6)  # en un bloque de código no hay títulos
+    assert count("| a | b |\n|---|---|\n| c | d |\n") == (1, 4)  # una fila de tabla no es un título setext
+    assert count("![Image](img/a%20b.png)\n\n[enlace](http://x/y) final.\n") == (1, 2)
+    assert count("---\ntitle: X\n---\n\nuno\n") == (1, 1)  # la cabecera no cuenta
+
+
+# --- Errores del build -----------------------------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_failed_build_error_leads_with_the_last_line_of_zensical_output(tmp_path, monkeypatch):
+    cause = "RuntimeError: Search field 'text' at 'x/' exceeds the search index limit"
+    stderr = "Build started\nTraceback (most recent call last):\n" + "  File x\n" * 500 + cause + "\n"
+    monkeypatch.setattr(SiteGenerator, "_zensical_command", staticmethod(lambda: ["zensical"]))
+    monkeypatch.setattr(site_generator_module.subprocess, "run", _fake_run(returncode=1, stderr=stderr))
+    project = _make_project(tmp_path)
+
+    with pytest.raises(SiteBuildError) as raised:
+        await SiteGenerator().generate(project, _make_context(project, []))
+
+    assert raised.value.cause == cause
+    assert str(raised.value) == f"'zensical build' falló para 'Demo' (código 1): {cause}"
+    assert raised.value.output_tail is not None
+    assert raised.value.output_tail.endswith(cause)
+    assert len(raised.value.output_tail) <= 2000
+
+
+@pytest.mark.asyncio
+async def test_missing_zensical_and_timeout_errors_carry_a_cause(tmp_path, monkeypatch):
+    project = _make_project(tmp_path)
+    monkeypatch.setattr(SiteGenerator, "_zensical_command", staticmethod(lambda: None))
+    with pytest.raises(SiteBuildError) as missing:
+        await SiteGenerator().generate(project, _make_context(project, []))
+    assert missing.value.cause == "zensical no está instalado (extra 'doc_organize[site]')"
+    assert missing.value.output_tail is None
+
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs["timeout"])
+
+    monkeypatch.setattr(SiteGenerator, "_zensical_command", staticmethod(lambda: ["zensical"]))
+    monkeypatch.setattr(site_generator_module.subprocess, "run", timeout)
+    with pytest.raises(SiteBuildError) as timed_out:
+        await SiteGenerator().generate(project, _make_context(project, []), timeout=0.5)
+    assert timed_out.value.cause == "'zensical build' superó el tiempo máximo (0.5 s)"
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+@pytest.mark.skipif(importlib.util.find_spec("zensical") is None, reason="Requiere el extra 'site' (zensical)")
+async def test_real_build_succeeds_when_a_section_exceeds_the_search_index_limit(tmp_path):
+    """Reproduce el fallo de 1.3.0: con más de 8 192 entradas en el índice, una sección de 70 000 palabras supera el
+    máximo de 65 536 posiciones y `zensical build` falla entero. `generate` saca esa página del buscador."""
+    project = _make_project(tmp_path)
+    documents = []
+    for stem, body in (("tabla", _words(70_000)), ("manual", "\n\n".join(f"## Apartado {i}\n\nTexto {i}" for i in range(9_000)))):
+        for suffix in (".pdf", ".json"):
+            (tmp_path / f"{stem}{suffix}").write_bytes(b"{}")
+        (tmp_path / f"{stem}.md").write_text(body, encoding="utf-8")
+        documents.append(
+            DomainDocument(
+                source_path=str(tmp_path / f"{stem}.pdf"),
+                markdown_path=str(tmp_path / f"{stem}.md"),
+                json_path=str(tmp_path / f"{stem}.json"),
+                title=stem,
+                document_type="pdf",
+                confidence=0.9,
+            )
+        )
+    context = _make_context(project, [Domain(slug="calidad", name="Calidad", documents=documents)])
+    await Reorganizer().reorganize(project, context)
+
+    result = await SiteGenerator().generate(project, context, timeout=300)
+
+    assert result.site_built is True
+    assert result.search_excluded == ("calidad/pdf/tabla/tabla.md",)
+    assert (tmp_path / "site" / "calidad" / "pdf" / "tabla" / "tabla" / "index.html").is_file()
+
+    # Sin la exclusión, el mismo sitio no se construye (si una versión de zensical quita el límite, esto lo avisa).
+    page = tmp_path / "organizado" / "calidad" / "pdf" / "tabla" / "tabla.md"
+    page.write_text(_words(70_000), encoding="utf-8")
+    with pytest.raises(SiteBuildError) as raised:
+        await SiteGenerator().build_site(project, timeout=300)
+    assert raised.value.cause is not None
+    assert "search index limit" in raised.value.cause
+
+
 # --- Borrado ---------------------------------------------------------------------------------------------------------
 
 

@@ -5,13 +5,15 @@ Sitio de contexto de un proyecto con Zensical (L-8, G10; sustituye a MkDocs desd
 import asyncio
 import html
 import importlib.util
+import math
 import os
+import re
 import shutil
 import subprocess
 import sys
 
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from doc_organize.context.reorganizer import Reorganizer, _remove_dir_or_link, resolve_organized_paths
@@ -41,12 +43,16 @@ class SiteResult:
         site_dir (Path): Carpeta del sitio (destino de `zensical build`).
         site_built (bool): Si se construyó el sitio (`build=True`). Un build que falla lanza `SiteBuildError`, nunca
             deja este campo en `False` en silencio.
+        search_excluded (tuple[str, ...]): Páginas que se sacaron del buscador del sitio porque una de sus secciones
+            supera el límite del índice de Zensical (ver `SiteGenerator`), como rutas relativas a la carpeta
+            reorganizada (las del `nav`, `DomainDocument.organized_path`). Se siguen pudiendo navegar. Desde 1.4.0.
     """
 
     config_path: Path
     index_path: Path
     site_dir: Path
     site_built: bool
+    search_excluded: tuple[str, ...] = ()
 
 
 class SiteGenerator:
@@ -69,6 +75,13 @@ class SiteGenerator:
     sin escapar las etiquetas del `nav` y `site_name` (títulos de documento, nombres de dominio y de proyecto), así que
     se escriben ya escapadas, igual que los nombres de dominio de `index.md`. Además, el tema por defecto carga Mermaid
     desde unpkg.com si una página tiene un bloque ```` ```mermaid ````. Ver `docs/functional/context.md`.
+
+    **Límite del buscador** (desde 1.4.0): Zensical falla el build entero si una sección indexada (el texto entre dos
+    títulos) tiene más posiciones de token de las que admite su índice, y ese máximo baja cuantas más secciones tiene
+    el sitio (65 536 a partir de 8 193). Un documento convertido sin títulos (p. ej. una hoja de cálculo grande) es
+    una sola sección. Antes de construir, `generate` estima ambos valores y añade `search: exclude: true` a la
+    cabecera de las páginas que lo superarían: el sitio se construye, esas páginas se navegan pero no aparecen en el
+    buscador, y se devuelven en `SiteResult.search_excluded`. Solo modifica la copia de la carpeta reorganizada.
 
     Requiere el extra `doc_organize[site]` (`zensical`) para construir; sin construir (`build=False`) no hace falta.
 
@@ -97,6 +110,9 @@ class SiteGenerator:
         """Escribe `zensical.toml` (raíz del proyecto) + `<output_folder_name>/index.md` y, con `build=True`, ejecuta
         `zensical build` hacia `site_dir`.
 
+        Con o sin `build`, saca del buscador las páginas que superarían el límite del índice de Zensical (ver la clase
+        y `SiteResult.search_excluded`), para que un `build_site` posterior no falle por ellas.
+
         Si el proyecto tiene un `mkdocs.yml` de antes de 0.13.0, se borra: el contexto pasa a Zensical al reconstruirlo.
 
         Args:
@@ -123,6 +139,8 @@ class SiteGenerator:
         await asyncio.to_thread(output_root.mkdir, parents=True, exist_ok=True)
         index_path = output_root / _INDEX_MD_NAME
         await asyncio.to_thread(write_text_atomic, index_path, _render_index(context))
+        pages = [_INDEX_MD_NAME] + [path for domain in context.domains for path in resolve_organized_paths(domain, project.root_path)]
+        search_excluded = await asyncio.to_thread(_exclude_oversized_from_search, output_root, pages)
 
         relative_site_dir = target_site_dir.relative_to(os.path.abspath(layout.output_root)).as_posix()
         config = self._build_config(project, context, relative_site_dir)
@@ -131,7 +149,9 @@ class SiteGenerator:
 
         if build:
             await self.build_site(project, timeout=timeout)
-        return SiteResult(config_path=layout.site_config_file, index_path=index_path, site_dir=target_site_dir, site_built=build)
+        return SiteResult(
+            config_path=layout.site_config_file, index_path=index_path, site_dir=target_site_dir, site_built=build, search_excluded=search_excluded
+        )
 
     async def build_site(self, project: Project, *, timeout: float | None = None) -> None:
         """Ejecuta `zensical build` sobre el `zensical.toml` ya escrito por `generate` (usa su `site_dir`).
@@ -142,7 +162,8 @@ class SiteGenerator:
         config_path = ProjectLayout.for_project(project).site_config_file
         command = await asyncio.to_thread(self._zensical_command)
         if command is None:
-            raise SiteBuildError(f"zensical no está instalado (extra 'doc_organize[site]'): '{config_path}' escrito, sin sitio navegable.")
+            reason = "zensical no está instalado (extra 'doc_organize[site]')"
+            raise SiteBuildError(f"{reason}: '{config_path}' escrito, sin sitio navegable.", cause=reason)
         try:
             result = await asyncio.to_thread(
                 subprocess.run,
@@ -156,12 +177,20 @@ class SiteGenerator:
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired as exc:
-            raise SiteBuildError(f"'zensical build' superó el tiempo máximo ({timeout} s) para '{project.name}'.") from exc
+            reason = f"'zensical build' superó el tiempo máximo ({timeout} s)"
+            raise SiteBuildError(f"{reason} para '{project.name}'.", cause=reason) from exc
         except OSError as exc:
-            raise SiteBuildError(f"No se pudo ejecutar 'zensical build' para '{project.name}': {exc}") from exc
+            reason = f"No se pudo ejecutar 'zensical build': {exc}"
+            raise SiteBuildError(f"No se pudo ejecutar 'zensical build' para '{project.name}': {exc}", cause=reason) from exc
         if result.returncode != 0:
             output = (result.stderr.strip() or result.stdout.strip())[-_STDERR_TAIL:]
-            raise SiteBuildError(f"'zensical build' falló para '{project.name}' (código {result.returncode}): {output}")
+            # La causa va al final (tras el traceback): la última línea, para que no se pierda si el mensaje se recorta.
+            cause = next((line.strip() for line in reversed(output.splitlines()) if line.strip()), None)
+            raise SiteBuildError(
+                f"'zensical build' falló para '{project.name}' (código {result.returncode}): {cause or 'sin salida'}",
+                cause=cause,
+                output_tail=output or None,
+            )
 
     @staticmethod
     def _zensical_command() -> list[str] | None:
@@ -281,6 +310,170 @@ def _label(text: str) -> str:
     """Texto no confiable (etiqueta del `nav`, `site_name`, título de `index.md`) listo para Zensical, que lo inserta
     en el HTML sin escapar: sin `<`/`>` (ver `_ANGLE_BRACKETS`) y con `&` y comillas escapados."""
     return html.escape(text.translate(_ANGLE_BRACKETS), quote=True)
+
+
+# --- Límite del índice de búsqueda de Zensical ------------------------------------------------------------------------
+# Comprobado con zensical 0.1.1 (no está documentado): el índice guarda cada posición de token junto con el número de
+# entrada en 30 bits, así que con N entradas en el sitio una sección admite 2**(30 - ceil(log2 N)) posiciones (sin
+# límite práctico hasta 8 192 entradas, 65 536 de 8 193 a 16 384, 32 768 hasta 32 768...). Una entrada es una página
+# más cada título (cualquier nivel, también setext) fuera de bloques de código; el `#` con el que empieza una página se
+# funde con ella. Si una sección supera su máximo, `zensical build` falla entero. Se estima con el separador por
+# defecto del buscador de Zensical (`plugins.search.separator`, que esta clase no cambia) y con margen en ambos valores.
+
+_SEARCH_POSITION_BITS = 30
+_SEARCH_ITEMS_MARGIN = 1.1
+_SEARCH_TOKENS_MARGIN = 0.9
+_SEARCH_SEPARATOR = re.compile(r'[\s\-_,:!=\[\]()\\"`/]+|\.(?!\d)')
+_ATX_HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+|$)")
+_SETEXT_UNDERLINE = re.compile(r"^ {0,3}(?:=+|-+)[ \t]*$")
+_CODE_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+_MARKDOWN_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_MARKDOWN_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_HTML_TAG = re.compile(r"<[^>]+>")
+_FRONT_MATTER_KEY = re.compile(r"^[A-Za-z_][\w-]*[ \t]*:")
+_SEARCH_EXCLUDE_LINES = ("search:", "  exclude: true")
+
+
+def _exclude_oversized_from_search(output_root: Path, pages: list[str]) -> tuple[str, ...]:
+    """Añade `search: exclude: true` a las `pages` (rutas relativas a `output_root`) con una sección que superaría el
+    límite del índice de Zensical; devuelve las excluidas (también las que ya lo estaban por una pasada anterior)."""
+    profiles: dict[str, tuple[int, int]] = {}
+    for page in dict.fromkeys(pages):
+        text = _read_page(output_root, page)
+        if text is not None:
+            profiles[page] = _search_profile(text)
+    if not profiles:
+        return ()
+    items = math.ceil(sum(page_items for page_items, _ in profiles.values()) * _SEARCH_ITEMS_MARGIN)
+    max_positions = 2 ** (_SEARCH_POSITION_BITS - max(items - 1, 1).bit_length())
+    threshold = int(max_positions * _SEARCH_TOKENS_MARGIN)
+
+    excluded: list[str] = []
+    for page, (_, biggest) in profiles.items():
+        if biggest > threshold and _mark_excluded_from_search(output_root, page):
+            logger.info(f"'{page}' sale del buscador del sitio: una sección de ~{biggest} palabras supera el límite ({max_positions})")
+            excluded.append(page)
+    return tuple(excluded)
+
+
+def _mark_excluded_from_search(output_root: Path, page: str) -> bool:
+    """Pone `search: exclude: true` en la cabecera de `page`; `False` si no se pudo (se registra por qué)."""
+    text = _read_page(output_root, page)
+    if text is None:
+        return False
+    new_text = _with_search_exclusion(text)
+    if new_text is None:
+        logger.warning(f"'{page}' supera el límite del buscador de Zensical y su cabecera ya define 'search': no se toca")
+        return False
+    if new_text == text:
+        return True
+    path = output_root.joinpath(*PurePosixPath(page).parts)
+    try:
+        ensure_no_symlinks(path.parent)  # mismo criterio que `Reorganizer`: nunca escribir a través de un enlace
+        write_text_atomic(path, new_text, newline="")
+    except OSError as exc:
+        logger.warning(f"No se pudo sacar '{page}' del buscador ({exc}): el build puede fallar por el límite del índice")
+        return False
+    return True
+
+
+def _read_page(output_root: Path, page: str) -> str | None:
+    """Texto de la página tal cual (saltos de línea incluidos), o `None` si falta, es un enlace o no es UTF-8."""
+    path = output_root.joinpath(*PurePosixPath(page).parts)
+    try:
+        if path.is_symlink() or not path.is_file():
+            return None
+        return path.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.warning(f"No se pudo leer '{page}' para estimar su tamaño en el buscador: {exc}")
+        return None
+
+
+def _split_front_matter(lines: list[str]) -> tuple[list[str] | None, list[str]]:
+    """(líneas de la cabecera sin los `---`, resto), o `(None, lines)` si no empieza por una cabecera válida: un `---`
+    con cierre (`---`/`...`) y una primera línea `clave:` (un `---` suelto al principio es una línea horizontal)."""
+    if not lines or lines[0].strip() != "---":
+        return None, lines
+    for index in range(1, len(lines)):
+        if lines[index].strip() in ("---", "..."):
+            inner = lines[1:index]
+            first = next((line for line in inner if line.strip()), None)
+            if first is not None and _FRONT_MATTER_KEY.match(first):
+                return inner, lines[index + 1 :]
+            return None, lines
+    return None, lines
+
+
+def _search_profile(text: str) -> tuple[int, int]:
+    """(entradas del índice que aporta la página, palabras de su sección más larga), estimadas como Zensical."""
+    _, lines = _split_front_matter(text.lstrip("\ufeff").splitlines())
+    # El texto del título no cuenta en su sección (Zensical lo indexa aparte).
+    sections: list[list[str]] = [[]]
+    headings = 0
+    starts_with_h1 = False
+    fence: str | None = None
+    previous_is_paragraph = False
+    for line in lines:
+        fence, is_code = _code_fence_state(line, fence)
+        heading = None if is_code else _heading(line, previous_is_paragraph)
+        if heading is None:
+            previous_is_paragraph = not is_code and bool(line.strip()) and not line.lstrip().startswith("|")
+            sections[-1].append(line)
+            continue
+        level, setext = heading
+        if setext:
+            sections[-1].pop()  # la línea anterior era el título
+        if headings == 0 and not any(text_line.strip() for text_line in sections[0]):
+            starts_with_h1 = level == 1
+        headings += 1
+        sections.append([])
+        previous_is_paragraph = False
+    items = 1 + headings - (1 if starts_with_h1 else 0)
+    return items, max(_count_search_tokens("\n".join(section)) for section in sections)
+
+
+def _code_fence_state(line: str, fence: str | None) -> tuple[str | None, bool]:
+    """(valla abierta tras `line`, si `line` es parte de un bloque de código)."""
+    if fence is not None:
+        return (None if line.strip().startswith(fence) else fence), True
+    if match := _CODE_FENCE.match(line):
+        return match.group(1)[0] * 3, True
+    return None, False
+
+
+def _heading(line: str, previous_is_paragraph: bool) -> tuple[int, bool] | None:
+    """(nivel, si es setext) si `line` es un título; un subrayado setext solo lo es tras una línea de párrafo."""
+    if match := _ATX_HEADING.match(line):
+        return len(match.group(1)), False
+    if previous_is_paragraph and _SETEXT_UNDERLINE.match(line):
+        return (1 if line.strip().startswith("=") else 2), True
+    return None
+
+
+def _count_search_tokens(text: str) -> int:
+    text = _MARKDOWN_IMAGE.sub(" ", text)
+    text = _MARKDOWN_LINK.sub(r"\1", text)
+    text = _HTML_TAG.sub(" ", text).replace("|", " ")
+    return sum(1 for token in _SEARCH_SEPARATOR.split(text) if token)
+
+
+def _with_search_exclusion(text: str) -> str | None:
+    """`text` con `search: exclude: true` en la cabecera (creándola si no hay), el mismo `text` si ya la tiene, o
+    `None` si la cabecera ya define `search` de otra forma (no se toca)."""
+    bom = "\ufeff" if text.startswith("\ufeff") else ""
+    body = text[len(bom) :]
+    newline = "\r\n" if "\r\n" in body[: body.find("\n") + 1 or len(body)] else "\n"
+    lines = body.splitlines()
+    front_matter, _ = _split_front_matter(lines)
+    block = newline.join(_SEARCH_EXCLUDE_LINES)
+    if front_matter is None:
+        return f"{bom}---{newline}{block}{newline}---{newline}{newline}{body}"
+    for index, line in enumerate(front_matter):
+        if _FRONT_MATTER_KEY.match(line) and line.split(":", 1)[0].strip() == "search":
+            ours = line.rstrip() == _SEARCH_EXCLUDE_LINES[0] and front_matter[index + 1 : index + 2] == [_SEARCH_EXCLUDE_LINES[1]]
+            return text if ours else None
+    opening_end = body.find("\n") + 1
+    return f"{bom}{body[:opening_end]}{block}{newline}{body[opening_end:]}"
 
 
 # --- TOML -------------------------------------------------------------------------------------------------------------

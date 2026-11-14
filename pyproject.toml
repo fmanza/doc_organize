@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_organize"
-version = "1.3.0"
+version = "1.4.0"
 description = "Sistema de extracción de contenido de documentos en Markdown y JSON documentación y organización."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -63,7 +63,7 @@ dev = [
 ]
 docs = [
     # Sitio con Zensical (L-13b); la referencia de API sale de los docstrings con mkdocstrings.
-    "zensical>=0.0.71",
+    "zensical>=0.1.1",
     "mkdocstrings-python>=2.0",
 ]
 # Excel de `doc_organize.export` (`write_cache_xlsx`, `write_scan_errors_xlsx`); el ZIP no necesita nada (L-7).
@@ -72,7 +72,7 @@ export = [
 ]
 # Sitio navegable del contexto de un proyecto (`SiteGenerator` ejecuta `zensical build`; con mkdocs hasta 0.12.x, L-8).
 site = [
-    "zensical>=0.0.71",
+    "zensical>=0.1.1",
 ]
 ocr-gpu = [
     "torch>=2.0",

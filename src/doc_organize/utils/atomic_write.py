@@ -26,13 +26,16 @@ _UMASK = _current_umask()
 """Se lee una vez al importar: `os.umask` no tiene lectura sin escritura y cambiarla en cada llamada no es seguro entre hilos."""
 
 
-def write_text_atomic(path: Path, content: str, *, encoding: str = "utf-8") -> None:
+def write_text_atomic(path: Path, content: str, *, encoding: str = "utf-8", newline: str | None = None) -> None:
     """Escribe `content` en `path` de forma atómica, sin escribir nunca a través de un enlace.
 
     El temporal se crea con nombre aleatorio y en exclusiva en `path.parent`; luego `os.replace` lo pone en su sitio
     (si `path` es un enlace, se sustituye el enlace, nunca su destino). El fichero final conserva los permisos del que
     sustituye, o los habituales (`0o666` menos la umask) si es nuevo: `mkstemp` lo crearía con `0o600`. Si algo falla,
     se borra el temporal.
+
+    `newline` es el de `open()`: `None` (por defecto) traduce `\\n` al salto de línea del sistema; `""` escribe
+    `content` tal cual (para reescribir un fichero conservando sus saltos de línea).
 
     Raises:
         OSError: Si no se puede crear, escribir o mover el temporal (el destino queda como estaba).
@@ -54,7 +57,7 @@ def write_text_atomic(path: Path, content: str, *, encoding: str = "utf-8") -> N
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
         # Mismo tratamiento de saltos de línea que `Path.write_text` (lo que se usaba hasta 0.13.0).
-        with os.fdopen(fd, "w", encoding=encoding) as handle:
+        with os.fdopen(fd, "w", encoding=encoding, newline=newline) as handle:
             handle.write(content)
         os.chmod(tmp_name, mode)
         os.replace(tmp_name, path)
