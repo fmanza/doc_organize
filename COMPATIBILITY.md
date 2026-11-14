@@ -14,7 +14,7 @@ instalables desde fuera.
 > reconstruido ahora verificando `git show <commit-de-bump>:pyproject.toml` de cada una (mismas
 > cotas que 0.4.0 en los tres casos, sin cambios) al cerrar la 0.8.0.
 
-> **Nota de corrección (2026-11-14)**: faltaban las filas de 0.14.0 a 1.3.0 (8 versiones publicadas) y 0.13.0
+> **Nota de corrección (2026-11-14)**: faltaban las filas de 0.14.0 a 1.3.0 (7 versiones publicadas) y 0.13.0
 > seguía marcada como activa. Se han reconstruido con `git diff <tag-anterior> <tag> -- pyproject.toml` entre
 > cada par de tags publicados: las dependencias solo cambian en 0.14.0 (cota de `ruff` en `[dev]`), 1.0.0rc1 (se
 > retiran el extra `[web]` y las dependencias de la web de `[dev]`) y 1.4.0 (`zensical`); el resto de cada fila
