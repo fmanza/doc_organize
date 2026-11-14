@@ -6,6 +6,33 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-14
+
+Corrección: el sitio de contexto no se construía con Zensical 0.0.71 o posterior cuando un documento convertido sin
+títulos (p. ej. una hoja de cálculo grande) superaba el límite del índice de búsqueda; `zensical build` fallaba
+entero. Sin cambios incompatibles en la API; requiere `zensical>=0.1.1`. Detalle en
+[SiteGenerator](docs/api/context.md#sitegenerator-0130-l-8).
+
+### Corregido
+
+- **Límite del buscador de Zensical**: `SiteGenerator.generate` (también con `build=False`) estima, como Zensical, el
+  tamaño de cada sección del índice de búsqueda y el máximo que admite según el número de secciones del sitio (65 536
+  posiciones de token a partir de 8 193 secciones, la mitad cada vez que se duplican), y añade `search: exclude: true`
+  a la cabecera de las páginas que lo superarían, en la copia de la carpeta reorganizada. Esas páginas se navegan pero
+  no salen en el buscador. Una cabecera que ya define `search` no se toca. Con un proyecto real de 214 páginas y
+  ~14 300 secciones: 2 páginas excluidas, ~1 s de estimación frente a ~5 min de build.
+
+### Añadido
+
+- `SiteResult.search_excluded: tuple[str, ...] = ()`: páginas sacadas del buscador, como rutas relativas a la carpeta
+  reorganizada.
+- `SiteBuildError.cause` (motivo en una línea: la última de la salida de Zensical) y `SiteBuildError.output_tail`
+  (final de esa salida, hasta 2000 caracteres). El mensaje termina ahora en `cause` en lugar de en toda la salida.
+
+### Dependencias
+
+- Extras `[site]` y `[docs]`: `zensical>=0.1.1` (antes `>=0.0.71`, cuyo límite del índice iba en bytes).
+
 ## [1.3.0] - 2026-11-07
 
 Petición de doc_organize_web (G41 / L-19). Sin cambios incompatibles: con los valores por defecto el escaneo recorre

@@ -21,8 +21,11 @@ fichero para ser ese tipo de material semántico.
 - El proyecto tiene documentos ya convertidos con éxito (`cache.db` con entradas
   `conversion_status=success`) — ver [Converter](converter.md).
 - Extra `doc_organize[context]` instalado (`pyyaml`, para el manifiesto y las plantillas de taxonomía).
-- Para construir el sitio navegable: extra `doc_organize[site]` (`zensical`). Sin él, la configuración se escribe
-  igual y `SiteGenerator` lanza `SiteBuildError` al construir.
+- Para construir el sitio navegable: extra `doc_organize[site]` (`zensical>=0.1.1` desde 1.4.0). Sin él, la
+  configuración se escribe igual y `SiteGenerator` lanza `SiteBuildError` al construir.
+- Las páginas con una sección demasiado grande para el índice de búsqueda de Zensical (típicamente documentos
+  convertidos sin títulos, como hojas de cálculo grandes) se construyen y se navegan, pero se sacan del buscador del
+  sitio; `SiteResult.search_excluded` dice cuáles (ver [API → SiteGenerator](../api/context.md#sitegenerator-0130-l-8)).
 - Sub-fase B (opcional): un LiteLLM Proxy desplegado — ver
   [Desplegar un LiteLLM Proxy](../guides/litellm_proxy_setup.md).
 

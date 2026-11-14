@@ -361,6 +361,7 @@ class SiteResult:
     index_path: Path     # <root_path>/<output_folder_name>/index.md
     site_dir: Path       # destino de zensical build
     site_built: bool
+    search_excluded: tuple[str, ...] = ()  # 1.4.0: páginas fuera del buscador (rutas relativas a la carpeta reorganizada)
 
 class SiteGenerator:
     async def generate(self, project: Project, context: Context, *, build: bool = True,
@@ -376,8 +377,18 @@ la carpeta física de `Reorganizer`). Con `build=True` ejecuta `zensical build` 
 `python -m zensical`, o el del `PATH`) hacia `site_dir`.
 
 - **Errores tipados**: si falta `zensical` (extra `doc_organize[site]`), el build termina con error o supera
-  `timeout`, lanza `SiteBuildError` (subclase de `DocOrganizeError`, con la salida de error de Zensical). Nunca
-  devuelve un sitio sin construir en silencio. La configuración ya está escrita cuando se lanza.
+  `timeout`, lanza `SiteBuildError` (subclase de `DocOrganizeError`). Nunca devuelve un sitio sin construir en
+  silencio. La configuración ya está escrita cuando se lanza. Desde 1.4.0 trae `cause` (el motivo en una línea: la
+  última de la salida de Zensical, que es la del error) y `output_tail` (los 2000 caracteres finales de esa salida),
+  y el mensaje termina en `cause`. Muestra `exc.cause`: recortar `str(exc)` por el principio puede perder el motivo.
+- **Límite del buscador (1.4.0)**: Zensical (desde 0.0.71) hace fallar el build entero si una sección del índice de
+  búsqueda (el texto entre dos títulos) tiene más posiciones de token de las que admite, y ese máximo depende del
+  tamaño del sitio: sin límite práctico hasta 8 192 secciones en total, 65 536 de 8 193 a 16 384, y la mitad cada
+  vez que el número de secciones se duplica. Un documento convertido sin títulos (una hoja de cálculo grande, un
+  anexo de tablas) es una sola sección. `generate` (también con `build=False`) estima ambos valores y añade
+  `search: exclude: true` a la cabecera de la copia en la carpeta reorganizada de las páginas que lo superarían:
+  se siguen navegando, no aparecen en el buscador y se devuelven en `SiteResult.search_excluded`. Una página cuya
+  cabecera ya define `search` no se toca (se registra un aviso). Requiere `zensical>=0.1.1`.
 - **`site_dir`**: por defecto `<root_path>/site`; relativa a `root_path` si no es absoluta. Tiene que colgar de
   `root_path` (lo exige Zensical, que también vacía `site_dir` al construir), y no puede ser la raíz, la carpeta
   reorganizada ni otra carpeta reservada (`RESERVED_OUTPUT_FOLDER_NAMES`), ni pasar por un enlace:
@@ -397,7 +408,10 @@ from doc_organize import SiteBuildError, SiteGenerator
 try:
     result = await SiteGenerator().generate(project, context, timeout=300)
 except SiteBuildError as exc:
-    ...  # configuración escrita, sitio sin construir: mostrar exc al administrador
+    ...  # configuración escrita, sitio sin construir: mostrar exc.cause al administrador
+else:
+    for page in result.search_excluded:
+        ...  # avisar: la página se navega pero no sale en el buscador
 ```
 
 `MkDocsGenerator`, alias obsoleto de `SiteGenerator` desde 0.13.0, se retiró en 1.0.0: usa `SiteGenerator`.

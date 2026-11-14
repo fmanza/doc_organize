@@ -16,6 +16,7 @@ instalables desde fuera.
 
 | Versión | Python | Dependencias clave | Estado |
 |---|---|---|---|
+| 1.4.0 | `>=3.12` | Mismas dependencias de ejecución que 1.3.0; los extras `[site]` y `[docs]` pasan a `zensical>=0.1.1` (límite del índice de búsqueda en posiciones de token, en el que se basa la exclusión de páginas del buscador); API pública ampliada (`SiteResult.search_excluded`, `SiteBuildError.cause`/`output_tail`) | ✅ Activa |
 | 0.13.0 | `>=3.12` | Mismas dependencias de ejecución que 0.12.1; el extra `[site]` pasa a `zensical>=0.0.71` (sustituye a `mkdocs`: sitio de contexto con `SiteGenerator`); API pública ampliada (rutas del contexto en `ProjectLayout`, plantillas de taxonomía como texto, `SiteBuildError`); `MkDocsGenerator` y `Context.mkdocs_*` obsoletos (se retiran en 1.0.0); la reorganización ya no sigue enlaces simbólicos | ✅ Activa |
 | 0.12.1 | `>=3.12` | Mismas dependencias que 0.12.0; parámetro opcional `relative_to` en la resolución de duplicados (ruta relativa en `duplicados/`); la resolución ya no sigue enlaces simbólicos (una ruta que pase por un enlace falla) | ❌ EOL |
 | 0.12.0 | `>=3.12` | Mismas dependencias que 0.11.0; API pública ampliada (rutas de salida sin Docling, caché de solo lectura con filtros, carpeta de modelos, `CacheNotFoundError`, `ModelsNotAvailableError`); `source_path` del JSON de cada documento relativo a la carpeta escaneada por defecto | ❌ EOL |
