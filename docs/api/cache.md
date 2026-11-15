@@ -235,7 +235,15 @@ class CacheEntry(BaseModel):
     error_message: str | None = None
     error_retry_count: int = 0
     size_bytes: int | None = None  # 1.1.0 (G25); None en entradas anteriores
+    created_time: float | None = None  # 1.5.0: los cuatro, como en DocumentMetadata; None en entradas anteriores
+    mime_type: str | None = None
+    file_permissions: str | None = None
+    owner_name: str | None = None
 ```
+
+Los metadatos de fichero de 1.5.0 (ver [Scanner](scanner.md#metadatos-de-fichero-150)) se guardan con cada documento
+convertido y, desde ese mismo escaneo, también se actualizan en los documentos sin cambios de contenido, sin
+reconvertirlos.
 
 `timestamp` y `size_bytes` permiten construir un `DocumentMetadata` desde la caché
 (`DocumentMetadata.from_cache_entry`, ver [Scanner](scanner.md#documentmetadata-desde-la-cache-110-g25)) y no rehashear
@@ -253,12 +261,17 @@ CREATE TABLE cache_entries (
     conversion_status TEXT,
     error_message TEXT,
     error_retry_count INTEGER NOT NULL DEFAULT 0,
-    size_bytes INTEGER  -- 1.1.0
+    size_bytes INTEGER,  -- 1.1.0
+    created_time REAL,   -- 1.5.0
+    mime_type TEXT,      -- 1.5.0
+    file_permissions TEXT,  -- 1.5.0
+    owner_name TEXT      -- 1.5.0
 );
 ```
 
 Al abrirla en escritura, una caché anterior gana las columnas que le falten (`ALTER TABLE ... ADD COLUMN`, migración
-aditiva). En solo lectura no se migra: una caché sin `size_bytes` se abre igual y esa columna se lee como `None`.
+aditiva). En solo lectura no se migra: una caché sin `size_bytes` o sin las columnas de 1.5.0 se abre igual y esas
+columnas se leen como `None`.
 
 **Pragmas**:
 - `PRAGMA journal_mode=WAL` — Write-Ahead Logging para concurrencia

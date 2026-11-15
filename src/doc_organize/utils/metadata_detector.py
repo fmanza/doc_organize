@@ -1,167 +1,150 @@
-"""Detección de metadatos de archivos: tipo MIME, permisos, propietario (FASE 1)."""
+"""Metadatos de fichero que da el sistema: tipo MIME, fecha de creación, permisos y propietario (1.5.0).
+
+Ninguna función lee el contenido del fichero ni hace E/S más allá de la del propietario: parten del `os.stat_result`
+que el escáner ya tiene. Lo que el sistema no da de forma fiable se devuelve como `None` en lugar de aproximarlo.
+"""
 
 import mimetypes
 import os
-import platform
+import sys
+
+from functools import lru_cache
 from pathlib import Path
 from stat import S_IMODE
-from typing import Any
 
 from doc_organize.utils.logging import get_logger
 
 _logger = get_logger(__name__)
 
 
-def detect_mime_type(path: Path | str) -> str | None:
-    """Detecta tipo MIME: intenta mimetypes, luego python-magic si está disponible.
+def guess_mime_type(path: Path | str) -> str | None:
+    """Tipo MIME según la extensión (`mimetypes`), o `None` si la extensión no es conocida.
 
-    Args:
-        path: Ruta al archivo
-
-    Returns:
-        Tipo MIME (p.ej. 'application/pdf') o None si no se puede detectar
+    Example:
+        >>> guess_mime_type("informe.pdf")
+        'application/pdf'
+        >>> guess_mime_type("informe.desconocida") is None
+        True
     """
-    path = Path(path)
-
-    # Intenta mimetypes (rápido, basado en extensión)
-    mime, _ = mimetypes.guess_type(str(path))
-    if mime:
-        return mime
-
-    # Intenta python-magic si está disponible (lento pero preciso)
-    try:
-        import magic
-
-        return magic.from_file(str(path), mime=True)
-    except ImportError:
-        pass
-    except Exception as e:
-        _logger.debug(f"Error detectando MIME con magic para '{path}': {e}")
-
-    # Fallback: detectar como binario
-    return "application/octet-stream"
+    mime, _ = mimetypes.guess_type(Path(path).name, strict=False)
+    return mime
 
 
-def get_creation_time(stat_result: os.stat_result, path: Path | str | None = None) -> float | None:
-    """Obtiene fecha creación: st_birthtime (macOS) o st_ctime (otros).
+def creation_time(st: os.stat_result) -> float | None:
+    """Fecha de creación (`st_birthtime`) en Windows, macOS y BSD; `None` donde el sistema no la da (Linux).
 
-    Args:
-        stat_result: Resultado de Path.stat()
-        path: Ruta (solo para logging)
-
-    Returns:
-        Timestamp Unix de creación, o None si no se puede obtener
+    En Linux `st_ctime` es la fecha del último cambio de metadatos, no la de creación, así que no se usa.
     """
-    try:
-        # macOS tiene st_birthtime
-        if hasattr(stat_result, "st_birthtime"):
-            return stat_result.st_birthtime
+    birthtime: float | None = getattr(st, "st_birthtime", None)
+    return birthtime
 
-        # Windows/Linux: usar el mínimo entre ctime y mtime
-        # ctime es "change time" (metadatos), mtime es "modification time" (contenido)
-        return min(stat_result.st_ctime, stat_result.st_mtime)
-    except Exception as e:
-        if path:
-            _logger.debug(f"Error obteniendo fecha creación de '{path}': {e}")
+
+def file_permissions(st: os.stat_result) -> str | None:
+    """Permisos POSIX en octal (p. ej. `'644'`, `'4755'`); `None` en Windows, donde no reflejan las ACL."""
+    if sys.platform == "win32":
         return None
+    return f"{S_IMODE(st.st_mode):03o}"
 
 
-def get_file_permissions(stat_result: os.stat_result, path: Path | str | None = None) -> str | None:
-    """Obtiene permisos del archivo en notación octal (Unix) o representación Windows.
+if sys.platform == "win32":
+    import ctypes
 
-    Args:
-        stat_result: Resultado de Path.stat()
-        path: Ruta (solo para logging)
+    from ctypes import wintypes
 
-    Returns:
-        Permisos en formato octal (3 dígitos), p.ej. '644', o None
-    """
-    try:
-        mode = S_IMODE(stat_result.st_mode)
-        return oct(mode)[-3:]  # Últimos 3 dígitos octal
-    except Exception as e:
-        if path:
-            _logger.debug(f"Error leyendo permisos de '{path}': {e}")
-        return None
+    _SE_FILE_OBJECT = 1
+    _OWNER_SECURITY_INFORMATION = 0x1
+    _NAME_BUFFER = 256
 
+    _advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _advapi32.GetNamedSecurityInfoW.argtypes = [
+        wintypes.LPCWSTR,
+        ctypes.c_int,
+        wintypes.DWORD,
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    _advapi32.GetNamedSecurityInfoW.restype = wintypes.DWORD
+    _advapi32.ConvertSidToStringSidW.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+    _advapi32.ConvertSidToStringSidW.restype = wintypes.BOOL
+    _advapi32.LookupAccountSidW.argtypes = [
+        wintypes.LPCWSTR,
+        ctypes.c_void_p,
+        wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+        wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    _advapi32.LookupAccountSidW.restype = wintypes.BOOL
+    _kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    _kernel32.LocalFree.restype = ctypes.c_void_p
 
-def get_owner_name(stat_result: os.stat_result, path: Path | str | None = None) -> str | None:
-    """Obtiene propietario del archivo (Unix/Windows).
+    # Pocas cuentas distintas por escaneo y la resolución puede ir al controlador de dominio: se guarda por SID.
+    _account_names: dict[str, str | None] = {}
 
-    Args:
-        stat_result: Resultado de Path.stat()
-        path: Ruta (solo para logging)
-
-    Returns:
-        Nombre del propietario, o None si no se puede obtener
-    """
-    system = platform.system()
-
-    if system in ("Linux", "Darwin"):  # Unix/macOS
+    def _sid_string(sid: ctypes.c_void_p) -> str | None:
+        buffer = ctypes.c_void_p()
+        if not _advapi32.ConvertSidToStringSidW(sid, ctypes.byref(buffer)):
+            return None
         try:
-            import pwd
+            return ctypes.wstring_at(buffer.value) if buffer.value else None
+        finally:
+            _kernel32.LocalFree(buffer)
 
-            return pwd.getpwuid(stat_result.st_uid).pw_name
-        except (ImportError, KeyError) as e:
-            if path:
-                _logger.debug(f"Error leyendo propietario Unix de '{path}': {e}")
+    def _account_name(sid: ctypes.c_void_p) -> str | None:
+        name = ctypes.create_unicode_buffer(_NAME_BUFFER)
+        domain = ctypes.create_unicode_buffer(_NAME_BUFFER)
+        name_len = wintypes.DWORD(_NAME_BUFFER)
+        domain_len = wintypes.DWORD(_NAME_BUFFER)
+        sid_type = wintypes.DWORD()
+        if not _advapi32.LookupAccountSidW(None, sid, name, ctypes.byref(name_len), domain, ctypes.byref(domain_len), ctypes.byref(sid_type)):
+            return None  # SID huérfano (cuenta borrada) o sin acceso al dominio
+        return f"{domain.value}\\{name.value}" if domain.value else name.value
+
+    def _windows_owner(path: str) -> str | None:
+        owner = ctypes.c_void_p()
+        descriptor = ctypes.c_void_p()
+        error = _advapi32.GetNamedSecurityInfoW(
+            path, _SE_FILE_OBJECT, _OWNER_SECURITY_INFORMATION, ctypes.byref(owner), None, None, None, ctypes.byref(descriptor)
+        )
+        if error:
+            _logger.debug(f"No se pudo leer el propietario de '{path}' (error {error})")
+            return None
+        try:
+            key = _sid_string(owner)
+            if key is None:
+                return None
+            if key not in _account_names:
+                _account_names[key] = _account_name(owner)
+            return _account_names[key]
+        finally:
+            _kernel32.LocalFree(descriptor)
+
+else:
+    import pwd
+
+    @lru_cache(maxsize=256)
+    def _user_name(uid: int) -> str | None:
+        try:
+            return pwd.getpwuid(uid).pw_name
+        except KeyError:  # UID sin entrada en la base de usuarios (p. ej. fichero de un montaje NFS)
             return None
 
-    if system == "Windows":
-        try:
-            import win32security
 
-            # Obtener SID del propietario
-            descriptor = win32security.GetFileSecurity(
-                str(path), win32security.OWNER_SECURITY_INFORMATION
-            )
-            owner_sid = descriptor.GetSecurityDescriptorOwner()
-            # Convertir SID a nombre
-            name, domain, _ = win32security.LookupAccountSid(None, owner_sid)
-            return f"{domain}\\{name}" if domain else name
-        except Exception as e:
-            if path:
-                _logger.debug(f"Error leyendo propietario Windows de '{path}': {e}")
-            return None
+def file_owner(path: Path | str, st: os.stat_result) -> str | None:
+    """Cuenta propietaria del fichero: `usuario` en POSIX, `DOMINIO\\usuario` en Windows; `None` si no se resuelve.
 
-    return None
-
-
-def extract_basic_metadata(path: Path | str) -> dict[str, Any]:
-    """Extrae metadatos básicos de un archivo (FASE 1).
-
-    Args:
-        path: Ruta al archivo
-
-    Returns:
-        Dict con claves: mime_type, created_time, file_permissions, owner_name
-        Valores pueden ser None si no se pueden obtener
+    En Windows lee el descriptor de seguridad del fichero (una llamada al sistema por fichero); en POSIX solo traduce
+    `st.st_uid`. Las cuentas resueltas se guardan en memoria durante el proceso.
     """
-    path = Path(path)
-
-    try:
-        stat = path.stat()
-
-        return {
-            "mime_type": detect_mime_type(path),
-            "created_time": get_creation_time(stat, path),
-            "file_permissions": get_file_permissions(stat, path),
-            "owner_name": get_owner_name(stat, path),
-        }
-    except Exception as e:
-        _logger.warning(f"Error extrayendo metadatos básicos de '{path}': {e}")
-        return {
-            "mime_type": None,
-            "created_time": None,
-            "file_permissions": None,
-            "owner_name": None,
-        }
+    if sys.platform == "win32":
+        return _windows_owner(str(path))
+    else:  # Con `else`, mypy no analiza esta rama en Windows, donde `_user_name` no existe.
+        return _user_name(st.st_uid)
 
 
-__all__ = [
-    "detect_mime_type",
-    "get_creation_time",
-    "get_file_permissions",
-    "get_owner_name",
-    "extract_basic_metadata",
-]
+__all__ = ["creation_time", "file_owner", "file_permissions", "guess_mime_type"]

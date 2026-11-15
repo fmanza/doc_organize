@@ -155,19 +155,13 @@ class DocumentMetadata(BaseModel):
     sha256_hash: str = Field(..., description="Hash SHA-256 (cadena hexadecimal de 64 caracteres)")
     created_time: float | None = Field(
         default=None,
-        description="Timestamp Unix de creación (st_birthtime en macOS, st_ctime en otros, FASE 1)",
+        description="Timestamp Unix de creación (`st_birthtime`, 1.5.0); None en Linux, que no la da",
     )
-    mime_type: str | None = Field(
-        default=None, description="Tipo MIME detectado (p.ej. 'application/pdf', 'text/plain', FASE 1)"
-    )
-    detected_language: str | None = Field(
-        default=None, description="Código ISO 639-1 del idioma detectado (p.ej. 'es', 'en', FASE 1)"
-    )
-    file_permissions: str | None = Field(
-        default=None, description="Permisos en notación octal (Unix) o representación Windows (FASE 1)"
-    )
+    mime_type: str | None = Field(default=None, description="Tipo MIME según la extensión (1.5.0); None si la extensión no es conocida")
+    file_permissions: str | None = Field(default=None, description="Permisos POSIX en octal, p. ej. '644' (1.5.0); None en Windows")
     owner_name: str | None = Field(
-        default=None, description="Propietario del archivo en el SO, o None si no se obtiene (FASE 1)"
+        default=None,
+        description="Cuenta propietaria (1.5.0); solo con `ScanOptions.capture_owner=True`, None si no se resuelve",
     )
 
     @classmethod
@@ -181,7 +175,8 @@ class DocumentMetadata(BaseModel):
             entry: Entrada guardada por un escaneo de 1.1.0 o posterior (con `size_bytes`).
 
         Returns:
-            DocumentMetadata con el hash, el tamaño y la fecha de modificación de la caché.
+            DocumentMetadata con el hash, el tamaño, la fecha de modificación y los metadatos de fichero de 1.5.0
+            (`None` si la entrada es anterior) de la caché.
 
         Raises:
             ValueError: La entrada no tiene `size_bytes` (la escribió una versión anterior a 1.1.0); se rellena en el
@@ -204,6 +199,10 @@ class DocumentMetadata(BaseModel):
             size_bytes=entry.size_bytes,
             modified_time=entry.timestamp,
             sha256_hash=entry.sha256_hash,
+            created_time=entry.created_time,
+            mime_type=entry.mime_type,
+            file_permissions=entry.file_permissions,
+            owner_name=entry.owner_name,
         )
 
     model_config = ConfigDict(
@@ -217,9 +216,8 @@ class DocumentMetadata(BaseModel):
                 "sha256_hash": "abc123def456...",
                 "created_time": 1693151000.0,
                 "mime_type": "application/pdf",
-                "detected_language": None,
                 "file_permissions": "644",
-                "owner_name": "user",
+                "owner_name": None,
             }
         }
     )
@@ -342,21 +340,10 @@ class CacheEntry(BaseModel):
     size_bytes: int | None = Field(
         default=None, description="Tamaño del fichero en bytes cuando se escaneó (None en entradas anteriores a 1.1.0, G25)"
     )
-    created_time: float | None = Field(
-        default=None, description="Timestamp Unix de creación (FASE 1), None en caché anterior a 1.5.0"
-    )
-    mime_type: str | None = Field(
-        default=None, description="Tipo MIME detectado (FASE 1), None en caché anterior a 1.5.0"
-    )
-    detected_language: str | None = Field(
-        default=None, description="Idioma detectado (FASE 1), None en caché anterior a 1.5.0"
-    )
-    file_permissions: str | None = Field(
-        default=None, description="Permisos del archivo (FASE 1), None en caché anterior a 1.5.0"
-    )
-    owner_name: str | None = Field(
-        default=None, description="Propietario del archivo (FASE 1), None en caché anterior a 1.5.0"
-    )
+    created_time: float | None = Field(default=None, description="`DocumentMetadata.created_time` (1.5.0; None en entradas anteriores)")
+    mime_type: str | None = Field(default=None, description="`DocumentMetadata.mime_type` (1.5.0; None en entradas anteriores)")
+    file_permissions: str | None = Field(default=None, description="`DocumentMetadata.file_permissions` (1.5.0; None en entradas anteriores)")
+    owner_name: str | None = Field(default=None, description="`DocumentMetadata.owner_name` (1.5.0; None en entradas anteriores)")
 
 
 class ScanErrorEntry(BaseModel):
@@ -540,6 +527,13 @@ class ScanOptions(BaseModel):
         description=(
             "No rehashear un fichero cuyo tamaño y fecha de modificación coinciden con la caché: se reutiliza su hash (G11). "
             "No detecta un cambio que conserve tamaño y fecha"
+        ),
+    )
+    capture_owner: bool = Field(
+        default=False,
+        description=(
+            "Guardar la cuenta propietaria de cada documento en `DocumentMetadata.owner_name` y en la caché (1.5.0). "
+            "Desactivado por defecto: es un dato personal y en Windows cuesta una llamada al sistema por fichero"
         ),
     )
     exclude_paths: list[str] = Field(

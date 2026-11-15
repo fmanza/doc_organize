@@ -22,13 +22,20 @@ CREATE TABLE IF NOT EXISTS cache_entries (
     conversion_status TEXT,
     error_message TEXT,
     error_retry_count INTEGER NOT NULL DEFAULT 0,
-    size_bytes INTEGER
+    size_bytes INTEGER,
+    created_time REAL,
+    mime_type TEXT,
+    file_permissions TEXT,
+    owner_name TEXT
 )
 """
 
 _UPSERT = """
-INSERT INTO cache_entries (file_path, sha256_hash, timestamp, status, conversion_status, error_message, error_retry_count, size_bytes)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO cache_entries (
+    file_path, sha256_hash, timestamp, status, conversion_status, error_message, error_retry_count,
+    size_bytes, created_time, mime_type, file_permissions, owner_name
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(file_path) DO UPDATE SET
     sha256_hash=excluded.sha256_hash,
     timestamp=excluded.timestamp,
@@ -36,8 +43,22 @@ ON CONFLICT(file_path) DO UPDATE SET
     conversion_status=excluded.conversion_status,
     error_message=excluded.error_message,
     error_retry_count=excluded.error_retry_count,
-    size_bytes=excluded.size_bytes
+    size_bytes=excluded.size_bytes,
+    created_time=excluded.created_time,
+    mime_type=excluded.mime_type,
+    file_permissions=excluded.file_permissions,
+    owner_name=excluded.owner_name
 """
+
+#: Columnas añadidas después del esquema de 1.0 (`size_bytes` en 1.1.0, el resto en 1.5.0) y su tipo: en escritura se
+#: añaden si faltan; en solo lectura, una que falte se lee como `NULL`.
+_OPTIONAL_COLUMNS: dict[str, str] = {
+    "size_bytes": "INTEGER",
+    "created_time": "REAL",
+    "mime_type": "TEXT",
+    "file_permissions": "TEXT",
+    "owner_name": "TEXT",
+}
 
 
 def _py_lower(value: str | None) -> str | None:
@@ -115,7 +136,7 @@ class CacheManager:
         self.read_only = read_only
         self.logger = get_logger(__name__)
         self._conn: aiosqlite.Connection | None = None
-        self._has_size_column = True
+        self._optional_present: frozenset[str] = frozenset(_OPTIONAL_COLUMNS)
 
     async def __aenter__(self) -> Self:
         """Abre la conexion (y, en escritura, prepara WAL, tabla y columnas).
@@ -155,7 +176,7 @@ class CacheManager:
         except Exception as exc:  # p. ej. sqlite3.DatabaseError si el fichero no es una base SQLite
             await self.__aexit__()
             raise CacheError(f"No se pudo leer la caché '{self.db_path}': {exc}") from exc
-        self._has_size_column = "size_bytes" in columns
+        self._optional_present = frozenset(_OPTIONAL_COLUMNS) & columns
         missing = set(_COLUMNS) - columns
         if missing:
             await self.__aexit__()
@@ -179,9 +200,11 @@ class CacheManager:
         if "error_retry_count" not in columns:
             await self._connection.execute("ALTER TABLE cache_entries ADD COLUMN error_retry_count INTEGER NOT NULL DEFAULT 0")
             altered = True
-        if "size_bytes" not in columns:
-            await self._connection.execute("ALTER TABLE cache_entries ADD COLUMN size_bytes INTEGER")
-            altered = True
+        for name, sql_type in _OPTIONAL_COLUMNS.items():
+            if name not in columns:
+                # Nombre y tipo salen de `_OPTIONAL_COLUMNS`, nunca de datos externos.
+                await self._connection.execute(f"ALTER TABLE cache_entries ADD COLUMN {name} {sql_type}")
+                altered = True
         if altered:
             await self._connection.commit()
 
@@ -232,13 +255,26 @@ class CacheManager:
         return cache
 
     def _select_columns(self) -> str:
-        """Columnas del `SELECT`; `size_bytes` como `NULL` en una caché antigua abierta en solo lectura (G25)."""
-        size_column = "size_bytes" if self._has_size_column else "NULL"
-        return ", ".join((*_COLUMNS, size_column))
+        """Columnas del `SELECT`; las de `_OPTIONAL_COLUMNS` que falten, como `NULL` (caché antigua en solo lectura, G25)."""
+        optional = (name if name in self._optional_present else "NULL" for name in _OPTIONAL_COLUMNS)
+        return ", ".join((*_COLUMNS, *optional))
 
     @staticmethod
     def _row_to_entry(row: tuple[object, ...] | aiosqlite.Row) -> CacheEntry:
-        file_path, sha256_hash, timestamp, status, conversion_value, error_message, error_retry_count, size_bytes = row
+        (
+            file_path,
+            sha256_hash,
+            timestamp,
+            status,
+            conversion_value,
+            error_message,
+            error_retry_count,
+            size_bytes,
+            created_time,
+            mime_type,
+            file_permissions,
+            owner_name,
+        ) = row
         return CacheEntry(
             file_path=file_path,
             sha256_hash=sha256_hash,
@@ -248,6 +284,10 @@ class CacheManager:
             error_message=error_message,
             error_retry_count=error_retry_count,
             size_bytes=size_bytes,
+            created_time=created_time,
+            mime_type=mime_type,
+            file_permissions=file_permissions,
+            owner_name=owner_name,
         )
 
     async def count_entries(
@@ -359,7 +399,7 @@ class CacheManager:
         direction = "DESC" if descending else "ASC"
         if order_by == "file_path":
             return f"file_path {direction}"
-        column = "NULL" if order_by == "size_bytes" and not self._has_size_column else order_by
+        column = "NULL" if order_by in _OPTIONAL_COLUMNS and order_by not in self._optional_present else order_by
         return f"{column} IS NULL, {column} {direction}, file_path ASC"
 
     async def compute_hash(self, file_path: str) -> str:
@@ -423,6 +463,10 @@ class CacheManager:
                 entry.error_message,
                 entry.error_retry_count,
                 entry.size_bytes,
+                entry.created_time,
+                entry.mime_type,
+                entry.file_permissions,
+                entry.owner_name,
             )
             for entry in entries
         ]

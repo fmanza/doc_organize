@@ -20,7 +20,7 @@ from doc_organize.core.models import CacheEntry, DirectoryTree, DirectoryTreeNod
 from doc_organize.utils.hash_utils import hash_file
 from doc_organize.utils.io_retry import retry_io, retry_io_async
 from doc_organize.utils.logging import get_logger
-from doc_organize.utils.metadata_detector import extract_basic_metadata
+from doc_organize.utils.metadata_detector import creation_time, file_owner, file_permissions, guess_mime_type
 
 _DEFAULT_MAX_CONCURRENT_HASHES = 8
 
@@ -144,18 +144,27 @@ class DocumentScanner:
         {'txt': 1}
     """
 
-    def __init__(self, max_concurrent_hashes: int = _DEFAULT_MAX_CONCURRENT_HASHES, *, io_retries: int = 0, io_retry_backoff_s: float = 1.0) -> None:
+    def __init__(
+        self,
+        max_concurrent_hashes: int = _DEFAULT_MAX_CONCURRENT_HASHES,
+        *,
+        io_retries: int = 0,
+        io_retry_backoff_s: float = 1.0,
+        capture_owner: bool = False,
+    ) -> None:
         """Crea el escáner.
 
         Args:
             max_concurrent_hashes: Hashes SHA-256 calculados a la vez.
             io_retries: Reintentos ante errores de E/S transitorios (G11, 1.1.0); 0 por defecto.
             io_retry_backoff_s: Espera antes del primer reintento; se duplica en cada uno.
+            capture_owner: Rellenar `DocumentMetadata.owner_name` (1.5.0); desactivado por defecto.
         """
         self.logger = get_logger(__name__)
         self._max_concurrent_hashes = max_concurrent_hashes
         self._io_retries = io_retries
         self._io_retry_backoff_s = io_retry_backoff_s
+        self._capture_owner = capture_owner
 
     async def __aenter__(self) -> Self:
         return self
@@ -364,7 +373,6 @@ class DocumentScanner:
                 unreadable_files[str(path)] = f"No se pudieron leer sus metadatos: {exc}"
             return None
         if extension in allowed_extensions:
-            basic_metadata = extract_basic_metadata(path)
             files.append(
                 _DiscoveredFile(
                     full_path=path,
@@ -372,10 +380,10 @@ class DocumentScanner:
                     extension=extension,
                     size_bytes=stat.st_size,
                     modified_time=stat.st_mtime,
-                    created_time=basic_metadata.get("created_time"),
-                    mime_type=basic_metadata.get("mime_type"),
-                    file_permissions=basic_metadata.get("file_permissions"),
-                    owner_name=basic_metadata.get("owner_name"),
+                    created_time=creation_time(stat),
+                    mime_type=guess_mime_type(path),
+                    file_permissions=file_permissions(stat),
+                    owner_name=file_owner(path, stat) if self._capture_owner else None,
                 )
             )
         return DirectoryTreeNode(name=path.name, type="file", path=str(path), size_bytes=stat.st_size)
