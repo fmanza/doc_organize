@@ -95,6 +95,17 @@ descartaba) y `material_type_confidence`; `Context.ai_classification_model` (ya 
 campos tipados en lugar del diccionario `domain_confidence_breakdown`.
 **Status**: ✅
 
+### ✅ 10. Fase 4: historial del contexto y su exportación
+
+**Archivo(s)**: `src/doc_organize/context/context_history.py`, `context_builder.py`, `core/models.py`,
+`core/constants.py`, `projects/layout.py`, `export/sources.py`, `export/xlsx_export.py`, `main.py`
+**Descripción**: `ContextBuilder._save_and_record` lee el contexto anterior, guarda el nuevo y añade un
+`ContextBuildRecord` a `historial_contexto/CONTEXT_HISTORY.jsonl` con `diff_contexts` (entra, sale o cambia de
+dominio/tipo de material). Exportación con `write_context_history_xlsx` y `export context-xlsx`. Decisión del usuario:
+de la Fase 4 del plan, solo historial e informe; se descartaron el origen «importado/creado/migrado» y el evento
+«accedido» (la librería no puede saberlos) y la retención por tipo de material.
+**Status**: ✅
+
 ---
 
 ## Impacto
@@ -164,6 +175,10 @@ cliente de IA solo se ha probado con `httpx.MockTransport`, no contra un LiteLLM
   `main` prohíbe push que no sean fast-forward (rulesets «PR en develop» y «CI en verde»).
 - **[imports]**: `ai/` no puede importar de `context/` (`context/__init__` importa `ContextBuilder`, que importa `ai`):
   lo compartido va en `utils/` (p. ej. `utils/text_clean.py`).
+- **[historial del contexto]**: se escribe en `ContextBuilder`, no en `ContextRegistry.save_context`, porque el
+  registro también guarda al reorganizar o generar el sitio y eso no son construcciones. Cualquier carpeta nueva en la
+  raíz del proyecto debe ir a `RESERVED_OUTPUT_FOLDER_NAMES` (`projects/layout.py`): la carpeta reorganizada se borra
+  entera al reconstruir.
 - **[tests de contexto]**: los dobles de los clientes de IA necesitan `config = SimpleNamespace(model=...)`, porque
   `ContextBuilder` anota `client.config.model` en el `Context`.
 - **[reglas]**: `score_catalog` compara con `fold_accents` (sin tildes ni diéresis; «ñ» → «n») desde esta sesión; antes

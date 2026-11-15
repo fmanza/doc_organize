@@ -137,6 +137,32 @@ Cada `DomainDocument` guarda cómo se llegó a su dominio, y el `Context`, con q
 La fecha de clasificación es `Context.updated_at`: todos los documentos de una construcción se clasifican a la vez.
 `confidence` sigue siendo la confianza final, la de quien decidió (`classified_by`).
 
+### Historial del contexto (1.5.0)
+
+`context.json` se sobrescribe en cada construcción. Para no perder qué cambió, `build()` lee el contexto anterior antes
+de guardar el nuevo y añade una línea (`ContextBuildRecord`) a `historial_contexto/CONTEXT_HISTORY.jsonl`
+(`ProjectLayout.context_history`, junto a `context.json`):
+
+| Campo | Contenido |
+|---|---|
+| `built_at`, `previous_built_at` | Esta construcción y la anterior con la que se compara (`None` si es la primera o la anterior no se pudo leer: entonces todo cuenta como `added`) |
+| `built_with_version`, `ai_classification_model`, `ai_enrichment_model`, `taxonomy_manifest_used` | Con qué se construyó |
+| `classified`, `unclassified` | Recuentos |
+| `changes` | Un `ContextChange` por documento que entra (`added`), sale (`removed`) o cambia de dominio o de tipo de material (`reclassified`, también de clasificado a sin clasificar y al revés), con el antes, el después y `classified_by` |
+
+Un documento que solo cambia de quién lo clasificó (reglas o IA) sin cambiar de sitio no es un cambio. Un contexto
+anterior dañado no impide construir (se avisa y se compara con nada), y un fallo al escribir el historial tampoco: el
+contexto ya guardado se mantiene. Eliminar el contexto no borra el historial (`ProjectHistoryCleaner` sí, porque vacía
+la raíz entera); `historial_contexto` es un nombre reservado para la carpeta reorganizada.
+
+```python
+from doc_organize.context import diff_contexts, list_context_builds  # list_context_builds(path): más recientes primero
+from doc_organize.export import load_context_history, write_context_history_xlsx
+```
+
+`list_context_builds(path)` ignora con un aviso las líneas dañadas. Para revisarlo fuera:
+`write_context_history_xlsx` o `python -m doc_organize export context-xlsx` (ver [Exportación](export.md)).
+
 ### Autor, descripción y palabras clave (1.5.0)
 
 Tras clasificar, cada `DomainDocument` recibe lo que declara su documento original (`read_document_properties`, en

@@ -135,6 +135,11 @@ SCAN_HISTORY_JSONL_NAME = "SCAN_HISTORY.jsonl"
 #: configuración de antes de 0.13.0: se borra al regenerar o eliminar el sitio.
 CONTEXT_FILE_NAME = "context.json"
 DOMAINS_FOLDER_NAME = "domains"
+#: Histórico de construcciones del contexto (1.5.0), junto a `context.json`: una línea JSON (`ContextBuildRecord`) por
+#: cada `ContextBuilder.build()`, con los documentos que entraron, salieron o cambiaron de dominio o tipo de material.
+#: Append-only: eliminar el contexto no lo borra (sí `ProjectHistoryCleaner`, que vacía la raíz entera).
+CONTEXT_HISTORY_FOLDER_NAME = "historial_contexto"
+CONTEXT_HISTORY_JSONL_NAME = "CONTEXT_HISTORY.jsonl"
 TAXONOMY_MANIFEST_FILE_NAME = "taxonomy_manifest.md"
 SITE_FOLDER_NAME = "site"
 SITE_CONFIG_FILE_NAME = "zensical.toml"
@@ -160,6 +165,8 @@ PROJECT_NAME_RESERVED_PATTERN = re.compile(
 __all__ = [
     "AV_SUPPORTED_EXTENSIONS",
     "CONTEXT_FILE_NAME",
+    "CONTEXT_HISTORY_FOLDER_NAME",
+    "CONTEXT_HISTORY_JSONL_NAME",
     "CONVERSION_FOLDER_NAME",
     "DEDUP_HISTORY_JSONL_NAME",
     "DEDUP_REPORT_JSON_NAME",

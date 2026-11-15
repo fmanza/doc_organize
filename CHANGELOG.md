@@ -29,6 +29,14 @@ releases publicados antes de esa versión).
   descartaba) y `material_type_confidence`. En `Context`: `ai_enrichment_model` y `built_with_version` (versión de
   doc_organize que lo construyó). Detalle en
   [Contexto](docs/api/context.md#trazabilidad-de-la-clasificacion-150).
+- **Historial del contexto**: cada `ContextBuilder.build()` añade a `historial_contexto/CONTEXT_HISTORY.jsonl`
+  (`ProjectLayout.context_history`) un `ContextBuildRecord` con los documentos que entraron, salieron o cambiaron de
+  dominio o tipo de material respecto a la construcción anterior, y con qué versión y modelos se construyó. Se lee con
+  `context.list_context_builds`/`export.load_context_history` y se compara con `context.diff_contexts`. Detalle en
+  [Contexto](docs/api/context.md#historial-del-contexto-150).
+- **Excel del historial del contexto**: `export.write_context_history_xlsx` (hojas `Construcciones` y `Cambios`) y
+  `python -m doc_organize export context-xlsx [--history-log ...]`.
+- `historial_contexto` pasa a `RESERVED_OUTPUT_FOLDER_NAMES`: la carpeta reorganizada no puede llamarse así.
 - `ProgressEvent.phase` admite `"enrichment"`.
 
 ### Corregido

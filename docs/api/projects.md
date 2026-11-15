@@ -241,6 +241,7 @@ Todas cuelgan de la raíz de salidas (`project.root_path`), también con un `sta
 | `site_cache_dir` | `.cache/` (caché que Zensical crea junto a su configuración) |
 | `legacy_mkdocs_config_file` | `mkdocs.yml` de antes de 0.13.0 |
 | `reorganized_dir(output_folder_name)` | `<output_folder_name>/`, validado |
+| `context_history` | `historial_contexto/CONTEXT_HISTORY.jsonl` (1.5.0): una línea por construcción del contexto |
 
 ```python
 RESERVED_OUTPUT_FOLDER_NAMES: frozenset[str]
@@ -249,7 +250,7 @@ def validate_output_folder_name(name: str) -> str   # InvalidPathError; devuelve
 
 `RESERVED_OUTPUT_FOLDER_NAMES` son los nombres de la raíz que no puede usar `Context.output_folder_name`, porque la
 carpeta reorganizada se borra entera al reconstruir o eliminar el contexto: `Conversión`, `duplicados`,
-`errores_escaneo`, `historial_escaneo`, `domains`, `site`, `.cache` y los ficheros de la raíz (`context.json`,
+`errores_escaneo`, `historial_escaneo`, `historial_contexto` (1.5.0), `domains`, `site`, `.cache` y los ficheros de la raíz (`context.json`,
 `zensical.toml`, `mkdocs.yml`, `taxonomy_manifest.md`, `cache.db`, `folders.json`, `scanned_folders.json`).
 `validate_output_folder_name` exige además un nombre simple (letras, dígitos, `_`, `.`, `-` y espacios; ni `.` ni `..`)
 y compara sin distinguir mayúsculas, sin puntos ni espacios finales (Windows los quita) y en forma Unicode NFC. doc_organize_web

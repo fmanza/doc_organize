@@ -65,6 +65,9 @@ python -m doc_organize export cache-xlsx --output-root /red/Proyecto --state-roo
 
 # Excel de errores (por defecto lee errores_escaneo/SCAN_ERRORS_HISTORY.jsonl del estado)
 python -m doc_organize export errors-xlsx --project "Mi Proyecto" -o errores.xlsx
+
+# Excel del historial del contexto (1.5.0; por defecto lee historial_contexto/CONTEXT_HISTORY.jsonl de las salidas)
+python -m doc_organize export context-xlsx --project "Mi Proyecto" -o historial_contexto.xlsx
 ```
 
 | Opción | Uso |
@@ -73,6 +76,7 @@ python -m doc_organize export errors-xlsx --project "Mi Proyecto" -o errores.xls
 | `--output-root` / `--state-root` | Raíz de salidas y raíz del estado si está aparte |
 | `--cache-file` | Una o varias `cache.db` (por defecto la del proyecto) |
 | `--errors-log` | Uno o varios históricos de errores (solo `errors-xlsx`) |
+| `--history-log` | Uno o varios historiales del contexto (solo `context-xlsx`) |
 | `-o`, `--output` | Fichero a escribir (se sobrescribe) |
 | `--preview` | Solo `zip`: muestra ficheros y bytes sin escribir |
 

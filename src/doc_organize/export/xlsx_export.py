@@ -20,7 +20,7 @@ from typing import Any, BinaryIO
 
 from doc_organize.core.constants import MAX_AUTO_ERROR_RETRIES
 from doc_organize.core.exceptions import MissingDependencyError
-from doc_organize.core.models import CacheEntry, ConversionStatus, ScanErrorEntry, ScanErrorReport
+from doc_organize.core.models import CacheEntry, ContextBuildRecord, ContextChange, ConversionStatus, ScanErrorEntry, ScanErrorReport
 from doc_organize.core.progress import CancelToken, ProgressCallback, checkpoint
 from doc_organize.export._progress import ExportProgress
 from doc_organize.utils.logging import get_logger
@@ -68,6 +68,37 @@ SCAN_ERRORS_HISTORY_COLUMNS = (
     _COL_REINTENTOS,
     _COL_LIMITE_ALCANZADO,
 )
+
+#: Hojas y cabeceras del Excel del historial del contexto (1.5.0).
+CONTEXT_BUILDS_SHEET = "Construcciones"
+CONTEXT_CHANGES_SHEET = "Cambios"
+_COL_FECHA_UTC = "Fecha (UTC)"
+CONTEXT_BUILDS_COLUMNS = (
+    _COL_FECHA_UTC,
+    "Construcción anterior (UTC)",
+    "Proyecto",
+    "Versión de doc_organize",
+    "Manifiesto",
+    "Modelo de clasificación",
+    "Modelo de descripciones",
+    "Clasificados",
+    "Sin clasificar",
+    "Cambios",
+)
+CONTEXT_CHANGES_COLUMNS = (
+    _COL_FECHA_UTC,
+    _COL_ARCHIVO,
+    _COL_CARPETA,
+    _COL_RUTA_COMPLETA,
+    "Cambio",
+    "Dominio anterior",
+    "Dominio",
+    "Tipo de material anterior",
+    "Tipo de material",
+    "Clasificado por",
+)
+_CHANGE_LABELS = {"added": "Entra", "removed": "Sale", "reclassified": "Cambia"}
+_UNCLASSIFIED_LABEL = "(sin clasificar)"
 
 _FORMULA_TRIGGER_CHARS = ("=", "+", "-", "@", "\t", "\r")
 # Caracteres de control que el formato XLSX no admite (openpyxl lanza `IllegalCharacterError`); mismo patrón que
@@ -152,6 +183,46 @@ def write_scan_errors_xlsx(
     return _write_workbook(destination, sheets, on_progress, cancel_token)
 
 
+def write_context_history_xlsx(
+    destination: str | Path | BinaryIO,
+    history: Iterable[ContextBuildRecord],
+    *,
+    on_progress: ProgressCallback | None = None,
+    cancel_token: CancelToken | None = None,
+) -> int:
+    """Escribe un Excel con el historial del contexto (1.5.0): hojas `Construcciones` y `Cambios`.
+
+    `Construcciones` tiene una fila por construcción y `Cambios` una por documento que entró, salió o cambió de dominio
+    o tipo de material, ambas en el orden de `history` (ver `load_context_history`: las más recientes primero).
+
+    Args:
+        destination: Ruta del `.xlsx` (se crea o sobrescribe) o fichero binario abierto para escritura.
+        history: Construcciones del contexto.
+        on_progress: Recibe `ProgressEvent(operation="export")` por fila (`started`, `export`, `done`).
+        cancel_token: Si se cancela, para entre dos filas.
+
+    Returns:
+        Filas de datos escritas en las dos hojas (sin las cabeceras).
+
+    Raises:
+        MissingDependencyError: Falta `openpyxl` (extra `export`).
+        OperationCancelledError: Se canceló; si `destination` es una ruta, el fichero parcial se borra.
+
+    Example:
+        >>> import io
+        >>> write_context_history_xlsx(io.BytesIO(), [])
+        0
+    """
+    records = list(history)
+    build_rows = [_context_build_row(record) for record in records]
+    change_rows = [_context_change_row(record, change) for record in records for change in record.changes]
+    sheets = [
+        (CONTEXT_BUILDS_SHEET, CONTEXT_BUILDS_COLUMNS, build_rows),
+        (CONTEXT_CHANGES_SHEET, CONTEXT_CHANGES_COLUMNS, change_rows),
+    ]
+    return _write_workbook(destination, sheets, on_progress, cancel_token)
+
+
 def _excel_safe(value: str) -> str:
     """Neutraliza la inyección de fórmulas: `value` viene de un nombre de fichero o un mensaje de error reales, no
     controlados por quien abre el Excel. Un fichero llamado p. ej. `=cmd|'/c calc'!A1` se interpretaría como fórmula al
@@ -197,6 +268,42 @@ def _scan_error_history_row(report: ScanErrorReport, entry: ScanErrorEntry) -> R
         _excel_safe(entry.error_message),
         entry.error_retry_count,
         "Sí" if entry.capped else "No",
+    )
+
+
+def _context_build_row(record: ContextBuildRecord) -> Row:
+    return (
+        _excel_safe(record.built_at),
+        _excel_safe(record.previous_built_at or ""),
+        _excel_safe(record.project_name),
+        _excel_safe(record.built_with_version or ""),
+        "Sí" if record.taxonomy_manifest_used else "No",
+        _excel_safe(record.ai_classification_model or ""),
+        _excel_safe(record.ai_enrichment_model or ""),
+        record.classified,
+        record.unclassified,
+        len(record.changes),
+    )
+
+
+def _placement_label(value: str | None, present: bool) -> str:
+    """Dominio o tipo de material; vacío si el documento no estaba en ese lado, «(sin clasificar)» si estaba sin él."""
+    if not present:
+        return ""
+    return _excel_safe(value) if value is not None else _UNCLASSIFIED_LABEL
+
+
+def _context_change_row(record: ContextBuildRecord, change: ContextChange) -> Row:
+    before, after = change.change != "added", change.change != "removed"
+    return (
+        _excel_safe(record.built_at),
+        *_file_columns(change.source_path),
+        _CHANGE_LABELS[change.change],
+        _placement_label(change.previous_domain, before),
+        _placement_label(change.domain, after),
+        _excel_safe(change.previous_material_type or ""),
+        _excel_safe(change.material_type or ""),
+        _excel_safe(change.classified_by or ""),
     )
 
 
@@ -274,10 +381,15 @@ def _discard_temporary_sheets(workbook: Any) -> None:
 __all__ = [
     "CACHE_COLUMNS",
     "CACHE_SHEET",
+    "CONTEXT_BUILDS_COLUMNS",
+    "CONTEXT_BUILDS_SHEET",
+    "CONTEXT_CHANGES_COLUMNS",
+    "CONTEXT_CHANGES_SHEET",
     "SCAN_ERRORS_CURRENT_COLUMNS",
     "SCAN_ERRORS_CURRENT_SHEET",
     "SCAN_ERRORS_HISTORY_COLUMNS",
     "SCAN_ERRORS_HISTORY_SHEET",
     "write_cache_xlsx",
+    "write_context_history_xlsx",
     "write_scan_errors_xlsx",
 ]

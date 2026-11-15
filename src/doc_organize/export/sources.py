@@ -1,4 +1,5 @@
-"""Carga de lo que se exporta (L-7): entradas de una o varias cachés e historial de errores de escaneo.
+"""Carga de lo que se exporta (L-7): entradas de una o varias cachés, historial de errores de escaneo e historial del
+contexto (1.5.0).
 
 Un consumidor puede tener varias cachés por proyecto (doc_organize_web guarda una por carpeta de origen, con salidas en
 `Conversión/<carpeta>/`), así que todo acepta varias rutas explícitas; nada se deriva del registro de proyectos.
@@ -12,7 +13,8 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from doc_organize.cache import CacheManager
-from doc_organize.core.models import CacheEntry, ScanErrorReport
+from doc_organize.context.context_history import list_context_builds
+from doc_organize.core.models import CacheEntry, ContextBuildRecord, ScanErrorReport
 from doc_organize.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -84,4 +86,21 @@ def load_scan_error_history(history_logs: Iterable[str | Path]) -> list[ScanErro
     return sorted(reports, key=lambda report: report.timestamp, reverse=True)
 
 
-__all__ = ["load_cache_entries", "load_scan_error_history"]
+def load_context_history(history_logs: Iterable[str | Path]) -> list[ContextBuildRecord]:
+    """Construcciones del contexto de uno o varios `CONTEXT_HISTORY.jsonl`, las más recientes primero (1.5.0).
+
+    Mismo criterio que `load_scan_error_history`: los ficheros que no existen se omiten y una línea inválida se ignora
+    con un aviso.
+
+    Args:
+        history_logs: Rutas a los históricos (p. ej. `[layout.context_history]`).
+
+    Example:
+        >>> load_context_history([])
+        []
+    """
+    records = [record for history_log in history_logs for record in list_context_builds(Path(history_log))]
+    return sorted(records, key=lambda record: record.built_at, reverse=True)
+
+
+__all__ = ["load_cache_entries", "load_context_history", "load_scan_error_history"]
