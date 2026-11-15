@@ -20,6 +20,7 @@ nav = [
   { "Guías" = [
     { "Instalación" = "guides/installation.md" },
     { "Inicio rápido" = "guides/quick_start.md" },
+    { "Metadatos de fichero" = "guides/metadata-schema.md" },
     { "Resolución de problemas" = "guides/troubleshooting.md" },
     { "Descarga Offline" = "guides/downloads.md" },
     { "Desplegar un LiteLLM Proxy" = "guides/litellm_proxy_setup.md" },

@@ -8,6 +8,12 @@ releases publicados antes de esa versión).
 
 ### Añadido
 
+- **Metadatos de fichero** en `DocumentMetadata` y `CacheEntry`: `created_time` (`st_birthtime`; `None` en Linux),
+  `mime_type` (por la extensión), `file_permissions` (octal POSIX; `None` en Windows) y `owner_name`. Salen del `stat`
+  que el escáner ya hacía, sin leer el contenido. `DocumentMetadata.from_cache_entry` los conserva. Detalle en
+  [Metadatos de fichero](docs/guides/metadata-schema.md).
+- `ScanOptions.capture_owner: bool = False` y `DocumentScanner(capture_owner=False)`: el propietario es un dato
+  personal y solo se guarda si se pide. En Windows se lee con la API del sistema (sin dependencias nuevas).
 - **Autor, descripción y palabras clave** en `DomainDocument` (`author`, `description`, `keywords`): `ContextBuilder`
   los lee de lo que declara cada documento original (PDF `/Author`, `/Subject`, `/Keywords`; Office OOXML
   `docProps/core.xml`), siempre y sin red. `/Creator` y `/Producer` no cuentan como autor. Detalle en
@@ -19,6 +25,14 @@ releases publicados antes de esa versión).
 - **Idioma** en `DomainDocument.language` (ISO 639-1), detectado con py3langid en el texto convertido, sin red. `None`
   si el texto es corto o la confianza baja (< 0,7), en lugar de adivinarlo.
 - `ProgressEvent.phase` admite `"enrichment"`.
+
+### Cambiado
+
+- `cache.db` gana las columnas `created_time`, `mime_type`, `file_permissions` y `owner_name` al abrirse en escritura
+  (migración aditiva); en solo lectura, una caché anterior las lee como `None`.
+- Cada escaneo actualiza en la caché los metadatos de fichero (y `size_bytes`) de los documentos sin cambios de
+  contenido, sin reconvertirlos. Antes, una entrada anterior a 1.1.0 no recibía `size_bytes` hasta que el documento
+  cambiaba, aunque la documentación decía que lo hacía el siguiente escaneo.
 
 ### Dependencias
 

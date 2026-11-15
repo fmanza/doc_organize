@@ -80,6 +80,7 @@ de 1.0.
 | `reuse_unchanged_hashes` | `bool` | `False` | **1.1.0.** Reutilizar el hash de la caché si coinciden tamaño y fecha |
 | `exclude_paths` | `list[str]` | `[]` | **1.3.0.** Carpetas o ficheros (rutas absolutas) que no se recorren, ni ellos ni su contenido |
 | `ignore_patterns` | `list[str]` | `[]` | **1.3.0.** Patrones `fnmatch` de nombre (fichero o carpeta) que no se recorren, sin distinguir mayúsculas |
+| `capture_owner` | `bool` | `False` | **1.5.0.** Guardar la cuenta propietaria de cada documento (`owner_name`); ver [Metadatos de fichero](scanner.md#metadatos-de-fichero-150) |
 
 ### Escaneos por tramos (`max_documents`, G38)
 

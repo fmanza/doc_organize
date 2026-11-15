@@ -29,6 +29,10 @@ classDiagram
         +size_bytes: int
         +modified_time: datetime
         +sha256_hash: str
+        +created_time: float
+        +mime_type: str
+        +file_permissions: str
+        +owner_name: str
     }
     
     DocumentScanner --> ScanResult
@@ -47,6 +51,7 @@ class DocumentScanner:
         *,
         io_retries: int = 0,              # 1.1.0
         io_retry_backoff_s: float = 1.0,  # 1.1.0
+        capture_owner: bool = False,      # 1.5.0
     ) -> None
 
     async def scan_folders(
@@ -73,6 +78,7 @@ Escanea carpetas recursivamente y calcula el SHA-256 de forma concurrente (hasta
 | `ignore_patterns` | `Sequence[str]` | 1.3.0. Patrones `fnmatch` sobre el nombre de cada entrada, sin distinguir mayúsculas; no se aplican a las raíces |
 | `io_retries` | `int` | 1.1.0. Reintentos ante `OSError` transitorios al listar, leer metadatos y hashear (ver [Escaneo](scan.md#carpetas-de-red-io_retries-document_timeout_s-reuse_unchanged_hashes-g11)) |
 | `io_retry_backoff_s` | `float` | 1.1.0. Espera antes del primer reintento; se duplica en cada uno |
+| `capture_owner` | `bool` | 1.5.0. Rellenar `owner_name`; ver [Metadatos de fichero](#metadatos-de-fichero-150) |
 
 | Retorno (`ScanResult`) | Tipo | Descripción |
 |---|---|---|
@@ -112,6 +118,10 @@ class DocumentMetadata:
     size_bytes: int
     modified_time: datetime
     sha256_hash: str
+    created_time: float | None = None      # 1.5.0
+    mime_type: str | None = None           # 1.5.0
+    file_permissions: str | None = None    # 1.5.0
+    owner_name: str | None = None          # 1.5.0, solo con capture_owner=True
 
 @dataclass
 class ScanResult:
@@ -132,6 +142,22 @@ dos: se omite.
 Los enlaces simbólicos, y desde 1.1.0 las *junctions* de Windows, no se siguen: aparecen en el árbol como nodo opaco,
 sin recorrerlos ni hashearlos. Solo se resuelve la carpeta raíz indicada.
 
+### Metadatos de fichero (1.5.0)
+
+Salen del `stat` que el escáner ya hace para cada fichero; no leen su contenido. Lo que el sistema no da de forma
+fiable queda en `None` en lugar de aproximarse. Detalle y casos de uso en
+[Metadatos de fichero](../guides/metadata-schema.md).
+
+| Campo | Valor | `None` cuando |
+|---|---|---|
+| `created_time` | `st_birthtime` (Unix) | Linux: `st_ctime` es el último cambio de metadatos, no la creación |
+| `mime_type` | `mimetypes.guess_type` por la extensión, p. ej. `application/pdf` | La extensión no es conocida |
+| `file_permissions` | Permisos POSIX en octal, p. ej. `"644"` o `"4755"` | Windows: no reflejan las ACL |
+| `owner_name` | `usuario` (POSIX) o `DOMINIO\usuario` (Windows) | `capture_owner=False` (por defecto), o la cuenta no se resuelve |
+
+`owner_name` es un dato personal: no se guarda salvo que se pida (`ScanOptions.capture_owner=True`). En Windows cuesta
+una llamada al sistema por fichero (y una consulta al dominio por cuenta distinta); en POSIX solo traduce el UID.
+
 ### DocumentMetadata desde la caché (1.1.0, G25)
 
 ```python
@@ -140,7 +166,7 @@ def from_cache_entry(cls, entry: CacheEntry) -> DocumentMetadata  # ValueError s
 ```
 
 Construye los metadatos de un documento con el hash, el tamaño y la fecha de modificación guardados en la caché, sin
-leer ni rehashear el fichero. `display_name` es el nombre del fichero y `extension` su sufijo en minúsculas, como los
+leer ni rehashear el fichero (desde 1.5.0, también los [metadatos de fichero](#metadatos-de-fichero-150)). `display_name` es el nombre del fichero y `extension` su sufijo en minúsculas, como los
 calcula `DocumentScanner`. Sirve para buscar duplicados desde la caché:
 
 ```python
