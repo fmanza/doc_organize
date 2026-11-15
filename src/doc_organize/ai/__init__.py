@@ -1,5 +1,6 @@
 """Monitorización de uso/coste de IA multi-fuente + clasificación de dominios/manifiesto por IA (Sub-fase B)."""
 
+from doc_organize.ai.document_enrichment_client import DocumentEnrichmentClient, litellm_enrichment_config_from_env
 from doc_organize.ai.domain_classification_client import (
     DomainClassificationClient,
     litellm_classification_config_from_env,
@@ -20,6 +21,7 @@ from doc_organize.ai.taxonomy_manifest_draft_client import (
 from doc_organize.ai.usage_source import UsageSource
 
 __all__ = [
+    "DocumentEnrichmentClient",
     "DomainClassificationClient",
     "GitHubCopilotUsageClient",
     "LiteLLMUsageClient",
@@ -28,6 +30,7 @@ __all__ = [
     "UsageSource",
     "github_copilot_usage_config_from_env",
     "litellm_classification_config_from_env",
+    "litellm_enrichment_config_from_env",
     "litellm_taxonomy_classification_config_from_env",
     "litellm_taxonomy_manifest_draft_config_from_env",
     "litellm_usage_config_from_env",

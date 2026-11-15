@@ -78,6 +78,8 @@ class ContextBuilder:
         cancel_token: CancelToken | None = None,
         ai_max_failures: int | None = None,   # 0.14.0
         ai_max_documents: int | None = None,  # 0.14.0
+        ai_enrichment_enabled: bool = False,                          # 1.5.0
+        ai_enrichment_client: DocumentEnrichmentClient | None = None, # 1.5.0
     ) -> Context
 ```
 
@@ -95,6 +97,8 @@ Orquesta Sub-fase A (siempre) + Sub-fase B (opt-in) y persiste el `Context` resu
 | `ai_max_failures` | `int \| None` | (0.14.0, L-3a) Detiene la Sub-fase B tras este número de errores de conexión **seguidos** (`Context.ai_classification_stopped = "connection"`). `None`: nunca para por eso. `< 1` → `ValueError` |
 | `ai_max_documents` | `int \| None` | (0.14.0, L-3b) Tope de documentos enviados a la IA en esta construcción; al alcanzarlo con documentos pendientes, para con `"budget"`. `None`: sin tope. `< 0` → `ValueError` |
 | `taxonomy_template_name` | `str \| None` | Nombre de la plantilla de `TaxonomyTemplateRegistry` de la que proviene `taxonomy_manifest`, o `None` si viene de un fichero local o si no hay manifiesto — puramente informativo, se persiste en `Context.taxonomy_template_name` |
+| `ai_enrichment_enabled` | `bool` | (1.5.0) Activa el enriquecimiento por IA — se persiste en `Context.ai_enrichment_enabled`. Ver [Autor, descripción y palabras clave](#autor-descripcion-y-palabras-clave-150) |
+| `ai_enrichment_client` | `DocumentEnrichmentClient \| None` | (1.5.0) Cliente ya configurado; sin él (o sin `ai_enrichment_enabled`), no se llama a la IA |
 
 **Parada y recuento de la Sub-fase B (0.14.0, L-3a…L-3c)**: un error de autenticación (401/403,
 `DomainClassificationAuthError`/`TaxonomyClassificationAuthError`) detiene la Sub-fase B en el acto, con o sin
@@ -117,6 +121,36 @@ queda reservado a artefactos incompletos. Con `taxonomy_manifest` + Sub-fase B a
 sigue en placeholder en algún eje, resolviendo ambos ejes en la misma llamada — pero
 solo se aplica la sugerencia al eje que seguía en `sin-clasificar`; un eje ya resuelto
 por reglas con confianza nunca se sobreescribe.
+
+### Autor, descripción y palabras clave (1.5.0)
+
+Tras clasificar, cada `DomainDocument` recibe lo que declara su documento original (`read_document_properties`, en
+`context/document_properties.py`), siempre y sin red:
+
+| Campo | PDF (diccionario `Info`) | Office OOXML (`docProps/core.xml`) |
+|---|---|---|
+| `author` | `/Author` | `dc:creator` |
+| `description` | `/Subject` | `dc:description`, o `dc:subject` si falta |
+| `keywords` | `/Keywords` (separadas por `,` o `;`) | `cp:keywords` |
+
+`/Creator` y `/Producer` no se usan como autor: nombran el programa que generó el PDF. Otros formatos, un original
+borrado, dañado o cifrado dejan los campos vacíos sin interrumpir la construcción. Los textos se guardan en una línea y
+acotados (500 caracteres; hasta 20 palabras clave de 60).
+
+`language` es el idioma principal (ISO 639-1: `es`, `en`, `ca`…) detectado con
+[py3langid](https://github.com/adbar/py3langid) en el título y los primeros 4000 caracteres del texto convertido
+(`context/language_detection.py`), sin red. Solo se acepta con al menos 40 letras y probabilidad ≥ 0,7; si no, queda en
+`None`: con textos cortos el detector se equivoca (un título como «Política de calidad» sale gallego al 33 %). No se
+usa el idioma que declaran Word o PDF, que suele ser el del ordenador del autor y no el del texto.
+
+Con `ai_enrichment_enabled=True` y `ai_enrichment_client`, la IA propone descripción y palabras clave **solo para los
+documentos clasificados que no las declaran** (una llamada por documento) y solo se rellena lo que falta: lo declarado
+nunca se sustituye y el autor nunca sale de la IA. `DomainDocument.ai_filled` dice qué campos rellenó. Usa los mismos
+`ai_max_failures` y `ai_max_documents` que la Sub-fase B, con las mismas paradas (`"auth"` en el acto, `"connection"`,
+`"budget"`), pero con su propio recuento: **cada fase puede enviar hasta `ai_max_documents`**. El resultado queda en
+`Context.ai_enrichment_stopped`, `ai_enrichment_sent`, `ai_enrichment_applied` (al menos un campo rellenado) y
+`ai_enrichment_failed`. Emite `ProgressEvent(phase="enrichment")` por documento y comprueba `cancel_token` entre ellos;
+no llama a `on_ai_progress`, que sigue siendo solo de la Sub-fase B.
 
 ---
 
@@ -527,6 +561,28 @@ cumple el schema de catálogo de taxonomía esperado, o un catálogo vacío en a
 
 ---
 
+## DocumentEnrichmentClient (descripción y palabras clave por IA, 1.5.0)
+
+```python
+class DocumentEnrichmentClient:
+    def __init__(self, config: LiteLLMEnrichmentConfig, *, transport: httpx.AsyncBaseTransport | None = None) -> None
+    async def enrich(self, *, chunks_text: str, title: str | None) -> DocumentEnrichmentResult
+
+def litellm_enrichment_config_from_env() -> LiteLLMEnrichmentConfig
+```
+
+Mismo endpoint y patrón que `DomainClassificationClient` (`chat/completions`, `response_format: json_object`,
+`temperature: 0`, primeros 4000 caracteres del contenido). La respuesta se sanea en el cliente: descripción en una
+línea (hasta 500 caracteres) y hasta 8 palabras clave sin repetir; un valor que no es texto se descarta. El prompt pide
+ignorar instrucciones que aparezcan en el contenido, pero eso no es una garantía: lo devuelto se trata siempre como
+texto, nunca se ejecuta ni se usa como ruta. `litellm_enrichment_config_from_env()` lee
+`DOC_ORGANIZE_LITELLM_ENRICHMENT_BASE_URL`/`_VIRTUAL_KEY` (obligatorias) y `_MODEL` (opcional). Config propia (ISP).
+
+**Excepciones**: `DocumentEnrichmentAuthError` (401/403), `DocumentEnrichmentConnectionError` (red/timeout),
+`DocumentEnrichmentError` (cualquier otro error, incluida una respuesta que no es un objeto JSON).
+
+---
+
 ## Modelos (`core.models`)
 
 ```python
@@ -544,6 +600,11 @@ class DomainDocument(BaseModel):
     confidence: float
     classified_by: str  # "rules" | "ai"
     organized_path: str | None  # 0.14.0 (L-8d): .md copiado, relativo a la carpeta reorganizada; None en contextos antiguos
+    author: str | None          # 1.5.0: declarado en el documento; nunca de la IA
+    description: str | None     # 1.5.0: declarada, o de la IA si falta
+    keywords: list[str]         # 1.5.0: declaradas, o de la IA si faltan
+    language: str | None        # 1.5.0: ISO 639-1 detectado en el texto convertido; None si no es seguro
+    ai_filled: list[Literal["description", "keywords"]]  # 1.5.0: lo que rellenó la IA
 
 class Domain(BaseModel):
     slug: str
@@ -571,6 +632,11 @@ class Context(BaseModel):
     ai_documents_sent: int        # 0.14.0, default 0
     ai_documents_classified: int  # 0.14.0, default 0
     ai_documents_failed: int      # 0.14.0, default 0
+    ai_enrichment_enabled: bool   # 1.5.0, default False
+    ai_enrichment_stopped: Literal["auth", "connection", "budget"] | None  # 1.5.0
+    ai_enrichment_sent: int       # 1.5.0, default 0
+    ai_enrichment_applied: int    # 1.5.0, default 0
+    ai_enrichment_failed: int     # 1.5.0, default 0
     created_at: str
     updated_at: str
 
@@ -615,6 +681,18 @@ class LiteLLMTaxonomyManifestDraftConfig(BaseModel):
     retries: int            # 0.14.0, default 0
     retry_backoff_s: float  # 0.14.0, default 0.5
 
+class DocumentEnrichmentResult(BaseModel):  # 1.5.0
+    description: str | None
+    keywords: list[str]
+
+class LiteLLMEnrichmentConfig(BaseModel):  # 1.5.0
+    base_url: str
+    virtual_key: str
+    model: str  # default "claude-classifier"
+    timeout_s: float  # default 30.0
+    retries: int            # default 0
+    retry_backoff_s: float  # default 0.5
+
 class TaxonomyCatalogEntry(BaseModel):
     slug: str
     name: str
@@ -642,7 +720,9 @@ class TaxonomyTemplateSummary(BaseModel):
 | `projects.ScannedFoldersStore` | Carpetas de escaneo guardadas, usadas como `scan_roots` |
 | `core.exceptions` | `ContextError`, `DomainClassificationError`, `TaxonomyClassificationError`, `TaxonomyManifestError`, `TaxonomyTemplateError` y sus subclases |
 | `zensical` (extra `site`) | `zensical build` del sitio de contexto (`SiteGenerator`); sin él, `SiteBuildError` |
-| `httpx` | Cliente HTTP de `DomainClassificationClient`/`TaxonomyClassificationClient` (ya incluido en el extra `ai`) |
+| `httpx` | Cliente HTTP de `DomainClassificationClient`/`TaxonomyClassificationClient`/`DocumentEnrichmentClient` (ya incluido en el extra `ai`) |
+| `pypdfium2` | (1.5.0) Lee `/Author`, `/Subject` y `/Keywords` de los PDF; ya lo instalaba Docling, ahora es dependencia declarada |
+| `py3langid` | (1.5.0) Idioma de cada documento (`DomainDocument.language`); 4,6 MB, solo depende de numpy |
 | `pyyaml` (extra `context`) | Parseo y escritura del front matter de `taxonomy_manifest.md`/plantillas de `TaxonomyTemplateRegistry` |
 
 ## Ejemplos Relacionados

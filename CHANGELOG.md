@@ -14,6 +14,17 @@ releases publicados antes de esa versión).
   [Metadatos de fichero](docs/guides/metadata-schema.md).
 - `ScanOptions.capture_owner: bool = False` y `DocumentScanner(capture_owner=False)`: el propietario es un dato
   personal y solo se guarda si se pide. En Windows se lee con la API del sistema (sin dependencias nuevas).
+- **Autor, descripción y palabras clave** en `DomainDocument` (`author`, `description`, `keywords`): `ContextBuilder`
+  los lee de lo que declara cada documento original (PDF `/Author`, `/Subject`, `/Keywords`; Office OOXML
+  `docProps/core.xml`), siempre y sin red. `/Creator` y `/Producer` no cuentan como autor. Detalle en
+  [Contexto](docs/api/context.md#autor-descripcion-y-palabras-clave-150).
+- **Enriquecimiento por IA opcional**: `ContextBuilder.build(ai_enrichment_enabled=, ai_enrichment_client=)` y
+  `DocumentEnrichmentClient` (`doc_organize.ai`, config `LiteLLMEnrichmentConfig`, `litellm_enrichment_config_from_env`)
+  rellenan solo la descripción y las palabras clave que un documento no declara (`DomainDocument.ai_filled`). Mismos
+  límites y paradas que la Sub-fase B, con su propio recuento (`Context.ai_enrichment_*`).
+- **Idioma** en `DomainDocument.language` (ISO 639-1), detectado con py3langid en el texto convertido, sin red. `None`
+  si el texto es corto o la confianza baja (< 0,7), en lugar de adivinarlo.
+- `ProgressEvent.phase` admite `"enrichment"`.
 
 ### Cambiado
 
@@ -22,6 +33,11 @@ releases publicados antes de esa versión).
 - Cada escaneo actualiza en la caché los metadatos de fichero (y `size_bytes`) de los documentos sin cambios de
   contenido, sin reconvertirlos. Antes, una entrada anterior a 1.1.0 no recibía `size_bytes` hasta que el documento
   cambiaba, aunque la documentación decía que lo hacía el siguiente escaneo.
+
+### Dependencias
+
+- `pypdfium2>=4.0` declarada (ya la instalaba Docling).
+- `py3langid>=0.4` (nueva; 4,6 MB, solo depende de numpy).
 
 ## [1.4.0] - 2026-11-14
 

@@ -188,6 +188,18 @@ class TaxonomyClassificationConnectionError(TaxonomyClassificationError):
     """Error de red o timeout consultando el LiteLLM Proxy para clasificar un documento por manifiesto."""
 
 
+class DocumentEnrichmentError(DocOrganizeError):
+    """Error base del cliente que describe documentos por IA (`doc_organize.ai`, 1.5.0)."""
+
+
+class DocumentEnrichmentAuthError(DocumentEnrichmentError):
+    """El LiteLLM Proxy rechazo la virtual key de descripcion de documentos (credencial invalida o sin permiso)."""
+
+
+class DocumentEnrichmentConnectionError(DocumentEnrichmentError):
+    """Error de red o timeout consultando el LiteLLM Proxy para describir un documento."""
+
+
 class TaxonomyManifestDraftError(DocOrganizeError):
     """Error base del cliente de propuesta de manifiesto de taxonomia por IA (`doc_organize.ai`).
 
@@ -213,6 +225,9 @@ __all__ = [
     "ContextNotFoundError",
     "ConversionError",
     "DocOrganizeError",
+    "DocumentEnrichmentAuthError",
+    "DocumentEnrichmentConnectionError",
+    "DocumentEnrichmentError",
     "DocumentError",
     "DomainClassificationAuthError",
     "DomainClassificationConnectionError",

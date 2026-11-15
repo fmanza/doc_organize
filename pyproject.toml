@@ -31,6 +31,8 @@ dependencies = [
     "pillow>=10.0",
     "pandas>=2.0",
     "rapidfuzz>=3.0",
+    "pypdfium2>=4.0",  # ya lo instala Docling; se importa directamente para leer /Author, /Subject y /Keywords
+    "py3langid>=0.4",  # idioma de cada documento del contexto (4,6 MB; solo depende de numpy, que ya trae Docling)
     "python-magic>=0.4; sys_platform != 'win32'",
     "python-magic-bin>=0.4; sys_platform == 'win32'",
     "tzdata>=2024.1",
@@ -113,6 +115,12 @@ ignore_missing_imports = false
 module = ["docling.*"]
 follow_imports = "skip"
 ignore_errors = true
+
+# pypdfium2 y py3langid no publican tipos (sin py.typed); se usan en context/document_properties.py y
+# context/language_detection.py.
+[[tool.mypy.overrides]]
+module = ["pypdfium2", "py3langid.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 150
