@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from doc_organize.core.exceptions import OperationCancelledError
 
-Phase = Literal["started", "discovery", "conversion", "ocr", "deduplication", "classification", "reorganize", "site", "export", "done"]
+Phase = Literal["started", "discovery", "conversion", "ocr", "deduplication", "classification", "enrichment", "reorganize", "site", "export", "done"]
 
 
 class CancelToken:

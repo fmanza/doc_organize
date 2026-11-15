@@ -775,6 +775,10 @@ class GitHubCopilotUsageConfig(BaseModel):
 # ===== Modelos de contexto y dominios (organización documental, `doc_organize.context`) =====
 
 
+DocumentEnrichmentField = Literal["description", "keywords"]
+"""Campos de `DomainDocument` que la IA puede rellenar (`DomainDocument.ai_filled`, 1.5.0)."""
+
+
 class DomainDocument(BaseModel):
     """Un documento clasificado dentro de un `Domain` (Sub-fase A o B, ver `.ai/sessions/2026-09-08-organizacion-documental-contextos/00_REQUEST.md` §2.4-§2.5)."""
 
@@ -812,6 +816,20 @@ class DomainDocument(BaseModel):
             "`Reorganizer` con `resolve_organized_paths` (L-8d); solo informativa: `Reorganizer`/`SiteGenerator` la "
             "recalculan siempre y nunca usan el valor leído de `index.json`"
         ),
+    )
+    author: str | None = Field(
+        default=None, description="Autor declarado en el propio documento (PDF `/Author`, Office `dc:creator`, 1.5.0); nunca la IA"
+    )
+    description: str | None = Field(
+        default=None,
+        description="Descripción declarada en el documento (PDF `/Subject`, Office `dc:description` o `dc:subject`), o de la IA si falta (1.5.0)",
+    )
+    keywords: list[str] = Field(
+        default_factory=list,
+        description="Palabras clave declaradas en el documento (PDF `/Keywords`, Office `cp:keywords`), o de la IA si faltan (1.5.0)",
+    )
+    ai_filled: list[DocumentEnrichmentField] = Field(
+        default_factory=list, description="Campos que rellenó la IA porque el documento no los declaraba (1.5.0); vacío si ninguno"
     )
 
 
@@ -910,6 +928,17 @@ class Context(BaseModel):
             "Documentos enviados cuya llamada falló (auth, conexión u otro error, L-3c); `sent = classified + failed + enviados sin asignación`"
         ),
     )
+    ai_enrichment_enabled: bool = Field(
+        default=False,
+        description="Si la IA rellenó la descripción y las palabras clave que los documentos no declaraban (1.5.0) — opt-in explícito",
+    )
+    ai_enrichment_stopped: AiClassificationStopReason | None = Field(
+        default=None,
+        description="Por qué se detuvo el enriquecimiento por IA, con los mismos motivos y límites que `ai_classification_stopped` (1.5.0)",
+    )
+    ai_enrichment_sent: int = Field(default=0, ge=0, description="Documentos enviados a la IA para enriquecer (una llamada por documento, 1.5.0)")
+    ai_enrichment_applied: int = Field(default=0, ge=0, description="Documentos enviados en los que la IA rellenó al menos un campo (1.5.0)")
+    ai_enrichment_failed: int = Field(default=0, ge=0, description="Documentos enviados a enriquecer cuya llamada falló (1.5.0)")
     created_at: str = Field(..., description="Timestamp ISO 8601 de creación del contexto")
     updated_at: str = Field(..., description="Timestamp ISO 8601 de la última reconstrucción del contexto")
 
@@ -1072,6 +1101,32 @@ class LiteLLMTaxonomyManifestDraftConfig(BaseModel):
     retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
 
 
+class DocumentEnrichmentResult(BaseModel):
+    """Descripción y palabras clave que propone la IA para un documento (`DocumentEnrichmentClient`, 1.5.0).
+
+    Ya saneadas por el cliente: una línea, longitud acotada y sin repetidos; `None`/lista vacía si el modelo no dio
+    un valor utilizable.
+    """
+
+    description: str | None = Field(default=None, description="Descripción de 1-2 frases, o `None`")
+    keywords: list[str] = Field(default_factory=list, description="Palabras clave, o lista vacía")
+
+
+class LiteLLMEnrichmentConfig(BaseModel):
+    """Configuración de acceso al LiteLLM Proxy para `DocumentEnrichmentClient` (1.5.0).
+
+    Config propia (ISP, mismo criterio que el resto de clientes de `ai/`): describir un documento es una carga de
+    trabajo distinta de clasificarlo, aunque en despliegue apunten al mismo proxy.
+    """
+
+    base_url: str = Field(..., description="URL base del LiteLLM Proxy")
+    virtual_key: str = Field(..., description="Virtual key con permiso de `chat/completions` para describir documentos")
+    model: str = Field(default="claude-classifier", description="Alias de modelo configurado en el proxy para describir documentos")
+    timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
+    retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
+    retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
+
+
 __all__ = [
     "AiClassificationStopReason",
     "AvStatus",
@@ -1091,6 +1146,8 @@ __all__ = [
     "DirectoryTree",
     "DirectoryTreeNode",
     "DoclingConfig",
+    "DocumentEnrichmentField",
+    "DocumentEnrichmentResult",
     "DocumentMetadata",
     "DocumentStatus",
     "Domain",
@@ -1102,6 +1159,7 @@ __all__ = [
     "GitHubCopilotUsageConfig",
     "GpuStatus",
     "LiteLLMClassificationConfig",
+    "LiteLLMEnrichmentConfig",
     "LiteLLMTaxonomyClassificationConfig",
     "LiteLLMTaxonomyManifestDraftConfig",
     "LiteLLMUsageConfig",

@@ -2,15 +2,21 @@
 Orquestador de la construcción del contexto de organización documental de un proyecto.
 """
 
+import asyncio
+
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from doc_organize.ai import DomainClassificationClient, TaxonomyClassificationClient
+from doc_organize.ai import DocumentEnrichmentClient, DomainClassificationClient, TaxonomyClassificationClient
 from doc_organize.context.context_registry import ContextRegistry
+from doc_organize.context.document_properties import read_document_properties
 from doc_organize.context.domain_classifier import DomainClassifier, MaterialTypeClassifier, read_conversion_json, resolve_title_and_type
 from doc_organize.context.reorganizer import assign_organized_paths
 from doc_organize.core.exceptions import (
+    DocumentEnrichmentAuthError,
+    DocumentEnrichmentConnectionError,
+    DocumentEnrichmentError,
     DomainClassificationAuthError,
     DomainClassificationConnectionError,
     DomainClassificationError,
@@ -28,7 +34,7 @@ from doc_organize.core.models import (
     Project,
     TaxonomyManifest,
 )
-from doc_organize.core.progress import CancelToken, ProgressCallback, ProgressEvent, checkpoint
+from doc_organize.core.progress import CancelToken, Phase, ProgressCallback, ProgressEvent, checkpoint
 from doc_organize.utils.logging import get_logger
 
 _DEFAULT_THRESHOLD = 0.5
@@ -159,6 +165,8 @@ class ContextBuilder:
         cancel_token: CancelToken | None = None,
         ai_max_failures: int | None = None,
         ai_max_documents: int | None = None,
+        ai_enrichment_enabled: bool = False,
+        ai_enrichment_client: DocumentEnrichmentClient | None = None,
     ) -> Context:
         """Clasifica `documents` y persiste el contexto de `project`.
 
@@ -223,6 +231,15 @@ class ContextBuilder:
             `cancel_token` se sigue comprobando entre ellos), y la construcción termina y persiste el contexto con
             normalidad. Los recuentos quedan en `Context.ai_documents_sent/_classified/_failed` (L-3c).
 
+            ai_enrichment_enabled: Activa el enriquecimiento por IA (1.5.0) — opt-in explícito, se persiste en
+                `Context.ai_enrichment_enabled`. Sin él, `author`, `description` y `keywords` de cada `DomainDocument`
+                salen solo de las propiedades que declara el propio documento (PDF y Office), que se leen siempre.
+            ai_enrichment_client: Cliente ya configurado. Con `ai_enrichment_enabled=True`, se llama una vez por
+                documento clasificado que no declara descripción o palabras clave, y solo se rellena lo que falta
+                (`DomainDocument.ai_filled`); el autor nunca sale de la IA. Usa los mismos `ai_max_failures` y
+                `ai_max_documents` que la Sub-fase B, pero con su propio recuento: cada fase puede enviar hasta
+                `ai_max_documents`. Al detenerse, el resto queda solo con lo declarado (`Context.ai_enrichment_*`).
+
         Returns:
             El `Context` construido y ya persistido vía `self.registry`.
 
@@ -237,23 +254,21 @@ class ContextBuilder:
         checkpoint(cancel_token)
         ai_run = _AiRun(max_failures=ai_max_failures, max_documents=ai_max_documents)
 
+        def _report(phase: Phase, index: int, total: int, source_path: str) -> None:
+            if on_progress is not None:
+                try:
+                    on_progress(ProgressEvent(operation="context_build", phase=phase, processed=index, total=total, current=source_path))
+                except Exception as exc:  # noqa: BLE001 - un callback del consumidor nunca debe parar la operación
+                    self.logger.warning(f"El callback de progreso falló: {type(exc).__name__}: {exc}")
+            checkpoint(cancel_token)  # L-2: parada entre documentos de la Sub-fase B o del enriquecimiento
+
         async def _ai_progress(index: int, total: int, source_path: str) -> None:
             if on_ai_progress is not None:
                 await on_ai_progress(index, total, source_path)
-            if on_progress is not None:
-                try:
-                    on_progress(
-                        ProgressEvent(
-                            operation="context_build",
-                            phase="classification",
-                            processed=index,
-                            total=total,
-                            current=source_path,
-                        )
-                    )
-                except Exception as exc:  # noqa: BLE001 - un callback del consumidor nunca debe parar la operación
-                    self.logger.warning(f"El callback de progreso falló: {type(exc).__name__}: {exc}")
-            checkpoint(cancel_token)  # L-2: parada entre documentos de la Sub-fase B
+            _report("classification", index, total, source_path)
+
+        async def _enrichment_progress(index: int, total: int, source_path: str) -> None:
+            _report("enrichment", index, total, source_path)
 
         if taxonomy_manifest is not None:
             classified, unclassified = await self._classify_with_manifest(documents, taxonomy_manifest, threshold)
@@ -274,6 +289,11 @@ class ContextBuilder:
                     on_progress=_ai_progress,
                     run=ai_run,
                 )
+
+        await self._apply_document_properties(classified, cancel_token)
+        enrichment_run = _AiRun(max_failures=ai_max_failures, max_documents=ai_max_documents)
+        if ai_enrichment_enabled and ai_enrichment_client is not None:
+            await self._enrich_with_ai(ai_enrichment_client, classified, on_progress=_enrichment_progress, run=enrichment_run)
 
         has_predefined_catalog = bool(candidate_domains) or taxonomy_manifest is not None
         manifest_domains_by_slug = (
@@ -305,6 +325,11 @@ class ContextBuilder:
             ai_documents_sent=ai_run.sent,
             ai_documents_classified=ai_run.classified,
             ai_documents_failed=ai_run.failed,
+            ai_enrichment_enabled=ai_enrichment_enabled,
+            ai_enrichment_stopped=enrichment_run.stopped,
+            ai_enrichment_sent=enrichment_run.sent,
+            ai_enrichment_applied=enrichment_run.classified,
+            ai_enrichment_failed=enrichment_run.failed,
             created_at=now,
             updated_at=now,
         )
@@ -552,17 +577,71 @@ class ContextBuilder:
             classified_by="ai",
         )
 
-    def _log_stop(self, run: _AiRun, remaining: int) -> None:
-        """Avisa una sola vez, justo tras el documento que la provocó, de que la Sub-fase B se detuvo."""
+    async def _apply_document_properties(self, classified: dict[str, list[DomainDocument]], cancel_token: CancelToken | None) -> None:
+        """Rellena `author`, `description` y `keywords` con lo que declara cada documento original (1.5.0).
+
+        Un original ilegible o borrado deja los campos vacíos (`read_document_properties` no lanza).
+        """
+        for documents in classified.values():
+            for document in documents:
+                properties = await asyncio.to_thread(read_document_properties, document.source_path)
+                document.author = properties.author
+                document.description = properties.description
+                document.keywords = list(properties.keywords)
+                checkpoint(cancel_token)
+
+    async def _enrich_with_ai(
+        self,
+        client: DocumentEnrichmentClient,
+        classified: dict[str, list[DomainDocument]],
+        on_progress: Callable[[int, int, str], Awaitable[None]],
+        run: _AiRun,
+    ) -> None:
+        """Pide a la IA la descripción y las palabras clave de los documentos que no las declaran (1.5.0).
+
+        Solo rellena lo que falta; lo declarado por el documento nunca se sustituye. Mismas paradas que la
+        Sub-fase B (`_AiRun`), con su propio recuento: `run.classified` cuenta los documentos en los que se rellenó
+        algo.
+        """
+        pending = [document for documents in classified.values() for document in documents if document.description is None or not document.keywords]
+        total = len(pending)
+        for index, document in enumerate(pending, start=1):
+            if run.stopped is None:
+                await self._try_enrich_document(client, document, run)
+                self._log_stop(run, total - index, stage="Enriquecimiento por IA detenido", outcome="quedan solo con lo que declaran")
+            await on_progress(index, total, document.source_path)
+
+    async def _try_enrich_document(self, client: DocumentEnrichmentClient, document: DomainDocument, run: _AiRun) -> None:
+        chunks_result = await read_conversion_json(document.json_path)
+        if chunks_result is None:
+            return
+        chunks_text, title = chunks_result
+        if not run.may_send():
+            return
+
+        try:
+            result = await client.enrich(chunks_text=chunks_text, title=title)
+        except DocumentEnrichmentError as exc:
+            run.record_failure(exc, DocumentEnrichmentAuthError, DocumentEnrichmentConnectionError)
+            self.logger.warning(f"Fallo el enriquecimiento por IA de '{document.source_path}': {exc} — queda con lo que declara")
+            return
+
+        if document.description is None and result.description is not None:
+            document.description = result.description
+            document.ai_filled.append("description")
+        if not document.keywords and result.keywords:
+            document.keywords = result.keywords
+            document.ai_filled.append("keywords")
+        run.record_result(assigned=bool(document.ai_filled))
+
+    def _log_stop(self, run: _AiRun, remaining: int, *, stage: str = "Sub-fase B detenida", outcome: str = "quedan sin clasificar") -> None:
+        """Avisa una sola vez, justo tras el documento que la provocó, de que una fase de IA se detuvo."""
         if run.stopped is None or run.stop_logged:
             return
         run.stop_logged = True
         if run.stopped == "budget":
             remaining += 1  # el documento que topó con el presupuesto tampoco se envió
-        self.logger.warning(
-            f"Sub-fase B detenida ({run.stopped}) tras {run.sent} documento(s) enviado(s): "
-            f"{remaining} documento(s) pendiente(s) quedan sin clasificar"
-        )
+        self.logger.warning(f"{stage} ({run.stopped}) tras {run.sent} documento(s) enviado(s): {remaining} documento(s) pendiente(s) {outcome}")
 
 
 __all__ = ["ContextBuilder"]

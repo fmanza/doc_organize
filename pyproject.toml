@@ -31,6 +31,7 @@ dependencies = [
     "pillow>=10.0",
     "pandas>=2.0",
     "rapidfuzz>=3.0",
+    "pypdfium2>=4.0",  # ya lo instala Docling; se importa directamente para leer /Author, /Subject y /Keywords
     "python-magic>=0.4; sys_platform != 'win32'",
     "python-magic-bin>=0.4; sys_platform == 'win32'",
     "tzdata>=2024.1",
@@ -113,6 +114,11 @@ ignore_missing_imports = false
 module = ["docling.*"]
 follow_imports = "skip"
 ignore_errors = true
+
+# pypdfium2 no publica tipos (sin py.typed); solo se usa en context/document_properties.py.
+[[tool.mypy.overrides]]
+module = ["pypdfium2"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 150

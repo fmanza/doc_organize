@@ -6,6 +6,22 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+### Añadido
+
+- **Autor, descripción y palabras clave** en `DomainDocument` (`author`, `description`, `keywords`): `ContextBuilder`
+  los lee de lo que declara cada documento original (PDF `/Author`, `/Subject`, `/Keywords`; Office OOXML
+  `docProps/core.xml`), siempre y sin red. `/Creator` y `/Producer` no cuentan como autor. Detalle en
+  [Contexto](docs/api/context.md#autor-descripcion-y-palabras-clave-150).
+- **Enriquecimiento por IA opcional**: `ContextBuilder.build(ai_enrichment_enabled=, ai_enrichment_client=)` y
+  `DocumentEnrichmentClient` (`doc_organize.ai`, config `LiteLLMEnrichmentConfig`, `litellm_enrichment_config_from_env`)
+  rellenan solo la descripción y las palabras clave que un documento no declara (`DomainDocument.ai_filled`). Mismos
+  límites y paradas que la Sub-fase B, con su propio recuento (`Context.ai_enrichment_*`).
+- `ProgressEvent.phase` admite `"enrichment"`.
+
+### Dependencias
+
+- `pypdfium2>=4.0` declarada (ya la instalaba Docling).
+
 ## [1.4.0] - 2026-11-14
 
 Corrección: el sitio de contexto no se construía con Zensical 0.0.71 o posterior cuando un documento convertido sin
