@@ -22,7 +22,8 @@ instalables desde fuera.
 
 | Versión | Python | Dependencias clave | Estado |
 |---|---|---|---|
-| 1.4.0 | `>=3.12` | Mismas dependencias de ejecución que 1.3.0; los extras `[site]` y `[docs]` pasan a `zensical>=0.1.1` (límite del índice de búsqueda en posiciones de token, en el que se basa la exclusión de páginas del buscador); API pública ampliada (`SiteResult.search_excluded`, `SiteBuildError.cause`/`output_tail`) | ✅ Activa |
+| 1.5.0 | `>=3.12` | Dependencias de ejecución nuevas: `py3langid>=0.4` (idioma de cada documento del contexto) y `pypdfium2>=4.0` declarada (ya la instalaba Docling); mismos extras que 1.4.0. `cache.db` gana 4 columnas (migración aditiva al abrirse en escritura); API pública ampliada (metadatos de fichero, `ScanOptions.capture_owner`, autor/descripción/palabras clave/idioma y trazabilidad en `DomainDocument`, `DocumentEnrichmentClient`, historial del contexto y `write_context_history_xlsx`) | ✅ Activa |
+| 1.4.0 | `>=3.12` | Mismas dependencias de ejecución que 1.3.0; los extras `[site]` y `[docs]` pasan a `zensical>=0.1.1` (límite del índice de búsqueda en posiciones de token, en el que se basa la exclusión de páginas del buscador); API pública ampliada (`SiteResult.search_excluded`, `SiteBuildError.cause`/`output_tail`) | ❌ EOL |
 | 1.3.0 | `>=3.12` | Mismas dependencias que 1.2.0; exclusiones en el escaneo (`ScanOptions.exclude_paths`/`ignore_patterns`, `ScanSummary.excluded_cached`) | ❌ EOL |
 | 1.2.0 | `>=3.12` | Mismas dependencias que 1.1.1; `CacheManager.load_cache_page(order_by=, descending=)` y `CacheOrderBy` | ❌ EOL |
 | 1.1.1 | `>=3.12` | Mismas dependencias que 1.1.0; sin cambios de API (borrado de proyectos y salidas con ficheros de solo lectura en Windows) | ❌ EOL |

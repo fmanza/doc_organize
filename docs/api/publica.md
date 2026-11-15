@@ -25,7 +25,8 @@ detect_office_status().libreoffice_installed   # no carga Docling
 ```
 
 `ScanCommand`, `DocumentConverter` y el resto de lo que convierte documentos sí cargan Docling al usarlos.
-`doc_organize.export` no carga Docling, y `openpyxl` (extra `export`) solo se importa al escribir un Excel.
+`doc_organize.export` no carga Docling (desde 1.5.0 sí carga `doc_organize.context`, por el historial del contexto), y
+`openpyxl` (extra `export`) solo se importa al escribir un Excel.
 Tampoco lo cargan `resolve_output_paths`, `resolve_images_dir`, `relative_source_path` ni `CacheManager` (también en
 solo lectura).
 
@@ -33,6 +34,7 @@ solo lectura).
 
 | Versión | Cambio |
 |---|---|
+| 1.5.0 | Sin cambios incompatibles: todo lo nuevo tiene valor por defecto y los JSON e `index.json` anteriores se siguen leyendo. Campos nuevos en `DocumentMetadata`/`CacheEntry` (metadatos de fichero), `DomainDocument` (autor, descripción, palabras clave, idioma, `ai_filled` y trazabilidad: `rules_domain`, `ai_domain`…) y `Context` (`ai_enrichment_*`, `ai_enrichment_model`, `built_with_version`); `ScanOptions.capture_owner` y `DocumentScanner(capture_owner=)`; `ContextBuilder.build(ai_enrichment_enabled=, ai_enrichment_client=)` *keyword-only*; `DocumentEnrichmentClient` y `litellm_enrichment_config_from_env` en `doc_organize.ai`; `diff_contexts`/`list_context_builds` en `doc_organize.context`; `load_context_history`/`write_context_history_xlsx` en `doc_organize.export`; `ProgressEvent.phase` admite `"enrichment"`. **Cambios de comportamiento**: `cache.db` se migra (4 columnas) al abrirse en escritura; `Context.ai_classification_model` lo rellena `ContextBuilder`; las reglas de clasificación ignoran tildes (algunos documentos pueden cambiar de sitio al reconstruir); cada construcción del contexto escribe `historial_contexto/CONTEXT_HISTORY.jsonl`, nombre que ya no admite `Context.output_folder_name`; `ContextRegistry.load_context` lanza `ContextError` (no `UnicodeDecodeError`/`TypeError`) con cualquier contexto dañado |
 | 1.4.0 | Sin cambios incompatibles en la API. `SiteResult.search_excluded` (tupla vacía por defecto) y `SiteBuildError.cause`/`output_tail` (argumentos *keyword-only* opcionales del constructor). **Cambios de comportamiento**: `SiteGenerator.generate` añade `search: exclude: true` a la cabecera de las páginas reorganizadas que superarían el límite del índice de búsqueda de Zensical (ver [SiteGenerator](context.md#sitegenerator-0130-l-8)); el mensaje de `SiteBuildError` termina en su `cause` (la última línea de la salida de Zensical) en lugar de en toda la salida. Los extras `[site]` y `[docs]` exigen `zensical>=0.1.1` |
 | 1.3.0 | Sin cambios incompatibles. `ScanOptions.exclude_paths` e `ignore_patterns` (listas vacías por defecto, el recorrido de siempre), `DocumentScanner.scan_folders(exclude_paths=, ignore_patterns=)` *keyword-only* y `ScanSummary.excluded_cached` (clave nueva de `COMPLETED`). Sin `force`, lo excluido que ya estaba en la caché se conserva; con `force`, cuenta como eliminado (ver [Exclusiones](scan.md#exclusiones-exclude_paths-ignore_patterns-g41)) |
 | 1.2.0 | Sin cambios incompatibles. `CacheManager.load_cache_page(order_by=, descending=)` (por defecto `"file_path"` y `False`, el orden de siempre) y el tipo `CacheOrderBy` en `doc_organize.cache`. Empates por `file_path` ascendente y `NULL` al final; `order_by` no válido lanza `ValueError`. Cada conexión de `CacheManager` fija `PRAGMA temp_store=MEMORY` (solo la conexión, no el fichero) |
