@@ -1,10 +1,11 @@
 """Tests de DomainClassifier (Sub-fase A, clasificación por reglas)."""
 
 import json
+import time
 
 import pytest
 
-from doc_organize.context.domain_classifier import DomainClassifier, MaterialTypeClassifier, resolve_title_and_type, score_catalog
+from doc_organize.context.domain_classifier import DomainClassifier, MaterialTypeClassifier, fold_accents, resolve_title_and_type, score_catalog
 from doc_organize.core.models import ConversionResult
 
 
@@ -213,6 +214,29 @@ def test_score_catalog_extra_keywords_use_the_sanitized_slug_as_key():
 )
 def test_score_catalog_ignores_accents(catalog_slug: str, text: str) -> None:
     assert score_catalog([catalog_slug], text, folder_slug="") == (catalog_slug, 1.0)
+
+
+@pytest.mark.parametrize(
+    ("text", "folded"),
+    [
+        ("plain ASCII text 123", "plain ascii text 123"),
+        ("GESTIÓN, Año, Pingüino, Façade, Ærø", "gestion, ano, pinguino, facade, ærø"),  # æ y ø no se descomponen
+        ("Straße ﬁcha", "strasse ficha"),
+        ("Москва 東京", "москва 東京"),  # otros alfabetos no se tocan
+    ],
+)
+def test_fold_accents(text: str, folded: str) -> None:
+    assert fold_accents(text) == folded
+
+
+def test_fold_accents_is_fast_with_large_documents():
+    """Con `unicodedata.normalize("NFKD")` sobre el texto entero, 5 MB tardaban ~3 s; con la tabla, décimas."""
+    text = "Gestión de la calidad según ISO 9001, revisión anual del año. " * 85_000
+
+    start = time.perf_counter()
+    fold_accents(text)
+
+    assert time.perf_counter() - start < 2.0
 
 
 def test_score_catalog_extra_keywords_ignore_accents():

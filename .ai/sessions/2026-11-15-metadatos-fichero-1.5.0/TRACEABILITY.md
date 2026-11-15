@@ -106,6 +106,20 @@ de la Fase 4 del plan, solo historial e informe; se descartaron el origen «impo
 «accedido» (la librería no puede saberlos) y la retención por tipo de material.
 **Status**: ✅
 
+### ✅ 11. `/audit-code` de las Fases 3 y 4: dos regresiones corregidas
+
+**Archivo(s)**: `context/context_registry.py`, `context/domain_classifier.py`, `context/context_builder.py`,
+`core/models.py`, `docs/api/context.md`, `docs/api/export.md`
+**Descripción**:
+- **Reconstruir sobre un contexto dañado fallaba** (desde el #38): `ContextRegistry._load` dejaba escapar
+  `UnicodeDecodeError`/`TypeError` con un `context.json` no UTF-8 o JSON que no era un objeto, y `build()` ahora lee el
+  contexto anterior. Ahora `_read_json_object` lo convierte todo en `ContextError`.
+- **`fold_accents` multiplicaba por ~150 el coste de clasificar** (desde el #37): `unicodedata.normalize("NFKD")` sobre
+  10 MB tardaba 5,8 s. Ahora es una tabla de `str.translate` (0,19 s; mismo resultado en las letras latinas).
+- `DomainDocument.ai_domain`: la propuesta de la IA, que se perdía cuando en modo manifiesto solo se aplicaba al tipo de
+  material. Corregida la documentación que decía que `confidence` era siempre la de `classified_by`.
+**Status**: ✅
+
 ---
 
 ## Impacto
@@ -179,6 +193,10 @@ cliente de IA solo se ha probado con `httpx.MockTransport`, no contra un LiteLLM
   registro también guarda al reorganizar o generar el sitio y eso no son construcciones. Cualquier carpeta nueva en la
   raíz del proyecto debe ir a `RESERVED_OUTPUT_FOLDER_NAMES` (`projects/layout.py`): la carpeta reorganizada se borra
   entera al reconstruir.
+- **[rendimiento]**: el texto de los documentos convertidos puede ocupar varios MB (hojas de cálculo grandes). Antes de
+  aplicarle una transformación por documento, medirla con ~10 MB: `unicodedata.normalize` tardó 5,8 s.
+- **[ContextRegistry]**: todo fallo de lectura de `context.json`/`index.json` debe salir como `ContextError`
+  (`_read_json_object`); `ContextBuilder` depende de ello para reconstruir sobre un contexto dañado.
 - **[tests de contexto]**: los dobles de los clientes de IA necesitan `config = SimpleNamespace(model=...)`, porque
   `ContextBuilder` anota `client.config.model` en el `Context`.
 - **[reglas]**: `score_catalog` compara con `fold_accents` (sin tildes ni diéresis; «ñ» → «n») desde esta sesión; antes

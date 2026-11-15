@@ -521,6 +521,7 @@ class ContextBuilder:
             self.logger.warning(f"Fallo la clasificación por IA (manifiesto) de '{document.source_path}': {exc} — sigue sin clasificar")
             return
 
+        document.ai_domain = result.domain
         document.ai_confidence = result.domain_confidence
         document.ai_reasoning = clean_text(result.reasoning)
         changed = False
@@ -611,6 +612,7 @@ class ContextBuilder:
             classified_by="ai",
             rules_domain=rules_domain,
             rules_confidence=rules_confidence,
+            ai_domain=result.domain,
             ai_confidence=result.confidence,
             ai_reasoning=clean_text(result.reasoning),
         )

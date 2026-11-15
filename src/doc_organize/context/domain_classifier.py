@@ -226,17 +226,35 @@ class DomainClassifier:
         return "-".join(_WORD_RE.findall(name.lower()))
 
 
+def _accent_folding_table() -> dict[int, str]:
+    """Letra latina con diacrítico (Latin-1, Latin Extended-A/B y Additional) o ligadura → su forma sin él."""
+    table: dict[int, str] = {}
+    for start, end in ((0x00C0, 0x0250), (0x1E00, 0x1F00), (0xFB00, 0xFB07)):
+        for codepoint in range(start, end):
+            character = chr(codepoint)
+            base = "".join(part for part in unicodedata.normalize("NFKD", character) if not unicodedata.combining(part))
+            if base and base != character:
+                table[codepoint] = base
+    return table
+
+
+# `unicodedata.normalize("NFKD")` sobre el texto entero tarda segundos con documentos de varios MB (5,8 s con 10 MB);
+# traducir solo las letras latinas con diacrítico tarda una fracción y cubre lo que comparan las reglas.
+_ACCENT_FOLDING = _accent_folding_table()
+
+
 def fold_accents(text: str) -> str:
     """Texto en minúsculas y sin tildes ni diéresis, para comparar palabras clave con el contenido (1.5.0).
 
-    La «ñ» pasa a «n», como cualquier letra con diacrítico.
+    La «ñ» pasa a «n», como cualquier letra latina con diacrítico; las ligaduras («ﬁ») se separan. Otros alfabetos se
+    dejan como están.
 
     Example:
-        >>> fold_accents("Gestión de CALIDAD, pingüino, año")
-        'gestion de calidad, pinguino, ano'
+        >>> fold_accents("Gestión de CALIDAD, pingüino, año, ﬁcha")
+        'gestion de calidad, pinguino, ano, ficha'
     """
-    decomposed = unicodedata.normalize("NFKD", text.casefold())
-    return "".join(character for character in decomposed if not unicodedata.combining(character))
+    folded = text.casefold()
+    return folded if folded.isascii() else folded.translate(_ACCENT_FOLDING)
 
 
 def score_catalog(

@@ -165,11 +165,12 @@ async def test_rebuilding_without_changes_records_an_empty_build(tmp_path: Path)
 
 
 @pytest.mark.asyncio
-async def test_unreadable_previous_context_does_not_stop_the_build(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+@pytest.mark.parametrize("damaged", [b"{no es json", b"\xff\xfe no es UTF-8", b"[]", b'{"domains": ["no es un objeto"]}'])
+async def test_unreadable_previous_context_does_not_stop_the_build(tmp_path: Path, caplog: pytest.LogCaptureFixture, damaged: bytes) -> None:
     project = _project(tmp_path)
     documents = [_converted(tmp_path, "Calidad", "informe.pdf")]
     await ContextBuilder(ContextRegistry()).build(project, documents)
-    ProjectLayout.for_project(project).context_file.write_text("{no es json", encoding="utf-8")
+    ProjectLayout.for_project(project).context_file.write_bytes(damaged)
 
     with caplog.at_level(logging.WARNING):
         await ContextBuilder(ContextRegistry()).build(project, documents)
