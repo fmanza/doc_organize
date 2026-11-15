@@ -849,6 +849,24 @@ class DomainDocument(BaseModel):
             "recalculan siempre y nunca usan el valor leído de `index.json`"
         ),
     )
+    author: str | None = Field(
+        default=None,
+        description="Autor del documento (extraído de metadatos PDF/Office, FASE 2)",
+    )
+    description: str | None = Field(
+        default=None,
+        description="Descripción o resumen del contenido (generado por IA o editado por usuario, FASE 2)",
+    )
+    keywords: list[str] = Field(
+        default_factory=list,
+        description="Palabras clave sugeridas por IA (FASE 2)",
+    )
+    keywords_confidence: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Confianza en las palabras clave generadas (0-1, FASE 2)",
+    )
 
 
 class Domain(BaseModel):
