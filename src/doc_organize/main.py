@@ -12,9 +12,11 @@ from doc_organize.core.exceptions import DocOrganizeError, InvalidPathError
 from doc_organize.core.models import DedupEventType
 from doc_organize.export import (
     load_cache_entries,
+    load_context_history,
     load_scan_error_history,
     preview_project_zip,
     write_cache_xlsx,
+    write_context_history_xlsx,
     write_project_zip,
     write_scan_errors_xlsx,
 )
@@ -82,8 +84,11 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+_XLSX_OUTPUT_HELP = "Ruta del .xlsx a escribir (se sobrescribe si existe)"
+
+
 def _add_export_parser(subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]", registry_flag: argparse.ArgumentParser) -> None:
-    """`export zip | cache-xlsx | errors-xlsx` (L-7): rutas de un proyecto del registro o explícitas."""
+    """`export zip | cache-xlsx | errors-xlsx | context-xlsx` (L-7, 1.5.0): rutas de un proyecto del registro o explícitas."""
     sources = argparse.ArgumentParser(add_help=False, parents=[registry_flag])
     sources.add_argument("--project", help="Nombre de un proyecto existente (REQ-008)")
     sources.add_argument("--output-root", help="Raíz de salidas del proyecto (contiene Conversión/), sin --project")
@@ -99,11 +104,17 @@ def _add_export_parser(subparsers: "argparse._SubParsersAction[argparse.Argument
     zip_target.add_argument("--preview", action="store_true", help="Solo mostrar cuántos ficheros y bytes incluiría el ZIP")
 
     cache_parser = export_subparsers.add_parser("cache-xlsx", help="Excel con todas las entradas de la caché", parents=[sources])
-    cache_parser.add_argument("-o", "--output", required=True, help="Ruta del .xlsx a escribir (se sobrescribe si existe)")
+    cache_parser.add_argument("-o", "--output", required=True, help=_XLSX_OUTPUT_HELP)
 
     errors_parser = export_subparsers.add_parser("errors-xlsx", help="Excel de errores de escaneo: estado actual e histórico", parents=[sources])
-    errors_parser.add_argument("-o", "--output", required=True, help="Ruta del .xlsx a escribir (se sobrescribe si existe)")
+    errors_parser.add_argument("-o", "--output", required=True, help=_XLSX_OUTPUT_HELP)
     errors_parser.add_argument("--errors-log", nargs="+", help="Uno o varios SCAN_ERRORS_HISTORY.jsonl (por defecto el del proyecto)")
+
+    context_parser = export_subparsers.add_parser(
+        "context-xlsx", help="Excel del historial del contexto: construcciones y documentos que cambiaron (1.5.0)", parents=[sources]
+    )
+    context_parser.add_argument("-o", "--output", required=True, help=_XLSX_OUTPUT_HELP)
+    context_parser.add_argument("--history-log", nargs="+", help="Uno o varios CONTEXT_HISTORY.jsonl (por defecto el del proyecto)")
 
 
 def _registry(args: argparse.Namespace) -> ProjectRegistry:
@@ -196,6 +207,10 @@ async def _run_export(args: argparse.Namespace) -> int:
     elif args.export_command == "cache-xlsx":
         rows = write_cache_xlsx(output, entries)
         print(f"Excel de caché escrito en '{output}': {rows} filas.")
+    elif args.export_command == "context-xlsx":
+        history_logs = [Path(log) for log in args.history_log] if args.history_log else [layout.context_history]
+        rows = write_context_history_xlsx(output, load_context_history(history_logs))
+        print(f"Excel del historial del contexto escrito en '{output}': {rows} filas.")
     else:
         history_logs = [Path(log) for log in args.errors_log] if args.errors_log else [layout.scan_errors_log]
         rows = write_scan_errors_xlsx(output, entries, load_scan_error_history(history_logs))

@@ -10,12 +10,15 @@ from datetime import UTC, datetime
 
 from doc_organize import __version__
 from doc_organize.ai import DocumentEnrichmentClient, DomainClassificationClient, TaxonomyClassificationClient
+from doc_organize.context.context_history import append_context_build, build_record
 from doc_organize.context.context_registry import ContextRegistry
 from doc_organize.context.document_properties import read_document_properties
 from doc_organize.context.domain_classifier import DomainClassifier, MaterialTypeClassifier, read_conversion_json, resolve_title_and_type
 from doc_organize.context.language_detection import detect_language
 from doc_organize.context.reorganizer import assign_organized_paths
 from doc_organize.core.exceptions import (
+    ContextError,
+    ContextNotFoundError,
     DocumentEnrichmentAuthError,
     DocumentEnrichmentConnectionError,
     DocumentEnrichmentError,
@@ -37,6 +40,7 @@ from doc_organize.core.models import (
     TaxonomyManifest,
 )
 from doc_organize.core.progress import CancelToken, Phase, ProgressCallback, ProgressEvent, checkpoint
+from doc_organize.projects.layout import ProjectLayout
 from doc_organize.utils.logging import get_logger
 from doc_organize.utils.text_clean import clean_text
 
@@ -356,7 +360,7 @@ class ContextBuilder:
         )
         assign_organized_paths(context, project.root_path)  # L-8d: ruta final de cada documento, para el consumidor
         checkpoint(cancel_token)  # nunca se persiste un contexto a medias
-        await self.registry.save_context(project, context)
+        await self._save_and_record(project, context)
         self.logger.info(f"Contexto construido para '{project.name}': {len(domains)} dominio(s), {len(unclassified)} documento(s) sin clasificar")
         return context
 
@@ -610,6 +614,27 @@ class ContextBuilder:
             ai_confidence=result.confidence,
             ai_reasoning=clean_text(result.reasoning),
         )
+
+    async def _save_and_record(self, project: Project, context: Context) -> None:
+        """Persiste `context` y añade la construcción al histórico (`ProjectLayout.context_history`, 1.5.0).
+
+        El contexto anterior se lee antes de sobrescribirlo, para registrar qué documentos cambiaron. Si no se puede
+        leer (dañado), se compara con nada y la construcción no falla; si el histórico no se puede escribir, se avisa y
+        el contexto ya guardado se mantiene.
+        """
+        try:
+            previous: Context | None = await self.registry.load_context(project)
+        except ContextNotFoundError:
+            previous = None
+        except ContextError as exc:
+            self.logger.warning(f"No se pudo leer el contexto anterior de '{project.name}' para el histórico: {exc}")
+            previous = None
+
+        await self.registry.save_context(project, context)
+        try:
+            await append_context_build(ProjectLayout.for_project(project).context_history, build_record(previous, context))
+        except OSError as exc:
+            self.logger.warning(f"No se pudo añadir la construcción al histórico del contexto de '{project.name}': {exc}")
 
     async def _describe_documents(
         self,

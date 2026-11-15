@@ -1029,6 +1029,52 @@ class Context(BaseModel):
             raise ValueError(str(exc)) from exc
 
 
+ContextChangeKind = Literal["added", "removed", "reclassified"]
+"""Tipo de cambio de un documento entre dos construcciones del contexto (`ContextChange.change`, 1.5.0)."""
+
+
+class ContextChange(BaseModel):
+    """Un documento que entró, salió o cambió de sitio entre la construcción anterior del contexto y esta (1.5.0).
+
+    `domain`/`material_type` en `None` significa «sin clasificar» (o sin manifiesto, para el tipo de material). Un
+    documento que pasa de clasificado a sin clasificar, o al revés, es `reclassified`; `added`/`removed` es que no
+    estaba o que ya no está en ninguno de los dos.
+    """
+
+    source_path: str = Field(..., description="Ruta del documento original")
+    change: ContextChangeKind = Field(..., description="`added`, `removed` o `reclassified`")
+    previous_domain: str | None = Field(default=None, description="Dominio en la construcción anterior; None si sin clasificar o `added`")
+    domain: str | None = Field(default=None, description="Dominio en esta construcción; None si sin clasificar o `removed`")
+    previous_material_type: str | None = Field(default=None, description="Tipo de material en la construcción anterior")
+    material_type: str | None = Field(default=None, description="Tipo de material en esta construcción")
+    classified_by: str | None = Field(default=None, description="'rules' o 'ai' en esta construcción; None si no quedó clasificado")
+
+
+class ContextBuildRecord(BaseModel):
+    """Una construcción del contexto en el histórico `CONTEXT_HISTORY.jsonl` (1.5.0).
+
+    Escrito por `ContextBuilder.build()` tras persistir el contexto; leído con
+    `context.context_history.list_context_builds` y exportado con `export.write_context_history_xlsx`.
+    """
+
+    built_at: str = Field(..., description="Timestamp ISO 8601 de la construcción (`Context.updated_at`)")
+    previous_built_at: str | None = Field(
+        default=None,
+        description=(
+            "`updated_at` de la construcción con la que se compara; None si es la primera o la anterior no se pudo "
+            "leer (entonces todos los documentos cuentan como `added`)"
+        ),
+    )
+    project_name: str = Field(..., description="Proyecto del contexto")
+    built_with_version: str | None = Field(default=None, description="Versión de doc_organize que construyó el contexto")
+    taxonomy_manifest_used: bool = Field(default=False, description="Si se clasificó con manifiesto de taxonomía")
+    ai_classification_model: str | None = Field(default=None, description="Modelo con el que se ejecutó la Sub-fase B, si se ejecutó")
+    ai_enrichment_model: str | None = Field(default=None, description="Modelo con el que se ejecutó el enriquecimiento, si se ejecutó")
+    classified: int = Field(..., ge=0, description="Documentos clasificados en algún dominio")
+    unclassified: int = Field(..., ge=0, description="Documentos sin clasificar")
+    changes: list[ContextChange] = Field(default_factory=list, description="Documentos que entraron, salieron o cambiaron de sitio")
+
+
 class DomainClassificationResult(BaseModel):
     """Resultado de clasificar un documento por IA (Sub-fase B, `DomainClassificationClient`)."""
 
@@ -1208,6 +1254,9 @@ __all__ = [
     "Context",
     "ContextBuildEvent",
     "ContextBuildEventType",
+    "ContextBuildRecord",
+    "ContextChange",
+    "ContextChangeKind",
     "ContextDeleteEvent",
     "ContextDeleteEventType",
     "ConversionResult",

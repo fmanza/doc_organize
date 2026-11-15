@@ -26,6 +26,8 @@ from pathlib import Path, PurePosixPath
 
 from doc_organize.core.constants import (
     CONTEXT_FILE_NAME,
+    CONTEXT_HISTORY_FOLDER_NAME,
+    CONTEXT_HISTORY_JSONL_NAME,
     CONVERSION_FOLDER_NAME,
     DEDUP_HISTORY_JSONL_NAME,
     DEDUP_REPORT_JSON_NAME,
@@ -58,6 +60,7 @@ RESERVED_OUTPUT_FOLDER_NAMES: frozenset[str] = frozenset(
         DUPLICATES_FOLDER_NAME,
         SCAN_ERRORS_FOLDER_NAME,
         SCAN_HISTORY_FOLDER_NAME,
+        CONTEXT_HISTORY_FOLDER_NAME,
         DOMAINS_FOLDER_NAME,
         SITE_FOLDER_NAME,
         SITE_CACHE_FOLDER_NAME,
@@ -164,6 +167,11 @@ class ProjectLayout:
     def context_file(self) -> Path:
         """``context.json``: metadatos del contexto y resumen de sus dominios."""
         return self.output_root / CONTEXT_FILE_NAME
+
+    @property
+    def context_history(self) -> Path:
+        """Histórico JSONL de construcciones del contexto (1.5.0), junto a ``context.json``."""
+        return self.output_root / CONTEXT_HISTORY_FOLDER_NAME / CONTEXT_HISTORY_JSONL_NAME
 
     @property
     def domains_dir(self) -> Path:

@@ -12,6 +12,8 @@
 | `write_project_zip` | `(destination, entries, *, layout=None, conversion_dir=None, dedup_report=None, on_progress=None, cancel_token=None)` | `ExportStats` |
 | `write_cache_xlsx` | `(destination, entries, *, on_progress=None, cancel_token=None)` | filas escritas |
 | `write_scan_errors_xlsx` | `(destination, entries, history, *, on_progress=None, cancel_token=None)` | filas escritas |
+| `load_context_history` | `(history_logs: Iterable[str \| Path])` | `list[ContextBuildRecord]`, más recientes primero (1.5.0) |
+| `write_context_history_xlsx` | `(destination, history, *, on_progress=None, cancel_token=None)` | filas escritas (1.5.0) |
 | `ExportStats` | `file_count`, `total_size_bytes` (modelo Pydantic congelado) | — |
 | `MissingDependencyError` | `package`, `extra` (en `doc_organize.core.exceptions`) | — |
 
@@ -59,8 +61,14 @@ Compresión `ZIP_DEFLATED`; ZIP64 automático para ficheros de más de 2 GiB.
 
 `openpyxl` en modo `write_only`, importado al escribir. Ese modo guarda el XML de cada hoja en un temporal del
 sistema hasta `save()`; si la escritura se cancela o falla, se borran en el momento. Cabeceras exportadas como
-constantes: `CACHE_COLUMNS`, `SCAN_ERRORS_CURRENT_COLUMNS`, `SCAN_ERRORS_HISTORY_COLUMNS` (en
-`doc_organize.export.xlsx_export`).
+constantes: `CACHE_COLUMNS`, `SCAN_ERRORS_CURRENT_COLUMNS`, `SCAN_ERRORS_HISTORY_COLUMNS`, `CONTEXT_BUILDS_COLUMNS` y
+`CONTEXT_CHANGES_COLUMNS` (en `doc_organize.export.xlsx_export`).
+
+El Excel del historial del contexto (1.5.0) tiene dos hojas: `Construcciones` (una fila por construcción: fecha, la
+construcción con la que se comparó, versión de doc_organize, modelos de IA, clasificados, sin clasificar y número de
+cambios) y `Cambios` (una fila por documento: `Entra`, `Sale` o `Cambia`, dominio y tipo de material antes y después,
+y quién lo clasificó). Un dominio vacío es que el documento no estaba en ese lado; `(sin clasificar)`, que estaba sin
+dominio. Ver [Historial del contexto](context.md#historial-del-contexto-150).
 
 ## Referencia generada
 

@@ -56,7 +56,7 @@ solo lectura).
 | Duplicados | `DeduplicationManager`, `DeduplicationSummary`, `DuplicateGroup`, `DuplicateReason`, `DeduplicationReport` |
 | Contexto | `ContextBuilder`, `ContextRegistry`, `Reorganizer`, `SiteGenerator`, `SiteResult`, `TaxonomyTemplateRegistry`, `Context`, `TaxonomyManifest` |
 | Plantillas de taxonomía como texto (0.13.0) | `parse_taxonomy_template`, `render_taxonomy_template`, `list_builtin_templates`, `load_builtin_template` (también en `doc_organize.context`) |
-| Exportación (0.11.0) | `write_project_zip`, `preview_project_zip`, `ExportStats`, `write_cache_xlsx`, `write_scan_errors_xlsx`, `load_cache_entries`, `load_scan_error_history` (también en `doc_organize.export`; ver [Exportación](export.md)) |
+| Exportación (0.11.0) | `write_project_zip`, `preview_project_zip`, `ExportStats`, `write_cache_xlsx`, `write_scan_errors_xlsx`, `load_cache_entries`, `load_scan_error_history` (también en `doc_organize.export`; ver [Exportación](export.md)). En `doc_organize.export` desde 1.5.0: `load_context_history`, `write_context_history_xlsx` |
 | Proyectos (CLI) | `ProjectRegistry`, `ProjectLayout`, `ProjectHistoryCleaner`, `ScannedFoldersStore`, `Project`, `ScannedFolder`, `FolderValidator`, `ProjectValidator` |
 | Eventos de progreso | `ScanEvent`/`ScanEventType`, `DedupEvent`/`DedupEventType`, `ContextBuildEvent`/`ContextBuildEventType`, `ContextDeleteEvent`/`ContextDeleteEventType` |
 | Modelos | `DocumentMetadata`, `ConversionResult`, `CacheEntry`, `ConversionStatus`, `DocumentStatus`, `ScanResult`, `ScanErrorEntry`, `ScanErrorReport`, `ScanRunReport` |

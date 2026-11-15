@@ -1,6 +1,7 @@
 """Organización documental por dominios y contextos."""
 
 from doc_organize.context.context_builder import ContextBuilder
+from doc_organize.context.context_history import diff_contexts, list_context_builds
 from doc_organize.context.context_registry import ContextRegistry
 from doc_organize.context.domain_classifier import DomainClassifier, MaterialTypeClassifier
 from doc_organize.context.reorganizer import Reorganizer, resolve_organized_paths
@@ -24,7 +25,9 @@ __all__ = [
     "SiteGenerator",
     "SiteResult",
     "TaxonomyTemplateRegistry",
+    "diff_contexts",
     "list_builtin_templates",
+    "list_context_builds",
     "load_builtin_template",
     "load_taxonomy_manifest",
     "parse_taxonomy_template",
