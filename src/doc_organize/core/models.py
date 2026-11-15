@@ -153,6 +153,16 @@ class DocumentMetadata(BaseModel):
     size_bytes: int = Field(..., description="Tamaño del fichero en bytes")
     modified_time: float = Field(..., description="Timestamp Unix de la última modificación")
     sha256_hash: str = Field(..., description="Hash SHA-256 (cadena hexadecimal de 64 caracteres)")
+    created_time: float | None = Field(
+        default=None,
+        description="Timestamp Unix de creación (`st_birthtime`, 1.5.0); None en Linux, que no la da",
+    )
+    mime_type: str | None = Field(default=None, description="Tipo MIME según la extensión (1.5.0); None si la extensión no es conocida")
+    file_permissions: str | None = Field(default=None, description="Permisos POSIX en octal, p. ej. '644' (1.5.0); None en Windows")
+    owner_name: str | None = Field(
+        default=None,
+        description="Cuenta propietaria (1.5.0); solo con `ScanOptions.capture_owner=True`, None si no se resuelve",
+    )
 
     @classmethod
     def from_cache_entry(cls, entry: "CacheEntry") -> "DocumentMetadata":
@@ -165,7 +175,8 @@ class DocumentMetadata(BaseModel):
             entry: Entrada guardada por un escaneo de 1.1.0 o posterior (con `size_bytes`).
 
         Returns:
-            DocumentMetadata con el hash, el tamaño y la fecha de modificación de la caché.
+            DocumentMetadata con el hash, el tamaño, la fecha de modificación y los metadatos de fichero de 1.5.0
+            (`None` si la entrada es anterior) de la caché.
 
         Raises:
             ValueError: La entrada no tiene `size_bytes` (la escribió una versión anterior a 1.1.0); se rellena en el
@@ -188,6 +199,10 @@ class DocumentMetadata(BaseModel):
             size_bytes=entry.size_bytes,
             modified_time=entry.timestamp,
             sha256_hash=entry.sha256_hash,
+            created_time=entry.created_time,
+            mime_type=entry.mime_type,
+            file_permissions=entry.file_permissions,
+            owner_name=entry.owner_name,
         )
 
     model_config = ConfigDict(
@@ -199,6 +214,10 @@ class DocumentMetadata(BaseModel):
                 "size_bytes": 1048576,
                 "modified_time": 1693152000.0,
                 "sha256_hash": "abc123def456...",
+                "created_time": 1693151000.0,
+                "mime_type": "application/pdf",
+                "file_permissions": "644",
+                "owner_name": None,
             }
         }
     )
@@ -321,6 +340,10 @@ class CacheEntry(BaseModel):
     size_bytes: int | None = Field(
         default=None, description="Tamaño del fichero en bytes cuando se escaneó (None en entradas anteriores a 1.1.0, G25)"
     )
+    created_time: float | None = Field(default=None, description="`DocumentMetadata.created_time` (1.5.0; None en entradas anteriores)")
+    mime_type: str | None = Field(default=None, description="`DocumentMetadata.mime_type` (1.5.0; None en entradas anteriores)")
+    file_permissions: str | None = Field(default=None, description="`DocumentMetadata.file_permissions` (1.5.0; None en entradas anteriores)")
+    owner_name: str | None = Field(default=None, description="`DocumentMetadata.owner_name` (1.5.0; None en entradas anteriores)")
 
 
 class ScanErrorEntry(BaseModel):
@@ -504,6 +527,13 @@ class ScanOptions(BaseModel):
         description=(
             "No rehashear un fichero cuyo tamaño y fecha de modificación coinciden con la caché: se reutiliza su hash (G11). "
             "No detecta un cambio que conserve tamaño y fecha"
+        ),
+    )
+    capture_owner: bool = Field(
+        default=False,
+        description=(
+            "Guardar la cuenta propietaria de cada documento en `DocumentMetadata.owner_name` y en la caché (1.5.0). "
+            "Desactivado por defecto: es un dato personal y en Windows cuesta una llamada al sistema por fichero"
         ),
     )
     exclude_paths: list[str] = Field(

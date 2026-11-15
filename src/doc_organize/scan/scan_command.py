@@ -25,7 +25,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Final
 
 from doc_organize.cache import CacheManager
 from doc_organize.converter import DocumentConverter, OCRScheduler
@@ -188,6 +188,10 @@ def _conversion_kwargs(options: ScanOptions) -> dict[str, Any]:
     if options.document_timeout_s is not None:
         kwargs["timeout_s"] = options.document_timeout_s
     return kwargs
+
+
+#: Campos de `CacheEntry` que vienen del sistema de ficheros y no del contenido: se refrescan aunque el hash no cambie.
+_FILE_METADATA_FIELDS: Final = ("size_bytes", "created_time", "mime_type", "file_permissions", "owner_name")
 
 
 def _is_under_any(path: str, folders: Sequence[str]) -> bool:
@@ -533,7 +537,9 @@ class ScanCommand:
             if opts.ignore_patterns:
                 scan_kwargs["ignore_patterns"] = opts.ignore_patterns
 
-            async with DocumentScanner(io_retries=opts.io_retries, io_retry_backoff_s=opts.io_retry_backoff_s) as scanner:
+            async with DocumentScanner(
+                io_retries=opts.io_retries, io_retry_backoff_s=opts.io_retry_backoff_s, capture_owner=opts.capture_owner
+            ) as scanner:
                 # exclude_dir=output_dir: sin esto, si una de `clean_paths` contiene el
                 # `output_dir` de un escaneo previo con `extract_images=True`, el escaneo
                 # redescubre las imagenes ya extraidas (`img/<stem>/*.png`) como
@@ -586,6 +592,7 @@ class ScanCommand:
                 modified_set = set(modified_files)
                 to_process_paths = new_set | modified_set
                 docs_by_path = {doc.full_path: doc for doc in scan_result.documents}
+                await self._refresh_file_metadata(cache, cached_entries, docs_by_path, unchanged_files)
                 error_retry_paths, error_retries_capped_paths = self._collect_stale_error_paths(cached_entries, docs_by_path, to_process_paths)
                 summary.error_retries = len(error_retry_paths)
                 summary.error_retries_capped = len(error_retries_capped_paths)
@@ -1397,6 +1404,33 @@ class ScanCommand:
         # L-2: el lote corre en un hilo y paró antes del siguiente documento; lo procesado ya está en `entries`.
         checkpoint(cancel_token)
 
+    async def _refresh_file_metadata(
+        self,
+        cache: CacheManager,
+        cached_entries: dict[str, CacheEntry],
+        docs_by_path: dict[str, DocumentMetadata],
+        unchanged_paths: list[str],
+    ) -> None:
+        """Actualiza en la caché los metadatos de fichero de lo que no se reconvierte (1.5.0).
+
+        Sin esto, una entrada de una versión anterior, o un cambio de permisos o propietario sin cambio de contenido,
+        no llegaría a la caché hasta que el documento cambiase. Un fallo al guardar (p. ej. base bloqueada) no para el
+        escaneo: el siguiente lo vuelve a intentar.
+        """
+        stale: list[CacheEntry] = []
+        for path in unchanged_paths:
+            doc, entry = docs_by_path[path], cached_entries[path]
+            update = {name: getattr(doc, name) for name in _FILE_METADATA_FIELDS}
+            if any(getattr(entry, name) != value for name, value in update.items()):
+                cached_entries[path] = entry.model_copy(update=update)
+                stale.append(cached_entries[path])
+        if not stale:
+            return
+        try:
+            await cache.save_entries(stale)
+        except Exception as exc:  # noqa: BLE001 - es un refresco; la conversión no depende de él
+            self.logger.warning(f"No se pudieron actualizar los metadatos de fichero en la caché: {type(exc).__name__}: {exc}")
+
     @staticmethod
     def _build_entry(
         doc: DocumentMetadata,
@@ -1421,6 +1455,10 @@ class ScanCommand:
             conversion_status=conversion_status,
             error_message=result.error,
             error_retry_count=error_retry_count,
+            created_time=doc.created_time,
+            mime_type=doc.mime_type,
+            file_permissions=doc.file_permissions,
+            owner_name=doc.owner_name,
         )
 
     @staticmethod
