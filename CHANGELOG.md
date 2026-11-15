@@ -25,8 +25,8 @@ releases publicados antes de esa versión).
 - **Idioma** en `DomainDocument.language` (ISO 639-1), detectado con py3langid en el texto convertido, sin red. `None`
   si el texto es corto o la confianza baja (< 0,7), en lugar de adivinarlo.
 - **Trazabilidad de la clasificación** en `DomainDocument`: `rules_domain` y `rules_confidence` (lo que propusieron
-  las reglas, también cuando decidió la IA), `ai_confidence` y `ai_reasoning` (antes la justificación de la IA se
-  descartaba) y `material_type_confidence`. En `Context`: `ai_enrichment_model` y `built_with_version` (versión de
+  las reglas, también cuando decidió la IA), `ai_domain`, `ai_confidence` y `ai_reasoning` (antes la propuesta y la
+  justificación de la IA se descartaban) y `material_type_confidence`. En `Context`: `ai_enrichment_model` y `built_with_version` (versión de
   doc_organize que lo construyó). Detalle en
   [Contexto](docs/api/context.md#trazabilidad-de-la-clasificacion-150).
 - **Historial del contexto**: cada `ContextBuilder.build()` añade a `historial_contexto/CONTEXT_HISTORY.jsonl`
@@ -41,10 +41,15 @@ releases publicados antes de esa versión).
 
 ### Corregido
 
+- **`ContextRegistry.load_context` ante un contexto dañado**: un `context.json` o `index.json` que no era UTF-8, o JSON
+  válido que no era un objeto (`[]`, un dominio que no es un objeto), salía como `UnicodeDecodeError`/`TypeError`;
+  ahora es `ContextError`, como el resto de daños. Con ello, `ContextBuilder.build()` (que lee el contexto anterior
+  para el historial) reconstruye sobre un contexto dañado en vez de fallar.
 - **Tildes en la clasificación por reglas**: `score_catalog` (dominios y tipos de material, también las palabras clave
   del manifiesto) comparaba sin quitar tildes, así que «gestión» en el texto no contaba para el dominio
   `gestion-calidad`, ni una carpeta «Gestión Calidad» daba la bonificación de ruta. Ahora ignora tildes y diéresis
-  (`fold_accents`; la «ñ» cuenta como «n»). Al reconstruir un contexto, algunos documentos pueden pasar de sin
+  (`fold_accents`, una tabla de traducción de las letras latinas con diacrítico; la «ñ» cuenta como «n»: 0,2 s con
+  10 MB de texto). Al reconstruir un contexto, algunos documentos pueden pasar de sin
   clasificar (o de la IA) a clasificados por reglas. Los slugs y las carpetas reorganizadas no cambian.
 
 ### Cambiado

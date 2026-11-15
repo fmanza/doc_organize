@@ -848,11 +848,18 @@ class DomainDocument(BaseModel):
     rules_confidence: float | None = Field(
         default=None, ge=0.0, le=1.0, description="Score de las reglas para `rules_domain` (1.5.0); None si el contexto es anterior"
     )
+    ai_domain: str | None = Field(
+        default=None,
+        description=(
+            "Dominio que propuso la IA, si se le preguntó (1.5.0). En modo manifiesto puede no coincidir con el dominio "
+            "del documento: si las reglas ya lo habían decidido, la propuesta de la IA para ese eje no se aplica"
+        ),
+    )
     ai_confidence: float | None = Field(
         default=None,
         ge=0.0,
         le=1.0,
-        description="Confianza que dio la IA en el eje de dominio, si se le preguntó por este documento (1.5.0); None si no",
+        description="Confianza que dio la IA en `ai_domain`, si se le preguntó por este documento (1.5.0); None si no",
     )
     ai_reasoning: str | None = Field(
         default=None, description="Justificación breve que dio la IA al clasificar este documento (1.5.0, hasta 500 caracteres); None si no"

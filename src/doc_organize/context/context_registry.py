@@ -24,6 +24,22 @@ _DOMAIN_INDEX_NAME = "index.json"
 _DOMAIN_DOCUMENTS_HEADING = "## Documentos clasificados"
 
 
+async def _read_json_object(path: Path, what: str) -> dict[str, Any]:
+    """Objeto JSON de `path`; cualquier fallo de lectura o de forma, como `ContextError` (1.5.0).
+
+    Antes, un fichero que no era UTF-8 o un JSON válido que no era un objeto (`[]`) salían como `UnicodeDecodeError` o
+    `TypeError`, que el llamador no podía distinguir de un fallo de programación.
+    """
+    try:
+        raw = await asyncio.to_thread(path.read_text, encoding="utf-8")
+        payload = json.loads(raw)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ContextError(f"{what} está corrupto o no se puede leer: {path}") from exc
+    if not isinstance(payload, dict):
+        raise ContextError(f"{what} está corrupto (no es un objeto JSON): {path}")
+    return payload
+
+
 class ContextRegistry:
     """Lee y escribe el contexto de un proyecto: `context.json` + `domains/<slug>/{DOMAIN.md,index.json}`.
 
@@ -119,19 +135,16 @@ class ContextRegistry:
         if not context_path.exists():
             raise ContextNotFoundError(f"El proyecto '{project.name}' no tiene contexto construido todavía.")
 
-        raw = await asyncio.to_thread(context_path.read_text, encoding="utf-8")
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise ContextError(f"El contexto del proyecto está corrupto: {context_path}") from exc
+        payload = await _read_json_object(context_path, "El contexto del proyecto")
 
         domain_summaries = payload.pop("domains", [])
+        if not isinstance(domain_summaries, list):
+            raise ContextError(f"El contexto del proyecto está corrupto ('domains' no es una lista): {context_path}")
         domains = []
         for summary in domain_summaries:
-            try:
-                slug = summary["slug"]
-            except KeyError as exc:
-                raise ContextError(f"El contexto del proyecto está corrupto (dominio sin 'slug'): {context_path}") from exc
+            if not isinstance(summary, dict) or not isinstance(summary.get("slug"), str):
+                raise ContextError(f"El contexto del proyecto está corrupto (dominio sin 'slug'): {context_path}")
+            slug = summary["slug"]
 
             documents = await self._load_domain_documents(project, slug)
             try:
@@ -150,13 +163,12 @@ class ContextRegistry:
         index_path = self._domain_dir(project, slug) / _DOMAIN_INDEX_NAME
         if not index_path.exists():
             return []
-        raw = await asyncio.to_thread(index_path.read_text, encoding="utf-8")
+        payload = await _read_json_object(index_path, f"El índice del dominio '{slug}'")
+        entries = payload.get("documents", [])
+        if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
+            raise ContextError(f"El índice del dominio '{slug}' está corrupto ('documents' no es una lista de objetos): {index_path}")
         try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise ContextError(f"El índice del dominio '{slug}' está corrupto: {index_path}") from exc
-        try:
-            return [DomainDocument(**entry) for entry in payload.get("documents", [])]
+            return [DomainDocument(**entry) for entry in entries]
         except ValidationError as exc:
             raise ContextError(f"El índice del dominio '{slug}' está corrupto: {index_path}") from exc
 

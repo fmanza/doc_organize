@@ -147,6 +147,38 @@ async def test_load_wraps_schema_mismatch_in_domain_index_as_context_error(tmp_p
         await registry.load_context(project)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"\xff\xfe\x00 no es UTF-8",
+        b"[]",
+        b'"texto"',
+        b'{"domains": "no es una lista"}',
+        b'{"domains": ["no es un objeto"]}',
+        b'{"domains": [{"slug": 7}]}',
+    ],
+)
+async def test_any_damaged_context_json_is_a_context_error(tmp_path, content: bytes):
+    project = _make_project(tmp_path)
+    (tmp_path / "context.json").write_bytes(content)
+
+    with pytest.raises(ContextError):
+        await ContextRegistry().load_context(project)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content", [b"\xff no es UTF-8", b"[]", b'{"documents": "no es una lista"}', b'{"documents": ["no es un objeto"]}'])
+async def test_any_damaged_domain_index_is_a_context_error(tmp_path, content: bytes):
+    project = _make_project(tmp_path)
+    registry = ContextRegistry()
+    await registry.save_context(project, _make_context(project, [Domain(slug="calidad", name="Calidad")]))
+    (tmp_path / "domains" / "calidad" / "index.json").write_bytes(content)
+
+    with pytest.raises(ContextError):
+        await registry.load_context(project)
+
+
 def test_context_json_with_legacy_tenant_id_is_still_read() -> None:
     """Un `context.json` de 0.14.0 con `tenant_id` se sigue leyendo; el campo se ignora (L-12)."""
     from doc_organize.core.models import Context

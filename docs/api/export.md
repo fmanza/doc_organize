@@ -1,6 +1,8 @@
 # Exportación — Referencia Técnica
 
-`doc_organize.export` (desde la 0.11.0, tarea L-7). Nivel 3: usa `cache/` y `projects/layout` y no importa Docling. Funcionalidad: [Exportación](../functional/export.md).
+`doc_organize.export` (desde la 0.11.0, tarea L-7). Usa `cache/`, `projects/layout` y, desde 1.5.0,
+`context.context_history` para el historial del contexto; esto último carga el paquete `doc_organize.context` (y con él
+`httpx`), pero no Docling. Funcionalidad: [Exportación](../functional/export.md).
 
 ## API pública
 

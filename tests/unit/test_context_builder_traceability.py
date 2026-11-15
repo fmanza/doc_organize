@@ -53,11 +53,14 @@ class _DomainAI:
 class _TaxonomyAI:
     config = SimpleNamespace(model="modelo-taxonomia")
 
+    def __init__(self, domain: str = "calidad") -> None:
+        self.domain = domain
+
     async def classify(
         self, *, chunks_text: str, title: str | None, candidate_domains: list[str], candidate_material_types: list[str]
     ) -> TaxonomyClassificationResult:
         return TaxonomyClassificationResult(
-            domain="calidad",
+            domain=self.domain,
             domain_confidence=0.7,
             material_type="normativa",
             material_type_confidence=0.6,
@@ -102,7 +105,7 @@ async def test_rules_and_ai_proposals_are_both_recorded(tmp_path: Path) -> None:
     by_ai = docs["acta.pdf"]
     assert (by_ai.classified_by, by_ai.confidence) == ("ai", 0.9)
     assert (by_ai.rules_domain, by_ai.rules_confidence) == ("gestion-calidad", 0.5)  # lo que las reglas dejaron por debajo
-    assert (by_ai.ai_confidence, by_ai.ai_reasoning) == (0.9, "Habla de auditorías de calidad")
+    assert (by_ai.ai_domain, by_ai.ai_confidence, by_ai.ai_reasoning) == ("gestion-calidad", 0.9, "Habla de auditorías de calidad")
 
     assert client.calls == 1
     assert context.ai_classification_model == "modelo-dominios"
@@ -124,10 +127,30 @@ async def test_manifest_mode_records_both_axes(tmp_path: Path) -> None:
     (document,) = _by_name(context).values()
     assert (document.classified_by, document.confidence) == ("ai", 0.7)
     assert (document.rules_domain, document.rules_confidence) == (None, 0.0)  # las reglas no encontraron dominio
-    assert (document.ai_confidence, document.ai_reasoning) == (0.7, "Es un procedimiento de calidad")
+    assert (document.ai_domain, document.ai_confidence, document.ai_reasoning) == ("calidad", 0.7, "Es un procedimiento de calidad")
     # El tipo de material lo decidieron las reglas: la propuesta de la IA para ese eje no se aplica.
     assert (document.material_type, document.material_type_confidence) == ("procedimiento", 1.0)
     assert context.ai_classification_model == "modelo-taxonomia"
+
+
+@pytest.mark.asyncio
+async def test_manifest_mode_keeps_the_ai_domain_proposal_it_did_not_apply(tmp_path: Path) -> None:
+    manifest = TaxonomyManifest(
+        domains=[TaxonomyCatalogEntry(slug="calidad", name="Calidad"), TaxonomyCatalogEntry(slug="auditoria", name="Auditoría")],
+        material_types=[TaxonomyCatalogEntry(slug="procedimiento", name="Procedimiento"), TaxonomyCatalogEntry(slug="normativa", name="Normativa")],
+    )
+    documents = [_document(tmp_path, "varios", "manual.pdf", "Manual de calidad del laboratorio.")]  # dominio sí, tipo no
+
+    context = await _build(
+        tmp_path, documents, taxonomy_manifest=manifest, ai_classification_enabled=True, taxonomy_classification_client=_TaxonomyAI("auditoria")
+    )
+
+    (domain,) = context.domains
+    (document,) = domain.documents
+    assert domain.slug == "calidad"  # el dominio lo decidieron las reglas
+    assert (document.rules_domain, document.confidence) == ("calidad", 1.0)
+    assert (document.ai_domain, document.ai_confidence) == ("auditoria", 0.7)  # propuesta de la IA, no aplicada
+    assert (document.classified_by, document.material_type, document.material_type_confidence) == ("ai", "normativa", 0.6)
 
 
 @pytest.mark.asyncio

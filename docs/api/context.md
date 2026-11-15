@@ -129,13 +129,20 @@ Cada `DomainDocument` guarda cómo se llegó a su dominio, y el `Context`, con q
 | Campo | Qué guarda |
 |---|---|
 | `DomainDocument.rules_domain`, `rules_confidence` | Lo que propusieron las reglas (Sub-fase A), **también cuando no alcanzó el umbral y decidió la IA**. En modo de un eje se recalcula para los documentos que clasifica la IA |
-| `DomainDocument.ai_confidence`, `ai_reasoning` | Confianza y justificación de la IA (hasta 500 caracteres), si se le preguntó por el documento; `None` si no. En modo manifiesto se guardan aunque la IA solo resolviera el eje de tipo de material |
+| `DomainDocument.ai_domain`, `ai_confidence`, `ai_reasoning` | Dominio que propuso la IA, su confianza y su justificación (hasta 500 caracteres), si se le preguntó por el documento; `None` si no. En modo manifiesto se guardan aunque las reglas ya hubieran decidido el dominio y la IA solo resolviera el tipo de material: entonces `ai_domain` puede no coincidir con el dominio del documento |
 | `DomainDocument.material_type_confidence` | Score del eje de tipo de material, de quien lo decidió (reglas o IA); `None` sin manifiesto |
 | `Context.ai_classification_model`, `ai_enrichment_model` | Alias de modelo con el que se ejecutó cada fase de IA; `None` si esa fase no llegó a enviar ningún documento |
 | `Context.built_with_version` | Versión de doc_organize que construyó el contexto. Las reglas son código, así que esta versión las identifica |
 
 La fecha de clasificación es `Context.updated_at`: todos los documentos de una construcción se clasifican a la vez.
-`confidence` sigue siendo la confianza final, la de quien decidió (`classified_by`).
+
+`confidence` es la confianza del **dominio** final: la de las reglas si las reglas lo decidieron, la de la IA si lo
+decidió la IA. `classified_by` no basta para saber cuál: en modo manifiesto vale `"ai"` en cuanto la IA resuelve
+cualquiera de los dos ejes, también si solo resolvió el tipo de material y el dominio (y `confidence`) siguen siendo
+de las reglas. Para saber quién decidió el dominio, comparar `rules_domain` y `ai_domain` con el dominio del documento.
+
+> Corregido antes de publicarse: la primera versión de esta sección decía que `confidence` era siempre la confianza de
+> quien indicaba `classified_by`, y no guardaba el dominio que proponía la IA (`ai_domain`).
 
 ### Historial del contexto (1.5.0)
 
@@ -643,6 +650,7 @@ class DomainDocument(BaseModel):
     classified_by: str  # "rules" | "ai"
     rules_domain: str | None              # 1.5.0: propuesta de las reglas, aunque decidiera la IA
     rules_confidence: float | None        # 1.5.0
+    ai_domain: str | None                 # 1.5.0: propuesta de la IA, aplicada o no
     ai_confidence: float | None           # 1.5.0: si se preguntó a la IA
     ai_reasoning: str | None              # 1.5.0
     material_type_confidence: float | None  # 1.5.0, modo manifiesto
