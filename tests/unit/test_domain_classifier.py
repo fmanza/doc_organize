@@ -201,3 +201,44 @@ def test_score_catalog_extra_keywords_use_the_sanitized_slug_as_key():
 
     assert slug == "ciberseguridad"
     assert score == 0.5
+
+
+@pytest.mark.parametrize(
+    ("catalog_slug", "text"),
+    [
+        ("gestion-calidad", "manual de gestión de calidad"),  # slug sin tilde, texto con tilde
+        ("gestión-calidad", "manual de gestion de calidad"),  # al revés
+        ("gestion-calidad", "MANUAL DE GESTIÓN DE CALIDAD"),  # mayúsculas con tilde
+    ],
+)
+def test_score_catalog_ignores_accents(catalog_slug: str, text: str) -> None:
+    assert score_catalog([catalog_slug], text, folder_slug="") == (catalog_slug, 1.0)
+
+
+def test_score_catalog_extra_keywords_ignore_accents():
+    assert score_catalog(["normativa"], "texto de la legislación vigente", folder_slug="", extra_keywords={"normativa": ["legislacion"]}) == (
+        "normativa",
+        0.5,
+    )
+
+
+def test_folder_bonus_ignores_accents():
+    with_bonus = score_catalog(["gestion-calidad"], "texto sin palabras clave", folder_slug="gestión-calidad")
+    assert with_bonus[0] == "gestion-calidad"
+    assert with_bonus[1] > 0
+
+
+@pytest.mark.asyncio
+async def test_catalog_mode_matches_folder_and_text_with_accents(tmp_path):
+    folder = tmp_path / "Gestión Calidad"
+    folder.mkdir()
+    json_path = tmp_path / "manual.json"
+    json_path.write_text(json.dumps({"title": "Manual", "chunks": [{"text": "Sistema de gestión de la calidad"}]}), encoding="utf-8")
+    document = ConversionResult(
+        source_path=str(folder / "manual.pdf"), markdown_path=str(tmp_path / "manual.md"), json_path=str(json_path), success=True
+    )
+
+    classified, unclassified = await DomainClassifier(candidate_domains=["gestion-calidad"], threshold=0.6).classify([document])
+
+    assert unclassified == []
+    assert list(classified) == ["gestion-calidad"]

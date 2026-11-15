@@ -5,6 +5,7 @@ Clasificación de documentos por dominio mediante reglas (Sub-fase A, sin IA).
 import asyncio
 import json
 import re
+import unicodedata
 
 from pathlib import Path
 
@@ -225,12 +226,26 @@ class DomainClassifier:
         return "-".join(_WORD_RE.findall(name.lower()))
 
 
+def fold_accents(text: str) -> str:
+    """Texto en minúsculas y sin tildes ni diéresis, para comparar palabras clave con el contenido (1.5.0).
+
+    La «ñ» pasa a «n», como cualquier letra con diacrítico.
+
+    Example:
+        >>> fold_accents("Gestión de CALIDAD, pingüino, año")
+        'gestion de calidad, pinguino, ano'
+    """
+    decomposed = unicodedata.normalize("NFKD", text.casefold())
+    return "".join(character for character in decomposed if not unicodedata.combining(character))
+
+
 def score_catalog(
     catalog: list[str], haystack: str, folder_slug: str, extra_keywords: dict[str, list[str]] | None = None
 ) -> tuple[str | None, float]:
     """Puntúa cada slug de `catalog` contra `haystack` (título+chunks en minúsculas), con
     bonus si coincide con `folder_slug` (señal secundaria de ruta, §2.4 del `00_REQUEST.md`
-    original).
+    original). Desde 1.5.0 compara sin distinguir tildes (`fold_accents`): «gestión» cuenta
+    para la palabra clave «gestion» y al revés.
 
     Extraída de `DomainClassifier._best_from_catalog` para que `MaterialTypeClassifier`
     (segundo eje de clasificación, manifiesto de taxonomía) reutilice el mismo criterio de
@@ -252,16 +267,19 @@ def score_catalog(
     """
     best_slug: str | None = None
     best_score = 0.0
+    haystack = fold_accents(haystack)
+    folder = fold_accents(folder_slug)
 
     for slug in catalog:
         keywords = slug.replace("-", " ").split()
         if extra_keywords:
-            keywords = keywords + [keyword.lower() for keyword in extra_keywords.get(slug, []) if keyword]
+            keywords = keywords + [keyword for keyword in extra_keywords.get(slug, []) if keyword]
+        keywords = [fold_accents(keyword) for keyword in keywords]
         if not keywords:
             continue
         hits = sum(1 for keyword in keywords if keyword in haystack)
         score = hits / len(keywords)
-        if slug == folder_slug:
+        if folder and fold_accents(slug) == folder:
             score = min(1.0, score + _PATH_SIGNAL_BONUS)
         if score > best_score:
             best_slug, best_score = slug, score

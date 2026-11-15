@@ -166,8 +166,9 @@ cliente de IA solo se ha probado con `httpx.MockTransport`, no contra un LiteLLM
   lo compartido va en `utils/` (p. ej. `utils/text_clean.py`).
 - **[tests de contexto]**: los dobles de los clientes de IA necesitan `config = SimpleNamespace(model=...)`, porque
   `ContextBuilder` anota `client.config.model` en el `Context`.
-- **[reglas]**: `score_catalog` compara subcadenas sin quitar tildes: «gestión» no cuenta para la palabra clave
-  «gestion». Limitación anterior a esta sesión.
+- **[reglas]**: `score_catalog` compara con `fold_accents` (sin tildes ni diéresis; «ñ» → «n») desde esta sesión; antes
+  «gestión» no contaba para la palabra clave «gestion». `_slugify` no se tocó a propósito: cambiaría los slugs y las
+  carpetas reorganizadas de contextos existentes.
 - **[idioma]**: py3langid falla con textos cortos con confianza baja; por eso `MIN_LETTERS` y `MIN_CONFIDENCE` en
   `context/language_detection.py`. El idioma declarado por Word/PDF no se usa: suele ser el del ordenador del autor.
 

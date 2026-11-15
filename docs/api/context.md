@@ -182,7 +182,8 @@ Clasifica por reglas, leyendo `chunks`/`title` del `.json` de conversión
 
 - **Catálogo** (`candidate_domains` no vacío): score = fracción de palabras del
   slug encontradas en `title`+`chunks`, con bonus si la carpeta contenedora
-  coincide con el slug. Cada entrada de `candidate_domains` se sanea con
+  coincide con el slug. Desde 1.5.0 las dos comparaciones ignoran tildes, diéresis y la
+  tilde de la «ñ» (`fold_accents`): «gestión» cuenta para `gestion-calidad`. Cada entrada de `candidate_domains` se sanea con
   `_slugify()` antes de aceptarse (nunca se usa tal cual como segmento de ruta).
 - **Descubrimiento** (`candidate_domains=None`): el slug es la carpeta
   contenedora inmediata del documento, saneada igual.

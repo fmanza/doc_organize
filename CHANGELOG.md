@@ -31,6 +31,14 @@ releases publicados antes de esa versión).
   [Contexto](docs/api/context.md#trazabilidad-de-la-clasificacion-150).
 - `ProgressEvent.phase` admite `"enrichment"`.
 
+### Corregido
+
+- **Tildes en la clasificación por reglas**: `score_catalog` (dominios y tipos de material, también las palabras clave
+  del manifiesto) comparaba sin quitar tildes, así que «gestión» en el texto no contaba para el dominio
+  `gestion-calidad`, ni una carpeta «Gestión Calidad» daba la bonificación de ruta. Ahora ignora tildes y diéresis
+  (`fold_accents`; la «ñ» cuenta como «n»). Al reconstruir un contexto, algunos documentos pueden pasar de sin
+  clasificar (o de la IA) a clasificados por reglas. Los slugs y las carpetas reorganizadas no cambian.
+
 ### Cambiado
 
 - `Context.ai_classification_model` lo rellena ahora `ContextBuilder` con el modelo con el que se ejecutó la Sub-fase B

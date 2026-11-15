@@ -80,7 +80,7 @@ async def _build(tmp_path: Path, documents: list[ConversionResult], **kwargs: ob
 @pytest.mark.asyncio
 async def test_rules_and_ai_proposals_are_both_recorded(tmp_path: Path) -> None:
     documents = [
-        _document(tmp_path, "varios", "manual.pdf", "Manual del sistema de gestion de calidad."),  # 2/2 palabras (las reglas no quitan tildes)
+        _document(tmp_path, "varios", "manual.pdf", "Manual del sistema de gestión de calidad."),  # 2/2 palabras, sin distinguir tildes
         _document(tmp_path, "varios", "acta.pdf", "Acta de la reunión sobre calidad del servicio."),  # 1/2: 0,5 < 0,6
     ]
     client = _DomainAI("gestion-calidad")
