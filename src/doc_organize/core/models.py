@@ -153,6 +153,22 @@ class DocumentMetadata(BaseModel):
     size_bytes: int = Field(..., description="Tamaño del fichero en bytes")
     modified_time: float = Field(..., description="Timestamp Unix de la última modificación")
     sha256_hash: str = Field(..., description="Hash SHA-256 (cadena hexadecimal de 64 caracteres)")
+    created_time: float | None = Field(
+        default=None,
+        description="Timestamp Unix de creación (st_birthtime en macOS, st_ctime en otros, FASE 1)",
+    )
+    mime_type: str | None = Field(
+        default=None, description="Tipo MIME detectado (p.ej. 'application/pdf', 'text/plain', FASE 1)"
+    )
+    detected_language: str | None = Field(
+        default=None, description="Código ISO 639-1 del idioma detectado (p.ej. 'es', 'en', FASE 1)"
+    )
+    file_permissions: str | None = Field(
+        default=None, description="Permisos en notación octal (Unix) o representación Windows (FASE 1)"
+    )
+    owner_name: str | None = Field(
+        default=None, description="Propietario del archivo en el SO, o None si no se obtiene (FASE 1)"
+    )
 
     @classmethod
     def from_cache_entry(cls, entry: "CacheEntry") -> "DocumentMetadata":
@@ -199,6 +215,11 @@ class DocumentMetadata(BaseModel):
                 "size_bytes": 1048576,
                 "modified_time": 1693152000.0,
                 "sha256_hash": "abc123def456...",
+                "created_time": 1693151000.0,
+                "mime_type": "application/pdf",
+                "detected_language": None,
+                "file_permissions": "644",
+                "owner_name": "user",
             }
         }
     )
@@ -320,6 +341,21 @@ class CacheEntry(BaseModel):
     error_retry_count: int = Field(default=0, description="Fallos consecutivos sin cambios en el fichero (0 si el último intento tuvo éxito)")
     size_bytes: int | None = Field(
         default=None, description="Tamaño del fichero en bytes cuando se escaneó (None en entradas anteriores a 1.1.0, G25)"
+    )
+    created_time: float | None = Field(
+        default=None, description="Timestamp Unix de creación (FASE 1), None en caché anterior a 1.5.0"
+    )
+    mime_type: str | None = Field(
+        default=None, description="Tipo MIME detectado (FASE 1), None en caché anterior a 1.5.0"
+    )
+    detected_language: str | None = Field(
+        default=None, description="Idioma detectado (FASE 1), None en caché anterior a 1.5.0"
+    )
+    file_permissions: str | None = Field(
+        default=None, description="Permisos del archivo (FASE 1), None en caché anterior a 1.5.0"
+    )
+    owner_name: str | None = Field(
+        default=None, description="Propietario del archivo (FASE 1), None en caché anterior a 1.5.0"
     )
 
 

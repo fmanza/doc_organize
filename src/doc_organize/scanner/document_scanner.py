@@ -20,6 +20,7 @@ from doc_organize.core.models import CacheEntry, DirectoryTree, DirectoryTreeNod
 from doc_organize.utils.hash_utils import hash_file
 from doc_organize.utils.io_retry import retry_io, retry_io_async
 from doc_organize.utils.logging import get_logger
+from doc_organize.utils.metadata_detector import extract_basic_metadata
 
 _DEFAULT_MAX_CONCURRENT_HASHES = 8
 
@@ -103,6 +104,10 @@ class _DiscoveredFile:
     extension: str
     size_bytes: int
     modified_time: float
+    created_time: float | None = None
+    mime_type: str | None = None
+    file_permissions: str | None = None
+    owner_name: str | None = None
 
 
 class DocumentScanner:
@@ -359,6 +364,7 @@ class DocumentScanner:
                 unreadable_files[str(path)] = f"No se pudieron leer sus metadatos: {exc}"
             return None
         if extension in allowed_extensions:
+            basic_metadata = extract_basic_metadata(path)
             files.append(
                 _DiscoveredFile(
                     full_path=path,
@@ -366,6 +372,10 @@ class DocumentScanner:
                     extension=extension,
                     size_bytes=stat.st_size,
                     modified_time=stat.st_mtime,
+                    created_time=basic_metadata.get("created_time"),
+                    mime_type=basic_metadata.get("mime_type"),
+                    file_permissions=basic_metadata.get("file_permissions"),
+                    owner_name=basic_metadata.get("owner_name"),
                 )
             )
         return DirectoryTreeNode(name=path.name, type="file", path=str(path), size_bytes=stat.st_size)
@@ -406,6 +416,10 @@ class DocumentScanner:
                 size_bytes=item.size_bytes,
                 modified_time=item.modified_time,
                 sha256_hash=digest,
+                created_time=item.created_time,
+                mime_type=item.mime_type,
+                file_permissions=item.file_permissions,
+                owner_name=item.owner_name,
             )
 
         results = await asyncio.gather(*(_hash_one(item) for item in files))
