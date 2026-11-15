@@ -137,6 +137,12 @@ Tras clasificar, cada `DomainDocument` recibe lo que declara su documento origin
 borrado, dañado o cifrado dejan los campos vacíos sin interrumpir la construcción. Los textos se guardan en una línea y
 acotados (500 caracteres; hasta 20 palabras clave de 60).
 
+`language` es el idioma principal (ISO 639-1: `es`, `en`, `ca`…) detectado con
+[py3langid](https://github.com/adbar/py3langid) en el título y los primeros 4000 caracteres del texto convertido
+(`context/language_detection.py`), sin red. Solo se acepta con al menos 40 letras y probabilidad ≥ 0,7; si no, queda en
+`None`: con textos cortos el detector se equivoca (un título como «Política de calidad» sale gallego al 33 %). No se
+usa el idioma que declaran Word o PDF, que suele ser el del ordenador del autor y no el del texto.
+
 Con `ai_enrichment_enabled=True` y `ai_enrichment_client`, la IA propone descripción y palabras clave **solo para los
 documentos clasificados que no las declaran** (una llamada por documento) y solo se rellena lo que falta: lo declarado
 nunca se sustituye y el autor nunca sale de la IA. `DomainDocument.ai_filled` dice qué campos rellenó. Usa los mismos
@@ -597,6 +603,7 @@ class DomainDocument(BaseModel):
     author: str | None          # 1.5.0: declarado en el documento; nunca de la IA
     description: str | None     # 1.5.0: declarada, o de la IA si falta
     keywords: list[str]         # 1.5.0: declaradas, o de la IA si faltan
+    language: str | None        # 1.5.0: ISO 639-1 detectado en el texto convertido; None si no es seguro
     ai_filled: list[Literal["description", "keywords"]]  # 1.5.0: lo que rellenó la IA
 
 class Domain(BaseModel):
@@ -715,6 +722,7 @@ class TaxonomyTemplateSummary(BaseModel):
 | `zensical` (extra `site`) | `zensical build` del sitio de contexto (`SiteGenerator`); sin él, `SiteBuildError` |
 | `httpx` | Cliente HTTP de `DomainClassificationClient`/`TaxonomyClassificationClient`/`DocumentEnrichmentClient` (ya incluido en el extra `ai`) |
 | `pypdfium2` | (1.5.0) Lee `/Author`, `/Subject` y `/Keywords` de los PDF; ya lo instalaba Docling, ahora es dependencia declarada |
+| `py3langid` | (1.5.0) Idioma de cada documento (`DomainDocument.language`); 4,6 MB, solo depende de numpy |
 | `pyyaml` (extra `context`) | Parseo y escritura del front matter de `taxonomy_manifest.md`/plantillas de `TaxonomyTemplateRegistry` |
 
 ## Ejemplos Relacionados

@@ -16,11 +16,14 @@ releases publicados antes de esa versión).
   `DocumentEnrichmentClient` (`doc_organize.ai`, config `LiteLLMEnrichmentConfig`, `litellm_enrichment_config_from_env`)
   rellenan solo la descripción y las palabras clave que un documento no declara (`DomainDocument.ai_filled`). Mismos
   límites y paradas que la Sub-fase B, con su propio recuento (`Context.ai_enrichment_*`).
+- **Idioma** en `DomainDocument.language` (ISO 639-1), detectado con py3langid en el texto convertido, sin red. `None`
+  si el texto es corto o la confianza baja (< 0,7), en lugar de adivinarlo.
 - `ProgressEvent.phase` admite `"enrichment"`.
 
 ### Dependencias
 
 - `pypdfium2>=4.0` declarada (ya la instalaba Docling).
+- `py3langid>=0.4` (nueva; 4,6 MB, solo depende de numpy).
 
 ## [1.4.0] - 2026-11-14
 

@@ -12,6 +12,7 @@ from doc_organize.ai import DocumentEnrichmentClient, DomainClassificationClient
 from doc_organize.context.context_registry import ContextRegistry
 from doc_organize.context.document_properties import read_document_properties
 from doc_organize.context.domain_classifier import DomainClassifier, MaterialTypeClassifier, read_conversion_json, resolve_title_and_type
+from doc_organize.context.language_detection import detect_language
 from doc_organize.context.reorganizer import assign_organized_paths
 from doc_organize.core.exceptions import (
     DocumentEnrichmentAuthError,
@@ -290,10 +291,8 @@ class ContextBuilder:
                     run=ai_run,
                 )
 
-        await self._apply_document_properties(classified, cancel_token)
         enrichment_run = _AiRun(max_failures=ai_max_failures, max_documents=ai_max_documents)
-        if ai_enrichment_enabled and ai_enrichment_client is not None:
-            await self._enrich_with_ai(ai_enrichment_client, classified, on_progress=_enrichment_progress, run=enrichment_run)
+        await self._describe_documents(classified, ai_enrichment_enabled, ai_enrichment_client, enrichment_run, _enrichment_progress, cancel_token)
 
         has_predefined_catalog = bool(candidate_domains) or taxonomy_manifest is not None
         manifest_domains_by_slug = (
@@ -577,10 +576,27 @@ class ContextBuilder:
             classified_by="ai",
         )
 
-    async def _apply_document_properties(self, classified: dict[str, list[DomainDocument]], cancel_token: CancelToken | None) -> None:
-        """Rellena `author`, `description` y `keywords` con lo que declara cada documento original (1.5.0).
+    async def _describe_documents(
+        self,
+        classified: dict[str, list[DomainDocument]],
+        enrichment_enabled: bool,
+        enrichment_client: DocumentEnrichmentClient | None,
+        run: _AiRun,
+        on_progress: Callable[[int, int, str], Awaitable[None]],
+        cancel_token: CancelToken | None,
+    ) -> None:
+        """Autor, descripción, palabras clave e idioma de cada documento clasificado; con el enriquecimiento activo y
+        cliente, la IA rellena después la descripción y las palabras clave que falten (1.5.0)."""
+        await self._apply_document_properties(classified, cancel_token)
+        if enrichment_enabled and enrichment_client is not None:
+            await self._enrich_with_ai(enrichment_client, classified, on_progress=on_progress, run=run)
 
-        Un original ilegible o borrado deja los campos vacíos (`read_document_properties` no lanza).
+    async def _apply_document_properties(self, classified: dict[str, list[DomainDocument]], cancel_token: CancelToken | None) -> None:
+        """Rellena `author`, `description` y `keywords` con lo que declara cada documento original, y `language` con
+        el idioma detectado en su texto convertido (1.5.0).
+
+        Un original ilegible o borrado deja los campos vacíos (`read_document_properties` no lanza); un `.json` de
+        conversión ilegible deja `language` en `None`.
         """
         for documents in classified.values():
             for document in documents:
@@ -588,6 +604,10 @@ class ContextBuilder:
                 document.author = properties.author
                 document.description = properties.description
                 document.keywords = list(properties.keywords)
+                conversion = await read_conversion_json(document.json_path)
+                if conversion is not None:
+                    chunks_text, title = conversion
+                    document.language = await asyncio.to_thread(detect_language, f"{title or ''}\n{chunks_text}")
                 checkpoint(cancel_token)
 
     async def _enrich_with_ai(

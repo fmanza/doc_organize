@@ -828,6 +828,10 @@ class DomainDocument(BaseModel):
         default_factory=list,
         description="Palabras clave declaradas en el documento (PDF `/Keywords`, Office `cp:keywords`), o de la IA si faltan (1.5.0)",
     )
+    language: str | None = Field(
+        default=None,
+        description="Idioma principal (ISO 639-1, p. ej. 'es') detectado en el texto convertido con py3langid (1.5.0); None si no es seguro",
+    )
     ai_filled: list[DocumentEnrichmentField] = Field(
         default_factory=list, description="Campos que rellenó la IA porque el documento no los declaraba (1.5.0); vacío si ninguno"
     )

@@ -17,6 +17,7 @@ from doc_organize.core.exceptions import DocumentEnrichmentAuthError, DocumentEn
 from doc_organize.core.models import Context, ConversionResult, DocumentEnrichmentResult, DomainDocument, Project
 from doc_organize.core.progress import ProgressEvent
 from tests.unit.test_document_properties import core_xml, make_pdf
+from tests.unit.test_language_detection import SPANISH
 
 
 def _project(tmp_path: Path) -> Project:
@@ -114,6 +115,21 @@ async def test_ai_fills_only_what_the_document_does_not_declare(tmp_path: Path) 
 
     reloaded = _by_name(await ContextRegistry().load_context(_project(tmp_path)))
     assert reloaded["vacio.pdf"].model_dump() == docs["vacio.pdf"].model_dump()
+
+
+@pytest.mark.asyncio
+async def test_language_is_detected_from_the_converted_text(tmp_path: Path) -> None:
+    spanish = _document(tmp_path, "procedimiento.pdf")
+    Path(spanish.json_path).write_text(  # type: ignore[arg-type]
+        json.dumps({"title": "Auditoría", "chunks": [{"text": SPANISH}]}),
+        encoding="utf-8",
+    )
+    short = _document(tmp_path, "corto.pdf")  # «contenido de corto»: demasiado poco texto
+
+    docs = _by_name(await _build(tmp_path, [spanish, short]))
+
+    assert docs["procedimiento.pdf"].language == "es"
+    assert docs["corto.pdf"].language is None
 
 
 @pytest.mark.asyncio
