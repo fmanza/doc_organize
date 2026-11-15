@@ -122,6 +122,21 @@ sigue en placeholder en algún eje, resolviendo ambos ejes en la misma llamada �
 solo se aplica la sugerencia al eje que seguía en `sin-clasificar`; un eje ya resuelto
 por reglas con confianza nunca se sobreescribe.
 
+### Trazabilidad de la clasificación (1.5.0)
+
+Cada `DomainDocument` guarda cómo se llegó a su dominio, y el `Context`, con qué se construyó:
+
+| Campo | Qué guarda |
+|---|---|
+| `DomainDocument.rules_domain`, `rules_confidence` | Lo que propusieron las reglas (Sub-fase A), **también cuando no alcanzó el umbral y decidió la IA**. En modo de un eje se recalcula para los documentos que clasifica la IA |
+| `DomainDocument.ai_confidence`, `ai_reasoning` | Confianza y justificación de la IA (hasta 500 caracteres), si se le preguntó por el documento; `None` si no. En modo manifiesto se guardan aunque la IA solo resolviera el eje de tipo de material |
+| `DomainDocument.material_type_confidence` | Score del eje de tipo de material, de quien lo decidió (reglas o IA); `None` sin manifiesto |
+| `Context.ai_classification_model`, `ai_enrichment_model` | Alias de modelo con el que se ejecutó cada fase de IA; `None` si esa fase no llegó a enviar ningún documento |
+| `Context.built_with_version` | Versión de doc_organize que construyó el contexto. Las reglas son código, así que esta versión las identifica |
+
+La fecha de clasificación es `Context.updated_at`: todos los documentos de una construcción se clasifican a la vez.
+`confidence` sigue siendo la confianza final, la de quien decidió (`classified_by`).
+
 ### Autor, descripción y palabras clave (1.5.0)
 
 Tras clasificar, cada `DomainDocument` recibe lo que declara su documento original (`read_document_properties`, en
@@ -167,7 +182,8 @@ Clasifica por reglas, leyendo `chunks`/`title` del `.json` de conversión
 
 - **Catálogo** (`candidate_domains` no vacío): score = fracción de palabras del
   slug encontradas en `title`+`chunks`, con bonus si la carpeta contenedora
-  coincide con el slug. Cada entrada de `candidate_domains` se sanea con
+  coincide con el slug. Desde 1.5.0 las dos comparaciones ignoran tildes, diéresis y la
+  tilde de la «ñ» (`fold_accents`): «gestión» cuenta para `gestion-calidad`. Cada entrada de `candidate_domains` se sanea con
   `_slugify()` antes de aceptarse (nunca se usa tal cual como segmento de ruta).
 - **Descubrimiento** (`candidate_domains=None`): el slug es la carpeta
   contenedora inmediata del documento, saneada igual.
@@ -599,6 +615,11 @@ class DomainDocument(BaseModel):
     material_type: str | None  # slug del tipo de material (modo manifiesto), o None
     confidence: float
     classified_by: str  # "rules" | "ai"
+    rules_domain: str | None              # 1.5.0: propuesta de las reglas, aunque decidiera la IA
+    rules_confidence: float | None        # 1.5.0
+    ai_confidence: float | None           # 1.5.0: si se preguntó a la IA
+    ai_reasoning: str | None              # 1.5.0
+    material_type_confidence: float | None  # 1.5.0, modo manifiesto
     organized_path: str | None  # 0.14.0 (L-8d): .md copiado, relativo a la carpeta reorganizada; None en contextos antiguos
     author: str | None          # 1.5.0: declarado en el documento; nunca de la IA
     description: str | None     # 1.5.0: declarada, o de la IA si falta
@@ -619,7 +640,9 @@ class Context(BaseModel):
     output_folder_name: str  # default "organizado"; validado con validate_output_folder_name desde 0.14.0 (L-8f)
     ai_classification_enabled: bool
     ai_fallback_threshold: float
-    ai_classification_model: str | None
+    ai_classification_model: str | None  # desde 1.5.0 lo rellena ContextBuilder (modelo usado en la Sub-fase B)
+    ai_enrichment_model: str | None      # 1.5.0
+    built_with_version: str | None       # 1.5.0: versión de doc_organize; None en contextos anteriores
     domains: list[Domain]
     unclassified_documents: list[str]
     reorganized: bool

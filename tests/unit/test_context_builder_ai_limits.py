@@ -8,6 +8,7 @@ import json
 import logging
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -71,6 +72,8 @@ class _ScriptedClient:
     `"ok"` asigna `calidad`, `"none"` responde sin dominio, `"auth"`/`"conn"`/`"err"` lanzan la excepción
     correspondiente.
     """
+
+    config = SimpleNamespace(model="stub-classifier")
 
     def __init__(self, script: list[str]) -> None:
         self.script = list(script)

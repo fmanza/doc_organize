@@ -24,10 +24,25 @@ releases publicados antes de esa versión).
   límites y paradas que la Sub-fase B, con su propio recuento (`Context.ai_enrichment_*`).
 - **Idioma** en `DomainDocument.language` (ISO 639-1), detectado con py3langid en el texto convertido, sin red. `None`
   si el texto es corto o la confianza baja (< 0,7), en lugar de adivinarlo.
+- **Trazabilidad de la clasificación** en `DomainDocument`: `rules_domain` y `rules_confidence` (lo que propusieron
+  las reglas, también cuando decidió la IA), `ai_confidence` y `ai_reasoning` (antes la justificación de la IA se
+  descartaba) y `material_type_confidence`. En `Context`: `ai_enrichment_model` y `built_with_version` (versión de
+  doc_organize que lo construyó). Detalle en
+  [Contexto](docs/api/context.md#trazabilidad-de-la-clasificacion-150).
 - `ProgressEvent.phase` admite `"enrichment"`.
+
+### Corregido
+
+- **Tildes en la clasificación por reglas**: `score_catalog` (dominios y tipos de material, también las palabras clave
+  del manifiesto) comparaba sin quitar tildes, así que «gestión» en el texto no contaba para el dominio
+  `gestion-calidad`, ni una carpeta «Gestión Calidad» daba la bonificación de ruta. Ahora ignora tildes y diéresis
+  (`fold_accents`; la «ñ» cuenta como «n»). Al reconstruir un contexto, algunos documentos pueden pasar de sin
+  clasificar (o de la IA) a clasificados por reglas. Los slugs y las carpetas reorganizadas no cambian.
 
 ### Cambiado
 
+- `Context.ai_classification_model` lo rellena ahora `ContextBuilder` con el modelo con el que se ejecutó la Sub-fase B
+  (antes nadie lo rellenaba y quedaba siempre en `None`).
 - `cache.db` gana las columnas `created_time`, `mime_type`, `file_permissions` y `owner_name` al abrirse en escritura
   (migración aditiva); en solo lectura, una caché anterior las lee como `None`.
 - Cada escaneo actualiza en la caché los metadatos de fichero (y `size_bytes`) de los documentos sin cambios de

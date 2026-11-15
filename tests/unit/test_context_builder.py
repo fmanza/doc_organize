@@ -4,6 +4,7 @@ import json
 
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -87,6 +88,8 @@ async def test_build_tracks_unclassified_documents_outside_catalog(tmp_path):
 class _StubAIClient:
     """Doble de `DomainClassificationClient` para tests — mismo contrato (`async classify(...)`
     devolviendo `DomainClassificationResult`), sin `httpx` de por medio."""
+
+    config = SimpleNamespace(model="stub-classifier")
 
     def __init__(self, domain: str | None, confidence: float = 0.8, error: bool = False) -> None:
         self.domain = domain
@@ -410,6 +413,8 @@ async def test_build_with_manifest_placeholder_material_type_keeps_name_unset(tm
 class _StubTaxonomyAIClient:
     """Doble de `TaxonomyClassificationClient` para tests — mismo contrato (`async classify(...)`
     devolviendo `TaxonomyClassificationResult`, ambos ejes en una sola llamada), sin `httpx` de por medio."""
+
+    config = SimpleNamespace(model="stub-taxonomy-classifier")
 
     def __init__(
         self,

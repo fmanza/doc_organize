@@ -8,6 +8,7 @@ import zipfile
 
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -51,6 +52,8 @@ def _by_name(context: Context) -> dict[str, DomainDocument]:
 
 class _ScriptedEnrichment:
     """Doble de `DocumentEnrichmentClient`: `"ok"` propone descripción y palabras clave; `"auth"`/`"conn"` fallan."""
+
+    config = SimpleNamespace(model="stub-enricher")
 
     def __init__(self, script: list[str] | None = None) -> None:
         self.script = list(script or [])
