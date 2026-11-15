@@ -84,6 +84,17 @@ y `main` prohíbe los push que no son fast-forward, la única salida que conserv
 `git push origin 5a98ca2:develop` (fast-forward) y reactivarlo. Decisión del usuario.
 **Status**: ✅
 
+### ✅ 9. Fase 3: trazabilidad de la clasificación
+
+**Archivo(s)**: `src/doc_organize/context/context_builder.py`, `context/domain_classifier.py`, `core/models.py`
+**Descripción**: `DomainDocument.rules_domain/rules_confidence` (propuesta de las reglas, recalculada con
+`DomainClassifier.score_domain` en los documentos que decide la IA), `ai_confidence`, `ai_reasoning` (antes se
+descartaba) y `material_type_confidence`; `Context.ai_classification_model` (ya existía, nadie lo rellenaba),
+`ai_enrichment_model` y `built_with_version`. Cambios respecto al plan: sin fecha por documento (es
+`Context.updated_at`), sin `rules_version.txt` manual (las reglas son código: basta la versión de doc_organize) y con
+campos tipados en lugar del diccionario `domain_confidence_breakdown`.
+**Status**: ✅
+
 ---
 
 ## Impacto
@@ -153,6 +164,10 @@ cliente de IA solo se ha probado con `httpx.MockTransport`, no contra un LiteLLM
   `main` prohíbe push que no sean fast-forward (rulesets «PR en develop» y «CI en verde»).
 - **[imports]**: `ai/` no puede importar de `context/` (`context/__init__` importa `ContextBuilder`, que importa `ai`):
   lo compartido va en `utils/` (p. ej. `utils/text_clean.py`).
+- **[tests de contexto]**: los dobles de los clientes de IA necesitan `config = SimpleNamespace(model=...)`, porque
+  `ContextBuilder` anota `client.config.model` en el `Context`.
+- **[reglas]**: `score_catalog` compara subcadenas sin quitar tildes: «gestión» no cuenta para la palabra clave
+  «gestion». Limitación anterior a esta sesión.
 - **[idioma]**: py3langid falla con textos cortos con confianza baja; por eso `MIN_LETTERS` y `MIN_CONFIDENCE` en
   `context/language_detection.py`. El idioma declarado por Word/PDF no se usa: suele ser el del ordenador del autor.
 

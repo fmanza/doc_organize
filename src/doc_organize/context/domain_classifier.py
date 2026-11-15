@@ -181,6 +181,8 @@ class DomainClassifier:
                     document_type=document_type,
                     confidence=score,
                     classified_by="rules",
+                    rules_domain=slug,
+                    rules_confidence=score,
                 )
             )
 

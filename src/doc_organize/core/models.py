@@ -838,6 +838,31 @@ class DomainDocument(BaseModel):
     )
     confidence: float = Field(..., ge=0.0, le=1.0, description="Score de confianza de la clasificación, 0-1")
     classified_by: str = Field(default="rules", description="'rules' (Sub-fase A) o 'ai' (Sub-fase B) según qué clasificó el documento")
+    rules_domain: str | None = Field(
+        default=None,
+        description=(
+            "Dominio que propusieron las reglas (Sub-fase A), aunque no alcanzase el umbral y lo decidiera la IA (1.5.0); "
+            "None si las reglas no propusieron ninguno o el contexto es anterior"
+        ),
+    )
+    rules_confidence: float | None = Field(
+        default=None, ge=0.0, le=1.0, description="Score de las reglas para `rules_domain` (1.5.0); None si el contexto es anterior"
+    )
+    ai_confidence: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Confianza que dio la IA en el eje de dominio, si se le preguntó por este documento (1.5.0); None si no",
+    )
+    ai_reasoning: str | None = Field(
+        default=None, description="Justificación breve que dio la IA al clasificar este documento (1.5.0, hasta 500 caracteres); None si no"
+    )
+    material_type_confidence: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Score del eje de tipo de material, de las reglas o de la IA según quién lo decidió (1.5.0, modo manifiesto); None si no",
+    )
     organized_path: str | None = Field(
         default=None,
         description=(
@@ -897,7 +922,20 @@ class Context(BaseModel):
     ai_classification_enabled: bool = Field(default=False, description="Si la Sub-fase B (IA) está activa para este proyecto — opt-in explícito")
     ai_fallback_threshold: float = Field(default=0.5, description="Score mínimo (Sub-fase A) por debajo del cual se intenta la Sub-fase B")
     ai_classification_model: str | None = Field(
-        default=None, description="Alias de modelo del LiteLLM Proxy a usar en la Sub-fase B, o `None` para el valor por defecto"
+        default=None,
+        description=(
+            "Alias de modelo del LiteLLM Proxy con el que se ejecutó la Sub-fase B (lo rellena `ContextBuilder` desde 1.5.0); `None` si no se ejecutó"
+        ),
+    )
+    ai_enrichment_model: str | None = Field(
+        default=None, description="Alias de modelo con el que se ejecutó el enriquecimiento por IA (1.5.0); `None` si no se ejecutó"
+    )
+    built_with_version: str | None = Field(
+        default=None,
+        description=(
+            "Versión de doc_organize que construyó el contexto (1.5.0): identifica las reglas de clasificación, que son "
+            "código; `None` en contextos anteriores"
+        ),
     )
     domains: list[Domain] = Field(default_factory=list, description="Dominios detectados/confirmados")
     unclassified_documents: list[str] = Field(

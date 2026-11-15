@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from doc_organize import __version__
 from doc_organize.ai import DocumentEnrichmentClient, DomainClassificationClient, TaxonomyClassificationClient
 from doc_organize.context.context_registry import ContextRegistry
 from doc_organize.context.document_properties import read_document_properties
@@ -37,6 +38,7 @@ from doc_organize.core.models import (
 )
 from doc_organize.core.progress import CancelToken, Phase, ProgressCallback, ProgressEvent, checkpoint
 from doc_organize.utils.logging import get_logger
+from doc_organize.utils.text_clean import clean_text
 
 _DEFAULT_THRESHOLD = 0.5
 
@@ -96,6 +98,23 @@ class _AiRun:
         else:
             # El servidor respondió (5xx, respuesta mal formada...): no es un error de conexión.
             self.consecutive_connection_failures = 0
+
+
+def _model_used(client: DomainClassificationClient | TaxonomyClassificationClient | DocumentEnrichmentClient | None, run: _AiRun) -> str | None:
+    """Alias de modelo del cliente si esa fase de IA llegó a enviar algún documento; si no, `None` (1.5.0)."""
+    if client is None or run.sent == 0:
+        return None
+    return client.config.model
+
+
+def _classification_model(
+    manifest: TaxonomyManifest | None,
+    domain_client: DomainClassificationClient | None,
+    taxonomy_client: TaxonomyClassificationClient | None,
+    run: _AiRun,
+) -> str | None:
+    """Modelo de la Sub-fase B: el cliente de 2 ejes en modo manifiesto, el de 1 eje si no (1.5.0)."""
+    return _model_used(taxonomy_client if manifest is not None else domain_client, run)
 
 
 class ContextBuilder:
@@ -286,7 +305,7 @@ class ContextBuilder:
                     ai_classification_client,
                     classified,
                     unclassified,
-                    classifier.candidate_domains,
+                    classifier,
                     on_progress=_ai_progress,
                     run=ai_run,
                 )
@@ -316,6 +335,9 @@ class ContextBuilder:
             output_folder_name=output_folder_name,
             ai_classification_enabled=ai_classification_enabled,
             ai_fallback_threshold=threshold,
+            ai_classification_model=_classification_model(taxonomy_manifest, ai_classification_client, taxonomy_classification_client, ai_run),
+            ai_enrichment_model=_model_used(ai_enrichment_client, enrichment_run),
+            built_with_version=__version__,
             domains=domains,
             unclassified_documents=[document.source_path for document in unclassified],
             taxonomy_manifest_used=taxonomy_manifest is not None,
@@ -387,11 +409,10 @@ class ContextBuilder:
                 continue
             chunks_text, title = chunks_result
 
-            domain_slug, domain_score = domain_classifier.score_domain(document, chunks_text, title, extra_keywords=domain_keywords)
-            if domain_slug is None or domain_score < threshold:
-                domain_slug = _UNCLASSIFIED_SLUG
+            rules_domain, domain_score = domain_classifier.score_domain(document, chunks_text, title, extra_keywords=domain_keywords)
+            domain_slug = rules_domain if rules_domain is not None and domain_score >= threshold else _UNCLASSIFIED_SLUG
 
-            material_slug, _material_score = material_classifier.classify_text(title=title, chunks_text=chunks_text, extra_keywords=material_keywords)
+            material_slug, material_score = material_classifier.classify_text(title=title, chunks_text=chunks_text, extra_keywords=material_keywords)
             if material_slug is None:
                 material_slug = _UNCLASSIFIED_SLUG
 
@@ -408,6 +429,9 @@ class ContextBuilder:
                     material_type_name=material_names.get(material_slug),
                     confidence=domain_score,
                     classified_by="rules",
+                    rules_domain=rules_domain,
+                    rules_confidence=domain_score,
+                    material_type_confidence=material_score,
                 )
             )
 
@@ -493,6 +517,8 @@ class ContextBuilder:
             self.logger.warning(f"Fallo la clasificación por IA (manifiesto) de '{document.source_path}': {exc} — sigue sin clasificar")
             return
 
+        document.ai_confidence = result.domain_confidence
+        document.ai_reasoning = clean_text(result.reasoning)
         changed = False
         if old_domain_slug == _UNCLASSIFIED_SLUG and result.domain is not None:
             classified[old_domain_slug] = [candidate for candidate in classified[old_domain_slug] if candidate is not document]
@@ -502,6 +528,7 @@ class ContextBuilder:
         if document.material_type == _UNCLASSIFIED_SLUG and result.material_type is not None:
             document.material_type = result.material_type
             document.material_type_name = material_names.get(result.material_type)
+            document.material_type_confidence = result.material_type_confidence
             changed = True
         if changed:
             document.classified_by = "ai"
@@ -512,15 +539,18 @@ class ContextBuilder:
         client: DomainClassificationClient,
         classified: dict[str, list[DomainDocument]],
         unclassified: list[ConversionResult],
-        candidate_domains: list[str] | None,
+        rules: DomainClassifier,
         on_progress: Callable[[int, int, str], Awaitable[None]] | None = None,
         run: _AiRun | None = None,
     ) -> tuple[dict[str, list[DomainDocument]], list[ConversionResult]]:
         """Sub-fase B: intenta clasificar por IA lo que la Sub-fase A dejó sin
         clasificar, eligiendo solo entre el catálogo ya confirmado (el predefinido,
         o los dominios que la Sub-fase A ya descubrió) — nunca crea uno nuevo.
+
+        `rules` es el clasificador de la Sub-fase A: da el catálogo y la propuesta que las reglas dejaron por debajo
+        del umbral (`DomainDocument.rules_domain`/`rules_confidence`).
         """
-        catalog = candidate_domains if candidate_domains else list(classified.keys())
+        catalog = rules.candidate_domains if rules.candidate_domains else list(classified.keys())
         if not catalog:
             return classified, unclassified
 
@@ -530,7 +560,7 @@ class ContextBuilder:
         for index, document in enumerate(unclassified, start=1):
             assigned: tuple[str, DomainDocument] | None = None
             if run.stopped is None:
-                assigned = await self._try_classify_document_with_ai(client, document, catalog, run)
+                assigned = await self._try_classify_document_with_ai(client, document, catalog, rules, run)
                 self._log_stop(run, total - index)
             if assigned is None:
                 still_unclassified.append(document)
@@ -542,7 +572,7 @@ class ContextBuilder:
         return classified, still_unclassified
 
     async def _try_classify_document_with_ai(
-        self, client: DomainClassificationClient, document: ConversionResult, catalog: list[str], run: _AiRun
+        self, client: DomainClassificationClient, document: ConversionResult, catalog: list[str], rules: DomainClassifier, run: _AiRun
     ) -> tuple[str, DomainDocument] | None:
         if not document.success or not document.markdown_path or not document.json_path:
             return None
@@ -565,6 +595,7 @@ class ContextBuilder:
             return None
 
         resolved_title, document_type = resolve_title_and_type(document, title)
+        rules_domain, rules_confidence = rules.score_domain(document, chunks_text, title)
         return result.domain, DomainDocument(
             source_path=document.source_path,
             markdown_path=document.markdown_path,
@@ -574,6 +605,10 @@ class ContextBuilder:
             document_type=document_type,
             confidence=result.confidence,
             classified_by="ai",
+            rules_domain=rules_domain,
+            rules_confidence=rules_confidence,
+            ai_confidence=result.confidence,
+            ai_reasoning=clean_text(result.reasoning),
         )
 
     async def _describe_documents(
