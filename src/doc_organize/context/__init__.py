@@ -1,7 +1,7 @@
 """Organización documental por dominios y contextos."""
 
 from doc_organize.context.context_builder import ContextBuilder
-from doc_organize.context.context_history import diff_contexts, list_context_builds
+from doc_organize.context.context_history import ContextHistoryPolicy, diff_contexts, list_context_builds
 from doc_organize.context.context_registry import ContextRegistry
 from doc_organize.context.domain_classifier import DomainClassifier, MaterialTypeClassifier
 from doc_organize.context.reorganizer import Reorganizer, resolve_organized_paths
@@ -18,6 +18,7 @@ from doc_organize.context.taxonomy_templates import (
 
 __all__ = [
     "ContextBuilder",
+    "ContextHistoryPolicy",
     "ContextRegistry",
     "DomainClassifier",
     "MaterialTypeClassifier",

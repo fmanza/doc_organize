@@ -173,6 +173,11 @@ class ProjectLayout:
         """Histórico JSONL de construcciones del contexto (1.5.0), junto a ``context.json``."""
         return self.output_root / CONTEXT_HISTORY_FOLDER_NAME / CONTEXT_HISTORY_JSONL_NAME
 
+    def context_history_files(self) -> list[Path]:
+        """Ficheros del histórico que existen: las copias giradas, de la más antigua a la más reciente, y el actual
+        (1.6.0). Para listar o borrar el historial entero; para leerlo, ``list_context_builds(self.context_history)``."""
+        return context_history_files(self.context_history)
+
     @property
     def domains_dir(self) -> Path:
         """``domains/<slug>/{DOMAIN.md,index.json}`` de cada dominio del contexto."""
@@ -335,13 +340,44 @@ def relative_source_path(full_path: str, scan_roots: Sequence[str] = ()) -> str:
     return PurePosixPath(*relative_parts).as_posix()
 
 
+def rotated_context_history_path(history_path: Path, index: int) -> Path:
+    """Copia girada número ``index`` (1 = la más reciente) de ``history_path``: ``CONTEXT_HISTORY.<index>.jsonl`` (1.6.0)."""
+    return history_path.with_name(f"{history_path.stem}.{index}{history_path.suffix}")
+
+
+def context_history_files(history_path: Path) -> list[Path]:
+    """Copias giradas de ``history_path`` que existen, de la más antigua a la más reciente, y ``history_path`` si
+    existe (1.6.0). Se buscan por nombre, así que una numeración con huecos (un giro a medias) se lista igual.
+
+    Example:
+        >>> context_history_files(Path("/ruta/que/no/existe/CONTEXT_HISTORY.jsonl"))
+        []
+    """
+    pattern = re.compile(rf"^{re.escape(history_path.stem)}\.(\d+){re.escape(history_path.suffix)}$")
+    try:
+        names = [entry.name for entry in history_path.parent.iterdir() if entry.is_file()]
+    except OSError:  # la carpeta no existe o no se puede leer
+        return []
+    rotated: list[tuple[int, str]] = []
+    for name in names:
+        match = pattern.match(name)
+        if match is not None:
+            rotated.append((int(match.group(1)), name))
+    files = [history_path.parent / name for _, name in sorted(rotated, reverse=True)]
+    if history_path.name in names:
+        files.append(history_path)
+    return files
+
+
 __all__ = [
     "RESERVED_OUTPUT_FOLDER_NAMES",
     "SCANNED_FOLDERS_JSON_NAME",
     "SITE_FOLDER_NAME",
     "ProjectLayout",
+    "context_history_files",
     "relative_source_path",
     "resolve_images_dir",
     "resolve_output_paths",
+    "rotated_context_history_path",
     "validate_output_folder_name",
 ]
