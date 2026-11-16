@@ -8,7 +8,7 @@ import time
 
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pypdfium2
 import pytest
@@ -31,7 +31,7 @@ class _CountingPdfDocument:
     guard = threading.Lock()
     active = 0
     peak = 0
-    sources: list[Any] = []
+    sources: ClassVar[list[Any]] = []
 
     def __init__(self, source: Any) -> None:
         cls = type(self)
