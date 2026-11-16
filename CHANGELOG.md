@@ -20,6 +20,19 @@ releases publicados antes de esa versión).
   (empate por ruta, `NULL` al final). `count_entries` y `load_cache_page` ganan `mime_type: str | Sequence[str] | None`
   (igualdad exacta, uno o varios tipos). Nuevo `CacheManager.list_mime_types(...)`: tipos presentes con su recuento,
   para el desplegable del filtro. Con 100 000 entradas, una página tarda ≤ 151 ms; sin índices nuevos ni migración.
+- **Propiedades de los originales leídas en paralelo** (G44, medición de doc_organize_web en un NAS por SMB):
+  `ContextBuilder` lee el autor, la descripción y las palabras clave de 4 originales a la vez
+  (`ContextBuilder(properties_concurrency=)`; `1` = una detrás de otra, como en 1.5.0). En red pasa de 88 a 28 ms por
+  documento: unos 2,5 minutos menos por construcción con 2600 documentos. `read_document_properties` se puede llamar
+  desde varios hilos: PDFium no lo admite, así que los bytes del PDF se leen en paralelo y solo el análisis va bajo un
+  cerrojo (un PDF de más de 16 MB se abre por ruta). El cerrojo es el de Docling (`docling.utils.locks.pypdfium2_lock`):
+  construir el contexto mientras se convierte en el mismo proceso tampoco llama a PDFium dos veces a la vez.
+- **Metadatos de los documentos sin clasificar** (G42, petición de doc_organize_web): `Context.unclassified_details`
+  trae un `UnclassifiedDocument` por cada ruta de `unclassified_documents` (que no cambia), en el mismo orden: motivo
+  (`"incomplete_artifacts"` o `"below_threshold"`), título, tipo, artefactos, lo que propusieron las reglas por debajo
+  del umbral, y autor, descripción, palabras clave e idioma del original. La IA no los enriquece. Se guarda aparte, en
+  `unclassified.json` junto a `context.json` (`ProjectLayout.unclassified_file`); un contexto de 1.5.0 se carga con la
+  lista vacía. `unclassified.json` pasa a ser un nombre reservado para `output_folder_name`.
 
 ### Corregido
 
@@ -32,7 +45,8 @@ releases publicados antes de esa versión).
   vez se perdían hasta un 20 % de las líneas, también en disco local. `append_context_build` escribe ahora bajo un
   bloqueo entre procesos (`CONTEXT_HISTORY.jsonl.lock`, creado en exclusiva, válido en SMB y NFS), con una sola
   escritura y `fsync`. Si otro proceso mantiene el bloqueo más de 5 s, o un bloqueo huérfano tiene más de 60 s, se
-  avisa o se rompe; la construcción nunca falla por el historial. Tampoco escribe ya a través de un enlace simbólico.
+  avisa o se rompe; la construcción nunca falla por el historial. Tampoco escribe ni gira a través de un enlace
+  simbólico, ni sigue uno puesto como fichero de bloqueo (en Windows, sin `O_NOFOLLOW`, se comprueba justo antes).
 
 ## [1.5.0] - 2026-11-16
 

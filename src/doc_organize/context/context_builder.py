@@ -4,7 +4,7 @@ Orquestador de la construcción del contexto de organización documental de un p
 
 import asyncio
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -38,6 +38,7 @@ from doc_organize.core.models import (
     DomainStatus,
     Project,
     TaxonomyManifest,
+    UnclassifiedDocument,
 )
 from doc_organize.core.progress import CancelToken, Phase, ProgressCallback, ProgressEvent, checkpoint
 from doc_organize.projects.layout import ProjectLayout
@@ -45,6 +46,9 @@ from doc_organize.utils.logging import get_logger
 from doc_organize.utils.text_clean import clean_text
 
 _DEFAULT_THRESHOLD = 0.5
+#: Medido en un NAS por SMB (G44, 2026-11-16): con 4 lecturas a la vez, 28 ms por documento frente a 88 ms de una en
+#: una; con 8, apenas mejora y la lectura más lenta se duplica.
+_DEFAULT_PROPERTIES_CONCURRENCY = 4
 
 _UNCLASSIFIED_SLUG = "sin-clasificar"
 """Slug placeholder para un eje (dominio o tipo de material) que no alcanza `threshold`
@@ -167,14 +171,28 @@ class ContextBuilder:
         'ciberseguridad'
     """
 
-    def __init__(self, registry: ContextRegistry | None = None, *, history_policy: ContextHistoryPolicy | None = None) -> None:
+    def __init__(
+        self,
+        registry: ContextRegistry | None = None,
+        *,
+        history_policy: ContextHistoryPolicy | None = None,
+        properties_concurrency: int = _DEFAULT_PROPERTIES_CONCURRENCY,
+    ) -> None:
         """
         Args:
             registry: Dónde se lee y guarda el contexto (`ContextRegistry()` por defecto).
             history_policy: Giro de `CONTEXT_HISTORY.jsonl` (1.6.0); `None` = `ContextHistoryPolicy()` (5 MB, 4 copias).
+            properties_concurrency: Originales cuyas propiedades se leen a la vez (1.6.0). En una carpeta de red, 4
+                lecturas a la vez cuestan un tercio que de una en una; `1` = una detrás de otra, como en 1.5.0.
+
+        Raises:
+            ValueError: Si `properties_concurrency` es menor que 1.
         """
+        if properties_concurrency < 1:
+            raise ValueError(f"properties_concurrency debe ser al menos 1, no {properties_concurrency}")
         self.registry = registry or ContextRegistry()
         self.history_policy = history_policy or ContextHistoryPolicy()
+        self.properties_concurrency = properties_concurrency
         self.logger = get_logger(__name__)
 
     async def build(
@@ -300,6 +318,7 @@ class ContextBuilder:
         async def _enrichment_progress(index: int, total: int, source_path: str) -> None:
             _report("enrichment", index, total, source_path)
 
+        rules: DomainClassifier | None = None  # para la propuesta de las reglas en los sin clasificar (1.6.0)
         if taxonomy_manifest is not None:
             classified, unclassified = await self._classify_with_manifest(documents, taxonomy_manifest, threshold)
             if ai_classification_enabled and taxonomy_classification_client is not None:
@@ -307,7 +326,7 @@ class ContextBuilder:
                     taxonomy_classification_client, classified, taxonomy_manifest, on_progress=_ai_progress, run=ai_run
                 )
         else:
-            classifier = DomainClassifier(candidate_domains=candidate_domains, threshold=threshold)
+            classifier = rules = DomainClassifier(candidate_domains=candidate_domains, threshold=threshold)
             classified, unclassified = await classifier.classify(documents)
 
             if ai_classification_enabled and ai_classification_client is not None and unclassified:
@@ -320,8 +339,11 @@ class ContextBuilder:
                     run=ai_run,
                 )
 
+        unclassified_details = await self._describe_unclassified(unclassified, rules, cancel_token)
         enrichment_run = _AiRun(max_failures=ai_max_failures, max_documents=ai_max_documents)
-        await self._describe_documents(classified, ai_enrichment_enabled, ai_enrichment_client, enrichment_run, _enrichment_progress, cancel_token)
+        await self._describe_documents(
+            classified, unclassified_details, ai_enrichment_enabled, ai_enrichment_client, enrichment_run, _enrichment_progress, cancel_token
+        )
 
         has_predefined_catalog = bool(candidate_domains) or taxonomy_manifest is not None
         manifest_domains_by_slug = (
@@ -350,6 +372,7 @@ class ContextBuilder:
             built_with_version=__version__,
             domains=domains,
             unclassified_documents=[document.source_path for document in unclassified],
+            unclassified_details=unclassified_details,
             taxonomy_manifest_used=taxonomy_manifest is not None,
             taxonomy_template_name=taxonomy_template_name,
             ai_classification_stopped=ai_run.stopped,
@@ -647,9 +670,64 @@ class ContextBuilder:
         except OSError as exc:
             self.logger.warning(f"No se pudo añadir la construcción al histórico del contexto de '{project.name}': {exc}")
 
+    async def _describe_unclassified(
+        self, unclassified: list[ConversionResult], rules: DomainClassifier | None, cancel_token: CancelToken | None
+    ) -> list[UnclassifiedDocument]:
+        """Motivo, título, propuesta de las reglas e idioma de cada documento sin clasificar (1.6.0, G42), en el orden de
+        `unclassified`. Autor, descripción y palabras clave los rellena después `_apply_document_properties`.
+
+        Sin `.md`/`.json` o con un `.json` ilegible, `"incomplete_artifacts"`; si no, `"below_threshold"`, con lo que
+        propusieron las reglas (`rules`; `None` en modo manifiesto, donde solo quedan sin clasificar los incompletos).
+        Los `.json` se leen de `properties_concurrency` en `properties_concurrency` (pueden estar en una carpeta de
+        red); el idioma se detecta después, de uno en uno, como en los clasificados.
+        """
+        conversions: list[tuple[str, str | None] | None] = [None] * len(unclassified)
+
+        async def read_json(item: tuple[int, ConversionResult]) -> None:
+            index, document = item
+            if document.success and document.markdown_path and document.json_path:
+                conversions[index] = await read_conversion_json(document.json_path)
+
+        await self._for_each_bounded(list(enumerate(unclassified)), read_json, cancel_token)
+
+        details: list[UnclassifiedDocument] = []
+        for document, conversion in zip(unclassified, conversions, strict=True):
+            if conversion is None:
+                title, document_type = resolve_title_and_type(document, None)
+                details.append(
+                    UnclassifiedDocument(
+                        source_path=document.source_path,
+                        title=title or None,
+                        document_type=document_type,
+                        markdown_path=document.markdown_path,
+                        json_path=document.json_path,
+                        reason="incomplete_artifacts",
+                    )
+                )
+            else:
+                chunks_text, json_title = conversion
+                title, document_type = resolve_title_and_type(document, json_title)
+                rules_domain, rules_confidence = rules.score_domain(document, chunks_text, json_title) if rules is not None else (None, None)
+                details.append(
+                    UnclassifiedDocument(
+                        source_path=document.source_path,
+                        title=title or None,
+                        document_type=document_type,
+                        markdown_path=document.markdown_path,
+                        json_path=document.json_path,
+                        reason="below_threshold",
+                        rules_domain=rules_domain,
+                        rules_confidence=rules_confidence if rules_domain is not None else None,
+                        language=await asyncio.to_thread(detect_language, f"{json_title or ''}\n{chunks_text}"),
+                    )
+                )
+            checkpoint(cancel_token)
+        return details
+
     async def _describe_documents(
         self,
         classified: dict[str, list[DomainDocument]],
+        unclassified: list[UnclassifiedDocument],
         enrichment_enabled: bool,
         enrichment_client: DocumentEnrichmentClient | None,
         run: _AiRun,
@@ -657,29 +735,70 @@ class ContextBuilder:
         cancel_token: CancelToken | None,
     ) -> None:
         """Autor, descripción, palabras clave e idioma de cada documento clasificado; con el enriquecimiento activo y
-        cliente, la IA rellena después la descripción y las palabras clave que falten (1.5.0)."""
-        await self._apply_document_properties(classified, cancel_token)
+        cliente, la IA rellena después la descripción y las palabras clave que falten (1.5.0). De los sin clasificar,
+        solo lo que declara el original (1.6.0): la IA no los enriquece."""
+        await self._apply_document_properties(classified, unclassified, cancel_token)
         if enrichment_enabled and enrichment_client is not None:
             await self._enrich_with_ai(enrichment_client, classified, on_progress=on_progress, run=run)
 
-    async def _apply_document_properties(self, classified: dict[str, list[DomainDocument]], cancel_token: CancelToken | None) -> None:
+    async def _apply_document_properties(
+        self, classified: dict[str, list[DomainDocument]], unclassified: list[UnclassifiedDocument], cancel_token: CancelToken | None
+    ) -> None:
         """Rellena `author`, `description` y `keywords` con lo que declara cada documento original, y `language` con
-        el idioma detectado en su texto convertido (1.5.0).
+        el idioma detectado en su texto convertido (1.5.0). Los originales de los sin clasificar se leen en la misma
+        pasada (1.6.0); su idioma ya lo puso `_describe_unclassified`.
 
         Un original ilegible o borrado deja los campos vacíos (`read_document_properties` no lanza); un `.json` de
-        conversión ilegible deja `language` en `None`.
+        conversión ilegible deja `language` en `None`. Los originales se leen de `properties_concurrency` en
+        `properties_concurrency` (1.6.0); el idioma, después y de uno en uno.
         """
-        for documents in classified.values():
-            for document in documents:
-                properties = await asyncio.to_thread(read_document_properties, document.source_path)
-                document.author = properties.author
-                document.description = properties.description
-                document.keywords = list(properties.keywords)
-                conversion = await read_conversion_json(document.json_path)
-                if conversion is not None:
-                    chunks_text, title = conversion
-                    document.language = await asyncio.to_thread(detect_language, f"{title or ''}\n{chunks_text}")
+        documents = [document for domain_documents in classified.values() for document in domain_documents]
+        await self._read_properties([*documents, *unclassified], cancel_token)
+        for document in documents:
+            conversion = await read_conversion_json(document.json_path)
+            if conversion is not None:
+                chunks_text, title = conversion
+                document.language = await asyncio.to_thread(detect_language, f"{title or ''}\n{chunks_text}")
+            checkpoint(cancel_token)
+
+    async def _read_properties(self, documents: Sequence[DomainDocument | UnclassifiedDocument], cancel_token: CancelToken | None) -> None:
+        """Autor, descripción y palabras clave de cada original, con hasta `properties_concurrency` lecturas a la vez.
+
+        Si se cancela, se propaga la misma excepción que en 1.5.0 (ver `_for_each_bounded`).
+        """
+
+        async def read(document: DomainDocument | UnclassifiedDocument) -> None:
+            properties = await asyncio.to_thread(read_document_properties, document.source_path)
+            document.author = properties.author
+            document.description = properties.description
+            document.keywords = list(properties.keywords)
+
+        await self._for_each_bounded(documents, read, cancel_token)
+
+    async def _for_each_bounded[T](self, items: Sequence[T], action: Callable[[T], Awaitable[None]], cancel_token: CancelToken | None) -> None:
+        """`action` sobre cada elemento de `items`, con hasta `properties_concurrency` a la vez (1.6.0).
+
+        Cada tarea toma el siguiente elemento pendiente y comprueba la cancelación antes de empezarlo. Si una falla, las
+        demás se detienen y se propaga la primera excepción tal cual (no un `ExceptionGroup`, para que la cancelación
+        siga siendo `OperationCancelledError`); las demás distintas, si las hay, se registran como aviso.
+        """
+        pending = iter(items)
+
+        async def worker() -> None:
+            for item in pending:  # iterador compartido: el bucle de eventos no cambia de tarea dentro de next()
                 checkpoint(cancel_token)
+                await action(item)
+
+        try:
+            async with asyncio.TaskGroup() as group:
+                for _ in range(min(self.properties_concurrency, len(items))):
+                    group.create_task(worker())
+        except BaseExceptionGroup as errors:
+            first, *others = errors.exceptions
+            for other in others:
+                if type(other) is not type(first):
+                    self.logger.warning(f"Otro error a la vez que {type(first).__name__}: {type(other).__name__}: {other}")
+            raise first from None
 
     async def _enrich_with_ai(
         self,

@@ -10,9 +10,9 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from doc_organize.core.constants import CONTEXT_FILE_NAME, DOMAINS_FOLDER_NAME
+from doc_organize.core.constants import CONTEXT_FILE_NAME, DOMAINS_FOLDER_NAME, UNCLASSIFIED_FILE_NAME
 from doc_organize.core.exceptions import ContextError, ContextNotFoundError, DomainNotFoundError
-from doc_organize.core.models import Context, Domain, DomainDocument, Project
+from doc_organize.core.models import Context, Domain, DomainDocument, Project, UnclassifiedDocument
 from doc_organize.utils.atomic_write import write_text_atomic
 from doc_organize.utils.logging import get_logger
 from doc_organize.utils.path_utils import remove_tree
@@ -41,7 +41,14 @@ async def _read_json_object(path: Path, what: str) -> dict[str, Any]:
 
 
 class ContextRegistry:
-    """Lee y escribe el contexto de un proyecto: `context.json` + `domains/<slug>/{DOMAIN.md,index.json}`.
+    """Lee y escribe el contexto de un proyecto: `context.json` + `domains/<slug>/{DOMAIN.md,index.json}` +
+    `unclassified.json` (1.6.0).
+
+    `unclassified.json` guarda `Context.unclassified_details`, aparte para que `context.json` siga siendo pequeño. Se
+    escribe antes que `context.json`. Al leer, `context.json` manda: se conservan los detalles cuya ruta está en
+    `unclassified_documents`, en su orden, y si sobran o faltan (un guardado que se cortó entre los dos ficheros, o un
+    consumidor que editó `unclassified_documents`) se avisa. Un contexto anterior a 1.6.0, sin el fichero, se carga con
+    `unclassified_details=[]` sin aviso.
 
     Mismo patrón de concurrencia que `ProjectRegistry`/`ScannedFoldersStore`: un
     `asyncio.Lock` en proceso + escritura atómica (fichero temporal + `os.replace`)
@@ -87,7 +94,7 @@ class ContextRegistry:
 
         Raises:
             ContextNotFoundError: Si el proyecto no tiene `context.json` todavía.
-            ContextError: Si `context.json` o algún `index.json` de dominio está corrupto, o si
+            ContextError: Si `context.json`, `unclassified.json` o algún `index.json` de dominio está corrupto, o si
                 `output_folder_name` no es un nombre de carpeta válido ("..", una ruta absoluta, un nombre
                 reservado...; L-8f): nunca se devuelve un contexto que copiaría o borraría fuera de su sitio.
         """
@@ -100,13 +107,14 @@ class ContextRegistry:
             await self._save(project, context)
 
     async def delete_context(self, project: Project) -> None:
-        """Borra `context.json` + `domains/` de `project`, si existen.
+        """Borra `context.json`, `unclassified.json` y `domains/` de `project`, si existen.
 
         Idempotente (no falla si ya no hay nada que borrar) — igual criterio que
         una operación DELETE HTTP.
         """
         async with self._lock:
             await asyncio.to_thread(self._context_path(project).unlink, missing_ok=True)
+            await asyncio.to_thread(self._unclassified_path(project).unlink, missing_ok=True)
             domains_root = Path(project.root_path) / _DOMAINS_DIR_NAME
             if await asyncio.to_thread(domains_root.is_dir):
                 await asyncio.to_thread(remove_tree, domains_root)
@@ -118,7 +126,8 @@ class ContextRegistry:
             ContextNotFoundError: Si el proyecto no tiene contexto todavía.
             DomainNotFoundError: Si no hay ningún dominio con ese slug.
         """
-        context = await self.load_context(project)
+        async with self._lock:
+            context = await self._load(project, with_unclassified=False)  # el detalle de los sin clasificar no hace falta
         domain = next((d for d in context.domains if d.slug == slug), None)
         if domain is None:
             raise DomainNotFoundError(f"No hay ningún dominio '{slug}' en el contexto de '{project.name}'.")
@@ -127,10 +136,13 @@ class ContextRegistry:
     def _context_path(self, project: Project) -> Path:
         return Path(project.root_path) / _CONTEXT_FILE_NAME
 
+    def _unclassified_path(self, project: Project) -> Path:
+        return Path(project.root_path) / UNCLASSIFIED_FILE_NAME
+
     def _domain_dir(self, project: Project, slug: str) -> Path:
         return Path(project.root_path) / _DOMAINS_DIR_NAME / slug
 
-    async def _load(self, project: Project) -> Context:
+    async def _load(self, project: Project, *, with_unclassified: bool = True) -> Context:
         context_path = self._context_path(project)
         if not context_path.exists():
             raise ContextNotFoundError(f"El proyecto '{project.name}' no tiene contexto construido todavía.")
@@ -152,12 +164,39 @@ class ContextRegistry:
             except ValidationError as exc:
                 raise ContextError(f"El resumen del dominio '{slug}' está corrupto: {context_path}") from exc
 
+        payload.pop("unclassified_details", None)  # vive en unclassified.json, nunca en context.json
         try:
-            return Context(**payload, domains=domains)
+            context = Context(**payload, domains=domains)
         except ValidationError as exc:
             if any(error["loc"][:1] == ("output_folder_name",) for error in exc.errors()):
                 raise ContextError(f"El contexto del proyecto tiene un 'output_folder_name' inválido: {context_path}") from exc
             raise ContextError(f"El contexto del proyecto está corrupto: {context_path}") from exc
+        if with_unclassified:
+            context.unclassified_details = await self._load_unclassified(project, context.unclassified_documents)
+        return context
+
+    async def _load_unclassified(self, project: Project, unclassified_documents: list[str]) -> list[UnclassifiedDocument]:
+        path = self._unclassified_path(project)
+        if not await asyncio.to_thread(path.exists):
+            return []
+        payload = await _read_json_object(path, "El detalle de los documentos sin clasificar")
+        entries = payload.get("documents", [])
+        if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
+            raise ContextError(f"El detalle de los documentos sin clasificar está corrupto ('documents' no es una lista de objetos): {path}")
+        try:
+            details = [UnclassifiedDocument(**entry) for entry in entries]
+        except ValidationError as exc:
+            raise ContextError(f"El detalle de los documentos sin clasificar está corrupto: {path}") from exc
+        if not details:  # guardado sin detalle (un `Context` creado a mano): nada que alinear
+            return []
+        by_path = {detail.source_path: detail for detail in details}
+        aligned = [by_path[source_path] for source_path in unclassified_documents if source_path in by_path]
+        if len(aligned) != len(details) or len(aligned) != len(unclassified_documents):
+            self.logger.warning(
+                f"'{path}' no coincide con 'unclassified_documents' de context.json (¿guardado interrumpido o contexto "
+                f"editado?): se conservan {len(aligned)} de {len(unclassified_documents)} detalles"
+            )
+        return aligned
 
     async def _load_domain_documents(self, project: Project, slug: str) -> list[DomainDocument]:
         index_path = self._domain_dir(project, slug) / _DOMAIN_INDEX_NAME
@@ -176,7 +215,10 @@ class ContextRegistry:
         context_path = self._context_path(project)
         await asyncio.to_thread(context_path.parent.mkdir, parents=True, exist_ok=True)
 
-        payload = context.model_dump(exclude={"domains"})
+        unclassified_payload = {"documents": [document.model_dump() for document in context.unclassified_details]}
+        await self._write_json_atomic(self._unclassified_path(project), unclassified_payload)  # antes que context.json
+
+        payload = context.model_dump(exclude={"domains", "unclassified_details"})
         payload["domains"] = [
             {
                 "slug": domain.slug,

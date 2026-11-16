@@ -140,6 +140,26 @@ y satura el NAS.
   la vez (doble que cuenta llamadas simultáneas); `properties_concurrency=1` reproduce 1.5.0; error en un fichero no
   afecta a los demás; cancelación (`checkpoint`) entre lotes.
 
+**Estado (2026-11-16): implementada en `feat/parallel-document-properties` (sobre `feat/context-created-at`).**
+
+- Medición en el NAS (`doc_organize_web/backend/scripts/bench_properties_strategies.py`, 200 ficheros por pasada no
+  leídos en W0): secuencial 88 ms/doc; hilos sin cerrojo 32; cerrojo por ruta 66; **opción A con 4 hilos, 28**; opción
+  A con 8, 27 (p95 de 210 a 466 ms); procesos (opción B) 38. Elegida la **opción A con 4**: máximo de llamadas
+  simultáneas a PDFium medido, 1.
+- Diferencias con el plan: el cerrojo y la lectura de bytes están en `read_document_properties` (no en el
+  constructor), así que la función es segura entre hilos para cualquier consumidor. En vez de `Semaphore` hay N tareas
+  que toman el siguiente documento de un iterador compartido (`TaskGroup`; la cancelación se propaga como
+  `OperationCancelledError`, sin `ExceptionGroup`). El tamaño se mira con `fstat` antes de leer y la lectura queda
+  acotada a 16 MB + 1.
+- Riesgo de convivir con Docling en el mismo proceso, cerrado con la alternativa B (analizada el 2026-11-16): el
+  cerrojo es `docling.utils.locks.pypdfium2_lock`, el mismo con el que Docling protege todas sus llamadas a PDFium. Se
+  resuelve la primera vez que se lee un PDF (importar `doc_organize.context` no importa Docling) y, si no existe, se usa
+  uno propio. Un test comprueba que es el objeto de Docling, para que un cambio de Docling falle en CI. Descartadas:
+  aceptar y documentar (el fallo es un cuelgue), leer el PDF sin PDFium (dependencia nueva o lector propio) y pool de
+  procesos (38 frente a 28 ms/doc). La web ya estaba aislada: cada operación corre en su propio subproceso.
+- Tests: `tests/unit/test_document_properties_concurrency.py` (13). Sin el cerrojo, el de PDFium falla con 8 llamadas
+  a la vez; con PDFium real y sin cerrojo, el proceso se cuelga.
+
 ### Fase L5 — G42: metadatos de los documentos sin clasificar
 
 **Problema**: `Context.unclassified_documents: list[str]` solo guarda la ruta; los sin clasificar no tienen autor,
@@ -162,6 +182,37 @@ descripción, palabras clave ni idioma.
 
 - Tests: cada `reason`; contexto de 1.5.0 se carga; `unclassified.json` dañado → `ContextError` (mismo criterio que un
   `index.json` dañado); propiedades de un original borrado → campos vacíos.
+
+**Estado (2026-11-16): implementada en `feat/parallel-document-properties`, a continuación de L4b.**
+
+- `UnclassifiedDocument`, `UnclassifiedReason`, `Context.unclassified_details`, `UNCLASSIFIED_FILE_NAME`,
+  `ProjectLayout.unclassified_file`; `ContextRegistry` guarda, lee y borra `unclassified.json`.
+- `ContextBuilder._describe_unclassified` calcula motivo, título, propuesta de las reglas e idioma (un solo
+  `read_conversion_json` por documento); las propiedades del original se leen en la misma pasada concurrente que las de
+  los clasificados (G44). El enriquecimiento por IA no los toca.
+- Diferencias con el plan:
+  - **Dos motivos, no tres.** Se quita `"ai_disabled"`: no es una causa por documento (que la IA estuviera activa ya
+    está en `Context.ai_classification_enabled`), y un documento por debajo del umbral es `"below_threshold"` tanto si
+    la IA estaba apagada como si se detuvo o no eligió dominio.
+  - **Sin validador de modelo** que exija las mismas rutas (F4). Un guardado cortado entre `unclassified.json` y
+    `context.json` dejaría el contexto ilegible. En su lugar, `unclassified.json` se escribe primero y, al leer, manda
+    `context.json`: se conservan los detalles cuya ruta sigue en `unclassified_documents`, en su orden, con aviso si
+    sobran o faltan. Así tampoco se pierde todo si un consumidor (la web) edita `unclassified_documents`.
+  - `unclassified.json` entra en `RESERVED_OUTPUT_FOLDER_NAMES`.
+- F3 (coste en red) resuelto por L4b: los sin clasificar se leen con la misma concurrencia.
+- Tests: `tests/unit/test_context_unclassified.py` (15).
+
+**Auditoría de código (2026-11-16, antes del tag): APROBADO CON CONDICIONES, condiciones resueltas.**
+
+- H1: un `.lock` que fuera enlace simbólico roto dejaba `_acquire` en un bucle sin fin en POSIX (`stat` sigue el
+  enlace) y en Windows creaba el destino del enlace. Ahora `lstat`, el enlace cuenta como bloqueo ajeno y el plazo se
+  comprueba en todos los caminos.
+- H2: «no escribe a través de un enlace» no se cumplía en Windows (sin `O_NOFOLLOW`). Ahora se rechaza antes de girar
+  o escribir; las copias giradas que sean enlaces no se listan.
+- H3: el cerrojo de PDFium de reserva podía duplicarse en la primera llamada concurrente; ahora es uno de módulo.
+- Menores: `.json` de los sin clasificar leídos en paralelo; `get_domain` no carga `unclassified.json`; errores
+  simultáneos distintos se registran; `mime_type` sin repetidos; tamaño de `Context` serializado anotado en el W2 web.
+- Tests nuevos: 7 fallan con el código anterior. Más cobertura de sin clasificar en modo manifiesto y tras la Sub-fase B.
 
 ### Fase L6 — Cierre de versión 1.6.0
 

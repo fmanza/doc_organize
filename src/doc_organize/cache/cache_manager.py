@@ -262,7 +262,8 @@ class CacheManager:
         if conversion_status is not None:
             conditions.append("conversion_status = ?")
             params.append(ConversionStatus(conversion_status).value)
-        mime_types = [mime_type] if isinstance(mime_type, str) else list(mime_type or [])
+        # Sin repetir: cada tipo es un parámetro de SQLite, que tiene un límite (32 766 desde SQLite 3.32).
+        mime_types = [mime_type] if isinstance(mime_type, str) else list(dict.fromkeys(mime_type or []))
         if mime_types:
             if "mime_type" in self._optional_present:
                 # Solo marcadores `?`: los valores van siempre como parámetros.

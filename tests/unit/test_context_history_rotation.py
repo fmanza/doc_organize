@@ -233,3 +233,16 @@ def test_concurrent_processes_rotating_lose_no_build(history: Path) -> None:
     lines = [line for path in files for line in path.read_text(encoding="utf-8").splitlines()]
     records = [ContextBuildRecord.model_validate_json(line) for line in lines]
     assert sorted(record.built_at for record in records) == sorted(f"{w}-{i}" for w in range(writers) for i in range(count))
+
+
+def test_symlinked_copies_are_neither_listed_nor_read(tmp_path: Path) -> None:
+    history = tmp_path / "CONTEXT_HISTORY.jsonl"
+    history.write_text("", encoding="utf-8")
+    elsewhere = tmp_path / "ajeno.jsonl"
+    elsewhere.write_text("", encoding="utf-8")
+    try:
+        rotated_context_history_path(history, 1).symlink_to(elsewhere)
+    except OSError as exc:
+        pytest.skip(f"no se pueden crear enlaces simbólicos aquí: {exc}")
+
+    assert context_history_files(history) == [history]

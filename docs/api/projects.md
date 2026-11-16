@@ -234,6 +234,7 @@ Todas cuelgan de la raíz de salidas (`project.root_path`), también con un `sta
 | Propiedad / función | Ruta |
 |---|---|
 | `context_file` | `context.json` |
+| `unclassified_file` | `unclassified.json` (1.6.0): detalle de los documentos sin clasificar |
 | `domains_dir` | `domains/` (`<slug>/DOMAIN.md`, `<slug>/index.json`) |
 | `taxonomy_manifest_file` | `taxonomy_manifest.md` |
 | `site_config_file` | `zensical.toml` |

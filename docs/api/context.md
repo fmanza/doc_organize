@@ -186,7 +186,10 @@ La escritura y el giro se hacen bajo un bloqueo entre procesos (`CONTEXT_HISTORY
 así que dos construcciones del mismo proyecto desde procesos o equipos distintos no pierden ni mezclan líneas. Si otro
 proceso mantiene el bloqueo más de 5 s, la construcción se guarda igual y solo se avisa de que no entró en el
 historial; un bloqueo de más de 60 s se da por huérfano y se rompe. Las lecturas no toman el bloqueo: si coinciden con
-un giro, esa lectura puede omitir o repetir alguna construcción, pero el historial en disco no cambia.
+un giro, esa lectura puede omitir o repetir alguna construcción, pero el historial en disco no cambia. Nunca se
+escribe, se gira ni se lee a través de un enlace simbólico: si `CONTEXT_HISTORY.jsonl` lo es, la construcción solo avisa
+de que no entró en el historial; un fichero de bloqueo que lo sea cuenta como bloqueo ajeno, y si es viejo se rompe el
+enlace, no su destino.
 
 ### Autor, descripción y palabras clave (1.5.0)
 
@@ -202,6 +205,26 @@ Tras clasificar, cada `DomainDocument` recibe lo que declara su documento origin
 `/Creator` y `/Producer` no se usan como autor: nombran el programa que generó el PDF. Otros formatos, un original
 borrado, dañado o cifrado dejan los campos vacíos sin interrumpir la construcción. Los textos se guardan en una línea y
 acotados (500 caracteres; hasta 20 palabras clave de 60).
+
+**Lectura en paralelo (1.6.0).** Los originales se leen de 4 en 4. En una carpeta de red (SMB), leerlos de uno en uno
+costaba unos 88 ms por documento; con 4 lecturas a la vez, 28 ms. Para cambiarlo:
+
+```python
+from doc_organize.context import ContextBuilder
+
+ContextBuilder(properties_concurrency=8)  # más lecturas a la vez; con un NAS doméstico apenas mejora
+ContextBuilder(properties_concurrency=1)  # de una en una, como en 1.5.0
+```
+
+PDFium (la librería que lee los PDF) no admite llamadas desde varios hilos a la vez, así que `read_document_properties`
+lee los bytes del PDF en paralelo y solo analiza uno cada vez, bajo un cerrojo. Un PDF de más de 16 MB se abre por
+ruta, para no cargarlo entero en memoria. `read_document_properties` se puede llamar desde varios hilos. El idioma se
+detecta después, de uno en uno. `cancel_token` se comprueba antes de cada lectura.
+
+El cerrojo es el mismo que usa Docling (`docling.utils.locks.pypdfium2_lock`), así que construir el contexto mientras
+otro hilo del mismo proceso convierte documentos tampoco llama a PDFium dos veces a la vez; mientras Docling procesa
+un PDF, la lectura de propiedades espera. Si tu código usa pypdfium2 directamente en el mismo proceso y en otro hilo,
+hazlo también bajo ese cerrojo.
 
 `language` es el idioma principal (ISO 639-1: `es`, `en`, `ca`…) detectado con
 [py3langid](https://github.com/adbar/py3langid) en el título y los primeros 4000 caracteres del texto convertido
@@ -219,6 +242,30 @@ nunca se sustituye y el autor nunca sale de la IA. `DomainDocument.ai_filled` di
 no llama a `on_ai_progress`, que sigue siendo solo de la Sub-fase B.
 
 ---
+
+### Documentos sin clasificar (1.6.0)
+
+`Context.unclassified_documents` sigue siendo la lista de rutas. Además, `Context.unclassified_details` trae un
+`UnclassifiedDocument` por cada uno, en el mismo orden:
+
+| Campo | Contenido |
+|---|---|
+| `reason` | `"incomplete_artifacts"`: la conversión falló o falta su `.md` o `.json` (o el `.json` no se puede leer). `"below_threshold"`: las reglas no llegaron al umbral y la IA no lo asignó (desactivada, detenida o sin dominio) |
+| `title`, `document_type` | Título del `.json` (o nombre del `.md`; `None` si no hay ninguno) y extensión original |
+| `markdown_path`, `json_path` | Los artefactos que dejó la conversión, o `None` |
+| `rules_domain`, `rules_confidence` | Lo que propusieron las reglas por debajo del umbral; `None` si no propusieron nada |
+| `author`, `description`, `keywords` | Lo que declara el original, como en los clasificados. **Nunca de la IA**: el enriquecimiento solo se aplica a los clasificados |
+| `language` | Idioma del texto convertido; `None` sin `.json` |
+
+Los originales de los sin clasificar se leen en la misma pasada que los demás, y sus `.json` también en paralelo
+(los dos con `properties_concurrency`), así que el coste es el mismo por documento. El detalle se guarda aparte, en `unclassified.json` junto a `context.json`
+(ver `ContextRegistry`). Un contexto de 1.5.0 se carga con `unclassified_details=[]`.
+
+```python
+context = await ContextRegistry().load_context(project)
+for detail in context.unclassified_details:
+    print(detail.reason, detail.title, detail.author, detail.rules_domain)
+```
 
 ## DomainClassifier (Sub-fase A)
 
@@ -382,6 +429,13 @@ reconstruir, borra `domains/<slug>/` de cualquier dominio ya no presente. `DOMAI
 solo regenera su sección `## Documentos clasificados` — el resto (editado a mano) se
 conserva.
 
+**`unclassified.json` (1.6.0)**: `Context.unclassified_details` se guarda aparte, para que `context.json` siga siendo
+pequeño aunque haya miles de documentos sin clasificar. Se escribe antes que `context.json`, y al leer manda
+`context.json`: se conservan los detalles cuya ruta está en `unclassified_documents`, en su orden. Si sobran o faltan
+(un guardado cortado entre los dos ficheros, o un consumidor que editó `unclassified_documents`), se avisa en el log.
+Sin el fichero (contexto de 1.5.0), `unclassified_details=[]`. Si el fichero está dañado, `ContextError`, igual que un
+`index.json`. `delete_context` lo borra. `get_domain` no lo lee: no lo necesita.
+
 **Escritura sin seguir enlaces (0.14.0, L-8e)**: `context.json`, `index.json` y `DOMAIN.md` (igual que `index.md`,
 `zensical.toml` y `taxonomy_manifest.md`) se escriben en un temporal con nombre aleatorio creado en exclusiva en la
 misma carpeta (`tempfile.mkstemp`: `O_CREAT | O_EXCL` y `O_NOFOLLOW` donde existe) y luego `os.replace`. Hasta 0.13.0
@@ -389,7 +443,7 @@ el temporal tenía un nombre fijo (`context.tmp`, `index.md.tmp`...) y un enlace
 de red desviaba la escritura. El fichero conserva los permisos del que sustituye.
 
 **Excepciones**: `ContextNotFoundError` (sin `context.json` todavía),
-`DomainNotFoundError`, `ContextError` (JSON corrupto o con esquema incompatible; desde 0.14.0 también si
+`DomainNotFoundError`, `ContextError` (JSON corrupto, también `unclassified.json`, o con esquema incompatible; desde 0.14.0 también si
 `output_folder_name` no es válido —`..`, una ruta absoluta, un nombre reservado como `Conversión`—, L-8f: nunca se
 devuelve un contexto que copiaría o borraría fuera de su sitio).
 
@@ -679,6 +733,20 @@ class DomainDocument(BaseModel):
     language: str | None        # 1.5.0: ISO 639-1 detectado en el texto convertido; None si no es seguro
     ai_filled: list[Literal["description", "keywords"]]  # 1.5.0: lo que rellenó la IA
 
+class UnclassifiedDocument(BaseModel):  # 1.6.0
+    source_path: str
+    title: str | None
+    document_type: str
+    markdown_path: str | None
+    json_path: str | None
+    reason: Literal["incomplete_artifacts", "below_threshold"]  # UnclassifiedReason
+    rules_domain: str | None
+    rules_confidence: float | None
+    author: str | None
+    description: str | None   # nunca de la IA
+    keywords: list[str]       # nunca de la IA
+    language: str | None
+
 class Domain(BaseModel):
     slug: str
     name: str
@@ -697,6 +765,7 @@ class Context(BaseModel):
     built_with_version: str | None       # 1.5.0: versión de doc_organize; None en contextos anteriores
     domains: list[Domain]
     unclassified_documents: list[str]
+    unclassified_details: list[UnclassifiedDocument]  # 1.6.0: mismo orden; se guarda en unclassified.json
     reorganized: bool
     reorganize_failed_documents: list[str]   # 0.13.0
     site_generated: bool                     # un context.json antiguo con mkdocs_generated se lee aquí
