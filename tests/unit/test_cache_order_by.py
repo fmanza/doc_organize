@@ -47,6 +47,16 @@ _ENTRIES = [
     ),
 ]
 
+# Metadatos de 1.5.0 (G43, 1.6.0): tipo MIME, fecha de creación y propietario, con empates, NULL y mayúsculas.
+_METADATA: dict[str, dict[str, object]] = {
+    "e": {"mime_type": "application/pdf", "created_time": 5.0, "owner_name": "maria"},
+    "a": {"mime_type": None, "created_time": None, "owner_name": "ana"},
+    "d": {"mime_type": "text/plain", "created_time": 1.0, "owner_name": None},
+    "b": {"mime_type": "application/pdf", "created_time": 5.0, "owner_name": "Ana"},
+    "c": {"mime_type": "application/msword", "created_time": None, "owner_name": "Zoe"},
+}
+_ENTRIES = [entry.model_copy(update=_METADATA[Path(entry.file_path).stem]) for entry in _ENTRIES]
+
 # Esperado: valor ascendente/descendente, NULL al final y desempate por ruta ascendente.
 _EXPECTED: dict[str, tuple[list[str], list[str]]] = {
     "file_path": (["a", "b", "c", "d", "e"], ["e", "d", "c", "b", "a"]),
@@ -55,6 +65,9 @@ _EXPECTED: dict[str, tuple[list[str], list[str]]] = {
     "conversion_status": (["d", "c", "b", "e", "a"], ["b", "e", "c", "d", "a"]),  # "error" < "ocr_pending" < "success"
     "size_bytes": (["b", "d", "e", "a", "c"], ["e", "b", "d", "a", "c"]),
     "error_retry_count": (["a", "b", "c", "e", "d"], ["d", "c", "e", "a", "b"]),
+    "mime_type": (["c", "b", "e", "d", "a"], ["d", "b", "e", "c", "a"]),
+    "created_time": (["d", "b", "e", "a", "c"], ["b", "e", "d", "a", "c"]),
+    "owner_name": (["a", "b", "e", "c", "d"], ["c", "e", "a", "b", "d"]),  # sin distinguir mayúsculas: "ana" = "Ana"
 }
 
 
@@ -174,6 +187,9 @@ async def test_high_offset_page_is_fast_with_100k_entries(tmp_path: Path) -> Non
             conversion_status=statuses[i % 4],
             error_retry_count=i % 3,
             size_bytes=None if i % 5 == 0 else (i * 104_729) % 10_000_000,
+            mime_type=None if i % 7 == 0 else ("application/pdf", "text/plain", "application/msword")[i % 3],
+            created_time=None if i % 6 == 0 else float((i * 6007) % 100_019),
+            owner_name=None if i % 9 == 0 else f"Usuario{(i * 31) % 250:03d}",
         )
         for i in range(count)
     ]

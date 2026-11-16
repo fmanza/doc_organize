@@ -15,6 +15,11 @@ releases publicados antes de esa versión).
 - `list_context_builds(path, *, include_rotated=True)` y `load_context_history` leen también las copias giradas (sin
   repetirlas si se pasan explícitamente). `ProjectLayout.context_history_files()` y las funciones
   `context_history_files`/`rotated_context_history_path` de `doc_organize.projects.layout` listan y nombran los ficheros.
+- **Ordenar y filtrar la caché por los metadatos de 1.5.0** (G43, petición de doc_organize_web): `CacheOrderBy` admite
+  `"mime_type"`, `"created_time"` y `"owner_name"` (este, sin distinguir mayúsculas), con el mismo contrato que G40
+  (empate por ruta, `NULL` al final). `count_entries` y `load_cache_page` ganan `mime_type: str | Sequence[str] | None`
+  (igualdad exacta, uno o varios tipos). Nuevo `CacheManager.list_mime_types(...)`: tipos presentes con su recuento,
+  para el desplegable del filtro. Con 100 000 entradas, una página tarda ≤ 151 ms; sin índices nuevos ni migración.
 
 ### Corregido
 
