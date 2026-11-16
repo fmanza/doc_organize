@@ -32,6 +32,9 @@ _OOXML_EXTENSIONS = frozenset({"docx", "docm", "xlsx", "xlsm", "pptx", "pptm"})
 _CORE_XML = "docProps/core.xml"
 #: Un `core.xml` real ocupa ~1 KB; uno mucho mayor es un fichero manipulado y no se descomprime.
 _MAX_CORE_XML_BYTES = 1_000_000
+#: Cerrojo propio, solo si Docling no ofrece el suyo. Se crea aquí, una vez: `functools.cache` no impide que dos hilos
+#: ejecuten a la vez la primera llamada a `_pdfium_lock()`, y cada uno habría creado su propio cerrojo.
+_FALLBACK_PDFIUM_LOCK = threading.Lock()
 #: Mayor que esto, el PDF se abre por ruta (bajo el cerrojo) en vez de leerse entero en memoria.
 _MAX_PDF_BYTES_IN_MEMORY = 16_000_000
 _NAMESPACES = {
@@ -79,7 +82,7 @@ def _pdfium_lock() -> AbstractContextManager[bool]:
         from docling.utils.locks import pypdfium2_lock
     except ImportError:
         _logger.debug("Docling no ofrece 'docling.utils.locks.pypdfium2_lock': se usa un cerrojo propio para PDFium")
-        return threading.Lock()
+        return _FALLBACK_PDFIUM_LOCK
     lock: AbstractContextManager[bool] = pypdfium2_lock
     return lock
 

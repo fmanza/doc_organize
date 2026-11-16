@@ -45,7 +45,8 @@ releases publicados antes de esa versión).
   vez se perdían hasta un 20 % de las líneas, también en disco local. `append_context_build` escribe ahora bajo un
   bloqueo entre procesos (`CONTEXT_HISTORY.jsonl.lock`, creado en exclusiva, válido en SMB y NFS), con una sola
   escritura y `fsync`. Si otro proceso mantiene el bloqueo más de 5 s, o un bloqueo huérfano tiene más de 60 s, se
-  avisa o se rompe; la construcción nunca falla por el historial. Tampoco escribe ya a través de un enlace simbólico.
+  avisa o se rompe; la construcción nunca falla por el historial. Tampoco escribe ni gira a través de un enlace
+  simbólico, ni sigue uno puesto como fichero de bloqueo (en Windows, sin `O_NOFOLLOW`, se comprueba justo antes).
 
 ## [1.5.0] - 2026-11-16
 

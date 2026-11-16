@@ -202,6 +202,18 @@ descripción, palabras clave ni idioma.
 - F3 (coste en red) resuelto por L4b: los sin clasificar se leen con la misma concurrencia.
 - Tests: `tests/unit/test_context_unclassified.py` (15).
 
+**Auditoría de código (2026-11-16, antes del tag): APROBADO CON CONDICIONES, condiciones resueltas.**
+
+- H1: un `.lock` que fuera enlace simbólico roto dejaba `_acquire` en un bucle sin fin en POSIX (`stat` sigue el
+  enlace) y en Windows creaba el destino del enlace. Ahora `lstat`, el enlace cuenta como bloqueo ajeno y el plazo se
+  comprueba en todos los caminos.
+- H2: «no escribe a través de un enlace» no se cumplía en Windows (sin `O_NOFOLLOW`). Ahora se rechaza antes de girar
+  o escribir; las copias giradas que sean enlaces no se listan.
+- H3: el cerrojo de PDFium de reserva podía duplicarse en la primera llamada concurrente; ahora es uno de módulo.
+- Menores: `.json` de los sin clasificar leídos en paralelo; `get_domain` no carga `unclassified.json`; errores
+  simultáneos distintos se registran; `mime_type` sin repetidos; tamaño de `Context` serializado anotado en el W2 web.
+- Tests nuevos: 7 fallan con el código anterior. Más cobertura de sin clasificar en modo manifiesto y tras la Sub-fase B.
+
 ### Fase L6 — Cierre de versión 1.6.0
 
 `CHANGELOG.md`, `docs/api/publica.md` (fila 1.6.0), `docs/api/context.md`, `docs/api/cache.md`, `docs/functional/*`,

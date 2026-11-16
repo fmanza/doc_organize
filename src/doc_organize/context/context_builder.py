@@ -678,12 +678,20 @@ class ContextBuilder:
 
         Sin `.md`/`.json` o con un `.json` ilegible, `"incomplete_artifacts"`; si no, `"below_threshold"`, con lo que
         propusieron las reglas (`rules`; `None` en modo manifiesto, donde solo quedan sin clasificar los incompletos).
+        Los `.json` se leen de `properties_concurrency` en `properties_concurrency` (pueden estar en una carpeta de
+        red); el idioma se detecta después, de uno en uno, como en los clasificados.
         """
-        details: list[UnclassifiedDocument] = []
-        for document in unclassified:
-            conversion = None
+        conversions: list[tuple[str, str | None] | None] = [None] * len(unclassified)
+
+        async def read_json(item: tuple[int, ConversionResult]) -> None:
+            index, document = item
             if document.success and document.markdown_path and document.json_path:
-                conversion = await read_conversion_json(document.json_path)
+                conversions[index] = await read_conversion_json(document.json_path)
+
+        await self._for_each_bounded(list(enumerate(unclassified)), read_json, cancel_token)
+
+        details: list[UnclassifiedDocument] = []
+        for document, conversion in zip(unclassified, conversions, strict=True):
             if conversion is None:
                 title, document_type = resolve_title_and_type(document, None)
                 details.append(
@@ -756,25 +764,41 @@ class ContextBuilder:
     async def _read_properties(self, documents: Sequence[DomainDocument | UnclassifiedDocument], cancel_token: CancelToken | None) -> None:
         """Autor, descripción y palabras clave de cada original, con hasta `properties_concurrency` lecturas a la vez.
 
-        Cada tarea toma el siguiente documento pendiente y comprueba la cancelación antes de leerlo; si se cancela, las
-        demás tareas se detienen y se propaga la misma excepción que en 1.5.0 (no un `ExceptionGroup`).
+        Si se cancela, se propaga la misma excepción que en 1.5.0 (ver `_for_each_bounded`).
         """
-        pending = iter(documents)
+
+        async def read(document: DomainDocument | UnclassifiedDocument) -> None:
+            properties = await asyncio.to_thread(read_document_properties, document.source_path)
+            document.author = properties.author
+            document.description = properties.description
+            document.keywords = list(properties.keywords)
+
+        await self._for_each_bounded(documents, read, cancel_token)
+
+    async def _for_each_bounded[T](self, items: Sequence[T], action: Callable[[T], Awaitable[None]], cancel_token: CancelToken | None) -> None:
+        """`action` sobre cada elemento de `items`, con hasta `properties_concurrency` a la vez (1.6.0).
+
+        Cada tarea toma el siguiente elemento pendiente y comprueba la cancelación antes de empezarlo. Si una falla, las
+        demás se detienen y se propaga la primera excepción tal cual (no un `ExceptionGroup`, para que la cancelación
+        siga siendo `OperationCancelledError`); las demás distintas, si las hay, se registran como aviso.
+        """
+        pending = iter(items)
 
         async def worker() -> None:
-            for document in pending:  # iterador compartido: el bucle de eventos no cambia de tarea dentro de next()
+            for item in pending:  # iterador compartido: el bucle de eventos no cambia de tarea dentro de next()
                 checkpoint(cancel_token)
-                properties = await asyncio.to_thread(read_document_properties, document.source_path)
-                document.author = properties.author
-                document.description = properties.description
-                document.keywords = list(properties.keywords)
+                await action(item)
 
         try:
             async with asyncio.TaskGroup() as group:
-                for _ in range(min(self.properties_concurrency, len(documents))):
+                for _ in range(min(self.properties_concurrency, len(items))):
                     group.create_task(worker())
         except BaseExceptionGroup as errors:
-            raise errors.exceptions[0] from None
+            first, *others = errors.exceptions
+            for other in others:
+                if type(other) is not type(first):
+                    self.logger.warning(f"Otro error a la vez que {type(first).__name__}: {type(other).__name__}: {other}")
+            raise first from None
 
     async def _enrich_with_ai(
         self,

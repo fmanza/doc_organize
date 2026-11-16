@@ -126,7 +126,8 @@ class ContextRegistry:
             ContextNotFoundError: Si el proyecto no tiene contexto todavía.
             DomainNotFoundError: Si no hay ningún dominio con ese slug.
         """
-        context = await self.load_context(project)
+        async with self._lock:
+            context = await self._load(project, with_unclassified=False)  # el detalle de los sin clasificar no hace falta
         domain = next((d for d in context.domains if d.slug == slug), None)
         if domain is None:
             raise DomainNotFoundError(f"No hay ningún dominio '{slug}' en el contexto de '{project.name}'.")
@@ -141,7 +142,7 @@ class ContextRegistry:
     def _domain_dir(self, project: Project, slug: str) -> Path:
         return Path(project.root_path) / _DOMAINS_DIR_NAME / slug
 
-    async def _load(self, project: Project) -> Context:
+    async def _load(self, project: Project, *, with_unclassified: bool = True) -> Context:
         context_path = self._context_path(project)
         if not context_path.exists():
             raise ContextNotFoundError(f"El proyecto '{project.name}' no tiene contexto construido todavía.")
@@ -170,7 +171,8 @@ class ContextRegistry:
             if any(error["loc"][:1] == ("output_folder_name",) for error in exc.errors()):
                 raise ContextError(f"El contexto del proyecto tiene un 'output_folder_name' inválido: {context_path}") from exc
             raise ContextError(f"El contexto del proyecto está corrupto: {context_path}") from exc
-        context.unclassified_details = await self._load_unclassified(project, context.unclassified_documents)
+        if with_unclassified:
+            context.unclassified_details = await self._load_unclassified(project, context.unclassified_documents)
         return context
 
     async def _load_unclassified(self, project: Project, unclassified_documents: list[str]) -> list[UnclassifiedDocument]:

@@ -9,12 +9,17 @@ Un bloqueo cuyo fichero es más viejo que `stale_after` se da por huérfano (pro
 mide con el reloj del servidor de ficheros (la `mtime` de un fichero de sondeo recién creado en la misma carpeta), no
 con el del equipo local, para que dos equipos con relojes desajustados no rompan un bloqueo vivo.
 
+Un fichero de bloqueo que es un enlace simbólico nunca se sigue: cuenta como un bloqueo ajeno (se espera o, si es viejo,
+se rompe el enlace, no su destino). En Windows no existe `O_NOFOLLOW`, así que se comprueba antes de crearlo; queda un
+margen mínimo entre la comprobación y la creación.
+
 Riesgo aceptado: si dos procesos deciden a la vez que el mismo bloqueo es huérfano, uno de ellos puede romper el bloqueo
 que el otro acaba de tomar. Hace falta un proceso muerto con el bloqueo y dos esperando en el mismo instante; en el peor
 caso se intercalan dos líneas del historial, que `list_context_builds` ya descarta como dañadas.
 """
 
 import contextlib
+import errno
 import os
 import socket
 import time
@@ -59,9 +64,13 @@ def _server_now(folder: Path) -> float:
 
 
 def _break_if_stale(lock: Path, stale_after: float) -> bool:
-    """Borra `lock` si es más viejo que `stale_after`; True si lo ha roto (o ya no existía)."""
+    """Borra `lock` si es más viejo que `stale_after`; True si lo ha roto (o ya no existía).
+
+    Usa `lstat`: un enlace simbólico (roto o no) se juzga por sí mismo y se rompe el enlace, nunca su destino. Con
+    `stat`, un enlace roto parecía «ya no existe» y `_acquire` reintentaba sin fin.
+    """
     try:
-        before = lock.stat()
+        before = lock.lstat()
     except FileNotFoundError:
         return True
     age = _server_now(lock.parent) - before.st_mtime
@@ -74,7 +83,7 @@ def _break_if_stale(lock: Path, stale_after: float) -> bool:
     except FileNotFoundError:
         return True
     try:
-        after = tombstone.stat()
+        after = tombstone.lstat()
         if after.st_mtime_ns != before.st_mtime_ns:
             logger.warning(f"El bloqueo '{lock}' cambió mientras se rompía por huérfano; se libera igualmente.")
     finally:
@@ -83,10 +92,21 @@ def _break_if_stale(lock: Path, stale_after: float) -> bool:
     return True
 
 
-def _wait_or_timeout(lock: Path, deadline: float, timeout: float) -> None:
+def _check_deadline(lock: Path, deadline: float, timeout: float) -> None:
     if time.monotonic() >= deadline:
         raise TimeoutError(f"No se pudo tomar el bloqueo '{lock}' en {timeout:g} s")
+
+
+def _wait_or_timeout(lock: Path, deadline: float, timeout: float) -> None:
+    _check_deadline(lock, deadline, timeout)
     time.sleep(_POLL_S)
+
+
+def _create_exclusive(lock: Path) -> int:
+    """Crea `lock` en exclusiva sin seguir enlaces; `FileExistsError` si ya existe, también si es un enlace."""
+    if os.path.islink(lock):  # Windows: sin O_NOFOLLOW, O_EXCL crearía el destino de un enlace roto
+        raise FileExistsError(errno.EEXIST, "El fichero de bloqueo es un enlace simbólico", str(lock))
+    return os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY | _O_NOFOLLOW, 0o644)
 
 
 def _acquire(lock: Path, timeout: float, stale_after: float) -> None:
@@ -94,9 +114,10 @@ def _acquire(lock: Path, timeout: float, stale_after: float) -> None:
     owner = f"{os.getpid()} {socket.gethostname()} {datetime.now(UTC).isoformat()}\n".encode()
     while True:
         try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY | _O_NOFOLLOW, 0o644)
+            fd = _create_exclusive(lock)
         except FileExistsError:
             if _break_if_stale(lock, stale_after):
+                _check_deadline(lock, deadline, timeout)  # acota el bucle aunque algo raro lo repita sin esperar
                 continue
             _wait_or_timeout(lock, deadline, timeout)
             continue

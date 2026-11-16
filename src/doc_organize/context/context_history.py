@@ -9,6 +9,7 @@ la `.1` a `.2`, etc., y se conservan `backups` copias (4). Las lecturas recorren
 """
 
 import asyncio
+import errno
 import json
 import os
 import time
@@ -133,6 +134,16 @@ def build_record(previous: Context | None, current: Context) -> ContextBuildReco
     )
 
 
+def _refuse_symlink(history_path: Path) -> None:
+    """`OSError(ELOOP)` si `history_path` es un enlace simbólico: nunca se escribe ni se gira a través de uno.
+
+    En Linux y macOS `O_NOFOLLOW` ya lo impide al abrir; en Windows no existe, así que se comprueba antes (queda un
+    margen mínimo entre la comprobación y la apertura, bajo el bloqueo).
+    """
+    if os.path.islink(history_path):
+        raise OSError(errno.ELOOP, "El historial del contexto es un enlace simbólico; no se escribe", str(history_path))
+
+
 def _append_line(history_path: Path, line: bytes) -> None:
     """Una sola escritura con `O_APPEND`, sin seguir enlaces, y `fsync` antes de soltar el bloqueo."""
     fd = os.open(history_path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | _O_NOFOLLOW | _O_BINARY, 0o644)
@@ -198,6 +209,7 @@ async def append_context_build(history_path: Path, record: ContextBuildRecord, p
 
     def _append() -> None:
         with exclusive_lock(history_path):
+            _refuse_symlink(history_path)
             if _needs_rotation(history_path, len(line), policy):
                 try:
                     _rotate(history_path, policy.backups)

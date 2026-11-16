@@ -1,5 +1,7 @@
 """Lectura concurrente de las propiedades de los originales sin llamar a PDFium a la vez (G44, 1.6.0)."""
 
+import asyncio
+import logging
 import sys
 import threading
 import time
@@ -124,21 +126,47 @@ def test_a_pdf_conversion_in_another_thread_blocks_the_read(tmp_path: Path) -> N
         assert future.result(timeout=5).author == "Autor 0"
 
 
-def test_without_docling_s_lock_falls_back_to_an_own_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_without_docling_s_lock_every_thread_gets_the_same_own_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from docling.utils.locks import pypdfium2_lock
 
     monkeypatch.setitem(sys.modules, "docling.utils.locks", None)  # la importación lanza ImportError
     document_properties_module._pdfium_lock.cache_clear()
-    try:
-        lock = document_properties_module._pdfium_lock()
-        (path,) = _pdfs(tmp_path, 1)
+    start = threading.Barrier(8)
 
-        assert lock is document_properties_module._pdfium_lock()  # siempre el mismo objeto
+    def first_call(_: int) -> object:
+        start.wait()  # las 8 primeras llamadas a la vez, como las tareas de ContextBuilder
+        return document_properties_module._pdfium_lock()
+
+    try:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            locks = set(map(id, pool.map(first_call, range(8))))
+        (path,) = _pdfs(tmp_path, 1)
         assert read_document_properties(path).author == "Autor 0"
     finally:
         document_properties_module._pdfium_lock.cache_clear()
 
-    assert lock is not pypdfium2_lock
+    assert locks == {id(document_properties_module._FALLBACK_PDFIUM_LOCK)}
+    assert document_properties_module._FALLBACK_PDFIUM_LOCK is not pypdfium2_lock
+
+
+@pytest.mark.asyncio
+async def test_two_different_errors_at_once_raise_the_first_and_log_the_other(caplog: pytest.LogCaptureFixture) -> None:
+    both_started = asyncio.Event()
+    started = 0
+
+    async def fail(item: int) -> None:
+        nonlocal started
+        started += 1
+        if started == 2:
+            both_started.set()
+        await both_started.wait()
+        raise (ValueError if item == 0 else RuntimeError)(f"fallo {item}")
+
+    with caplog.at_level(logging.WARNING), pytest.raises((ValueError, RuntimeError)) as raised:
+        await ContextBuilder(properties_concurrency=2)._for_each_bounded([0, 1], fail, None)
+
+    assert not isinstance(raised.value, BaseExceptionGroup)
+    assert "Otro error a la vez" in caplog.text
 
 
 def _builder(concurrency: int) -> ContextBuilder:

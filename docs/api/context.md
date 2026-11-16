@@ -186,7 +186,10 @@ La escritura y el giro se hacen bajo un bloqueo entre procesos (`CONTEXT_HISTORY
 así que dos construcciones del mismo proyecto desde procesos o equipos distintos no pierden ni mezclan líneas. Si otro
 proceso mantiene el bloqueo más de 5 s, la construcción se guarda igual y solo se avisa de que no entró en el
 historial; un bloqueo de más de 60 s se da por huérfano y se rompe. Las lecturas no toman el bloqueo: si coinciden con
-un giro, esa lectura puede omitir o repetir alguna construcción, pero el historial en disco no cambia.
+un giro, esa lectura puede omitir o repetir alguna construcción, pero el historial en disco no cambia. Nunca se
+escribe, se gira ni se lee a través de un enlace simbólico: si `CONTEXT_HISTORY.jsonl` lo es, la construcción solo avisa
+de que no entró en el historial; un fichero de bloqueo que lo sea cuenta como bloqueo ajeno, y si es viejo se rompe el
+enlace, no su destino.
 
 ### Autor, descripción y palabras clave (1.5.0)
 
@@ -254,8 +257,8 @@ no llama a `on_ai_progress`, que sigue siendo solo de la Sub-fase B.
 | `author`, `description`, `keywords` | Lo que declara el original, como en los clasificados. **Nunca de la IA**: el enriquecimiento solo se aplica a los clasificados |
 | `language` | Idioma del texto convertido; `None` sin `.json` |
 
-Los originales de los sin clasificar se leen en la misma pasada que los demás (con `properties_concurrency`), así
-que el coste es el mismo por documento. El detalle se guarda aparte, en `unclassified.json` junto a `context.json`
+Los originales de los sin clasificar se leen en la misma pasada que los demás, y sus `.json` también en paralelo
+(los dos con `properties_concurrency`), así que el coste es el mismo por documento. El detalle se guarda aparte, en `unclassified.json` junto a `context.json`
 (ver `ContextRegistry`). Un contexto de 1.5.0 se carga con `unclassified_details=[]`.
 
 ```python
@@ -431,7 +434,7 @@ pequeño aunque haya miles de documentos sin clasificar. Se escribe antes que `c
 `context.json`: se conservan los detalles cuya ruta está en `unclassified_documents`, en su orden. Si sobran o faltan
 (un guardado cortado entre los dos ficheros, o un consumidor que editó `unclassified_documents`), se avisa en el log.
 Sin el fichero (contexto de 1.5.0), `unclassified_details=[]`. Si el fichero está dañado, `ContextError`, igual que un
-`index.json`. `delete_context` lo borra.
+`index.json`. `delete_context` lo borra. `get_domain` no lo lee: no lo necesita.
 
 **Escritura sin seguir enlaces (0.14.0, L-8e)**: `context.json`, `index.json` y `DOMAIN.md` (igual que `index.md`,
 `zensical.toml` y `taxonomy_manifest.md`) se escriben en un temporal con nombre aleatorio creado en exclusiva en la

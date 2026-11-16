@@ -17,6 +17,7 @@ relativa a la carpeta escaneada (``relative_source_path``): sin Docling, para qu
 API de doc_organize_web, G20) calcule las mismas rutas que ``DocumentConverter``.
 """
 
+import os
 import re
 import unicodedata
 
@@ -354,7 +355,8 @@ def rotated_context_history_path(history_path: Path, index: int) -> Path:
 
 def context_history_files(history_path: Path) -> list[Path]:
     """Copias giradas de ``history_path`` que existen, de la más antigua a la más reciente, y ``history_path`` si
-    existe (1.6.0). Se buscan por nombre, así que una numeración con huecos (un giro a medias) se lista igual.
+    existe (1.6.0). Se buscan por nombre, así que una numeración con huecos (un giro a medias) se lista igual. Los
+    enlaces simbólicos no se listan: el historial nunca los crea, y así no se leen ni se giran ficheros ajenos.
 
     Example:
         >>> context_history_files(Path("/ruta/que/no/existe/CONTEXT_HISTORY.jsonl"))
@@ -362,7 +364,8 @@ def context_history_files(history_path: Path) -> list[Path]:
     """
     pattern = re.compile(rf"^{re.escape(history_path.stem)}\.(\d+){re.escape(history_path.suffix)}$")
     try:
-        names = [entry.name for entry in history_path.parent.iterdir() if entry.is_file()]
+        with os.scandir(history_path.parent) as entries:
+            names = [entry.name for entry in entries if entry.is_file(follow_symlinks=False)]
     except OSError:  # la carpeta no existe o no se puede leer
         return []
     rotated: list[tuple[int, str]] = []

@@ -1,16 +1,27 @@
 """Metadatos de los documentos sin clasificar y su persistencia en `unclassified.json` (G42, 1.6.0)."""
 
+import asyncio
 import json
 import logging
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from doc_organize.context import context_builder as context_builder_module
 from doc_organize.context.context_builder import ContextBuilder
 from doc_organize.context.context_registry import ContextRegistry
 from doc_organize.core.exceptions import ContextError
-from doc_organize.core.models import Context, ConversionResult, Project, UnclassifiedDocument
+from doc_organize.core.models import (
+    Context,
+    ConversionResult,
+    DomainClassificationResult,
+    Project,
+    TaxonomyCatalogEntry,
+    TaxonomyManifest,
+    UnclassifiedDocument,
+)
 from doc_organize.projects.layout import RESERVED_OUTPUT_FOLDER_NAMES, ProjectLayout
 from tests.unit.test_context_builder_enrichment import _document, _project, _ScriptedEnrichment
 from tests.unit.test_document_properties import make_pdf
@@ -215,3 +226,83 @@ async def test_classified_documents_are_unchanged(tmp_path: Path) -> None:
 
     assert context.unclassified_details == []
     assert context.domains[0].documents[0].author == "Ana Ruiz"
+
+
+class _UndecidedAI:
+    """Doble de `DomainClassificationClient` que nunca elige dominio."""
+
+    config = SimpleNamespace(model="modelo-dominios")
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def classify(self, *, chunks_text: str, title: str | None, candidate_domains: list[str]) -> DomainClassificationResult:
+        self.calls += 1
+        return DomainClassificationResult(domain=None, confidence=0.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("budget", [None, 0])
+async def test_after_the_ai_phase_they_are_still_below_threshold(tmp_path: Path, budget: int | None) -> None:
+    """La IA no eligió dominio (`None`) o no llegó a preguntarse (presupuesto 0): el motivo es el mismo."""
+    client = _UndecidedAI()
+    documents = [_converted(tmp_path, "Calidad", "auditorias.pdf", text=SPANISH)]
+    await _build(tmp_path, [_converted(tmp_path, "Seguridad", "politica.pdf", text="ciberseguridad")])  # el catálogo existe
+
+    context = await _build(tmp_path, documents, ai_classification_enabled=True, ai_classification_client=client, ai_max_documents=budget)
+
+    (detail,) = context.unclassified_details
+    assert detail.reason == "below_threshold"
+    assert client.calls == (1 if budget is None else 0)
+
+
+@pytest.mark.asyncio
+async def test_manifest_mode_only_leaves_incomplete_documents_without_rules_proposal(tmp_path: Path) -> None:
+    manifest = TaxonomyManifest(
+        domains=[TaxonomyCatalogEntry(slug="calidad", name="Calidad")],
+        material_types=[TaxonomyCatalogEntry(slug="procedimiento", name="Procedimiento")],
+    )
+    documents = [_converted(tmp_path, "Varios", "nada.pdf", text="texto sin ninguna palabra del catálogo"), _failed(tmp_path, "roto.pdf")]
+
+    context = await ContextBuilder(ContextRegistry()).build(_project(tmp_path), documents, taxonomy_manifest=manifest)
+
+    (detail,) = context.unclassified_details  # «nada.pdf» va a «sin-clasificar» en el eje, no a la lista
+    assert (Path(detail.source_path).name, detail.reason) == ("roto.pdf", "incomplete_artifacts")
+    assert (detail.rules_domain, detail.rules_confidence) == (None, None)
+    assert detail.author == "Eva Sanz"
+
+
+@pytest.mark.asyncio
+async def test_their_json_files_are_read_with_bounded_concurrency(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    real = context_builder_module.read_conversion_json
+    active = peak = 0
+
+    async def slow_read(json_path: str) -> tuple[str, str | None] | None:
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.02)
+        active -= 1
+        return await real(json_path)
+
+    monkeypatch.setattr(context_builder_module, "read_conversion_json", slow_read)
+    documents = [_converted(tmp_path, "Calidad", f"doc{i}.pdf", text=SPANISH) for i in range(10)]
+
+    context = await ContextBuilder(ContextRegistry(), properties_concurrency=3).build(_project(tmp_path), documents, candidate_domains=_CATALOG)
+
+    assert peak == 3
+    assert [Path(detail.source_path).name for detail in context.unclassified_details] == [f"doc{i}.pdf" for i in range(10)]
+    assert all(detail.language == "es" for detail in context.unclassified_details)
+
+
+@pytest.mark.asyncio
+async def test_get_domain_does_not_read_unclassified_json(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    await _build(tmp_path, _mixed(tmp_path))
+    ProjectLayout.for_project(project).unclassified_file.write_text("{dañado", encoding="utf-8")
+
+    domain = await ContextRegistry().get_domain(project, "ciberseguridad")
+
+    assert [Path(document.source_path).name for document in domain.documents] == ["politica.pdf"]
+    with pytest.raises(ContextError):
+        await ContextRegistry().load_context(project)

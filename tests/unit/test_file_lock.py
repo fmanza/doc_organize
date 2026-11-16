@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 
 from pathlib import Path
@@ -16,6 +17,7 @@ import pytest
 from doc_organize.context import context_history as context_history_module
 from doc_organize.context.context_history import append_context_build, list_context_builds
 from doc_organize.core.models import ContextBuildRecord, ContextChange
+from doc_organize.utils import file_lock as file_lock_module
 from doc_organize.utils.file_lock import exclusive_lock, lock_path_for
 
 
@@ -92,18 +94,71 @@ def test_append_fails_with_os_error_while_another_process_holds_the_lock(tmp_pat
     assert not history.exists()
 
 
-@pytest.mark.skipif(os.name == "nt", reason="crear enlaces simbólicos en Windows exige privilegios")
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    """Crea el enlace o salta el test (en Windows hace falta el modo desarrollador o privilegios)."""
+    try:
+        link.symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"no se pueden crear enlaces simbólicos aquí: {exc}")
+
+
 def test_append_does_not_follow_a_symlink(tmp_path: Path) -> None:
     elsewhere = tmp_path / "fuera.txt"
     elsewhere.write_text("", encoding="utf-8")
     history = tmp_path / "historial_contexto" / "CONTEXT_HISTORY.jsonl"
     history.parent.mkdir()
-    history.symlink_to(elsewhere)
+    _symlink_or_skip(history, elsewhere)
 
     with pytest.raises(OSError):
         asyncio.run(append_context_build(history, _record(1)))
 
     assert elsewhere.read_text(encoding="utf-8") == ""
+    assert not (tmp_path / "historial_contexto" / "CONTEXT_HISTORY.1.jsonl").exists()  # tampoco gira el enlace
+
+
+def _acquire_in_thread(target: Path, timeout: float) -> dict[str, object]:
+    """Intenta tomar el bloqueo en un hilo y espera como mucho 5 s: un bucle sin fin no cuelga la suite."""
+    result: dict[str, object] = {}
+
+    def run() -> None:
+        try:
+            with exclusive_lock(target, timeout=timeout):
+                result["outcome"] = "acquired"
+        except OSError as exc:
+            result["outcome"] = type(exc).__name__
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(5)
+    result["alive"] = thread.is_alive()
+    return result
+
+
+def test_a_dangling_symlink_lock_is_a_busy_lock_not_a_loop(tmp_path: Path) -> None:
+    target = tmp_path / "CONTEXT_HISTORY.jsonl"
+    nowhere = tmp_path / "no-existe"
+    _symlink_or_skip(lock_path_for(target), nowhere)
+
+    result = _acquire_in_thread(target, timeout=0.3)
+
+    assert result == {"outcome": "TimeoutError", "alive": False}  # reciente: se espera; antes, bucle sin fin
+    assert not nowhere.exists()  # en Windows, O_EXCL creaba el destino del enlace
+
+
+def test_an_old_symlink_lock_is_broken_without_touching_its_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "CONTEXT_HISTORY.jsonl"
+    elsewhere = tmp_path / "fuera.txt"
+    elsewhere.write_text("no tocar", encoding="utf-8")
+    lock = lock_path_for(target)
+    _symlink_or_skip(lock, elsewhere)
+    real_now = file_lock_module._server_now
+    monkeypatch.setattr(file_lock_module, "_server_now", lambda folder: real_now(folder) + 3600)  # el enlace parece de hace 1 h
+
+    result = _acquire_in_thread(target, timeout=2.0)
+
+    assert result == {"outcome": "acquired", "alive": False}
+    assert elsewhere.read_text(encoding="utf-8") == "no tocar"
+    assert not os.path.lexists(lock)
 
 
 _WRITER = textwrap.dedent(

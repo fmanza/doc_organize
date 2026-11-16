@@ -55,6 +55,7 @@ async def test_filters_by_several_mime_types(cache: CacheManager) -> None:
 
     assert sorted(_names(page)) == ["notas.txt", "plan.docx"]
     assert await cache.count_entries(mime_type=(_DOCX, _TXT)) == 2
+    assert await cache.count_entries(mime_type=[_PDF, _PDF, _PDF]) == 3  # repetidos: un solo parámetro
 
 
 @pytest.mark.asyncio
