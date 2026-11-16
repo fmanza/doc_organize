@@ -45,6 +45,9 @@ from doc_organize.utils.logging import get_logger
 from doc_organize.utils.text_clean import clean_text
 
 _DEFAULT_THRESHOLD = 0.5
+#: Medido en un NAS por SMB (G44, 2026-11-16): con 4 lecturas a la vez, 28 ms por documento frente a 88 ms de una en
+#: una; con 8, apenas mejora y la lectura más lenta se duplica.
+_DEFAULT_PROPERTIES_CONCURRENCY = 4
 
 _UNCLASSIFIED_SLUG = "sin-clasificar"
 """Slug placeholder para un eje (dominio o tipo de material) que no alcanza `threshold`
@@ -167,14 +170,28 @@ class ContextBuilder:
         'ciberseguridad'
     """
 
-    def __init__(self, registry: ContextRegistry | None = None, *, history_policy: ContextHistoryPolicy | None = None) -> None:
+    def __init__(
+        self,
+        registry: ContextRegistry | None = None,
+        *,
+        history_policy: ContextHistoryPolicy | None = None,
+        properties_concurrency: int = _DEFAULT_PROPERTIES_CONCURRENCY,
+    ) -> None:
         """
         Args:
             registry: Dónde se lee y guarda el contexto (`ContextRegistry()` por defecto).
             history_policy: Giro de `CONTEXT_HISTORY.jsonl` (1.6.0); `None` = `ContextHistoryPolicy()` (5 MB, 4 copias).
+            properties_concurrency: Originales cuyas propiedades se leen a la vez (1.6.0). En una carpeta de red, 4
+                lecturas a la vez cuestan un tercio que de una en una; `1` = una detrás de otra, como en 1.5.0.
+
+        Raises:
+            ValueError: Si `properties_concurrency` es menor que 1.
         """
+        if properties_concurrency < 1:
+            raise ValueError(f"properties_concurrency debe ser al menos 1, no {properties_concurrency}")
         self.registry = registry or ContextRegistry()
         self.history_policy = history_policy or ContextHistoryPolicy()
+        self.properties_concurrency = properties_concurrency
         self.logger = get_logger(__name__)
 
     async def build(
@@ -667,19 +684,40 @@ class ContextBuilder:
         el idioma detectado en su texto convertido (1.5.0).
 
         Un original ilegible o borrado deja los campos vacíos (`read_document_properties` no lanza); un `.json` de
-        conversión ilegible deja `language` en `None`.
+        conversión ilegible deja `language` en `None`. Los originales se leen de `properties_concurrency` en
+        `properties_concurrency` (1.6.0); el idioma, después y de uno en uno.
         """
-        for documents in classified.values():
-            for document in documents:
+        documents = [document for domain_documents in classified.values() for document in domain_documents]
+        await self._read_properties(documents, cancel_token)
+        for document in documents:
+            conversion = await read_conversion_json(document.json_path)
+            if conversion is not None:
+                chunks_text, title = conversion
+                document.language = await asyncio.to_thread(detect_language, f"{title or ''}\n{chunks_text}")
+            checkpoint(cancel_token)
+
+    async def _read_properties(self, documents: list[DomainDocument], cancel_token: CancelToken | None) -> None:
+        """Autor, descripción y palabras clave de cada original, con hasta `properties_concurrency` lecturas a la vez.
+
+        Cada tarea toma el siguiente documento pendiente y comprueba la cancelación antes de leerlo; si se cancela, las
+        demás tareas se detienen y se propaga la misma excepción que en 1.5.0 (no un `ExceptionGroup`).
+        """
+        pending = iter(documents)
+
+        async def worker() -> None:
+            for document in pending:  # iterador compartido: el bucle de eventos no cambia de tarea dentro de next()
+                checkpoint(cancel_token)
                 properties = await asyncio.to_thread(read_document_properties, document.source_path)
                 document.author = properties.author
                 document.description = properties.description
                 document.keywords = list(properties.keywords)
-                conversion = await read_conversion_json(document.json_path)
-                if conversion is not None:
-                    chunks_text, title = conversion
-                    document.language = await asyncio.to_thread(detect_language, f"{title or ''}\n{chunks_text}")
-                checkpoint(cancel_token)
+
+        try:
+            async with asyncio.TaskGroup() as group:
+                for _ in range(min(self.properties_concurrency, len(documents))):
+                    group.create_task(worker())
+        except BaseExceptionGroup as errors:
+            raise errors.exceptions[0] from None
 
     async def _enrich_with_ai(
         self,

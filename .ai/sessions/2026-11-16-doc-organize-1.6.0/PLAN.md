@@ -140,6 +140,26 @@ y satura el NAS.
   la vez (doble que cuenta llamadas simultáneas); `properties_concurrency=1` reproduce 1.5.0; error en un fichero no
   afecta a los demás; cancelación (`checkpoint`) entre lotes.
 
+**Estado (2026-11-16): implementada en `feat/parallel-document-properties` (sobre `feat/context-created-at`).**
+
+- Medición en el NAS (`doc_organize_web/backend/scripts/bench_properties_strategies.py`, 200 ficheros por pasada no
+  leídos en W0): secuencial 88 ms/doc; hilos sin cerrojo 32; cerrojo por ruta 66; **opción A con 4 hilos, 28**; opción
+  A con 8, 27 (p95 de 210 a 466 ms); procesos (opción B) 38. Elegida la **opción A con 4**: máximo de llamadas
+  simultáneas a PDFium medido, 1.
+- Diferencias con el plan: el cerrojo y la lectura de bytes están en `read_document_properties` (no en el
+  constructor), así que la función es segura entre hilos para cualquier consumidor. En vez de `Semaphore` hay N tareas
+  que toman el siguiente documento de un iterador compartido (`TaskGroup`; la cancelación se propaga como
+  `OperationCancelledError`, sin `ExceptionGroup`). El tamaño se mira con `fstat` antes de leer y la lectura queda
+  acotada a 16 MB + 1.
+- Riesgo de convivir con Docling en el mismo proceso, cerrado con la alternativa B (analizada el 2026-11-16): el
+  cerrojo es `docling.utils.locks.pypdfium2_lock`, el mismo con el que Docling protege todas sus llamadas a PDFium. Se
+  resuelve la primera vez que se lee un PDF (importar `doc_organize.context` no importa Docling) y, si no existe, se usa
+  uno propio. Un test comprueba que es el objeto de Docling, para que un cambio de Docling falle en CI. Descartadas:
+  aceptar y documentar (el fallo es un cuelgue), leer el PDF sin PDFium (dependencia nueva o lector propio) y pool de
+  procesos (38 frente a 28 ms/doc). La web ya estaba aislada: cada operación corre en su propio subproceso.
+- Tests: `tests/unit/test_document_properties_concurrency.py` (13). Sin el cerrojo, el de PDFium falla con 8 llamadas
+  a la vez; con PDFium real y sin cerrojo, el proceso se cuelga.
+
 ### Fase L5 — G42: metadatos de los documentos sin clasificar
 
 **Problema**: `Context.unclassified_documents: list[str]` solo guarda la ruta; los sin clasificar no tienen autor,

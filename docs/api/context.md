@@ -203,6 +203,26 @@ Tras clasificar, cada `DomainDocument` recibe lo que declara su documento origin
 borrado, dañado o cifrado dejan los campos vacíos sin interrumpir la construcción. Los textos se guardan en una línea y
 acotados (500 caracteres; hasta 20 palabras clave de 60).
 
+**Lectura en paralelo (1.6.0).** Los originales se leen de 4 en 4. En una carpeta de red (SMB), leerlos de uno en uno
+costaba unos 88 ms por documento; con 4 lecturas a la vez, 28 ms. Para cambiarlo:
+
+```python
+from doc_organize.context import ContextBuilder
+
+ContextBuilder(properties_concurrency=8)  # más lecturas a la vez; con un NAS doméstico apenas mejora
+ContextBuilder(properties_concurrency=1)  # de una en una, como en 1.5.0
+```
+
+PDFium (la librería que lee los PDF) no admite llamadas desde varios hilos a la vez, así que `read_document_properties`
+lee los bytes del PDF en paralelo y solo analiza uno cada vez, bajo un cerrojo. Un PDF de más de 16 MB se abre por
+ruta, para no cargarlo entero en memoria. `read_document_properties` se puede llamar desde varios hilos. El idioma se
+detecta después, de uno en uno. `cancel_token` se comprueba antes de cada lectura.
+
+El cerrojo es el mismo que usa Docling (`docling.utils.locks.pypdfium2_lock`), así que construir el contexto mientras
+otro hilo del mismo proceso convierte documentos tampoco llama a PDFium dos veces a la vez; mientras Docling procesa
+un PDF, la lectura de propiedades espera. Si tu código usa pypdfium2 directamente en el mismo proceso y en otro hilo,
+hazlo también bajo ese cerrojo.
+
 `language` es el idioma principal (ISO 639-1: `es`, `en`, `ca`…) detectado con
 [py3langid](https://github.com/adbar/py3langid) en el título y los primeros 4000 caracteres del texto convertido
 (`context/language_detection.py`), sin red. Solo se acepta con al menos 40 letras y probabilidad ≥ 0,7; si no, queda en
@@ -381,6 +401,7 @@ concurrencia que `ProjectRegistry` (`asyncio.Lock` + escritura atómica). Al
 reconstruir, borra `domains/<slug>/` de cualquier dominio ya no presente. `DOMAIN.md`
 solo regenera su sección `## Documentos clasificados` — el resto (editado a mano) se
 conserva.
+
 
 **Escritura sin seguir enlaces (0.14.0, L-8e)**: `context.json`, `index.json` y `DOMAIN.md` (igual que `index.md`,
 `zensical.toml` y `taxonomy_manifest.md`) se escriben en un temporal con nombre aleatorio creado en exclusiva en la
