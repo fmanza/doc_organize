@@ -11,8 +11,9 @@ classDiagram
         -db_path: Path
         +load_cache() dict[str, CacheEntry]
         +read_only: bool
-        +count_entries(search, relative_to, conversion_status) int
-        +load_cache_page(limit, offset, search, relative_to, conversion_status, order_by, descending) list[CacheEntry]
+        +count_entries(search, relative_to, conversion_status, mime_type) int
+        +load_cache_page(limit, offset, search, relative_to, conversion_status, order_by, descending, mime_type) list[CacheEntry]
+        +list_mime_types(search, relative_to, conversion_status) list[tuple[str, int]]
         +get_changes(cache: dict, current_docs: list) tuple
         +save_entries(entries: list[CacheEntry]) void
     }
@@ -46,6 +47,7 @@ class CacheManager:
         *,
         relative_to: str | Path | None = None,
         conversion_status: ConversionStatus | str | None = None,
+        mime_type: str | Sequence[str] | None = None,       # 1.6.0
     ) -> int
     
     async def load_cache_page(
@@ -58,7 +60,16 @@ class CacheManager:
         conversion_status: ConversionStatus | str | None = None,
         order_by: CacheOrderBy = "file_path",
         descending: bool = False,
+        mime_type: str | Sequence[str] | None = None,       # 1.6.0
     ) -> list[CacheEntry]
+    
+    async def list_mime_types(                              # 1.6.0
+        self,
+        search: str | None = None,
+        *,
+        relative_to: str | Path | None = None,
+        conversion_status: ConversionStatus | str | None = None,
+    ) -> list[tuple[str, int]]
     
     def get_changes(
         self,
@@ -113,6 +124,7 @@ Cuenta entradas de `cache_entries`, opcionalmente filtradas por `search`.
 | `search` | `str \| None` | Subcadena a buscar en `file_path` (nombre o carpeta). `None` cuenta todas |
 | `relative_to` | `str \| Path \| None` | Raíz escaneada (0.12.0): solo cuenta las entradas que cuelgan de ella y `search` se aplica a la ruta relativa a esa raíz (buscar `mnt` no encuentra el prefijo del montaje) |
 | `conversion_status` | `ConversionStatus \| str \| None` | Solo las entradas con ese estado (p. ej. `"error"`) (0.12.0) |
+| `mime_type` | `str \| Sequence[str] \| None` | Solo las entradas con ese tipo MIME exacto o con alguno de la lista (1.6.0). `None` o lista vacía no filtra; las entradas sin tipo (escaneadas antes de 1.5.0) nunca coinciden |
 
 | Retorno | Tipo | Descripción |
 |---|---|---|
@@ -136,8 +148,9 @@ Lee una página de `cache_entries`, ordenada por `file_path` (o por `order_by`, 
 | `search` | `str \| None` | Subcadena a buscar en `file_path`. `None` no filtra |
 | `relative_to` | `str \| Path \| None` | Igual que en `count_entries` (0.12.0) |
 | `conversion_status` | `ConversionStatus \| str \| None` | Igual que en `count_entries` (0.12.0) |
-| `order_by` | `CacheOrderBy` | Columna de orden (1.2.0): `"file_path"` (por defecto), `"timestamp"`, `"conversion_status"`, `"status"`, `"size_bytes"` o `"error_retry_count"` |
+| `order_by` | `CacheOrderBy` | Columna de orden (1.2.0): `"file_path"` (por defecto), `"timestamp"`, `"conversion_status"`, `"status"`, `"size_bytes"` o `"error_retry_count"`; desde 1.6.0 también `"mime_type"`, `"created_time"` y `"owner_name"` |
 | `descending` | `bool` | Orden descendente de `order_by` (1.2.0). Por defecto `False` |
+| `mime_type` | `str \| Sequence[str] \| None` | Igual que en `count_entries` (1.6.0) |
 
 | Retorno | Tipo | Descripción |
 |---|---|---|
@@ -155,6 +168,9 @@ Lee una página de `cache_entries`, ordenada por `file_path` (o por `order_by`, 
   valor. En una caché anterior a 1.1.0 abierta con `read_only=True` (sin la columna `size_bytes`), ordenar por
   `size_bytes` deja todas las entradas empatadas y quedan por `file_path`.
 - `status` y `conversion_status` se ordenan por el texto de su valor (`"error"` < `"ocr_pending"` < `"success"`).
+- Metadatos de 1.5.0 (1.6.0): `mime_type` por su texto; `created_time` es la fecha de creación en Windows y macOS y
+  `None` en Linux (allí todas empatan y quedan por ruta); `owner_name` sin distinguir mayúsculas («ana» y «Ana»
+  empatan y quedan por ruta). Las entradas escaneadas antes de 1.5.0 no tienen estos valores y van al final.
 - `CacheOrderBy` se importa de `doc_organize.cache`.
 
 ```python
@@ -162,6 +178,19 @@ from doc_organize.cache import CacheManager
 
 async with CacheManager(project / "cache.db", read_only=True) as cache:
     mayores = await cache.load_cache_page(50, 0, order_by="size_bytes", descending=True)
+    pdfs = await cache.load_cache_page(50, 0, mime_type="application/pdf", order_by="created_time", descending=True)
+```
+
+---
+
+#### list_mime_types (Async, 1.6.0)
+
+Tipos MIME presentes en la caché con su número de entradas, de más a menos (y por tipo si empatan). Pensado para el
+desplegable del filtro por tipo de una lista, sin leer la caché entera. Admite `search`, `relative_to` y
+`conversion_status` como `count_entries`. Las entradas sin tipo no aparecen; una caché anterior a 1.5.0 devuelve `[]`.
+
+```python
+tipos = await cache.list_mime_types(relative_to="/mnt/datos/2024")  # [("application/pdf", 1520), ("text/plain", 40)]
 ```
 
 **Operación**:
@@ -170,7 +199,9 @@ async with CacheManager(project / "cache.db", read_only=True) as cache:
 - Con otra columna: se ordenan solo las claves (`rowid`) en una subconsulta con los mismos filtros y se leen las filas
   de la página. No hay índices nuevos ni migración: cada conexión fija `PRAGMA temp_store=MEMORY`, que no cambia el
   fichero, para que SQLite no vuelque la ordenación a disco. Con 100 000 entradas, una página con offset alto tarda
-  ~80–150 ms en cualquier orden (disco local, Windows, Python 3.14), frente a ~1 s sin ese PRAGMA
+  ~80–150 ms en cualquier orden (disco local, Windows, Python 3.14), frente a ~1 s sin ese PRAGMA. Medido de nuevo en
+  1.6.0 con las columnas nuevas: `mime_type` 113 ms, `created_time` 87 ms, `owner_name` 151 ms (pasa por `py_lower`);
+  `list_mime_types` 34 ms y `count_entries(mime_type=…)` 15 ms
 - No sustituye a `load_cache()`: sigue siendo la fuente completa que usan `get_changes()` y la exportación ZIP; `load_cache_page()` es solo para listas largas en la vista web
 
 ---

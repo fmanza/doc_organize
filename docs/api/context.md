@@ -170,6 +170,24 @@ from doc_organize.export import load_context_history, write_context_history_xlsx
 `list_context_builds(path)` ignora con un aviso las líneas dañadas. Para revisarlo fuera:
 `write_context_history_xlsx` o `python -m doc_organize export context-xlsx` (ver [Exportación](export.md)).
 
+**Giro y escrituras concurrentes (1.6.0).** Antes de añadir una línea, si el fichero pasaría de 5 MB se gira:
+`CONTEXT_HISTORY.jsonl` pasa a `CONTEXT_HISTORY.1.jsonl`, la `.1` a `.2`, y así hasta 4 copias; la más antigua se
+borra. `list_context_builds` y `load_context_history` leen el actual y las copias (con `include_rotated=False`, solo el
+fichero indicado). `ProjectLayout.context_history_files()` lista los ficheros que existen.
+
+```python
+from doc_organize.context import ContextBuilder, ContextHistoryPolicy
+
+builder = ContextBuilder(history_policy=ContextHistoryPolicy(max_bytes=20_000_000, backups=10))
+ContextBuilder(history_policy=ContextHistoryPolicy(backups=0))  # sin giro: crece sin límite, como en 1.5.0
+```
+
+La escritura y el giro se hacen bajo un bloqueo entre procesos (`CONTEXT_HISTORY.jsonl.lock`, válido en SMB y NFS),
+así que dos construcciones del mismo proyecto desde procesos o equipos distintos no pierden ni mezclan líneas. Si otro
+proceso mantiene el bloqueo más de 5 s, la construcción se guarda igual y solo se avisa de que no entró en el
+historial; un bloqueo de más de 60 s se da por huérfano y se rompe. Las lecturas no toman el bloqueo: si coinciden con
+un giro, esa lectura puede omitir o repetir alguna construcción, pero el historial en disco no cambia.
+
 ### Autor, descripción y palabras clave (1.5.0)
 
 Tras clasificar, cada `DomainDocument` recibe lo que declara su documento original (`read_document_properties`, en

@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 
 from doc_organize import __version__
 from doc_organize.ai import DocumentEnrichmentClient, DomainClassificationClient, TaxonomyClassificationClient
-from doc_organize.context.context_history import append_context_build, build_record
+from doc_organize.context.context_history import ContextHistoryPolicy, append_context_build, build_record
 from doc_organize.context.context_registry import ContextRegistry
 from doc_organize.context.document_properties import read_document_properties
 from doc_organize.context.domain_classifier import DomainClassifier, MaterialTypeClassifier, read_conversion_json, resolve_title_and_type
@@ -167,8 +167,14 @@ class ContextBuilder:
         'ciberseguridad'
     """
 
-    def __init__(self, registry: ContextRegistry | None = None) -> None:
+    def __init__(self, registry: ContextRegistry | None = None, *, history_policy: ContextHistoryPolicy | None = None) -> None:
+        """
+        Args:
+            registry: Dónde se lee y guarda el contexto (`ContextRegistry()` por defecto).
+            history_policy: Giro de `CONTEXT_HISTORY.jsonl` (1.6.0); `None` = `ContextHistoryPolicy()` (5 MB, 4 copias).
+        """
         self.registry = registry or ContextRegistry()
+        self.history_policy = history_policy or ContextHistoryPolicy()
         self.logger = get_logger(__name__)
 
     async def build(
@@ -620,9 +626,10 @@ class ContextBuilder:
     async def _save_and_record(self, project: Project, context: Context) -> None:
         """Persiste `context` y añade la construcción al histórico (`ProjectLayout.context_history`, 1.5.0).
 
-        El contexto anterior se lee antes de sobrescribirlo, para registrar qué documentos cambiaron. Si no se puede
-        leer (dañado), se compara con nada y la construcción no falla; si el histórico no se puede escribir, se avisa y
-        el contexto ya guardado se mantiene.
+        El contexto anterior se lee antes de sobrescribirlo, para registrar qué documentos cambiaron y para conservar
+        su `created_at` (1.6.0): reconstruir actualiza `updated_at`, no la fecha de creación. Si no se puede leer
+        (dañado), se compara con nada, `created_at` queda en la hora de esta construcción y la construcción no falla;
+        si el histórico no se puede escribir, se avisa y el contexto ya guardado se mantiene.
         """
         try:
             previous: Context | None = await self.registry.load_context(project)
@@ -632,9 +639,11 @@ class ContextBuilder:
             self.logger.warning(f"No se pudo leer el contexto anterior de '{project.name}' para el histórico: {exc}")
             previous = None
 
+        if previous is not None:
+            context.created_at = previous.created_at
         await self.registry.save_context(project, context)
         try:
-            await append_context_build(ProjectLayout.for_project(project).context_history, build_record(previous, context))
+            await append_context_build(ProjectLayout.for_project(project).context_history, build_record(previous, context), self.history_policy)
         except OSError as exc:
             self.logger.warning(f"No se pudo añadir la construcción al histórico del contexto de '{project.name}': {exc}")
 

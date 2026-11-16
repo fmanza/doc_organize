@@ -242,6 +242,7 @@ Todas cuelgan de la raíz de salidas (`project.root_path`), también con un `sta
 | `legacy_mkdocs_config_file` | `mkdocs.yml` de antes de 0.13.0 |
 | `reorganized_dir(output_folder_name)` | `<output_folder_name>/`, validado |
 | `context_history` | `historial_contexto/CONTEXT_HISTORY.jsonl` (1.5.0): una línea por construcción del contexto |
+| `context_history_files()` | Método (1.6.0): el histórico actual y sus copias giradas (`CONTEXT_HISTORY.1.jsonl`…) que existen, de la más antigua a la actual. Para listar o borrar el historial entero |
 
 ```python
 RESERVED_OUTPUT_FOLDER_NAMES: frozenset[str]

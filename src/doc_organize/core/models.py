@@ -1018,7 +1018,13 @@ class Context(BaseModel):
     ai_enrichment_sent: int = Field(default=0, ge=0, description="Documentos enviados a la IA para enriquecer (una llamada por documento, 1.5.0)")
     ai_enrichment_applied: int = Field(default=0, ge=0, description="Documentos enviados en los que la IA rellenó al menos un campo (1.5.0)")
     ai_enrichment_failed: int = Field(default=0, ge=0, description="Documentos enviados a enriquecer cuya llamada falló (1.5.0)")
-    created_at: str = Field(..., description="Timestamp ISO 8601 de creación del contexto")
+    created_at: str = Field(
+        ...,
+        description=(
+            "Timestamp ISO 8601 de creación del contexto. `ContextBuilder` lo conserva al reconstruir desde 1.6.0 (antes "
+            "era la hora de cada construcción); vuelve a empezar si el contexto se borra o el anterior no se puede leer"
+        ),
+    )
     updated_at: str = Field(..., description="Timestamp ISO 8601 de la última reconstrucción del contexto")
 
     @field_validator("output_folder_name")

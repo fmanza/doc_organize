@@ -2,6 +2,7 @@
 Cache transaccional (SQLite + WAL) de hashes de documentos (REQ-006).
 """
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal, Self, get_args
 
@@ -68,10 +69,25 @@ def _py_lower(value: str | None) -> str | None:
 
 _COLUMNS = ("file_path", "sha256_hash", "timestamp", "status", "conversion_status", "error_message", "error_retry_count")
 
-CacheOrderBy = Literal["file_path", "timestamp", "conversion_status", "status", "size_bytes", "error_retry_count"]
-"""Columnas por las que `CacheManager.load_cache_page` puede ordenar (G40, 1.2.0)."""
+CacheOrderBy = Literal[
+    "file_path",
+    "timestamp",
+    "conversion_status",
+    "status",
+    "size_bytes",
+    "error_retry_count",
+    "mime_type",
+    "created_time",
+    "owner_name",
+]
+"""Columnas por las que `CacheManager.load_cache_page` puede ordenar (G40, 1.2.0; `mime_type`, `created_time` y
+`owner_name` desde 1.6.0, G43)."""
 
 _ORDER_BY_COLUMNS: frozenset[str] = frozenset(get_args(CacheOrderBy))
+
+#: Columnas de texto libre que se ordenan sin distinguir mayúsculas (Unicode, con `py_lower`): un propietario "ana" y
+#: otro "Zoe" no deben ordenarse por el código del carácter.
+_CASE_INSENSITIVE_ORDER: frozenset[str] = frozenset({"owner_name"})
 
 
 def _py_relpath(file_path: str | None, root: str | None) -> str | None:
@@ -223,25 +239,37 @@ class CacheManager:
         if self.read_only:
             raise CacheError(f"La caché '{self.db_path}' está abierta en solo lectura.")
 
-    @staticmethod
     def _build_filters(
-        search: str | None, relative_to: str | Path | None, conversion_status: ConversionStatus | str | None
+        self,
+        search: str | None,
+        relative_to: str | Path | None,
+        conversion_status: ConversionStatus | str | None,
+        mime_type: str | Sequence[str] | None = None,
     ) -> tuple[str, list[object]]:
-        """Clausula `WHERE` (o cadena vacia) y parametros comunes a `count_entries` y `load_cache_page`."""
+        """Clausula `WHERE` (o cadena vacia) y parametros comunes a `count_entries`, `load_cache_page` y `list_mime_types`."""
         conditions: list[str] = []
         params: list[object] = []
         if relative_to is not None:
-            params.append(_normalize_root(relative_to))
+            root = _normalize_root(relative_to)
+            params.append(root)
             conditions.append("py_relpath(file_path, ?) IS NOT NULL")
             if search:
                 conditions.append("py_lower(py_relpath(file_path, ?)) LIKE py_lower(?) ESCAPE '\\'")
-                params.extend([params[0], _like_pattern(search)])
+                params.extend([root, _like_pattern(search)])
         elif search:
             conditions.append("py_lower(file_path) LIKE py_lower(?) ESCAPE '\\'")
             params.append(_like_pattern(search))
         if conversion_status is not None:
             conditions.append("conversion_status = ?")
             params.append(ConversionStatus(conversion_status).value)
+        mime_types = [mime_type] if isinstance(mime_type, str) else list(mime_type or [])
+        if mime_types:
+            if "mime_type" in self._optional_present:
+                # Solo marcadores `?`: los valores van siempre como parámetros.
+                conditions.append(f"mime_type IN ({', '.join('?' * len(mime_types))})")
+                params.extend(mime_types)
+            else:
+                conditions.append("0")  # caché anterior a 1.5.0 en solo lectura: ninguna entrada tiene tipo
         return (" WHERE " + " AND ".join(conditions) if conditions else ""), params
 
     async def load_cache(self) -> dict[str, CacheEntry]:
@@ -296,6 +324,7 @@ class CacheManager:
         *,
         relative_to: str | Path | None = None,
         conversion_status: ConversionStatus | str | None = None,
+        mime_type: str | Sequence[str] | None = None,
     ) -> int:
         """Cuenta entradas de `cache_entries`, opcionalmente filtradas.
 
@@ -307,6 +336,9 @@ class CacheManager:
                 a esa raiz (sin el prefijo del montaje).
             conversion_status (ConversionStatus | str | None): Solo las entradas con
                 ese estado de conversion (p. ej. `ConversionStatus.ERROR`).
+            mime_type (str | Sequence[str] | None): Solo las entradas con ese tipo MIME
+                exacto, o con alguno de la lista (G43, 1.6.0). `None` o lista vacía no
+                filtra. Las entradas sin tipo (anteriores a 1.5.0) nunca coinciden.
 
         Returns:
             int: Numero de entradas que coinciden.
@@ -321,11 +353,44 @@ class CacheManager:
             >>> asyncio.run(main())
             0
         """
-        where, params = self._build_filters(search, relative_to, conversion_status)
+        where, params = self._build_filters(search, relative_to, conversion_status, mime_type)
         query = "SELECT COUNT(*) FROM cache_entries" + where
         async with self._connection.execute(query, params) as cursor:
             row = await cursor.fetchone()
             return int(row[0]) if row else 0
+
+    async def list_mime_types(
+        self,
+        search: str | None = None,
+        *,
+        relative_to: str | Path | None = None,
+        conversion_status: ConversionStatus | str | None = None,
+    ) -> list[tuple[str, int]]:
+        """Tipos MIME presentes en la caché con cuántas entradas tiene cada uno (G43, 1.6.0).
+
+        Para construir el filtro por tipo de una lista sin leer la caché entera. Admite los mismos filtros que
+        `count_entries` (salvo el propio `mime_type`). Las entradas sin tipo (anteriores a 1.5.0) no aparecen.
+
+        Returns:
+            list[tuple[str, int]]: `(tipo, entradas)`, de más a menos entradas y, con empate, por tipo.
+
+        Example:
+            >>> import asyncio, tempfile
+            >>> from pathlib import Path
+            >>> async def main():
+            ...     db_path = Path(tempfile.mkdtemp()) / "cache.db"
+            ...     async with CacheManager(db_path) as cache:
+            ...         return await cache.list_mime_types()
+            >>> asyncio.run(main())
+            []
+        """
+        if "mime_type" not in self._optional_present:
+            return []
+        where, params = self._build_filters(search, relative_to, conversion_status)
+        condition = " AND mime_type IS NOT NULL" if where else " WHERE mime_type IS NOT NULL"
+        query = f"SELECT mime_type, COUNT(*) FROM cache_entries{where}{condition} GROUP BY mime_type ORDER BY COUNT(*) DESC, mime_type ASC"
+        async with self._connection.execute(query, params) as cursor:
+            return [(str(mime), int(count)) async for mime, count in cursor]
 
     async def load_cache_page(
         self,
@@ -337,6 +402,7 @@ class CacheManager:
         conversion_status: ConversionStatus | str | None = None,
         order_by: CacheOrderBy = "file_path",
         descending: bool = False,
+        mime_type: str | Sequence[str] | None = None,
     ) -> list[CacheEntry]:
         """Lee una pagina de `cache_entries`, ordenada por `file_path` (o por `order_by`) para paginacion estable.
 
@@ -353,10 +419,13 @@ class CacheManager:
             conversion_status (ConversionStatus | str | None): Igual que en `count_entries`.
             order_by (CacheOrderBy): Columna de orden (G40, 1.2.0). Los empates se resuelven siempre por
                 `file_path` ascendente, asi que el orden es total y el mismo en cualquier caché. `conversion_status` y
-                `status` se ordenan por el texto de su valor (`"error"` < `"ocr_pending"` < `"success"`).
+                `status` se ordenan por el texto de su valor (`"error"` < `"ocr_pending"` < `"success"`). Desde 1.6.0
+                (G43) también `mime_type`, `created_time` y `owner_name`; este último sin distinguir mayúsculas.
+                `created_time` es la fecha de creación en Windows y macOS y `None` en Linux (ver `CacheEntry`).
             descending (bool): Orden descendente de `order_by` (el desempate por `file_path` sigue ascendente). Los
-                `NULL` (`size_bytes` de entradas anteriores a 1.1.0, `conversion_status` sin valor) van al final en
-                los dos sentidos.
+                `NULL` (`size_bytes` de entradas anteriores a 1.1.0, `conversion_status` sin valor, los metadatos de
+                1.5.0 en entradas anteriores) van al final en los dos sentidos.
+            mime_type (str | Sequence[str] | None): Igual que en `count_entries` (G43, 1.6.0).
 
         Returns:
             list[CacheEntry]: Entradas de la pagina solicitada, en ese orden.
@@ -375,7 +444,7 @@ class CacheManager:
             []
         """
         order_clause = self._order_clause(order_by, descending)
-        where, params = self._build_filters(search, relative_to, conversion_status)
+        where, params = self._build_filters(search, relative_to, conversion_status, mime_type)
         if order_by == "file_path":
             query = f"SELECT {self._select_columns()} FROM cache_entries{where} ORDER BY {order_clause} LIMIT ? OFFSET ?"
         else:
@@ -400,6 +469,8 @@ class CacheManager:
         if order_by == "file_path":
             return f"file_path {direction}"
         column = "NULL" if order_by in _OPTIONAL_COLUMNS and order_by not in self._optional_present else order_by
+        if column in _CASE_INSENSITIVE_ORDER:
+            column = f"py_lower({column})"
         return f"{column} IS NULL, {column} {direction}, file_path ASC"
 
     async def compute_hash(self, file_path: str) -> str:

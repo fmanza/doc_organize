@@ -13,7 +13,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from doc_organize.cache import CacheManager
-from doc_organize.context.context_history import list_context_builds
+from doc_organize.context.context_history import history_file_set, list_context_builds
 from doc_organize.core.models import CacheEntry, ContextBuildRecord, ScanErrorReport
 from doc_organize.utils.logging import get_logger
 
@@ -90,7 +90,8 @@ def load_context_history(history_logs: Iterable[str | Path]) -> list[ContextBuil
     """Construcciones del contexto de uno o varios `CONTEXT_HISTORY.jsonl`, las más recientes primero (1.5.0).
 
     Mismo criterio que `load_scan_error_history`: los ficheros que no existen se omiten y una línea inválida se ignora
-    con un aviso.
+    con un aviso. Desde 1.6.0 incluye las copias giradas de cada histórico (`CONTEXT_HISTORY.1.jsonl`…), sin repetir
+    ninguna aunque se pasen también de forma explícita.
 
     Args:
         history_logs: Rutas a los históricos (p. ej. `[layout.context_history]`).
@@ -99,7 +100,8 @@ def load_context_history(history_logs: Iterable[str | Path]) -> list[ContextBuil
         >>> load_context_history([])
         []
     """
-    records = [record for history_log in history_logs for record in list_context_builds(Path(history_log))]
+    files = history_file_set(Path(history_log) for history_log in history_logs)
+    records = [record for path in files for record in list_context_builds(path, include_rotated=False)]
     return sorted(records, key=lambda record: record.built_at, reverse=True)
 
 

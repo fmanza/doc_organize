@@ -14,7 +14,7 @@
 | `write_project_zip` | `(destination, entries, *, layout=None, conversion_dir=None, dedup_report=None, on_progress=None, cancel_token=None)` | `ExportStats` |
 | `write_cache_xlsx` | `(destination, entries, *, on_progress=None, cancel_token=None)` | filas escritas |
 | `write_scan_errors_xlsx` | `(destination, entries, history, *, on_progress=None, cancel_token=None)` | filas escritas |
-| `load_context_history` | `(history_logs: Iterable[str \| Path])` | `list[ContextBuildRecord]`, más recientes primero (1.5.0) |
+| `load_context_history` | `(history_logs: Iterable[str \| Path])` | `list[ContextBuildRecord]`, más recientes primero (1.5.0); con las copias giradas de cada histórico, sin repetir (1.6.0) |
 | `write_context_history_xlsx` | `(destination, history, *, on_progress=None, cancel_token=None)` | filas escritas (1.5.0) |
 | `ExportStats` | `file_count`, `total_size_bytes` (modelo Pydantic congelado) | — |
 | `MissingDependencyError` | `package`, `extra` (en `doc_organize.core.exceptions`) | — |

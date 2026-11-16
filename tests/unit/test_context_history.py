@@ -182,10 +182,51 @@ async def test_unreadable_previous_context_does_not_stop_the_build(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+async def test_rebuilding_keeps_created_at_and_moves_updated_at(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    registry = ContextRegistry()
+    documents = [_converted(tmp_path, "Calidad", "informe.pdf")]
+    first = await ContextBuilder(registry).build(project, documents)
+
+    second = await ContextBuilder(registry).build(project, documents)
+
+    assert second.created_at == first.created_at
+    assert second.updated_at > first.updated_at
+    assert (await registry.load_context(project)).created_at == first.created_at
+
+
+@pytest.mark.asyncio
+async def test_created_at_starts_again_after_deleting_the_context(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    registry = ContextRegistry()
+    documents = [_converted(tmp_path, "Calidad", "informe.pdf")]
+    first = await ContextBuilder(registry).build(project, documents)
+    await registry.delete_context(project)
+
+    second = await ContextBuilder(registry).build(project, documents)
+
+    assert second.created_at != first.created_at
+    assert second.created_at == second.updated_at
+
+
+@pytest.mark.asyncio
+async def test_created_at_starts_again_when_the_previous_context_is_unreadable(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    documents = [_converted(tmp_path, "Calidad", "informe.pdf")]
+    first = await ContextBuilder(ContextRegistry()).build(project, documents)
+    ProjectLayout.for_project(project).context_file.write_bytes(b"{no es json")
+
+    second = await ContextBuilder(ContextRegistry()).build(project, documents)
+
+    assert second.created_at != first.created_at
+    assert second.created_at == second.updated_at
+
+
+@pytest.mark.asyncio
 async def test_history_write_failure_keeps_the_saved_context(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    async def _disk_full(history_path: Path, record: ContextBuildRecord) -> None:
+    async def _disk_full(history_path: Path, record: ContextBuildRecord, policy: object = None) -> None:
         raise OSError("No queda espacio en el disco")
 
     monkeypatch.setattr(context_builder_module, "append_context_build", _disk_full)

@@ -6,6 +6,34 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+### Añadido
+
+- **Giro del historial del contexto**: `CONTEXT_HISTORY.jsonl` ya no crece sin límite. Antes de añadir una construcción,
+  si pasaría de 5 MB, el fichero pasa a `CONTEXT_HISTORY.1.jsonl` (y la `.1` a `.2`…); se conservan 4 copias.
+  Configurable con `ContextHistoryPolicy(max_bytes=, backups=)` en `doc_organize.context` y
+  `ContextBuilder(history_policy=)`; `backups=0` mantiene el comportamiento de 1.5.0.
+- `list_context_builds(path, *, include_rotated=True)` y `load_context_history` leen también las copias giradas (sin
+  repetirlas si se pasan explícitamente). `ProjectLayout.context_history_files()` y las funciones
+  `context_history_files`/`rotated_context_history_path` de `doc_organize.projects.layout` listan y nombran los ficheros.
+- **Ordenar y filtrar la caché por los metadatos de 1.5.0** (G43, petición de doc_organize_web): `CacheOrderBy` admite
+  `"mime_type"`, `"created_time"` y `"owner_name"` (este, sin distinguir mayúsculas), con el mismo contrato que G40
+  (empate por ruta, `NULL` al final). `count_entries` y `load_cache_page` ganan `mime_type: str | Sequence[str] | None`
+  (igualdad exacta, uno o varios tipos). Nuevo `CacheManager.list_mime_types(...)`: tipos presentes con su recuento,
+  para el desplegable del filtro. Con 100 000 entradas, una página tarda ≤ 151 ms; sin índices nuevos ni migración.
+
+### Corregido
+
+- `ContextBuilder.build()` conserva `Context.created_at` al reconstruir: hasta 1.5.0 se ponía a la hora de cada
+  construcción, igual que `updated_at`. Ahora se copia del contexto anterior; vuelve a empezar si el contexto se borra
+  o si el anterior no se puede leer. **Cambio de comportamiento**: quien mostrase `created_at` como «última
+  construcción» debe usar `updated_at`.
+- **Escrituras concurrentes al historial del contexto**: dos construcciones del mismo proyecto en procesos o equipos
+  distintos (CLI y web, dos workers) podían perder o mezclar líneas de `CONTEXT_HISTORY.jsonl`; con cuatro procesos a la
+  vez se perdían hasta un 20 % de las líneas, también en disco local. `append_context_build` escribe ahora bajo un
+  bloqueo entre procesos (`CONTEXT_HISTORY.jsonl.lock`, creado en exclusiva, válido en SMB y NFS), con una sola
+  escritura y `fsync`. Si otro proceso mantiene el bloqueo más de 5 s, o un bloqueo huérfano tiene más de 60 s, se
+  avisa o se rompe; la construcción nunca falla por el historial. Tampoco escribe ya a través de un enlace simbólico.
+
 ## [1.5.0] - 2026-11-16
 
 Metadatos para organizar mejor la información. El escaneo guarda tipo MIME, fecha de creación, permisos y, si se pide,
