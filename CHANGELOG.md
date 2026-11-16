@@ -6,6 +6,13 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+### Corregido
+
+- `ContextBuilder.build()` conserva `Context.created_at` al reconstruir: hasta 1.5.0 se ponía a la hora de cada
+  construcción, igual que `updated_at`. Ahora se copia del contexto anterior; vuelve a empezar si el contexto se borra
+  o si el anterior no se puede leer. **Cambio de comportamiento**: quien mostrase `created_at` como «última
+  construcción» debe usar `updated_at`.
+
 ## [1.5.0] - 2026-11-16
 
 Metadatos para organizar mejor la información. El escaneo guarda tipo MIME, fecha de creación, permisos y, si se pide,

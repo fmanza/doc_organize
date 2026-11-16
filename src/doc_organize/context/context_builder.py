@@ -620,9 +620,10 @@ class ContextBuilder:
     async def _save_and_record(self, project: Project, context: Context) -> None:
         """Persiste `context` y añade la construcción al histórico (`ProjectLayout.context_history`, 1.5.0).
 
-        El contexto anterior se lee antes de sobrescribirlo, para registrar qué documentos cambiaron. Si no se puede
-        leer (dañado), se compara con nada y la construcción no falla; si el histórico no se puede escribir, se avisa y
-        el contexto ya guardado se mantiene.
+        El contexto anterior se lee antes de sobrescribirlo, para registrar qué documentos cambiaron y para conservar
+        su `created_at` (1.6.0): reconstruir actualiza `updated_at`, no la fecha de creación. Si no se puede leer
+        (dañado), se compara con nada, `created_at` queda en la hora de esta construcción y la construcción no falla;
+        si el histórico no se puede escribir, se avisa y el contexto ya guardado se mantiene.
         """
         try:
             previous: Context | None = await self.registry.load_context(project)
@@ -632,6 +633,8 @@ class ContextBuilder:
             self.logger.warning(f"No se pudo leer el contexto anterior de '{project.name}' para el histórico: {exc}")
             previous = None
 
+        if previous is not None:
+            context.created_at = previous.created_at
         await self.registry.save_context(project, context)
         try:
             await append_context_build(ProjectLayout.for_project(project).context_history, build_record(previous, context))
