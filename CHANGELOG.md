@@ -6,6 +6,16 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-16
+
+Más información sobre los documentos y un historial del contexto que aguanta proyectos grandes y varios procesos. Los
+documentos sin clasificar traen ahora su motivo, título, autor, descripción, palabras clave e idioma; la lista de la
+caché se puede ordenar y filtrar por tipo, fecha de creación y propietario; las propiedades de los originales se leen
+en paralelo (unas 3 veces más rápido en una carpeta de red); el historial del contexto gira a los 5 MB y ya no pierde
+líneas cuando escriben varios procesos a la vez; y `created_at` deja de cambiar en cada reconstrucción. Sin cambios
+incompatibles en la API ni dependencias nuevas; `cache.db` no se migra. Detalle en [Contexto](docs/api/context.md) y
+[Caché](docs/api/cache.md).
+
 ### Añadido
 
 - **Giro del historial del contexto**: `CONTEXT_HISTORY.jsonl` ya no crece sin límite. Antes de añadir una construcción,

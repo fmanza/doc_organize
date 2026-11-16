@@ -217,6 +217,10 @@ deduplicación desde 0.12.1:
 | **Una operación a la vez** | La librería no bloquea: evitar un escaneo, una deduplicación u otra construcción de contexto simultáneos sobre el mismo proyecto es responsabilidad del consumidor (doc_organize_web encola las ejecuciones) |
 | **Manifiesto y catálogo simple son excluyentes** | Con `taxonomy_manifest`, `ContextBuilder.build()` clasifica por el manifiesto; rechazar que además llegue `candidate_domains` (en vez de ignorarlo en silencio) es responsabilidad del consumidor |
 | **Fichero local, catálogo simple y plantilla son excluyentes entre sí** | El fichero local `taxonomy_manifest.md`, si existe, gana sobre una plantilla; rechazar cualquier combinación de los tres en la misma petición es responsabilidad del consumidor |
+| **Sin clasificar, con su motivo (1.6.0)** | Cada documento sin clasificar queda en `Context.unclassified_details` con su motivo (artefactos incompletos o por debajo del umbral), lo que propusieron las reglas y lo que declara el original. La IA no los enriquece. Se guarda en `unclassified.json`, aparte de `context.json` |
+| **`created_at` es la primera construcción (1.6.0)** | Reconstruir solo cambia `updated_at`; `created_at` vuelve a empezar si se borra el contexto o el anterior no se puede leer |
+| **Historial acotado y seguro (1.6.0)** | `CONTEXT_HISTORY.jsonl` gira a los 5 MB y conserva 4 copias; dos construcciones del mismo proyecto desde procesos o equipos distintos no pierden líneas (bloqueo entre procesos, válido en SMB y NFS). La regla «una operación a la vez» sigue valiendo para el resto del contexto |
+| **Propiedades en paralelo (1.6.0)** | Los originales se leen de 4 en 4 (`properties_concurrency`), sin llamar nunca a PDFium dos veces a la vez |
 | **Modo manifiesto nunca excluye por completo** | Con manifiesto activo (fichero local o plantilla), un documento con los tres artefactos completos siempre se reorganiza — si un eje (dominio o tipo de material) no alcanza el umbral, se le asigna el slug `sin-clasificar` en ese eje en vez de dejarlo fuera |
 
 ## Límites y Restricciones

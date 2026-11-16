@@ -66,7 +66,8 @@ python -m doc_organize export cache-xlsx --output-root /red/Proyecto --state-roo
 # Excel de errores (por defecto lee errores_escaneo/SCAN_ERRORS_HISTORY.jsonl del estado)
 python -m doc_organize export errors-xlsx --project "Mi Proyecto" -o errores.xlsx
 
-# Excel del historial del contexto (1.5.0; por defecto lee historial_contexto/CONTEXT_HISTORY.jsonl de las salidas)
+# Excel del historial del contexto (1.5.0; por defecto lee historial_contexto/CONTEXT_HISTORY.jsonl de las salidas,
+# y desde 1.6.0 también sus copias giradas CONTEXT_HISTORY.1.jsonl…)
 python -m doc_organize export context-xlsx --project "Mi Proyecto" -o historial_contexto.xlsx
 ```
 

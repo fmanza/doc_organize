@@ -50,6 +50,7 @@ sequenceDiagram
 | **Transaccional** | `save_entries()` es operación atómica |
 | **Clasificación local** | `get_changes()` no accede disco; cálculo en memoria |
 | **Única fuente de verdad** | SHA-256 = `utils.hash_utils.hash_file()` |
+| **Páginas ordenables y filtrables** | `load_cache_page` ordena por ruta, fecha, estado, tamaño, reintentos y, desde 1.6.0, tipo MIME, fecha de creación y propietario (sin distinguir mayúsculas); empate por ruta y vacíos al final. Desde 1.6.0 filtra por uno o varios tipos MIME, y `list_mime_types` da los tipos presentes con su recuento |
 
 ## Límites y Restricciones
 
