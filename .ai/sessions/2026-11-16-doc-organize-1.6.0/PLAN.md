@@ -220,6 +220,12 @@ descripción, palabras clave ni idioma.
 `zensical.toml` si hay página nueva, `zensical build --strict`, versión en `pyproject.toml`, wheel con SHA-256 en las
 notas de la release. Avisar a la web de que G42 y G43 están disponibles.
 
+**Estado (2026-11-16): preparada en `release/1.6.0`** (versión 1.6.0 en `pyproject.toml`, `[1.6.0] - 2026-11-16`
+en el CHANGELOG, fila en `COMPATIBILITY.md` con la 1.5.0 en EOL, fila en `docs/api/publica.md`, reglas nuevas en
+`docs/functional/context.md` y `cache.md`, copias giradas en `docs/functional/export.md`). Pendiente: fusionar #41 y el
+PR de L4b+L5 en `develop`, llevar esta rama sobre `develop`, PR del release, fast-forward de `main`, tag `v1.6.0` y tabla
+SHA-256 en las notas. Después, avisar a la web (G42, G43 y G44 disponibles: fase W2).
+
 ### Orden y dependencias
 
 ```
