@@ -240,6 +240,30 @@ no llama a `on_ai_progress`, que sigue siendo solo de la Sub-fase B.
 
 ---
 
+### Documentos sin clasificar (1.6.0)
+
+`Context.unclassified_documents` sigue siendo la lista de rutas. Además, `Context.unclassified_details` trae un
+`UnclassifiedDocument` por cada uno, en el mismo orden:
+
+| Campo | Contenido |
+|---|---|
+| `reason` | `"incomplete_artifacts"`: la conversión falló o falta su `.md` o `.json` (o el `.json` no se puede leer). `"below_threshold"`: las reglas no llegaron al umbral y la IA no lo asignó (desactivada, detenida o sin dominio) |
+| `title`, `document_type` | Título del `.json` (o nombre del `.md`; `None` si no hay ninguno) y extensión original |
+| `markdown_path`, `json_path` | Los artefactos que dejó la conversión, o `None` |
+| `rules_domain`, `rules_confidence` | Lo que propusieron las reglas por debajo del umbral; `None` si no propusieron nada |
+| `author`, `description`, `keywords` | Lo que declara el original, como en los clasificados. **Nunca de la IA**: el enriquecimiento solo se aplica a los clasificados |
+| `language` | Idioma del texto convertido; `None` sin `.json` |
+
+Los originales de los sin clasificar se leen en la misma pasada que los demás (con `properties_concurrency`), así
+que el coste es el mismo por documento. El detalle se guarda aparte, en `unclassified.json` junto a `context.json`
+(ver `ContextRegistry`). Un contexto de 1.5.0 se carga con `unclassified_details=[]`.
+
+```python
+context = await ContextRegistry().load_context(project)
+for detail in context.unclassified_details:
+    print(detail.reason, detail.title, detail.author, detail.rules_domain)
+```
+
 ## DomainClassifier (Sub-fase A)
 
 ```python
@@ -402,6 +426,12 @@ reconstruir, borra `domains/<slug>/` de cualquier dominio ya no presente. `DOMAI
 solo regenera su sección `## Documentos clasificados` — el resto (editado a mano) se
 conserva.
 
+**`unclassified.json` (1.6.0)**: `Context.unclassified_details` se guarda aparte, para que `context.json` siga siendo
+pequeño aunque haya miles de documentos sin clasificar. Se escribe antes que `context.json`, y al leer manda
+`context.json`: se conservan los detalles cuya ruta está en `unclassified_documents`, en su orden. Si sobran o faltan
+(un guardado cortado entre los dos ficheros, o un consumidor que editó `unclassified_documents`), se avisa en el log.
+Sin el fichero (contexto de 1.5.0), `unclassified_details=[]`. Si el fichero está dañado, `ContextError`, igual que un
+`index.json`. `delete_context` lo borra.
 
 **Escritura sin seguir enlaces (0.14.0, L-8e)**: `context.json`, `index.json` y `DOMAIN.md` (igual que `index.md`,
 `zensical.toml` y `taxonomy_manifest.md`) se escriben en un temporal con nombre aleatorio creado en exclusiva en la
@@ -410,7 +440,7 @@ el temporal tenía un nombre fijo (`context.tmp`, `index.md.tmp`...) y un enlace
 de red desviaba la escritura. El fichero conserva los permisos del que sustituye.
 
 **Excepciones**: `ContextNotFoundError` (sin `context.json` todavía),
-`DomainNotFoundError`, `ContextError` (JSON corrupto o con esquema incompatible; desde 0.14.0 también si
+`DomainNotFoundError`, `ContextError` (JSON corrupto, también `unclassified.json`, o con esquema incompatible; desde 0.14.0 también si
 `output_folder_name` no es válido —`..`, una ruta absoluta, un nombre reservado como `Conversión`—, L-8f: nunca se
 devuelve un contexto que copiaría o borraría fuera de su sitio).
 
@@ -700,6 +730,20 @@ class DomainDocument(BaseModel):
     language: str | None        # 1.5.0: ISO 639-1 detectado en el texto convertido; None si no es seguro
     ai_filled: list[Literal["description", "keywords"]]  # 1.5.0: lo que rellenó la IA
 
+class UnclassifiedDocument(BaseModel):  # 1.6.0
+    source_path: str
+    title: str | None
+    document_type: str
+    markdown_path: str | None
+    json_path: str | None
+    reason: Literal["incomplete_artifacts", "below_threshold"]  # UnclassifiedReason
+    rules_domain: str | None
+    rules_confidence: float | None
+    author: str | None
+    description: str | None   # nunca de la IA
+    keywords: list[str]       # nunca de la IA
+    language: str | None
+
 class Domain(BaseModel):
     slug: str
     name: str
@@ -718,6 +762,7 @@ class Context(BaseModel):
     built_with_version: str | None       # 1.5.0: versión de doc_organize; None en contextos anteriores
     domains: list[Domain]
     unclassified_documents: list[str]
+    unclassified_details: list[UnclassifiedDocument]  # 1.6.0: mismo orden; se guarda en unclassified.json
     reorganized: bool
     reorganize_failed_documents: list[str]   # 0.13.0
     site_generated: bool                     # un context.json antiguo con mkdocs_generated se lee aquí

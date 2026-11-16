@@ -899,6 +899,48 @@ class DomainDocument(BaseModel):
     )
 
 
+UnclassifiedReason = Literal["incomplete_artifacts", "below_threshold"]
+"""Por qué un documento quedó sin clasificar (`UnclassifiedDocument.reason`, 1.6.0).
+
+- `"incomplete_artifacts"`: la conversión falló o falta su `.md` o su `.json` (o el `.json` no se puede leer).
+- `"below_threshold"`: tiene sus artefactos, pero las reglas no llegaron al umbral y la IA no lo asignó (estaba
+  desactivada, se detuvo o no eligió ningún dominio).
+"""
+
+
+class UnclassifiedDocument(BaseModel):
+    """Un documento que `ContextBuilder.build()` dejó sin clasificar, con lo que se sabe de él (1.6.0, G42).
+
+    Persistido por `ContextRegistry` en `unclassified.json`, junto a `context.json`. No reutiliza `DomainDocument`:
+    puede no tener `.md` ni `.json`, y no tiene dominio ni confianza. La IA no lo enriquece: `description` y `keywords`
+    son solo lo que declara el original.
+
+    Example:
+        >>> document = UnclassifiedDocument(source_path="/datos/acta.pdf", document_type="pdf", reason="incomplete_artifacts")
+        >>> document.reason, document.title, document.keywords
+        ('incomplete_artifacts', None, [])
+    """
+
+    source_path: str = Field(..., description="Ruta del documento original")
+    title: str | None = Field(
+        default=None, description="Título del `.json` de conversión o, si no lo da, el nombre del `.md`; None si no hay ninguno"
+    )
+    document_type: str = Field(..., description="Extensión original en minúsculas, sin punto ('desconocido' si no tiene)")
+    markdown_path: str | None = Field(default=None, description="Ruta del `.md` generado, si la conversión lo dejó")
+    json_path: str | None = Field(default=None, description="Ruta del `.json` generado, si la conversión lo dejó")
+    reason: UnclassifiedReason = Field(..., description="Por qué quedó sin clasificar")
+    rules_domain: str | None = Field(
+        default=None, description="Dominio que propusieron las reglas por debajo del umbral; None si no propusieron ninguno"
+    )
+    rules_confidence: float | None = Field(
+        default=None, ge=0.0, le=1.0, description="Confianza de `rules_domain`; None si las reglas no puntuaron el documento"
+    )
+    author: str | None = Field(default=None, description="Autor declarado en el original (como `DomainDocument.author`)")
+    description: str | None = Field(default=None, description="Descripción declarada en el original; nunca de la IA")
+    keywords: list[str] = Field(default_factory=list, description="Palabras clave declaradas en el original; nunca de la IA")
+    language: str | None = Field(default=None, description="Idioma detectado en el texto convertido (ISO 639-1); None sin `.json` o si no es seguro")
+
+
 class Domain(BaseModel):
     """Un dominio documental dentro del `Context` de un proyecto."""
 
@@ -948,6 +990,13 @@ class Context(BaseModel):
     unclassified_documents: list[str] = Field(
         default_factory=list,
         description="`source_path` de documentos sin clasificar (score insuficiente, artefactos incompletos, o IA deshabilitada)",
+    )
+    unclassified_details: list[UnclassifiedDocument] = Field(
+        default_factory=list,
+        description=(
+            "Los mismos documentos que `unclassified_documents`, en el mismo orden, con motivo, título, autor, descripción, "
+            "palabras clave e idioma (1.6.0, G42). Se guarda aparte, en `unclassified.json`; vacía en contextos anteriores"
+        ),
     )
     reorganized: bool = Field(
         default=False,
@@ -1311,6 +1360,8 @@ __all__ = [
     "TaxonomyCatalogEntry",
     "TaxonomyClassificationResult",
     "TaxonomyManifest",
+    "UnclassifiedDocument",
+    "UnclassifiedReason",
     "UsageLineItem",
     "UsageSnapshot",
     "UsageSourceName",

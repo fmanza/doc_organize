@@ -183,6 +183,25 @@ descripción, palabras clave ni idioma.
 - Tests: cada `reason`; contexto de 1.5.0 se carga; `unclassified.json` dañado → `ContextError` (mismo criterio que un
   `index.json` dañado); propiedades de un original borrado → campos vacíos.
 
+**Estado (2026-11-16): implementada en `feat/parallel-document-properties`, a continuación de L4b.**
+
+- `UnclassifiedDocument`, `UnclassifiedReason`, `Context.unclassified_details`, `UNCLASSIFIED_FILE_NAME`,
+  `ProjectLayout.unclassified_file`; `ContextRegistry` guarda, lee y borra `unclassified.json`.
+- `ContextBuilder._describe_unclassified` calcula motivo, título, propuesta de las reglas e idioma (un solo
+  `read_conversion_json` por documento); las propiedades del original se leen en la misma pasada concurrente que las de
+  los clasificados (G44). El enriquecimiento por IA no los toca.
+- Diferencias con el plan:
+  - **Dos motivos, no tres.** Se quita `"ai_disabled"`: no es una causa por documento (que la IA estuviera activa ya
+    está en `Context.ai_classification_enabled`), y un documento por debajo del umbral es `"below_threshold"` tanto si
+    la IA estaba apagada como si se detuvo o no eligió dominio.
+  - **Sin validador de modelo** que exija las mismas rutas (F4). Un guardado cortado entre `unclassified.json` y
+    `context.json` dejaría el contexto ilegible. En su lugar, `unclassified.json` se escribe primero y, al leer, manda
+    `context.json`: se conservan los detalles cuya ruta sigue en `unclassified_documents`, en su orden, con aviso si
+    sobran o faltan. Así tampoco se pierde todo si un consumidor (la web) edita `unclassified_documents`.
+  - `unclassified.json` entra en `RESERVED_OUTPUT_FOLDER_NAMES`.
+- F3 (coste en red) resuelto por L4b: los sin clasificar se leen con la misma concurrencia.
+- Tests: `tests/unit/test_context_unclassified.py` (15).
+
 ### Fase L6 — Cierre de versión 1.6.0
 
 `CHANGELOG.md`, `docs/api/publica.md` (fila 1.6.0), `docs/api/context.md`, `docs/api/cache.md`, `docs/functional/*`,
