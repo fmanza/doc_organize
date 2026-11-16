@@ -6,6 +6,16 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-16
+
+Metadatos para organizar mejor la información. El escaneo guarda tipo MIME, fecha de creación, permisos y, si se pide,
+el propietario de cada fichero. El contexto recoge autor, descripción, palabras clave e idioma de cada documento (lo
+que declara el propio documento; con un opt-in, la IA rellena la descripción y las palabras clave que falten), deja
+constancia de cómo se clasificó cada documento y guarda un historial de qué cambia entre construcciones, exportable a
+Excel. La clasificación por reglas ya no distingue tildes. Sin cambios incompatibles en la API; `cache.db` se migra
+sola. Nueva dependencia: `py3langid`. Detalle en [Metadatos de fichero](docs/guides/metadata-schema.md) y
+[Contexto](docs/api/context.md).
+
 ### Añadido
 
 - **Metadatos de fichero** en `DocumentMetadata` y `CacheEntry`: `created_time` (`st_birthtime`; `None` en Linux),
@@ -26,8 +36,8 @@ releases publicados antes de esa versión).
   si el texto es corto o la confianza baja (< 0,7), en lugar de adivinarlo.
 - **Trazabilidad de la clasificación** en `DomainDocument`: `rules_domain` y `rules_confidence` (lo que propusieron
   las reglas, también cuando decidió la IA), `ai_domain`, `ai_confidence` y `ai_reasoning` (antes la propuesta y la
-  justificación de la IA se descartaban) y `material_type_confidence`. En `Context`: `ai_enrichment_model` y `built_with_version` (versión de
-  doc_organize que lo construyó). Detalle en
+  justificación de la IA se descartaban) y `material_type_confidence`. En `Context`: `ai_enrichment_model` y
+  `built_with_version` (versión de doc_organize que lo construyó). Detalle en
   [Contexto](docs/api/context.md#trazabilidad-de-la-clasificacion-150).
 - **Historial del contexto**: cada `ContextBuilder.build()` añade a `historial_contexto/CONTEXT_HISTORY.jsonl`
   (`ProjectLayout.context_history`) un `ContextBuildRecord` con los documentos que entraron, salieron o cambiaron de
@@ -49,8 +59,8 @@ releases publicados antes de esa versión).
   del manifiesto) comparaba sin quitar tildes, así que «gestión» en el texto no contaba para el dominio
   `gestion-calidad`, ni una carpeta «Gestión Calidad» daba la bonificación de ruta. Ahora ignora tildes y diéresis
   (`fold_accents`, una tabla de traducción de las letras latinas con diacrítico; la «ñ» cuenta como «n»: 0,2 s con
-  10 MB de texto). Al reconstruir un contexto, algunos documentos pueden pasar de sin
-  clasificar (o de la IA) a clasificados por reglas. Los slugs y las carpetas reorganizadas no cambian.
+  10 MB de texto). Al reconstruir un contexto, algunos documentos pueden pasar de sin clasificar (o de la IA) a
+  clasificados por reglas. Los slugs y las carpetas reorganizadas no cambian.
 
 ### Cambiado
 

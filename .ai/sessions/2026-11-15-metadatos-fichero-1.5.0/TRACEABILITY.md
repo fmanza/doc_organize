@@ -158,7 +158,8 @@ cliente de IA solo se ha probado con `httpx.MockTransport`, no contra un LiteLLM
 | En Windows, `capture_owner=True` añade una llamada al sistema por fichero; en carpetas de red puede notarse | Opt-in; cuentas resueltas en caché por SID | Aceptado (sin medir) |
 | `mime_type` por extensión no detecta ficheros renombrados | Documentado en la guía | Aceptado |
 | Un escaneo sin `capture_owner` borra el propietario guardado por otro anterior | Documentado; es coherente con el opt-in | Aceptado |
-| Versión: el código y la doc dicen 1.5.0 pero `pyproject.toml` sigue en 1.4.0 | Subir en el paso de release | Abierto |
+| Versión: el código y la doc dicen 1.5.0 pero `pyproject.toml` seguía en 1.4.0 | Subida en `release/1.5.0` (CHANGELOG, `COMPATIBILITY.md`, `publica.md`) | Cerrado |
+| El historial del contexto no rota, se reescribe `created_at` en cada construcción y dos construcciones simultáneas pueden cruzar sus líneas | Anotados en `/audit-code`; para una versión posterior | Abierto |
 | `main` publicó la documentación de la Fase 1 antes de la release (workflows `Docs` al fusionar el #34) | Se corrige sola con la release 1.5.0 | Aceptado |
 | Cada fase de IA (clasificación y enriquecimiento) puede enviar hasta `ai_max_documents`: el total puede duplicarse | Documentado en `docs/api/context.md` | Aceptado |
 | El sitio de contexto no muestra autor, descripción, palabras clave ni idioma | Pendiente en `SiteGenerator` | Abierto |
