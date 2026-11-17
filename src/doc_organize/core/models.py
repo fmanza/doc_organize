@@ -956,6 +956,18 @@ AiClassificationStopReason = Literal["auth", "connection", "budget"]
 """Motivo por el que `ContextBuilder.build()` detuvo la Sub-fase B (`Context.ai_classification_stopped`, L-3a/L-3b)."""
 
 
+class DocumentCredentialFindings(BaseModel):
+    """Credenciales redactadas en el texto de un documento antes de enviarlo a la IA (1.7.0), **sin los valores**.
+
+    Attributes:
+        source_path (str): Documento, con la misma ruta que su `DomainDocument`/`UnclassifiedDocument`.
+        rules (dict[str, int]): Cuántos valores se redactaron por regla (`doc_organize.security.CREDENTIAL_RULES`).
+    """
+
+    source_path: str
+    rules: dict[str, int] = Field(default_factory=dict)
+
+
 class Context(BaseModel):
     """Contexto de organización documental de un proyecto: configuración de clasificación + dominios.
 
@@ -1067,6 +1079,20 @@ class Context(BaseModel):
     ai_enrichment_sent: int = Field(default=0, ge=0, description="Documentos enviados a la IA para enriquecer (una llamada por documento, 1.5.0)")
     ai_enrichment_applied: int = Field(default=0, ge=0, description="Documentos enviados en los que la IA rellenó al menos un campo (1.5.0)")
     ai_enrichment_failed: int = Field(default=0, ge=0, description="Documentos enviados a enriquecer cuya llamada falló (1.5.0)")
+    ai_redact_credentials: bool = Field(
+        default=False,
+        description=(
+            "Si el texto enviado a la IA se redactó antes (`ContextBuilder(ai_redact_credentials=True)`, 1.7.0). `False` en "
+            "contextos anteriores a la 1.7.0"
+        ),
+    )
+    credential_findings: list[DocumentCredentialFindings] = Field(
+        default_factory=list,
+        description=(
+            "Documentos enviados a la IA en los que se redactaron credenciales, con el recuento por regla y nunca el "
+            "valor (1.7.0). Vacío sin IA o con la redacción desactivada"
+        ),
+    )
     created_at: str = Field(
         ...,
         description=(
@@ -1279,6 +1305,13 @@ class LiteLLMTaxonomyManifestDraftConfig(BaseModel):
     )
     retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
     retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
+    redact_credentials: bool = Field(
+        default=True,
+        description=(
+            "Redacta las credenciales (`doc_organize.security.redact_credentials`) del título y el extracto de cada documento "
+            "de la muestra antes de enviarlos (1.7.0)"
+        ),
+    )
 
 
 class DocumentEnrichmentResult(BaseModel):
@@ -1329,6 +1362,7 @@ __all__ = [
     "DirectoryTree",
     "DirectoryTreeNode",
     "DoclingConfig",
+    "DocumentCredentialFindings",
     "DocumentEnrichmentField",
     "DocumentEnrichmentResult",
     "DocumentMetadata",

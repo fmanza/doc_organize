@@ -267,6 +267,34 @@ for detail in context.unclassified_details:
     print(detail.reason, detail.title, detail.author, detail.rules_domain)
 ```
 
+### Credenciales redactadas antes de la IA (Unreleased)
+
+`ContextBuilder(ai_redact_credentials=True)` (*keyword-only*, **activado por defecto**) pasa el título y el texto de cada
+documento por [`redact_credentials`](#credenciales-doc_organizesecurity-unreleased) antes de enviarlo a la IA, en la
+Sub-fase B (un eje y manifiesto) y en el enriquecimiento. Solo cambia lo que **sale**: las reglas, el idioma y lo que
+se guarda en `context.json` usan el texto original.
+
+- `Context.ai_redact_credentials` (`bool`, `False` en contextos anteriores) dice si la construcción redactó.
+- `Context.credential_findings` (`list[DocumentCredentialFindings]`): por cada documento enviado en el que se redactó algo,
+  `source_path` y `rules` (recuento por regla, sumando todas las fases de IA). **Nunca el valor.**
+- `ai_redact_credentials=False` envía el texto original (comportamiento de 1.6.0).
+
+`TaxonomyManifestDraftClient` hace lo mismo con la muestra (títulos y extractos) según
+`LiteLLMTaxonomyManifestDraftConfig.redact_credentials` (`True` por defecto), porque el consumidor lo llama sin pasar por
+`ContextBuilder`.
+
+### Credenciales: `doc_organize.security` (Unreleased)
+
+::: doc_organize.security.credentials
+    options:
+      members:
+        - redact_credentials
+        - scan_credentials
+        - RedactionResult
+        - CredentialFinding
+        - REDACTED
+        - CREDENTIAL_RULES
+
 ## DomainClassifier (Sub-fase A)
 
 ```python

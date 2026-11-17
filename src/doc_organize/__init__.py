@@ -98,6 +98,12 @@ _EXPORTS: dict[str, str] = {
     "OfficeStatus": "doc_organize.core.models",
     "Context": "doc_organize.core.models",
     "TaxonomyManifest": "doc_organize.core.models",
+    "DocumentCredentialFindings": "doc_organize.core.models",
+    # Credenciales (1.7.0)
+    "redact_credentials": "doc_organize.security.credentials",
+    "scan_credentials": "doc_organize.security.credentials",
+    "RedactionResult": "doc_organize.security.credentials",
+    "CredentialFinding": "doc_organize.security.credentials",
     # Errores
     "DocOrganizeError": "doc_organize.core.exceptions",
     "OperationCancelledError": "doc_organize.core.exceptions",
@@ -173,6 +179,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         DedupEventType,
         DeduplicationReport,
         DedupMode,
+        DocumentCredentialFindings,
         DocumentMetadata,
         DocumentStatus,
         DuplicateGroup,
@@ -208,6 +215,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
     from doc_organize.projects.scanned_folders_store import ScannedFoldersStore
     from doc_organize.scan.scan_command import DeduplicationSummary, ScanCommand, ScanSummary
     from doc_organize.scanner.document_scanner import DocumentScanner
+    from doc_organize.security.credentials import CredentialFinding, RedactionResult, redact_credentials, scan_credentials
     from doc_organize.utils.av_detector import detect_av_status
     from doc_organize.utils.gpu_detector import detect_gpu_status
     from doc_organize.utils.office_detector import detect_office_status

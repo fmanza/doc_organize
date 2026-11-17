@@ -193,6 +193,29 @@ Quien sirva el sitio debe tratarlo como contenido de terceros: servirlo desde **
 sus cookies), o con una cabecera `Content-Security-Policy` restrictiva (por ejemplo `sandbox`, que deja el sitio en un
 origen opaco).
 
+## Credenciales en el texto (Unreleased)
+
+Los documentos de oficina llevan a veces contraseñas, tokens o un `client_secret` en claro. Antes de que su texto salga
+de la aplicación o se publique, el **valor** se sustituye por `«REDACTADO»` (la clave se conserva: el texto sigue
+diciendo que había una contraseña):
+
+| Dónde | Qué se redacta | Cómo se desactiva |
+|---|---|---|
+| Clasificación y enriquecimiento con IA (`ContextBuilder`) | Título y texto enviados | `ContextBuilder(ai_redact_credentials=False)` |
+| Borrador de manifiesto con IA | Títulos y extractos de la muestra | `LiteLLMTaxonomyManifestDraftConfig(redact_credentials=False)` |
+| Sitio (`SiteGenerator.generate`) | Páginas de la carpeta reorganizada y títulos del `nav` | `generate(redact_credentials=False)` |
+
+Está **activado por defecto** en los tres. `Conversión/` y los originales no se tocan; `context.json` guarda el título
+y el texto originales (lo que se publica en el sitio sale redactado). El contexto resume lo redactado en
+`credential_findings` (documento y recuento por regla) y el sitio lista las páginas tocadas en
+`SiteResult.credentials_redacted`, **sin el valor** en ningún caso.
+
+Reglas: claves privadas PEM, `client_secret`, contraseña (`password`, `contraseña`, `clave`…), `token`/`api_key`/`secret`,
+usuario y contraseña en una URL, JWT, claves de acceso de AWS, tokens de GitHub y claves `sk-…`. No se tocan marcadores
+evidentes (`xxxxxx`, `***`, `<…>`, `${VAR}`), URL ni valores ya redactados; en las reglas por palabra clave el valor
+tiene que tener algún carácter que no sea letra, así que **una contraseña solo de letras no se detecta**. Es una red de
+seguridad, no una garantía: el aviso de privacidad de la IA sigue valiendo.
+
 ## Reorganizar sin seguir enlaces simbólicos
 
 Desde 0.13.0, `Reorganizer` no sigue enlaces simbólicos (ni uniones de Windows), con el mismo criterio que la

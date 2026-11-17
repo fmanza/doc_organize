@@ -21,6 +21,7 @@ from doc_organize.core.constants import SITE_FOLDER_NAME
 from doc_organize.core.exceptions import InvalidPathError, SiteBuildError
 from doc_organize.core.models import Context, Domain, DomainDocument, Project
 from doc_organize.projects.layout import RESERVED_OUTPUT_FOLDER_NAMES, ProjectLayout, _folder_key, validate_output_folder_name
+from doc_organize.security import credentials
 from doc_organize.utils.atomic_write import write_text_atomic
 from doc_organize.utils.logging import get_logger
 from doc_organize.utils.path_utils import ensure_no_symlinks
@@ -46,6 +47,9 @@ class SiteResult:
         search_excluded (tuple[str, ...]): Páginas que se sacaron del buscador del sitio porque una de sus secciones
             supera el límite del índice de Zensical (ver `SiteGenerator`), como rutas relativas a la carpeta
             reorganizada (las del `nav`, `DomainDocument.organized_path`). Se siguen pudiendo navegar. Desde 1.4.0.
+        credentials_redacted (tuple[str, ...]): Páginas de la carpeta reorganizada en las que se redactaron credenciales
+            antes de publicar el sitio (`generate(redact_credentials=True)`), como rutas relativas a esa carpeta. Desde
+            1.7.0.
     """
 
     config_path: Path
@@ -53,6 +57,7 @@ class SiteResult:
     site_dir: Path
     site_built: bool
     search_excluded: tuple[str, ...] = ()
+    credentials_redacted: tuple[str, ...] = ()
 
 
 class SiteGenerator:
@@ -105,7 +110,14 @@ class SiteGenerator:
         self.logger = logger
 
     async def generate(
-        self, project: Project, context: Context, *, build: bool = True, site_dir: Path | None = None, timeout: float | None = None
+        self,
+        project: Project,
+        context: Context,
+        *,
+        build: bool = True,
+        site_dir: Path | None = None,
+        timeout: float | None = None,
+        redact_credentials: bool = True,
     ) -> SiteResult:
         """Escribe `zensical.toml` (raíz del proyecto) + `<output_folder_name>/index.md` y, con `build=True`, ejecuta
         `zensical build` hacia `site_dir`.
@@ -123,6 +135,10 @@ class SiteGenerator:
                 Tiene que colgar de `root_path` (lo exige Zensical) y no puede ser ni estar dentro de la carpeta
                 reorganizada ni de otra carpeta reservada del proyecto: Zensical vacía `site_dir` al construir.
             timeout: Segundos máximos para `zensical build` (`None`: sin límite).
+            redact_credentials: Antes de publicar, sustituye el valor de las credenciales de las páginas de la carpeta
+                reorganizada por `«REDACTADO»` (`doc_organize.security.redact_credentials`, 1.7.0). Por defecto activado.
+                Solo cambia esa copia: `Conversión/` y los originales no se tocan. Las páginas tocadas se devuelven en
+                `SiteResult.credentials_redacted`.
 
         Returns:
             `SiteResult` con las rutas escritas y si se construyó el sitio.
@@ -140,17 +156,23 @@ class SiteGenerator:
         index_path = output_root / _INDEX_MD_NAME
         await asyncio.to_thread(write_text_atomic, index_path, _render_index(context))
         pages = [_INDEX_MD_NAME] + [path for domain in context.domains for path in resolve_organized_paths(domain, project.root_path)]
+        credentials_redacted = await asyncio.to_thread(_redact_pages, output_root, pages[1:]) if redact_credentials else ()
         search_excluded = await asyncio.to_thread(_exclude_oversized_from_search, output_root, pages)
 
         relative_site_dir = target_site_dir.relative_to(os.path.abspath(layout.output_root)).as_posix()
-        config = self._build_config(project, context, relative_site_dir)
+        config = self._build_config(project, context, relative_site_dir, redact=redact_credentials)
         await asyncio.to_thread(write_text_atomic, layout.site_config_file, _CONFIG_HEADER + _render_toml(config))
         await asyncio.to_thread(layout.legacy_mkdocs_config_file.unlink, missing_ok=True)
 
         if build:
             await self.build_site(project, timeout=timeout)
         return SiteResult(
-            config_path=layout.site_config_file, index_path=index_path, site_dir=target_site_dir, site_built=build, search_excluded=search_excluded
+            config_path=layout.site_config_file,
+            index_path=index_path,
+            site_dir=target_site_dir,
+            site_built=build,
+            search_excluded=search_excluded,
+            credentials_redacted=credentials_redacted,
         )
 
     async def build_site(self, project: Project, *, timeout: float | None = None) -> None:
@@ -219,10 +241,10 @@ class SiteGenerator:
         for directory in (target_site_dir, layout.site_cache_dir):
             await asyncio.to_thread(_remove_dir_or_link, directory)
 
-    def _build_config(self, project: Project, context: Context, site_dir: str) -> dict[str, Any]:
+    def _build_config(self, project: Project, context: Context, site_dir: str, *, redact: bool = True) -> dict[str, Any]:
         nav: list[Any] = [{"Inicio": _INDEX_MD_NAME}]
         for domain in context.domains:
-            domain_nav = self._build_domain_nav(domain, context.taxonomy_manifest_used, project.root_path)
+            domain_nav = self._build_domain_nav(domain, context.taxonomy_manifest_used, project.root_path, redact=redact)
             if domain_nav:
                 nav.append({_label(domain.name): domain_nav})
         return {
@@ -235,14 +257,19 @@ class SiteGenerator:
             }
         }
 
-    def _build_domain_nav(self, domain: Domain, taxonomy_manifest_used: bool, project_root: str) -> list[Any]:
+    def _build_domain_nav(self, domain: Domain, taxonomy_manifest_used: bool, project_root: str, *, redact: bool = True) -> list[Any]:
         """Nav de un dominio: lista plana de documentos (modo sin manifiesto), o agrupada
         por `material_type` dentro del dominio cuando `taxonomy_manifest_used` — mismo
         criterio de profundidad `dominio > tipo de material > documentos` que la carpeta
         física (`Reorganizer`): las dos usan `resolve_organized_paths` (L-8d), que desambigua colisiones de `stem`."""
         paths = {id(document): path for document, path in zip(domain.documents, resolve_organized_paths(domain, project_root), strict=True)}
+
+        def title(document: DomainDocument) -> str:
+            # El título sale del documento y se publica en el `nav`: con `redact`, sin credenciales (1.7.0).
+            return _label(credentials.redact_credentials(document.title).text if redact else document.title)
+
         if not taxonomy_manifest_used:
-            return [{_label(document.title): paths[id(document)]} for document in domain.documents]
+            return [{title(document): paths[id(document)]} for document in domain.documents]
 
         by_material_type: dict[str, list[DomainDocument]] = {}
         for document in domain.documents:
@@ -251,7 +278,7 @@ class SiteGenerator:
 
         nav: list[Any] = []
         for material_type, docs in by_material_type.items():
-            entries = [{_label(document.title): paths[id(document)]} for document in docs]
+            entries = [{title(document): paths[id(document)]} for document in docs]
             # `material_type_name` (nombre legible del manifiesto) es el mismo para todos los
             # documentos de este grupo -- comparten `material_type`, luego la misma entrada del
             # catálogo `TaxonomyManifest.material_types`. `None` para el placeholder "sin-clasificar"
@@ -354,6 +381,32 @@ def _exclude_oversized_from_search(output_root: Path, pages: list[str]) -> tuple
             logger.info(f"'{page}' sale del buscador del sitio: una sección de ~{biggest} palabras supera el límite ({max_positions})")
             excluded.append(page)
     return tuple(excluded)
+
+
+def _redact_pages(output_root: Path, pages: list[str]) -> tuple[str, ...]:
+    """Redacta las credenciales de las `pages` (rutas relativas a `output_root`); devuelve las que cambiaron.
+
+    Mismo criterio de escritura que `_mark_excluded_from_search`: nunca a través de un enlace, y un fallo se registra
+    sin parar la generación (sin el valor encontrado).
+    """
+    redacted: list[str] = []
+    for page in dict.fromkeys(pages):
+        text = _read_page(output_root, page)
+        if text is None:
+            continue
+        result = credentials.redact_credentials(text)
+        if not result.findings:
+            continue
+        path = output_root.joinpath(*PurePosixPath(page).parts)
+        try:
+            ensure_no_symlinks(path.parent)
+            write_text_atomic(path, result.text, newline="")
+        except OSError as exc:
+            logger.warning(f"No se pudieron redactar las credenciales de '{page}' ({exc}): no se publica redactada")
+            continue
+        logger.info(f"'{page}': {len(result.findings)} credencial(es) redactada(s) antes de publicar el sitio")
+        redacted.append(page)
+    return tuple(redacted)
 
 
 def _mark_excluded_from_search(output_root: Path, page: str) -> bool:

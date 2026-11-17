@@ -4,6 +4,7 @@ Orquestador de la construcción del contexto de organización documental de un p
 
 import asyncio
 
+from collections import Counter
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -33,6 +34,7 @@ from doc_organize.core.models import (
     AiClassificationStopReason,
     Context,
     ConversionResult,
+    DocumentCredentialFindings,
     Domain,
     DomainDocument,
     DomainStatus,
@@ -42,6 +44,7 @@ from doc_organize.core.models import (
 )
 from doc_organize.core.progress import CancelToken, Phase, ProgressCallback, ProgressEvent, checkpoint
 from doc_organize.projects.layout import ProjectLayout
+from doc_organize.security.credentials import redact_credentials
 from doc_organize.utils.logging import get_logger
 from doc_organize.utils.text_clean import clean_text
 
@@ -77,6 +80,24 @@ class _AiRun:
     consecutive_connection_failures: int = 0
     stopped: AiClassificationStopReason | None = None
     stop_logged: bool = False
+    #: Redactar credenciales del título y el texto antes de enviarlos (1.7.0, `ContextBuilder(ai_redact_credentials=)`).
+    redact: bool = True
+    #: Recuento por documento y regla de lo redactado, compartido por todas las fases de IA de una construcción.
+    credential_ledger: dict[str, Counter[str]] | None = None
+
+    def outgoing(self, source_path: str, chunks_text: str, title: str | None) -> tuple[str, str | None]:
+        """Título y texto tal como salen hacia la IA: redactados si `redact`, y lo redactado anotado en el registro.
+
+        Solo para enviar: las reglas, el idioma y lo que se guarda siguen usando el texto original.
+        """
+        if not self.redact:
+            return chunks_text, title
+        body = redact_credentials(chunks_text)
+        head = redact_credentials(title) if title else None
+        found = [*body.findings, *(head.findings if head is not None else ())]
+        if found and self.credential_ledger is not None:
+            self.credential_ledger.setdefault(source_path, Counter()).update(finding.rule for finding in found)
+        return body.text, head.text if head is not None else title
 
     def may_send(self) -> bool:
         """Reserva un envío si se puede; al agotar `max_documents` marca la parada `"budget"` y devuelve `False`."""
@@ -177,6 +198,7 @@ class ContextBuilder:
         *,
         history_policy: ContextHistoryPolicy | None = None,
         properties_concurrency: int = _DEFAULT_PROPERTIES_CONCURRENCY,
+        ai_redact_credentials: bool = True,
     ) -> None:
         """
         Args:
@@ -184,6 +206,10 @@ class ContextBuilder:
             history_policy: Giro de `CONTEXT_HISTORY.jsonl` (1.6.0); `None` = `ContextHistoryPolicy()` (5 MB, 4 copias).
             properties_concurrency: Originales cuyas propiedades se leen a la vez (1.6.0). En una carpeta de red, 4
                 lecturas a la vez cuestan un tercio que de una en una; `1` = una detrás de otra, como en 1.5.0.
+            ai_redact_credentials: Redacta las credenciales (`doc_organize.security.redact_credentials`) del título y el texto
+                de cada documento antes de enviarlo a la IA, en la Sub-fase B y el enriquecimiento (1.7.0). Por
+                defecto **activado**: cambia lo que sale hacia la IA, no lo que se clasifica con reglas ni lo que se
+                guarda. Lo redactado se resume, sin valores, en `Context.credential_findings`.
 
         Raises:
             ValueError: Si `properties_concurrency` es menor que 1.
@@ -193,6 +219,7 @@ class ContextBuilder:
         self.registry = registry or ContextRegistry()
         self.history_policy = history_policy or ContextHistoryPolicy()
         self.properties_concurrency = properties_concurrency
+        self.ai_redact_credentials = ai_redact_credentials
         self.logger = get_logger(__name__)
 
     async def build(
@@ -300,7 +327,8 @@ class ContextBuilder:
         if ai_max_documents is not None and ai_max_documents < 0:
             raise ValueError("ai_max_documents debe ser >= 0 (o None)")
         checkpoint(cancel_token)
-        ai_run = _AiRun(max_failures=ai_max_failures, max_documents=ai_max_documents)
+        credential_ledger: dict[str, Counter[str]] = {}
+        ai_run = self._new_ai_run(ai_max_failures, ai_max_documents, credential_ledger)
 
         def _report(phase: Phase, index: int, total: int, source_path: str) -> None:
             if on_progress is not None:
@@ -340,7 +368,7 @@ class ContextBuilder:
                 )
 
         unclassified_details = await self._describe_unclassified(unclassified, rules, cancel_token)
-        enrichment_run = _AiRun(max_failures=ai_max_failures, max_documents=ai_max_documents)
+        enrichment_run = self._new_ai_run(ai_max_failures, ai_max_documents, credential_ledger)
         await self._describe_documents(
             classified, unclassified_details, ai_enrichment_enabled, ai_enrichment_client, enrichment_run, _enrichment_progress, cancel_token
         )
@@ -384,6 +412,11 @@ class ContextBuilder:
             ai_enrichment_sent=enrichment_run.sent,
             ai_enrichment_applied=enrichment_run.classified,
             ai_enrichment_failed=enrichment_run.failed,
+            ai_redact_credentials=self.ai_redact_credentials,
+            credential_findings=[
+                DocumentCredentialFindings(source_path=source_path, rules=dict(sorted(counts.items())))
+                for source_path, counts in sorted(credential_ledger.items())
+            ],
             created_at=now,
             updated_at=now,
         )
@@ -392,6 +425,9 @@ class ContextBuilder:
         await self._save_and_record(project, context)
         self.logger.info(f"Contexto construido para '{project.name}': {len(domains)} dominio(s), {len(unclassified)} documento(s) sin clasificar")
         return context
+
+    def _new_ai_run(self, max_failures: int | None, max_documents: int | None, ledger: dict[str, Counter[str]]) -> _AiRun:
+        return _AiRun(max_failures=max_failures, max_documents=max_documents, redact=self.ai_redact_credentials, credential_ledger=ledger)
 
     async def _classify_with_manifest(
         self, documents: list[ConversionResult], manifest: TaxonomyManifest, threshold: float
@@ -541,9 +577,10 @@ class ContextBuilder:
         if not run.may_send():
             return
 
+        sent_text, sent_title = run.outgoing(document.source_path, chunks_text, title)
         try:
             result = await client.classify(
-                chunks_text=chunks_text, title=title, candidate_domains=domain_slugs, candidate_material_types=material_slugs
+                chunks_text=sent_text, title=sent_title, candidate_domains=domain_slugs, candidate_material_types=material_slugs
             )
         except TaxonomyClassificationError as exc:
             run.record_failure(exc, TaxonomyClassificationAuthError, TaxonomyClassificationConnectionError)
@@ -617,8 +654,9 @@ class ContextBuilder:
         if not run.may_send():
             return None
 
+        sent_text, sent_title = run.outgoing(document.source_path, chunks_text, title)
         try:
-            result = await client.classify(chunks_text=chunks_text, title=title, candidate_domains=catalog)
+            result = await client.classify(chunks_text=sent_text, title=sent_title, candidate_domains=catalog)
         except DomainClassificationError as exc:
             run.record_failure(exc, DomainClassificationAuthError, DomainClassificationConnectionError)
             self.logger.warning(f"Fallo la clasificación por IA de '{document.source_path}': {exc} — queda sin clasificar")
@@ -829,8 +867,9 @@ class ContextBuilder:
         if not run.may_send():
             return
 
+        sent_text, sent_title = run.outgoing(document.source_path, chunks_text, title)
         try:
-            result = await client.enrich(chunks_text=chunks_text, title=title)
+            result = await client.enrich(chunks_text=sent_text, title=sent_title)
         except DocumentEnrichmentError as exc:
             run.record_failure(exc, DocumentEnrichmentAuthError, DocumentEnrichmentConnectionError)
             self.logger.warning(f"Fallo el enriquecimiento por IA de '{document.source_path}': {exc} — queda con lo que declara")
