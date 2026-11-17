@@ -1,4 +1,4 @@
-"""Redacción de credenciales (1.6.1): reglas, marcadores que no son secretos, idempotencia y su aplicación en todo lo
+"""Redacción de credenciales (1.7.0): reglas, marcadores que no son secretos, idempotencia y su aplicación en todo lo
 que sale hacia la IA (`ContextBuilder`, `TaxonomyManifestDraftClient`) y en el sitio (`SiteGenerator`).
 
 Valores sintéticos evidentes: nunca un secreto real.

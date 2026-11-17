@@ -49,7 +49,7 @@ class SiteResult:
             reorganizada (las del `nav`, `DomainDocument.organized_path`). Se siguen pudiendo navegar. Desde 1.4.0.
         credentials_redacted (tuple[str, ...]): Páginas de la carpeta reorganizada en las que se redactaron credenciales
             antes de publicar el sitio (`generate(redact_credentials=True)`), como rutas relativas a esa carpeta. Desde
-            1.6.1.
+            1.7.0.
     """
 
     config_path: Path
@@ -136,7 +136,7 @@ class SiteGenerator:
                 reorganizada ni de otra carpeta reservada del proyecto: Zensical vacía `site_dir` al construir.
             timeout: Segundos máximos para `zensical build` (`None`: sin límite).
             redact_credentials: Antes de publicar, sustituye el valor de las credenciales de las páginas de la carpeta
-                reorganizada por `«REDACTADO»` (`doc_organize.security.redact_credentials`, 1.6.1). Por defecto activado.
+                reorganizada por `«REDACTADO»` (`doc_organize.security.redact_credentials`, 1.7.0). Por defecto activado.
                 Solo cambia esa copia: `Conversión/` y los originales no se tocan. Las páginas tocadas se devuelven en
                 `SiteResult.credentials_redacted`.
 
@@ -265,7 +265,7 @@ class SiteGenerator:
         paths = {id(document): path for document, path in zip(domain.documents, resolve_organized_paths(domain, project_root), strict=True)}
 
         def title(document: DomainDocument) -> str:
-            # El título sale del documento y se publica en el `nav`: con `redact`, sin credenciales (1.6.1).
+            # El título sale del documento y se publica en el `nav`: con `redact`, sin credenciales (1.7.0).
             return _label(credentials.redact_credentials(document.title).text if redact else document.title)
 
         if not taxonomy_manifest_used:

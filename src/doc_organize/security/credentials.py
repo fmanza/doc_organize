@@ -1,5 +1,5 @@
 """
-Detección y redacción de credenciales en el texto de los documentos (1.6.1, F1 del plan de 2.0.0).
+Detección y redacción de credenciales en el texto de los documentos (1.7.0, F1 del plan de 2.0.0).
 
 Los documentos de oficina llevan a veces contraseñas, tokens o un ``client_secret`` en claro (anexos técnicos, actas
 con accesos). Antes de que su texto salga de la aplicación (hacia un servicio de IA) o se publique (sitio del

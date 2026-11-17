@@ -957,7 +957,7 @@ AiClassificationStopReason = Literal["auth", "connection", "budget"]
 
 
 class DocumentCredentialFindings(BaseModel):
-    """Credenciales redactadas en el texto de un documento antes de enviarlo a la IA (1.6.1), **sin los valores**.
+    """Credenciales redactadas en el texto de un documento antes de enviarlo a la IA (1.7.0), **sin los valores**.
 
     Attributes:
         source_path (str): Documento, con la misma ruta que su `DomainDocument`/`UnclassifiedDocument`.
@@ -1082,15 +1082,15 @@ class Context(BaseModel):
     ai_redact_credentials: bool = Field(
         default=False,
         description=(
-            "Si el texto enviado a la IA se redactó antes (`ContextBuilder(ai_redact_credentials=True)`, 1.6.1). `False` en "
-            "contextos anteriores a la 1.6.1"
+            "Si el texto enviado a la IA se redactó antes (`ContextBuilder(ai_redact_credentials=True)`, 1.7.0). `False` en "
+            "contextos anteriores a la 1.7.0"
         ),
     )
     credential_findings: list[DocumentCredentialFindings] = Field(
         default_factory=list,
         description=(
             "Documentos enviados a la IA en los que se redactaron credenciales, con el recuento por regla y nunca el "
-            "valor (1.6.1). Vacío sin IA o con la redacción desactivada"
+            "valor (1.7.0). Vacío sin IA o con la redacción desactivada"
         ),
     )
     created_at: str = Field(
@@ -1309,7 +1309,7 @@ class LiteLLMTaxonomyManifestDraftConfig(BaseModel):
         default=True,
         description=(
             "Redacta las credenciales (`doc_organize.security.redact_credentials`) del título y el extracto de cada documento "
-            "de la muestra antes de enviarlos (1.6.1)"
+            "de la muestra antes de enviarlos (1.7.0)"
         ),
     )
 

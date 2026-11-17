@@ -80,7 +80,7 @@ class _AiRun:
     consecutive_connection_failures: int = 0
     stopped: AiClassificationStopReason | None = None
     stop_logged: bool = False
-    #: Redactar credenciales del título y el texto antes de enviarlos (1.6.1, `ContextBuilder(ai_redact_credentials=)`).
+    #: Redactar credenciales del título y el texto antes de enviarlos (1.7.0, `ContextBuilder(ai_redact_credentials=)`).
     redact: bool = True
     #: Recuento por documento y regla de lo redactado, compartido por todas las fases de IA de una construcción.
     credential_ledger: dict[str, Counter[str]] | None = None
@@ -207,7 +207,7 @@ class ContextBuilder:
             properties_concurrency: Originales cuyas propiedades se leen a la vez (1.6.0). En una carpeta de red, 4
                 lecturas a la vez cuestan un tercio que de una en una; `1` = una detrás de otra, como en 1.5.0.
             ai_redact_credentials: Redacta las credenciales (`doc_organize.security.redact_credentials`) del título y el texto
-                de cada documento antes de enviarlo a la IA, en la Sub-fase B y el enriquecimiento (1.6.1). Por
+                de cada documento antes de enviarlo a la IA, en la Sub-fase B y el enriquecimiento (1.7.0). Por
                 defecto **activado**: cambia lo que sale hacia la IA, no lo que se clasifica con reglas ni lo que se
                 guarda. Lo redactado se resume, sin valores, en `Context.credential_findings`.
 

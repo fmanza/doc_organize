@@ -5,7 +5,7 @@
 - fecha: 2026-11-18
 - rama: `feat/redact-credentials` (desde `develop`, que es v1.6.0 + planes: no hizo falta `support/1.6`)
 - skill: new_feature
-- fase: IMPLEMENT + AUDIT_CODE de **M3b** (F1, redacción de credenciales) del plan único
+- fase: IMPLEMENT + AUDIT_CODE + VERSION (**1.7.0**) de **M3b** (F1, redacción de credenciales) del plan único
   [`../2026-11-17-ai-2.0/PLAN.md`](../2026-11-17-ai-2.0/PLAN.md); D18: publicarla antes de 2.0.0
 
 ## Prompt issued
@@ -33,9 +33,8 @@
 - Sin rama `support/1.6`: `develop` no tiene nada de 2.0 todavía.
 
 ## Pendiente
-- **Versión**: el plan dice 1.6.1 (D18), pero M3b añade API pública (funciones, parámetros y campos); con SemVer eso es
-  una MINOR (**1.7.0**). Decisión del mantenedor antes de cerrar la versión; el CHANGELOG queda en `Unreleased` y el
-  código cita «1.6.1» en docstrings hasta entonces.
+- ~~Versión~~ **Decidido (2026-11-18): 1.7.0**, no 1.6.1 (D18): M3b añade API pública y con SemVer eso es una
+  MINOR. El número 1.7.0 estaba libre (las facetas se fusionaron en la 2.0.0).
 - La web tiene que adoptarla (subir el pin y, si se quiere, mostrar `credential_findings`).
 
 ## Verificación

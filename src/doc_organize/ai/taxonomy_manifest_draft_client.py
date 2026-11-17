@@ -190,7 +190,7 @@ class TaxonomyManifestDraftClient(AiHttpClientBase):
 
     @staticmethod
     def _build_user_prompt(documents: list[SampledDocument], *, redact: bool = True) -> str:
-        """Prompt con la muestra; con `redact` (por defecto), sin credenciales en títulos ni extractos (1.6.1)."""
+        """Prompt con la muestra; con `redact` (por defecto), sin credenciales en títulos ni extractos (1.7.0)."""
         lines = [f"Muestra de {len(documents)} documentos ya convertidos del proyecto:", ""]
         for index, document in enumerate(documents, start=1):
             excerpt = document.chunks_text[:_MAX_CONTENT_CHARS_PER_DOCUMENT]

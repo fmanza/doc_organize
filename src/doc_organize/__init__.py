@@ -99,7 +99,7 @@ _EXPORTS: dict[str, str] = {
     "Context": "doc_organize.core.models",
     "TaxonomyManifest": "doc_organize.core.models",
     "DocumentCredentialFindings": "doc_organize.core.models",
-    # Credenciales (1.6.1)
+    # Credenciales (1.7.0)
     "redact_credentials": "doc_organize.security.credentials",
     "scan_credentials": "doc_organize.security.credentials",
     "RedactionResult": "doc_organize.security.credentials",
