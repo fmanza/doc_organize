@@ -20,8 +20,13 @@ versiones intermedias.
 > - **Decidido en la adaptación (revisable)**: se revierte la S3 (el modelo recibe nombres, descripciones y perfil;
 >   mitigaciones en G2.2); las facetas nacen directamente como **ejes** (no hay `TaxonomyFacet` ni `FacetValue`); en la
 >   web los valores de todos los ejes van en **una tabla genérica indexada** (U3).
+> - **Decisiones D10-D18 (2026-11-17)**: D10, D11, D12, D13, D14 según la recomendación; **D15: las variables de
+>   entorno antiguas se quitan en 2.0.0** (no se leen; si se detectan, error claro que dice cuál usar: U17); **D16 no**:
+>   los agentes (G5-G6) son parte de 2.0.0 y no se sacan a 2.1 aunque peligre el criterio de salida (U18); **D17 sí**:
+>   la parte 1 de la web sale antes como **doc_organize_web 1.8.0**; **D18 sí**: la redacción de credenciales (F1) se
+>   publica como **doc_organize 1.6.1** (hito M3b).
 >
-> El AUDIT_PLAN independiente del final (U1-U16) **manda sobre el cuerpo** donde lo contradiga. La auditoría anterior de
+> El AUDIT_PLAN independiente del final (U1-U18) **manda sobre el cuerpo** donde lo contradiga. La auditoría anterior de
 > este plan (B1-B18) queda como registro y sus correcciones están aplicadas.
 
 ## Origen
@@ -180,8 +185,10 @@ class DocumentClassification(BaseModel):
   `taxonomy_design`, `agent`, `embed`; modelo por tarea (alias del proxy recomendados, **no obligatorios**: U10);
   claves virtuales por tarea opcionales (D12); `metadata.tags`; reintentos de B; redacción de C.
 - Salida `json_schema` estricta con `enum` de slugs por eje; caída una vez a `json_object`; validación siempre.
-- `settings_from_env()` con `DOC_ORGANIZE_LITELLM_BASE_URL`, `_VIRTUAL_KEY`, `_MODEL_<TAREA>`; las antiguas se leen con
-  aviso (D15); si conviven, mandan las nuevas.
+- `settings_from_env()` con `DOC_ORGANIZE_LITELLM_BASE_URL`, `_VIRTUAL_KEY`, `_MODEL_<TAREA>`. Las antiguas
+  `DOC_ORGANIZE_LITELLM_<CLIENTE>_*` **no se leen** (D15); si alguna está definida, `AiConfigurationError` con la lista
+  de variables antiguas encontradas y su equivalente nueva, para que la actualización falle de forma visible y no con
+  la IA desactivada en silencio (U17).
 - `PromptRegistry`: `ai/prompts/<tarea>.md` empaquetados con `id`/`version`, sobrescribibles en
   `<proyecto>/.doc_organize/prompts/`; prefijo estable (instrucciones + perfil + catálogo → ejemplos → documento) para
   la caché del proveedor; `litellm_prompt_ids` opcional; procedencia en `Context.ai_provenance`.
@@ -256,7 +263,7 @@ class DocumentClassification(BaseModel):
 | `ContextBuilder.build(ai_classification_client=…, ai_enrichment_client=…)` | `build(llm=…, ai_scope=…, enrich=…, decisions=…, versions=…, semantic=…)` |
 | `TaxonomyClassificationResult`, `DomainClassificationResult` | `DocumentClassification` |
 | `Context.ai_documents_*`, `ai_classification_stopped`, `ai_enrichment_*` | `Context.ai_stats` |
-| Variables `DOC_ORGANIZE_LITELLM_<CLIENTE>_*` | `DOC_ORGANIZE_LITELLM_*` (antiguas leídas con aviso en 2.0.x) |
+| Variables `DOC_ORGANIZE_LITELLM_<CLIENTE>_*` | `DOC_ORGANIZE_LITELLM_*`; las antiguas ya no se leen y su presencia da error con el equivalente (D15) |
 | `context.json` v1 y manifiesto v1 como formato de escritura | v2 (los v1 se siguen leyendo) |
 
 `LiteLLMUsageClient` y `GitHubCopilotUsageClient` no cambian.
@@ -292,6 +299,7 @@ correcciones. Prerreleases PEP 440 (`2.0.0a1`, `a2`…, `rc1`) para que la web l
 | **M1** | A1-A4 (ejes, manifiesto v2 y migración, reglas por eje, `context.json` v2, historial, sitio y Excel por ejes) | Sin IA: mismo árbol y misma clasificación de dominio y tipo que 1.6.0; CALIDAD_VD (implícita) migra y clasifica `iso-27001` y `ens` en el documento que menciona los dos; «ensayos sensibles» no da `ens` |
 | **M2** | B (lectura única, concurrencia, D5) + F4 | Contador de lecturas; `context.json` idéntico con 1 y 4; medición después |
 | **M3** | C (F1, F2) | El valor redactado no sale ni aparece en `context.json`, logs ni informes |
+| **M3b** | **doc_organize 1.6.1** (D18) desde `support/1.6`: `doc_organize.security.secrets` y su aplicación al texto que sale hacia los cuatro clientes actuales (`ContextBuilder(ai_redact_secrets=True)`) y a la copia del sitio; mismo código que M3, sin depender de 2.0. Web: subir a 1.6.1 en `develop` (1.8.x) | Los tests de M3 sobre la API de 1.6; CHANGELOG avisa del cambio de lo que sale hacia la IA |
 | **M4** | G1 (cliente, prompts, caché) | Esquema enviado, caída una vez, procedencia, cero llamadas al reconstruir sin cambios |
 | **M5** | G1.4 + G2 + enriquecimiento y borrador → **`2.0.0a1`** | Riesgos E1-E5; evidencia; perfil compuesto; vista previa |
 | **M6** | G3 + F (decisiones y cola) | Métricas contra casos a mano; decisiones desfasadas y huérfanas |
@@ -304,7 +312,7 @@ correcciones. Prerreleases PEP 440 (`2.0.0a1`, `a2`…, `rc1`) para que la web l
 
 | Hito | Contenido | Depende de |
 |---|---|---|
-| **W1** | Parte 1 del plan web (manifiesto, `0015`) | — (puede empezar ya) |
+| **W1** | Parte 1 del plan web (manifiesto, `0015`) → **se publica como doc_organize_web 1.8.0** sobre doc_organize 1.6.x (D17), desde `develop`, antes de W2 | — (puede empezar ya) |
 | **W2** | Migraciones 2.0 (prueba de ida y vuelta sobre una copia de la BD real) + integración sobre `2.0.0a1` + LiteLLM falso con `json_schema` | M5 |
 | **W3** | Contexto por ejes (filtros, insignias, evidencia, procedencia, avisos), ajustes de IA por tarea, editor de perfil y vista previa | W2 |
 | **W4** | Frescura, redacción por proyecto, diagnóstico | M2, M3 |
@@ -337,6 +345,20 @@ correcciones. Prerreleases PEP 440 (`2.0.0a1`, `a2`…, `rc1`) para que la web l
 | D17 | ¿La parte 1 de la web (manifiesto, no depende de la librería) puede salir antes como web 1.8.0? | Sí (U2) |
 | D18 | ¿Se publica F1 (redacción) como corrección en 1.6.x mientras llega 2.0? | Sí (U2) |
 
+**Decididas (2026-11-17)**:
+
+| # | Decisión |
+|---|---|
+| D10 | Evidencia no encontrada: se conserva con confianza limitada por debajo del umbral y va a revisión |
+| D11 | Perfil de la plantilla + perfil del proyecto que solo añade |
+| D12 | Claves virtuales por tarea, opcionales |
+| D13 | Semántica opt-in |
+| D14 | El revisor solo propone |
+| D15 | **Se quitan** las variables antiguas en 2.0.0; su presencia da error con el equivalente nuevo (U17) |
+| D16 | **No**: los agentes van en 2.0.0; si no cumplen su puerta, la release espera (U18) |
+| D17 | **Sí**: parte 1 de la web como doc_organize_web 1.8.0 |
+| D18 | **Sí**: F1 como doc_organize 1.6.1 (M3b) |
+
 ---
 
 ## AUDIT_PLAN independiente del plan único (2026-11-17)
@@ -350,34 +372,39 @@ que procede. Los símbolos citados existen (verificado: `_for_each_bounded`, `pr
 
 | # | Gravedad | Hallazgo | Corrección |
 |---|---|---|---|
-| U1 | **Alta** | **Versión «big bang»**: ~20 capacidades en dos repos en una sola publicación; meses sin entregar nada y sin opinión de usuarios; rama larga | Prerreleases `a1`/`a2`/`rc1` instalables por la web; hitos con puerta propia; todo lo nuevo opt-in salvo redacción y caché; D16 permite sacar los agentes si peligra el criterio de salida |
-| U2 | **Alta** | Mejoras independientes **retenidas** por la fusión: la redacción de credenciales (privacidad) y la parte 1 de la web (no depende de la librería) esperarían a 2.0 | D17 y D18: recomendación de publicarlas antes (web 1.8.0 y doc_organize 1.6.x). Si se rechaza, se acepta el retraso y se documenta |
+| U1 | **Alta** | **Versión «big bang»**: ~20 capacidades en dos repos en una sola publicación; meses sin entregar nada y sin opinión de usuarios; rama larga | Prerreleases `a1`/`a2`/`rc1` instalables por la web; hitos con puerta propia; todo lo nuevo opt-in salvo redacción y caché. Con D16 = no, el riesgo de retraso por los agentes se acepta (U18) |
+| U2 | **Alta** | Mejoras independientes **retenidas** por la fusión: la redacción de credenciales (privacidad) y la parte 1 de la web (no depende de la librería) esperarían a 2.0 | **Resuelto** por D17 (web 1.8.0) y D18 (doc_organize 1.6.1, M3b) |
 | U3 | Media | Conflicto entre planes: la parte 2 web eligió **tabla** por rendimiento (100 000 documentos); el plan de facetas (P1-A3) eligió **JSON** para no migrar por eje | Tabla **genérica** `context_document_axis_values` con columna `axis`: indexada (P5/P6 del plan web) y sin columnas por eje. Aplicado en §I |
 | U4 | Media | Las versiones del manifiesto (parte 1, `0015`) guardan textos **v1**; restaurar uno tras 2.0 devolvería un manifiesto v1 | La librería lee v1; al restaurar, la web guarda el texto migrado a v2 y conserva el original en la versión. Test |
-| U5 | Media | Orden de migraciones de la web: `0015` (parte 1) y las de 2.0 en la misma rama | Numeración consecutiva en `feature/2.0` (W1 primero); si W1 sale antes (D17), `0015` llega a `develop` y 2.0 parte de ahí |
+| U5 | Media | Orden de migraciones de la web: `0015` (parte 1) y las de 2.0 | Con D17, `0015` llega a `develop` con la web 1.8.0 y `feature/2.0` de la web se crea **después**, desde ese `develop`; sus migraciones empiezan en `0016` |
 | U6 | Media | La línea base exige **etiquetar a mano** ~150 documentos antes de M1: si no hay responsable, el criterio de salida no se puede medir | M0 con responsable y fecha; la web (W5) no hace falta para eso: Excel con `load_gold_xlsx` |
 | U7 | Media | Muchos interruptores nuevos (`ai_scope`, `semantic`, `versions`, `enrich`, `decisions`, `offline`, `llms_txt`): combinaciones sin probar | Matriz de tests de combinaciones relevantes en M10 (al menos: sin IA; `unclassified`; `missing_axes` + semántica + decisiones + `current_only`) |
 | U8 | Media | Historial del contexto: con `current_only` y decisiones, documentos «salen» o cambian sin ser cambios del original | Tipos de cambio propios (`superseded`, `origin="human"`), no como eliminados o reclasificados |
 | U9 | Media | Operadores: la 2.0 cambia la configuración de IA (familias, variables) y, si usan alias, el proxy | Guía de migración con la lista de alias; F2 `check_ai` en la página «Diagnóstico» tras actualizar; error claro si el modelo no existe en el proxy |
 | U10 | Media | Exigir alias `doc-organize-*` en el proxy obligaría a tocar LiteLLM en cada instalación | Alias **recomendados**; la web guarda el modelo real por tarea si no hay alias |
-| U11 | Media | G5-G6 (agentes) son lo de más alcance y menos validado | Al final (M8); sacables a 2.1 (D16) sin afectar al resto |
+| U11 | Media | G5-G6 (agentes) son lo de más alcance y menos validado | Al final (M8), con puerta propia; no se sacan de 2.0 (D16 = no, ver U18) |
 | U12 | Baja | §8.0 del plan de facetas (`"human"` en `FacetValue`) queda sin objeto: no hay `FacetValue` | Anotado en el plan de facetas; `AxisValue` ya incluye los cuatro orígenes |
 | U13 | Media | Sitio con «una página por valor» de cada eje: 10 ejes × 150 entradas = 1500 páginas más y el límite del buscador de Zensical (1.4.0) | Una página por eje con tabla de valores y documentos; excluida del buscador si supera el límite (mecanismo de 1.4.0) |
 | U14 | Media | Coste de `missing_axes` + perfil + extracto + ejemplos en corpus grandes | Presupuesto por tarea (D12), caché, prefijo estable y límite del criterio de salida (≤ 1,5×) |
 | U15 | Baja | La parte 2 web preveía la etapa de progreso `context_facets` y `ai_facets`: ya no existen | Revisión 6 del plan web las sustituye por `context_ai` y `ai_scope` |
+| U17 | Media | **D15**: quitar las variables antiguas sin periodo de transición hace que una instalación actualizada sin reconfigurar se quede **sin IA en silencio** (los clientes no encontrarían su configuración) | `settings_from_env()` y la web detectan las antiguas y fallan con un error que dice qué variable nueva usar; F2 (`check_environment`) lo informa; la guía de migración lleva la tabla de equivalencias. La web, al migrar `ai_settings`, no depende de variables (sus ajustes están en BD) |
+| U18 | Media | **D16 = no**: los agentes (M8) son lo menos validado y ahora condicionan la fecha de toda la 2.0 | Se acepta el riesgo; M8 tiene puerta propia y margen en el plan; si su puerta falla, se ajustan los agentes (prompts, herramientas, topes), no se publican a medias |
 | U16 | Baja | Planes de sesión sin seguimiento en git: la revisión 5 del plan web se perdió en disco (sobrescrita por la revisión 4 a las 21:38) y hubo que reconstruirla | Commit de los planes de sesión en ramas de documentación con PR a `develop` |
 
 ### Veredicto: **GO_CONDICIONAL**
 
 1. U1: prerreleases por hito y puertas de salida de cada hito cumplidas antes del siguiente.
-2. U2: D17 y D18 decididas antes de empezar M1.
+2. U2: resuelto (D17, D18); M3b (1.6.1) y W1 (web 1.8.0) publicadas antes de que la web cree su `feature/2.0`.
 3. U3 y U4 aplicados en el diseño de W2 y con tests.
 4. U6: M0 con responsable y referencia etiquetada antes de M1.
 5. U7: matriz de combinaciones en M10.
 6. Condiciones vigentes de los planes de origen: plan de facetas C1-C3, C7, S2 y R2 (orden determinista); plan web
    parte 1 (las 17 condiciones), parte 2 P5, P6 y P10 (sobre la tabla genérica); auditoría B1-B18 de este plan.
-7. D10-D16 decididas antes del hito que las usa (D10 M5, D11 M5, D12 W2, D13 M7, D14 M8, D15 M4, D16 M8).
+7. D10-D18 decididas (2026-11-17).
 8. Ninguna dependencia nueva ni rastro de web o autenticación en la librería (`test_library_architecture.py`).
+9. U17: error con el equivalente nuevo ante variables antiguas, con test, y la guía de migración con la tabla de
+   equivalencias.
+10. U18: el criterio de salida incluye la puerta de M8 (agentes); el plan de hitos reserva margen para M8.
 
 ---
 
@@ -404,4 +431,4 @@ Sus correcciones están aplicadas en el cuerpo del plan único; se conserva como
 | B15 | Baja | Coseno en Python lento en corpus grandes | Suficiente para ~10⁴; medir en M7 |
 | B16 | **Alta** | Fuga en la evaluación por ejemplos recuperados | Excluir el propio documento, sus duplicados y la referencia al evaluar |
 | B17 | Baja | Temperatura 0 no es determinista | Caché para reproducir; evaluación con caché vacía |
-| B18 | Baja | Variables antiguas y nuevas mezcladas | Mandan las nuevas; aviso por cada antigua ignorada |
+| B18 | Baja | Variables antiguas y nuevas mezcladas | Mandan las nuevas; aviso por cada antigua ignorada (**sustituido por D15/U17**: las antiguas dan error) |
