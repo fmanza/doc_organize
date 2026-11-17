@@ -6,6 +6,29 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+Redacción de credenciales (F1 del plan de 2.0.0, M3b): el texto que sale hacia la IA y lo que se publica en el sitio
+llevan `«REDACTADO»` en lugar de contraseñas, tokens y claves. Activada por defecto. Sin dependencias nuevas.
+
+### Añadido
+
+- `doc_organize.security` con `redact_credentials(text) -> RedactionResult` y `scan_credentials(text) -> list[CredentialFinding]`
+  (también en `doc_organize`): funciones puras, adaptadas de `doc_ia/scripts/redact_credentials.py`. Sustituyen solo el
+  **valor** (la clave se conserva), son idempotentes y los hallazgos dan línea y regla, nunca el valor. Reglas: clave
+  privada PEM, `client_secret`, contraseña, `token`/`api_key`/`secret`, credenciales en URL, JWT, claves de AWS, tokens
+  de GitHub y claves `sk-…`.
+- `ContextBuilder(ai_redact_credentials=True)`: título y texto redactados antes de la Sub-fase B y del enriquecimiento;
+  `Context.ai_redact_credentials` y `Context.credential_findings` (`DocumentCredentialFindings`: documento y recuento por regla).
+- `LiteLLMTaxonomyManifestDraftConfig.redact_credentials` (`True`): la muestra del borrador de manifiesto sale redactada.
+- `SiteGenerator.generate(redact_credentials=True)` y `SiteResult.credentials_redacted`: las páginas de la carpeta
+  reorganizada y los títulos del `nav` se redactan antes de publicar el sitio.
+
+### Cambiado
+
+- **Lo que se envía a la IA cambia**: con los valores por defecto, las credenciales llegan como `«REDACTADO»`. Para
+  el comportamiento de 1.6.0, `ai_redact_credentials=False` / `redact_credentials=False`.
+- La carpeta reorganizada (la que publica el sitio) queda con las credenciales redactadas; `Conversión/` y los
+  originales no cambian.
+
 ## [1.6.0] - 2026-11-16
 
 Más información sobre los documentos y un historial del contexto que aguanta proyectos grandes y varios procesos. Los

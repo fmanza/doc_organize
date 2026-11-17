@@ -24,6 +24,7 @@ from pydantic import ValidationError
 from doc_organize.ai._http_client_base import AiHttpClientBase
 from doc_organize.core.exceptions import TaxonomyManifestDraftAuthError, TaxonomyManifestDraftConnectionError, TaxonomyManifestDraftError
 from doc_organize.core.models import LiteLLMTaxonomyManifestDraftConfig, TaxonomyCatalogEntry, TaxonomyManifestDraftResult
+from doc_organize.security.credentials import redact_credentials
 from doc_organize.utils.logging import get_logger
 
 _ENV_VAR_BASE_URL = "DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_BASE_URL"
@@ -165,7 +166,7 @@ class TaxonomyManifestDraftClient(AiHttpClientBase):
         if not documents:
             raise ValueError("No se puede proponer un borrador de manifiesto sin ningún documento de muestra.")
 
-        user_prompt = self._build_user_prompt(documents)
+        user_prompt = self._build_user_prompt(documents, redact=self.config.redact_credentials)
         response = await self._request(
             "POST",
             "/chat/completions",
@@ -188,11 +189,15 @@ class TaxonomyManifestDraftClient(AiHttpClientBase):
         return self._parse_result(response.json())
 
     @staticmethod
-    def _build_user_prompt(documents: list[SampledDocument]) -> str:
+    def _build_user_prompt(documents: list[SampledDocument], *, redact: bool = True) -> str:
+        """Prompt con la muestra; con `redact` (por defecto), sin credenciales en títulos ni extractos (1.6.1)."""
         lines = [f"Muestra de {len(documents)} documentos ya convertidos del proyecto:", ""]
         for index, document in enumerate(documents, start=1):
             excerpt = document.chunks_text[:_MAX_CONTENT_CHARS_PER_DOCUMENT]
-            lines.append(f"{index}. Carpeta: {document.folder or '(raíz)'} | Título: {document.title or '(sin título)'} | Contenido: {excerpt}")
+            title = document.title or "(sin título)"
+            if redact:
+                excerpt, title = redact_credentials(excerpt).text, redact_credentials(title).text
+            lines.append(f"{index}. Carpeta: {document.folder or '(raíz)'} | Título: {title} | Contenido: {excerpt}")
         lines.append("")
         lines.append("Propón el borrador de taxonomía (dominios + tipos de material) que mejor organice estos documentos.")
         return "\n".join(lines)
