@@ -193,7 +193,7 @@ Quien sirva el sitio debe tratarlo como contenido de terceros: servirlo desde **
 sus cookies), o con una cabecera `Content-Security-Policy` restrictiva (por ejemplo `sandbox`, que deja el sitio en un
 origen opaco).
 
-## Credenciales en el texto (Unreleased)
+## Credenciales en el texto (1.7.0)
 
 Los documentos de oficina llevan a veces contraseñas, tokens o un `client_secret` en claro. Antes de que su texto salga
 de la aplicación o se publique, el **valor** se sustituye por `«REDACTADO»` (la clave se conserva: el texto sigue

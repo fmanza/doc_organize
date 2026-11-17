@@ -6,6 +6,8 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-18
+
 Redacción de credenciales (F1 del plan de 2.0.0, M3b): el texto que sale hacia la IA y lo que se publica en el sitio
 llevan `«REDACTADO»` en lugar de contraseñas, tokens y claves. Activada por defecto. Sin dependencias nuevas.
 

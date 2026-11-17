@@ -267,10 +267,10 @@ for detail in context.unclassified_details:
     print(detail.reason, detail.title, detail.author, detail.rules_domain)
 ```
 
-### Credenciales redactadas antes de la IA (Unreleased)
+### Credenciales redactadas antes de la IA (1.7.0)
 
 `ContextBuilder(ai_redact_credentials=True)` (*keyword-only*, **activado por defecto**) pasa el título y el texto de cada
-documento por [`redact_credentials`](#credenciales-doc_organizesecurity-unreleased) antes de enviarlo a la IA, en la
+documento por [`redact_credentials`](#credenciales-doc_organizesecurity-170) antes de enviarlo a la IA, en la
 Sub-fase B (un eje y manifiesto) y en el enriquecimiento. Solo cambia lo que **sale**: las reglas, el idioma y lo que
 se guarda en `context.json` usan el texto original.
 
@@ -283,7 +283,7 @@ se guarda en `context.json` usan el texto original.
 `LiteLLMTaxonomyManifestDraftConfig.redact_credentials` (`True` por defecto), porque el consumidor lo llama sin pasar por
 `ContextBuilder`.
 
-### Credenciales: `doc_organize.security` (Unreleased)
+### Credenciales: `doc_organize.security` (1.7.0)
 
 ::: doc_organize.security.credentials
     options:
