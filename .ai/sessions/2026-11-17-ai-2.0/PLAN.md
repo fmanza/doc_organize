@@ -24,7 +24,7 @@ versiones intermedias.
 >   entorno antiguas se quitan en 2.0.0** (no se leen; si se detectan, error claro que dice cuál usar: U17); **D16 no**:
 >   los agentes (G5-G6) son parte de 2.0.0 y no se sacan a 2.1 aunque peligre el criterio de salida (U18); **D17 sí**:
 >   la parte 1 de la web sale antes como **doc_organize_web 1.8.0**; **D18 sí**: la redacción de credenciales (F1) se
->   publica como **doc_organize 1.6.1** (hito M3b).
+>   publica como **doc_organize 1.7.0** (hito M3b; era 1.6.1, pero añade API pública: SemVer pide MINOR, decisión 2026-11-18). Los nombres son `redact_credentials`/`credential_findings`, no `*_secrets`: la guarda de arquitectura rechaza nombres públicos con «secret».
 >
 > El AUDIT_PLAN independiente del final (U1-U18) **manda sobre el cuerpo** donde lo contradiga. La auditoría anterior de
 > este plan (B1-B18) queda como registro y sus correcciones están aplicadas.
@@ -139,7 +139,7 @@ class DocumentClassification(BaseModel):
 - `DomainDocument` y `UnclassifiedDocument` llevan `classification`, `source_sha256` (F4) y, con F5, `version`,
   `version_group`, `is_current`. `domain`, `material_type` y `classified_by` quedan como **propiedades de lectura**
   derivadas (se retiran en 3.0).
-- `Context`: `schema_version = 2`, `taxonomy_axes` (sin `keywords`), `ai_provenance`, `ai_stats`, `secret_findings`,
+- `Context`: `schema_version = 2`, `taxonomy_axes` (sin `keywords`), `ai_provenance`, `ai_stats`, `credential_findings`,
   `stale_decisions`, `orphan_decisions`, `superseded_documents`.
 - `load_context` lee v1 migrado; `diff_contexts` migra el anterior antes de comparar. El historial registra solo los
   **ejes organizadores** (D3) y un tipo de cambio por decisión humana (`origin="human"`).
@@ -164,9 +164,9 @@ class DocumentClassification(BaseModel):
 
 ### C. Seguridad y entorno
 
-- **F1 Redacción de credenciales** (plan de facetas §F1): `doc_organize.security.secrets` (`scan_secrets`,
-  `redact_secrets`, funciones puras). Se aplica en el **único punto de salida** hacia la IA (`LlmClient`, D7: por
-  defecto) y en la copia del sitio; `Context.secret_findings` sin valores.
+- **F1 Redacción de credenciales** (plan de facetas §F1): `doc_organize.security.credentials` (`scan_credentials`,
+  `redact_credentials`, funciones puras). Se aplica en el **único punto de salida** hacia la IA (`LlmClient`, D7: por
+  defecto) y en la copia del sitio; `Context.credential_findings` sin valores.
 - **F2 Diagnóstico** (§F2): `check_environment(check_ai=False)`; con `check_ai=True` comprueba además que cada alias
   de tarea responde y si admite salida `json_schema`.
 
@@ -193,7 +193,7 @@ class DocumentClassification(BaseModel):
   `<proyecto>/.doc_organize/prompts/`; prefijo estable (instrucciones + perfil + catálogo → ejemplos → documento) para
   la caché del proveedor; `litellm_prompt_ids` opcional; procedencia en `Context.ai_provenance`.
 - `AiResultCache` en `<proyecto>/.doc_organize/ai_cache/`: clave con `source_sha256`, tarea, prompt y versión, modelo,
-  `catalog_hash`, `profile_hash`, versión del extractor y `redact_secrets`; `prune_ai_cache`.
+  `catalog_hash`, `profile_hash`, versión del extractor y `redact_credentials`; `prune_ai_cache`.
 
 #### G1.4. Clasificación de ejes con IA (antes §4/§4b del plan de facetas)
 
@@ -299,7 +299,7 @@ correcciones. Prerreleases PEP 440 (`2.0.0a1`, `a2`…, `rc1`) para que la web l
 | **M1** | A1-A4 (ejes, manifiesto v2 y migración, reglas por eje, `context.json` v2, historial, sitio y Excel por ejes) | Sin IA: mismo árbol y misma clasificación de dominio y tipo que 1.6.0; CALIDAD_VD (implícita) migra y clasifica `iso-27001` y `ens` en el documento que menciona los dos; «ensayos sensibles» no da `ens` |
 | **M2** | B (lectura única, concurrencia, D5) + F4 | Contador de lecturas; `context.json` idéntico con 1 y 4; medición después |
 | **M3** | C (F1, F2) | El valor redactado no sale ni aparece en `context.json`, logs ni informes |
-| **M3b** | **doc_organize 1.6.1** (D18) desde `support/1.6`: `doc_organize.security.secrets` y su aplicación al texto que sale hacia los cuatro clientes actuales (`ContextBuilder(ai_redact_secrets=True)`) y a la copia del sitio; mismo código que M3, sin depender de 2.0. Web: subir a 1.6.1 en `develop` (1.8.x) | Los tests de M3 sobre la API de 1.6; CHANGELOG avisa del cambio de lo que sale hacia la IA |
+| **M3b** | **doc_organize 1.7.0** (D18; publicada desde `develop`, sin `support/1.6`): `doc_organize.security.credentials` y su aplicación al texto que sale hacia los cuatro clientes actuales (`ContextBuilder(ai_redact_credentials=True)`) y a la copia del sitio; mismo código que M3, sin depender de 2.0. Web: subir a 1.7.0 en `develop` (1.8.x) | Los tests de M3 sobre la API de 1.6; CHANGELOG avisa del cambio de lo que sale hacia la IA |
 | **M4** | G1 (cliente, prompts, caché) | Esquema enviado, caída una vez, procedencia, cero llamadas al reconstruir sin cambios |
 | **M5** | G1.4 + G2 + enriquecimiento y borrador → **`2.0.0a1`** | Riesgos E1-E5; evidencia; perfil compuesto; vista previa |
 | **M6** | G3 + F (decisiones y cola) | Métricas contra casos a mano; decisiones desfasadas y huérfanas |
@@ -357,7 +357,7 @@ correcciones. Prerreleases PEP 440 (`2.0.0a1`, `a2`…, `rc1`) para que la web l
 | D15 | **Se quitan** las variables antiguas en 2.0.0; su presencia da error con el equivalente nuevo (U17) |
 | D16 | **No**: los agentes van en 2.0.0; si no cumplen su puerta, la release espera (U18) |
 | D17 | **Sí**: parte 1 de la web como doc_organize_web 1.8.0 |
-| D18 | **Sí**: F1 como doc_organize 1.6.1 (M3b) |
+| D18 | **Sí**: F1 antes de 2.0, como doc_organize **1.7.0** (M3b; 1.6.1 no cumplía SemVer) |
 
 ---
 
@@ -373,7 +373,7 @@ que procede. Los símbolos citados existen (verificado: `_for_each_bounded`, `pr
 | # | Gravedad | Hallazgo | Corrección |
 |---|---|---|---|
 | U1 | **Alta** | **Versión «big bang»**: ~20 capacidades en dos repos en una sola publicación; meses sin entregar nada y sin opinión de usuarios; rama larga | Prerreleases `a1`/`a2`/`rc1` instalables por la web; hitos con puerta propia; todo lo nuevo opt-in salvo redacción y caché. Con D16 = no, el riesgo de retraso por los agentes se acepta (U18) |
-| U2 | **Alta** | Mejoras independientes **retenidas** por la fusión: la redacción de credenciales (privacidad) y la parte 1 de la web (no depende de la librería) esperarían a 2.0 | **Resuelto** por D17 (web 1.8.0) y D18 (doc_organize 1.6.1, M3b) |
+| U2 | **Alta** | Mejoras independientes **retenidas** por la fusión: la redacción de credenciales (privacidad) y la parte 1 de la web (no depende de la librería) esperarían a 2.0 | **Resuelto** por D17 (web 1.8.0) y D18 (doc_organize 1.7.0, M3b) |
 | U3 | Media | Conflicto entre planes: la parte 2 web eligió **tabla** por rendimiento (100 000 documentos); el plan de facetas (P1-A3) eligió **JSON** para no migrar por eje | Tabla **genérica** `context_document_axis_values` con columna `axis`: indexada (P5/P6 del plan web) y sin columnas por eje. Aplicado en §I |
 | U4 | Media | Las versiones del manifiesto (parte 1, `0015`) guardan textos **v1**; restaurar uno tras 2.0 devolvería un manifiesto v1 | La librería lee v1; al restaurar, la web guarda el texto migrado a v2 y conserva el original en la versión. Test |
 | U5 | Media | Orden de migraciones de la web: `0015` (parte 1) y las de 2.0 | Con D17, `0015` llega a `develop` con la web 1.8.0 y `feature/2.0` de la web se crea **después**, desde ese `develop`; sus migraciones empiezan en `0016` |
@@ -394,7 +394,7 @@ que procede. Los símbolos citados existen (verificado: `_for_each_bounded`, `pr
 ### Veredicto: **GO_CONDICIONAL**
 
 1. U1: prerreleases por hito y puertas de salida de cada hito cumplidas antes del siguiente.
-2. U2: resuelto (D17, D18); M3b (1.6.1) y W1 (web 1.8.0) publicadas antes de que la web cree su `feature/2.0`.
+2. U2: resuelto (D17, D18); M3b (1.7.0) y W1 (web 1.8.0) publicadas antes de que la web cree su `feature/2.0`.
 3. U3 y U4 aplicados en el diseño de W2 y con tests.
 4. U6: M0 con responsable y referencia etiquetada antes de M1.
 5. U7: matriz de combinaciones en M10.
