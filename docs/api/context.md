@@ -77,6 +77,7 @@ class ContextBuilder:
         ai_scope: Literal["off", "unclassified"] = "off",  # 2.0.0
         enrich: bool = False,                           # 2.0.0
         prompts: PromptRegistry | None = None,          # 2.0.0
+        ai_cache: bool | AiResultCache = True,          # 2.0.0
         on_progress: ProgressCallback | None = None,
         cancel_token: CancelToken | None = None,
         ai_max_failures: int | None = None,             # 0.14.0
@@ -97,6 +98,7 @@ Orquesta Sub-fase A (reglas, siempre) + Sub-fase B (IA, opt-in) y persiste el `C
 | `ai_scope` | `"off" \| "unclassified"` | (2.0.0) `"unclassified"`: la IA clasifica lo que las reglas dejaron sin clasificar en algún eje organizador (la Sub-fase B de 1.x). Se guarda en `Context.ai_stats.scope` |
 | `enrich` | `bool` | (2.0.0) Describir con IA los documentos que no declaran descripción o palabras clave. Ver [Autor, descripción y palabras clave](#autor-descripcion-y-palabras-clave-150) |
 | `prompts` | `PromptRegistry \| None` | (2.0.0) Prompts de cada tarea; por defecto, los de `<raíz>/.doc_organize/prompts/` o los empaquetados |
+| `ai_cache` | `bool \| AiResultCache` | (2.0.0) Caché de resultados de IA (por defecto, la del proyecto): reconstruir sin cambios no llama al modelo. Ver [Caché de resultados](llm_client.md#cache-de-resultados) |
 | `ai_max_failures` | `int \| None` | (0.14.0, L-3a) Detiene una fase de IA tras este número de errores de conexión **seguidos** (`AiPhaseStats.stopped = "connection"`). `None`: nunca para por eso. `< 1` → `ValueError` |
 | `ai_max_documents` | `int \| None` | (0.14.0, L-3b) Tope de documentos enviados en cada fase de IA; al alcanzarlo con documentos pendientes, para con `"budget"`. `None`: sin tope. `< 0` → `ValueError` |
 

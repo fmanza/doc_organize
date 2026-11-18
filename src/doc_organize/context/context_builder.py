@@ -11,9 +11,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from doc_organize import __version__
+from doc_organize.ai.cache import AiResultCache
 from doc_organize.ai.llm_client import LlmClient, LlmResult, ResponseFormat
 from doc_organize.ai.prompts import PromptRegistry
-from doc_organize.ai.services import AxisRequest, ClassificationAnswer, classify_document, enrich_document
+from doc_organize.ai.services import AxisRequest, ClassificationAnswer, TaskRequest, classification_request, enrichment_request
 from doc_organize.context.axis_rules import TAG_AXIS_TEXT_CHARS, AxisRuleScorer, FoldedText
 from doc_organize.context.context_history import ContextHistoryPolicy, append_context_build, build_record
 from doc_organize.context.context_registry import ContextRegistry
@@ -37,6 +38,7 @@ from doc_organize.core.models import (
     ConversionResult,
     DocumentClassification,
     DocumentCredentialFindings,
+    DocumentEnrichmentResult,
     Domain,
     DomainDocument,
     DomainStatus,
@@ -85,6 +87,8 @@ class _AiRun:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     response_format: ResponseFormat | None = None
+    #: Documentos resueltos con la caché de resultados (no cuentan en `sent` ni consumen presupuesto).
+    cached: int = 0
     #: Recuento por documento y regla de lo redactado, compartido por todas las fases de IA de una construcción.
     credential_ledger: dict[str, Counter[str]] | None = None
 
@@ -142,6 +146,7 @@ class _AiRun:
             prompt_tokens=self.prompt_tokens,
             completion_tokens=self.completion_tokens,
             response_format=self.response_format,
+            cached=self.cached,
         )
 
 
@@ -163,10 +168,10 @@ class _BuildReads:
 
 
 def _provenance(llm: LlmClient | None, prompts: PromptRegistry, runs: Sequence[tuple[AiTask, _AiRun]]) -> list[PromptProvenance]:
-    """Prompt y modelo de cada tarea que llegó a enviar algún documento (2.0.0, G1)."""
+    """Prompt y modelo de cada tarea que llegó a enviar algún documento o lo resolvió con la caché (2.0.0, G1)."""
     if llm is None:
         return []
-    return [prompts.get(task).provenance(llm.model_for(task)) for task, run in runs if run.sent > 0]
+    return [prompts.get(task).provenance(llm.model_for(task)) for task, run in runs if run.sent > 0 or run.cached > 0]
 
 
 def _rules_value(slug: str, names: dict[str, str], confidence: float) -> list[AxisValue]:
@@ -292,6 +297,7 @@ class ContextBuilder:
         ai_scope: AiScope = "off",
         enrich: bool = False,
         prompts: PromptRegistry | None = None,
+        ai_cache: bool | AiResultCache = True,
         on_progress: ProgressCallback | None = None,
         cancel_token: CancelToken | None = None,
         ai_max_failures: int | None = None,
@@ -323,6 +329,10 @@ class ContextBuilder:
                 clave; solo se rellena lo que falta (`DomainDocument.ai_filled`). El autor nunca sale de la IA.
             prompts: Prompts de cada tarea; por defecto, los del proyecto (`<raíz>/.doc_organize/prompts/`) o los
                 empaquetados.
+            ai_cache: Caché de resultados de IA (2.0.0): `True` (por defecto) usa la del proyecto
+                (`<raíz>/.doc_organize/ai_cache/`), `False` no usa ninguna, o una `AiResultCache` concreta. Con ella,
+                reconstruir sin cambios (mismo documento, prompt, modelo, catálogo y redacción) no llama al modelo: el
+                resultado se vuelve a validar y cuenta en `AiPhaseStats.cached`, no en `sent`.
             on_progress: Recibe un `ProgressEvent` (`operation="context_build"`, fase `classification` o `enrichment`)
                 tras cada documento de una fase de IA (L-2). Un fallo del callback se registra y no para la construcción.
             cancel_token: Si se cancela, la construcción para entre documentos con `OperationCancelledError`, **sin**
@@ -350,6 +360,7 @@ class ContextBuilder:
             raise ValueError("ai_scope y enrich necesitan un cliente de IA (llm)")
         checkpoint(cancel_token)
         prompts = prompts if prompts is not None else PromptRegistry(project.root_path)
+        cache = ai_cache if isinstance(ai_cache, AiResultCache) else (AiResultCache(project.root_path) if ai_cache and llm is not None else None)
         credential_ledger: dict[str, Counter[str]] = {}
         ai_run = _AiRun(max_failures=ai_max_failures, max_documents=ai_max_documents, credential_ledger=credential_ledger)
         enrichment_run = _AiRun(max_failures=ai_max_failures, max_documents=ai_max_documents, credential_ledger=credential_ledger)
@@ -374,19 +385,21 @@ class ContextBuilder:
                 documents, taxonomy_manifest, threshold, reads=reads, cancel_token=cancel_token
             )
             if llm is not None and ai_scope == "unclassified":
-                classified = await self._classify_with_manifest_ai(llm, prompts, classified, taxonomy_manifest, on_progress=_ai_progress, run=ai_run)
+                classified = await self._classify_with_manifest_ai(
+                    llm, prompts, classified, taxonomy_manifest, on_progress=_ai_progress, run=ai_run, cache=cache
+                )
         else:
             classifier = DomainClassifier(candidate_domains=candidate_domains, threshold=threshold)
             classified, unclassified = await self._classify_by_rules(documents, classifier, reads, cancel_token)
             if llm is not None and ai_scope == "unclassified" and unclassified:
                 classified, unclassified = await self._classify_with_ai(
-                    llm, prompts, classified, unclassified, classifier, on_progress=_ai_progress, run=ai_run
+                    llm, prompts, classified, unclassified, classifier, on_progress=_ai_progress, run=ai_run, cache=cache
                 )
 
         unclassified_details = self._describe_unclassified(unclassified, reads)
         await self._apply_document_properties(classified, unclassified_details, reads, cancel_token)
         if llm is not None and enrich:
-            await self._enrich_with_ai(llm, prompts, classified, on_progress=_enrichment_progress, run=enrichment_run)
+            await self._enrich_with_ai(llm, prompts, classified, on_progress=_enrichment_progress, run=enrichment_run, cache=cache)
 
         has_predefined_catalog = bool(candidate_domains) or taxonomy_manifest is not None
         manifest_domains_by_slug = (
@@ -653,6 +666,7 @@ class ContextBuilder:
         manifest: TaxonomyManifest,
         on_progress: Callable[[int, int, str], Awaitable[None]] | None = None,
         run: _AiRun | None = None,
+        cache: AiResultCache | None = None,
     ) -> dict[str, list[DomainDocument]]:
         """Clasificación con IA en modo manifiesto (`ai_scope="unclassified"`): para cada documento que las reglas
         dejaron con el placeholder `_UNCLASSIFIED_SLUG` en el eje de dominio y/o en el de tipo de material, pide ambos
@@ -677,24 +691,17 @@ class ContextBuilder:
 
         ai_run = run if run is not None else _AiRun()
 
-        async def call(item: tuple[str, DomainDocument]) -> ClassificationAnswer | None:
-            document = item[1]
-            conversion = await self._reserve_and_read(document.json_path, ai_run)
-            if conversion is None:
-                return None
-            chunks_text, title = conversion
-            try:
-                result = await classify_document(
-                    llm, prompts, axes=axes, title=title, content=chunks_text, on_redacted=ai_run.redaction_note(document.source_path)
-                )
-            except AiError as exc:
-                ai_run.record_failure(exc)
-                self.logger.warning(f"Falló la clasificación por IA de '{document.source_path}': {exc} — sigue sin clasificar")
-                return None
-            ai_run.record_response(result)
-            return result.value
+        def request(chunks_text: str, title: str | None) -> TaskRequest[ClassificationAnswer]:
+            return classification_request(prompts, axes=axes, title=title, content=chunks_text)
 
-        results = await self._run_ai_phase(pending, call, ai_run, on_progress, lambda item: item[1].source_path)
+        hits = await self._cache_hits(llm, cache, [document.json_path for _, document in pending], request)
+
+        async def call(item: tuple[tuple[str, DomainDocument], bool]) -> ClassificationAnswer | None:
+            (_, document), cached = item
+            asked = await self._ask_ai(llm, ai_run, cache, document, request, cached=cached, failure="Falló la clasificación por IA de")
+            return asked[0] if asked is not None else None
+
+        results = await self._run_ai_phase(list(zip(pending, hits, strict=True)), call, ai_run, on_progress, lambda item: item[0][1].source_path)
         for (old_domain_slug, document), answer in zip(pending, results, strict=True):
             if answer is not None:
                 self._apply_manifest_ai(document, old_domain_slug, answer, classified, manifest, ai_run)
@@ -702,6 +709,72 @@ class ContextBuilder:
         # Poda buckets que quedaron vacíos (p.ej. todo "sin-clasificar" se resolvió a otros
         # dominios) — sin esto, `build()` crearía un `Domain` fantasma sin documentos.
         return {slug: documents for slug, documents in classified.items() if documents}
+
+    async def _cache_hits[T](
+        self,
+        llm: LlmClient,
+        cache: AiResultCache | None,
+        json_paths: Sequence[str | None],
+        make_request: Callable[[str, str | None], TaskRequest[T]],
+    ) -> list[bool]:
+        """Qué documentos tienen ya su respuesta en la caché (2.0.0, G1), sin enviar nada.
+
+        Se mira **antes** de la fase de IA para que los aciertos no consuman presupuesto y el reparto del presupuesto entre
+        los demás siga en el orden de los documentos.
+        """
+        hits = [False] * len(json_paths)
+        if cache is None:
+            return hits
+
+        async def check(item: tuple[int, str | None]) -> None:
+            index, json_path = item
+            conversion = await read_conversion_json(json_path) if json_path else None
+            if conversion is not None:
+                hits[index] = cache.has(make_request(*conversion).cache_key(llm))
+
+        await self._for_each_bounded(list(enumerate(json_paths)), check, None)
+        return hits
+
+    async def _ask_ai[T](
+        self,
+        llm: LlmClient,
+        run: _AiRun,
+        cache: AiResultCache | None,
+        document: ConversionResult | DomainDocument,
+        make_request: Callable[[str, str | None], TaskRequest[T]],
+        *,
+        cached: bool,
+        failure: str,
+    ) -> tuple[T, str, str | None] | None:
+        """Una petición de una fase de IA para `document`: la respuesta validada, el texto y el título; `None` si no hubo
+        presupuesto, el `.json` no se pudo leer o la llamada falló (anotado en `run`).
+
+        Un documento ya en caché (`cached`) no reserva presupuesto ni llama al modelo; los demás reservan antes de leer
+        (`_reserve_and_read`) y su respuesta se guarda en la caché.
+        """
+        conversion = await read_conversion_json(document.json_path) if cached and document.json_path else None
+        if not cached:
+            conversion = await self._reserve_and_read(document.json_path, run)
+        if conversion is None:
+            return None
+        chunks_text, title = conversion
+        try:
+            result = await make_request(chunks_text, title).send(llm, on_redacted=run.redaction_note(document.source_path), cache=cache)
+        except AiError as exc:
+            if cached:
+                run.sent += 1  # la entrada desapareció entre la comprobación y la llamada: fue una llamada de verdad
+            run.record_failure(exc)
+            self.logger.warning(f"{failure} '{document.source_path}': {exc}")
+            return None
+        if result.cached:
+            run.cached += 1
+            if not cached:
+                run.release()  # reservado, pero lo resolvió la caché (la escribió otra llamada en vuelo)
+        else:
+            if cached:
+                run.sent += 1  # la entrada desapareció entre la comprobación y la llamada
+            run.record_response(result)
+        return result.value, chunks_text, title
 
     async def _reserve_and_read(self, json_path: str | None, run: _AiRun) -> tuple[str, str | None] | None:
         """Texto y título de un documento para enviarlo a la IA, si hay presupuesto; `None` si no.
@@ -768,6 +841,7 @@ class ContextBuilder:
         rules: DomainClassifier,
         on_progress: Callable[[int, int, str], Awaitable[None]] | None = None,
         run: _AiRun | None = None,
+        cache: AiResultCache | None = None,
     ) -> tuple[dict[str, list[DomainDocument]], list[ConversionResult]]:
         """Clasificación con IA sin manifiesto (`ai_scope="unclassified"`): lo que las reglas dejaron sin clasificar,
         eligiendo solo entre el catálogo ya confirmado (el predefinido, o los dominios que las reglas descubrieron),
@@ -783,10 +857,17 @@ class ContextBuilder:
 
         ai_run = run if run is not None else _AiRun()
 
-        async def call(document: ConversionResult) -> tuple[str, DomainDocument] | None:
-            return await self._try_classify_document_with_ai(llm, prompts, document, catalog, rules, ai_run)
+        def request(chunks_text: str, title: str | None) -> TaskRequest[ClassificationAnswer]:
+            return classification_request(prompts, axes=[AxisRequest(LEGACY_FOLDER_AXIS_KEY, catalog)], title=title, content=chunks_text)
 
-        results = await self._run_ai_phase(unclassified, call, ai_run, on_progress, lambda document: document.source_path)
+        complete = [document.json_path if document.success and document.markdown_path else None for document in unclassified]
+        hits = await self._cache_hits(llm, cache, complete, request)
+
+        async def call(item: tuple[ConversionResult, bool]) -> tuple[str, DomainDocument] | None:
+            document, cached = item
+            return await self._try_classify_document_with_ai(llm, request, document, rules, ai_run, cache, cached=cached)
+
+        results = await self._run_ai_phase(list(zip(unclassified, hits, strict=True)), call, ai_run, on_progress, lambda item: item[0].source_path)
         still_unclassified: list[ConversionResult] = []
         for document, assigned in zip(unclassified, results, strict=True):
             if assigned is None:
@@ -797,30 +878,23 @@ class ContextBuilder:
         return classified, still_unclassified
 
     async def _try_classify_document_with_ai(
-        self, llm: LlmClient, prompts: PromptRegistry, document: ConversionResult, catalog: list[str], rules: DomainClassifier, run: _AiRun
+        self,
+        llm: LlmClient,
+        request: Callable[[str, str | None], TaskRequest[ClassificationAnswer]],
+        document: ConversionResult,
+        rules: DomainClassifier,
+        run: _AiRun,
+        cache: AiResultCache | None,
+        *,
+        cached: bool,
     ) -> tuple[str, DomainDocument] | None:
         if not document.success or not document.markdown_path or not document.json_path:
             return None
-        conversion = await self._reserve_and_read(document.json_path, run)
-        if conversion is None:
+        asked = await self._ask_ai(llm, run, cache, document, request, cached=cached, failure="Falló la clasificación por IA de")
+        if asked is None:
             return None
-        chunks_text, title = conversion
-        try:
-            result = await classify_document(
-                llm,
-                prompts,
-                axes=[AxisRequest(LEGACY_FOLDER_AXIS_KEY, catalog)],
-                title=title,
-                content=chunks_text,
-                on_redacted=run.redaction_note(document.source_path),
-            )
-        except AiError as exc:
-            run.record_failure(exc)
-            self.logger.warning(f"Falló la clasificación por IA de '{document.source_path}': {exc} — queda sin clasificar")
-            return None
-
-        run.record_response(result)
-        answer = result.value.axes[LEGACY_FOLDER_AXIS_KEY]
+        value, chunks_text, title = asked
+        answer = value.axes[LEGACY_FOLDER_AXIS_KEY]
         if answer.slug is None:
             return None
         run.classified += 1
@@ -840,7 +914,7 @@ class ContextBuilder:
             rules_confidence=rules_confidence,
             ai_domain=answer.slug,
             ai_confidence=answer.confidence,
-            ai_reasoning=result.value.reasoning,
+            ai_reasoning=value.reasoning,
         )
 
     async def _save_and_record(self, project: Project, context: Context) -> None:
@@ -980,49 +1054,46 @@ class ContextBuilder:
         classified: dict[str, list[DomainDocument]],
         on_progress: Callable[[int, int, str], Awaitable[None]],
         run: _AiRun,
+        cache: AiResultCache | None = None,
     ) -> None:
         """Pide a la IA la descripción y las palabras clave de los documentos que no las declaran (tarea `enrich`).
 
         Solo rellena lo que falta; lo declarado por el documento nunca se sustituye. Mismas paradas que la
         clasificación (`_AiRun`), con su propio recuento: `run.classified` cuenta los documentos en los que se rellenó
-        algo. Con `ai_concurrency`, varias llamadas a la vez (cada una solo toca su documento).
+        algo. Con `ai_concurrency`, varias llamadas a la vez (cada una solo toca su documento); con `cache`, lo ya
+        descrito con la misma petición no vuelve al modelo.
         """
         pending = [document for documents in classified.values() for document in documents if document.description is None or not document.keywords]
 
-        async def call(document: DomainDocument) -> None:
-            await self._try_enrich_document(llm, prompts, document, run)
+        def request(chunks_text: str, title: str | None) -> TaskRequest[DocumentEnrichmentResult]:
+            return enrichment_request(prompts, title=title, content=chunks_text)
+
+        hits = await self._cache_hits(llm, cache, [document.json_path for document in pending], request)
+
+        async def call(item: tuple[DomainDocument, bool]) -> None:
+            document, cached = item
+            asked = await self._ask_ai(llm, run, cache, document, request, cached=cached, failure="Falló la descripción con IA de")
+            if asked is None:
+                return
+            value = asked[0]
+            if document.description is None and value.description is not None:
+                document.description = value.description
+                document.ai_filled.append("description")
+            if not document.keywords and value.keywords:
+                document.keywords = value.keywords
+                document.ai_filled.append("keywords")
+            if document.ai_filled:
+                run.classified += 1
 
         await self._run_ai_phase(
-            pending,
+            list(zip(pending, hits, strict=True)),
             call,
             run,
             on_progress,
-            lambda document: document.source_path,
+            lambda item: item[0].source_path,
             stage="Descripción con IA detenida",
             outcome="quedan solo con lo que declaran",
         )
-
-    async def _try_enrich_document(self, llm: LlmClient, prompts: PromptRegistry, document: DomainDocument, run: _AiRun) -> None:
-        conversion = await self._reserve_and_read(document.json_path, run)
-        if conversion is None:
-            return
-        chunks_text, title = conversion
-        try:
-            result = await enrich_document(llm, prompts, title=title, content=chunks_text, on_redacted=run.redaction_note(document.source_path))
-        except AiError as exc:
-            run.record_failure(exc)
-            self.logger.warning(f"Falló la descripción con IA de '{document.source_path}': {exc} — queda con lo que declara")
-            return
-
-        run.record_response(result)
-        if document.description is None and result.value.description is not None:
-            document.description = result.value.description
-            document.ai_filled.append("description")
-        if not document.keywords and result.value.keywords:
-            document.keywords = result.value.keywords
-            document.ai_filled.append("keywords")
-        if document.ai_filled:
-            run.classified += 1
 
     def _log_stop(self, run: _AiRun, remaining: int, *, stage: str = "Sub-fase B detenida", outcome: str = "quedan sin clasificar") -> None:
         """Avisa una sola vez, justo tras el documento que la provocó, de que una fase de IA se detuvo."""
