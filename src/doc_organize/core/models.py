@@ -722,6 +722,42 @@ class AvStatus(BaseModel):
     )
 
 
+EnvironmentCheckStatus = Literal["ok", "warning", "error"]
+
+
+class EnvironmentCheck(BaseModel):
+    """Una comprobación del entorno (`check_environment`, 2.0.0, F2).
+
+    Attributes:
+        name (str): Qué se comprueba (`python`, `docling`, `extra:site`, `ai:<nombre>`...).
+        status (str): `ok`, `warning` (funciona con limitaciones) o `error` (algo no funcionará).
+        detail (str): Qué se encontró (versiones, sin rutas ni claves).
+        remedy (str | None): Qué hacer si no es `ok`.
+    """
+
+    name: str
+    status: EnvironmentCheckStatus
+    detail: str
+    remedy: str | None = None
+
+
+class EnvironmentReport(BaseModel):
+    """Resultado de `check_environment` (2.0.0, F2): una entrada por comprobación.
+
+    Attributes:
+        checks (list[EnvironmentCheck]): Comprobaciones en orden.
+        checked_at (str): Cuándo se hizo (ISO 8601, UTC).
+    """
+
+    checks: list[EnvironmentCheck] = Field(default_factory=list)
+    checked_at: str
+
+    @property
+    def ok(self) -> bool:
+        """Sin errores (los avisos no cuentan)."""
+        return all(check.status != "error" for check in self.checks)
+
+
 class OfficeStatus(BaseModel):
     """Estado de soporte de LibreOffice del entorno donde corre el servidor (menú Escaneo).
 
@@ -1693,6 +1729,9 @@ __all__ = [
     "DomainStatus",
     "DuplicateGroup",
     "DuplicateReason",
+    "EnvironmentCheck",
+    "EnvironmentCheckStatus",
+    "EnvironmentReport",
     "GitHubCopilotUsageConfig",
     "GpuStatus",
     "LiteLLMClassificationConfig",

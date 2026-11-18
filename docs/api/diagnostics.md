@@ -1,0 +1,57 @@
+# Diagnóstico del entorno
+
+`check_environment()` (2.0.0) adelanta los fallos de entorno que antes aparecían a mitad de un escaneo o de la
+construcción del sitio: falta un extra, Zensical fuera del rango probado, no hay GPU para el OCR, faltan los modelos de
+docling o un modelo de IA no responde.
+
+```python
+import asyncio
+
+from doc_organize import check_environment
+
+report = asyncio.run(check_environment())
+for check in report.checks:
+    print(check.status, check.name, check.detail, check.remedy or "")
+print("Sin errores" if report.ok else "Hay errores")
+```
+
+## Comprobaciones
+
+| `name` | Qué comprueba | Si falla |
+|---|---|---|
+| `python` | Python 3.12 o posterior | `error` |
+| `docling` | docling instalado y su versión | `error` |
+| `docling-models` | Modelos de docling: en `artifacts_path` (o `DOCLING_ARTIFACTS_PATH`) si se indica; si no, en la caché de Hugging Face | `error` si la carpeta indicada está vacía; `warning` si no están en la caché (se descargarán en el primer PDF, con red) |
+| `extra:export` | `openpyxl` (Excel de las exportaciones) | `warning` |
+| `extra:site` | Zensical dentro del rango probado (`ZENSICAL_TESTED_RANGE`) y, con `build_site=True`, un sitio de una página construido en una carpeta temporal | `warning` si no está o está fuera del rango; `error` si el build falla |
+| `gpu` | GPU CUDA para el OCR | `warning`: el OCR irá por CPU |
+| `libreoffice` | LibreOffice para los formatos de Office antiguos | `warning` |
+| `extra:av` | Transcripción de audio y vídeo | `warning` |
+| `ai:<nombre>` | Con `check_ai=True`, cada modelo de IA configurado | ver abajo |
+
+`report.ok` es `False` si alguna comprobación dio `error`; los `warning` no cuentan. Los detalles no llevan rutas ni
+claves. Sin `check_ai` no se usa la red y nada toca ningún proyecto.
+
+## Modelos de IA (`check_ai=True`)
+
+Una llamada por modelo con **texto sintético** (nunca nada de un documento) pidiendo la salida `json_schema` estricta:
+
+- responde: `ok`;
+- el proxy rechaza el esquema (HTTP 400) pero responde con `json_object`: `warning` (funciona, con menos garantías);
+- clave rechazada (401/403), alias que no existe, error de red o sin respuesta en 60 s: `error`.
+
+Por defecto se comprueban los modelos configurados por variables de entorno. Para otros:
+
+```python
+from doc_organize import AiEndpoint, check_environment
+
+endpoint = AiEndpoint(name="clasificacion", base_url="http://localhost:4000", virtual_key=clave, model="mi-alias")
+report = await check_environment(check_ai=True, ai_endpoints=[endpoint])
+```
+
+::: doc_organize.diagnostics
+    options:
+      show_root_heading: false
+      members:
+        - check_environment
+        - AiEndpoint
