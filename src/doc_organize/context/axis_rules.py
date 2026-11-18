@@ -23,6 +23,10 @@ from doc_organize.core.models import AxisValue, TaxonomyAxis, TaxonomyEntry
 
 #: Valores como mucho por documento en un eje de varios valores.
 MAX_VALUES_PER_AXIS = 5
+#: Caracteres del texto (tras el título) en los que buscan las reglas de los ejes que etiquetan. Medido en CALIDAD_VD
+#: contra la referencia (marcos normativos): con el texto entero, un documento largo menciona de pasada casi todos los
+#: marcos; con el título y el comienzo, F1 de 0,27 a 0,34 (y de 0,43 a 0,50 con palabras clave específicas).
+TAG_AXIS_TEXT_CHARS = 6000
 #: Confianza según los términos distintos encontrados (1, 2, 3 o más).
 _CONFIDENCE_BY_HITS = (0.0, 0.6, 0.8, 1.0)
 _NON_WORD = re.compile(r"[^0-9a-z]+")
@@ -145,4 +149,4 @@ def _is_name_term(part: str) -> bool:
     return len(words) >= 2 or (len(words) == 1 and bool(_ACRONYM.match(part.strip())))
 
 
-__all__ = ["MAX_VALUES_PER_AXIS", "AxisRuleScorer", "FoldedText", "fold"]
+__all__ = ["MAX_VALUES_PER_AXIS", "TAG_AXIS_TEXT_CHARS", "AxisRuleScorer", "FoldedText", "fold"]

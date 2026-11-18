@@ -32,7 +32,8 @@ ruptura; la guía de migración completa llega con la versión.
 - **Clasificación por ejes (M1, A2 y A3)**: cada `DomainDocument` lleva `classification: DocumentClassification`, con
   una lista de `AxisValue` (`slug`, `name`, `confidence`, `classified_by`: `rules`, `semantic`, `ai` o `human`) por cada
   eje del manifiesto; lista vacía = evaluado sin valor (en un eje organizador, «Sin Clasificar»). Los ejes que solo
-  etiquetan se clasifican por reglas con `AxisRuleScorer`: palabra o frase completa sin acentos ni mayúsculas, sin los
+  etiquetan se clasifican por reglas con `AxisRuleScorer`, en el título y los primeros 6000 caracteres del texto:
+  palabra o frase completa sin acentos ni mayúsculas, sin los
   términos que comparten varias entradas, y confianza por términos distintos encontrados (1 → 0,6; 2 → 0,8; 3+ → 1,0);
   como mucho 5 valores en un eje `multiple` y el mejor en los demás; `threshold` propio del eje y `rules: false`. Los
   ejes organizadores siguen con las reglas de 1.x. La Sub-fase B marca con `ai` solo el eje que decide.

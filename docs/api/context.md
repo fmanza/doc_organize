@@ -360,6 +360,9 @@ ejes organizadores siguen con `score_catalog`, para que carpetas y sitio sean lo
   cuenta si es una sigla: «ENS», «RGPD»).
 - **Palabra o frase completa** tras plegar acentos y mayúsculas: «ens» no encaja en
   «ensayos».
+- **Dónde busca**: en el título y los primeros 6000 caracteres del texto
+  (`TAG_AXIS_TEXT_CHARS`). Un documento largo cita de pasada casi todos los marcos;
+  medido en CALIDAD_VD contra la referencia, el F1 del eje de marcos sube de 0,27 a 0,34.
 - Los términos que tienen **dos o más entradas** del eje no cuentan («iso»,
   «seguridad»).
 - **Confianza por términos distintos encontrados**: 1 → 0,6; 2 → 0,8; 3 o más → 1,0.

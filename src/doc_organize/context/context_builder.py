@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 
 from doc_organize import __version__
 from doc_organize.ai import DocumentEnrichmentClient, DomainClassificationClient, TaxonomyClassificationClient
-from doc_organize.context.axis_rules import AxisRuleScorer, FoldedText
+from doc_organize.context.axis_rules import TAG_AXIS_TEXT_CHARS, AxisRuleScorer, FoldedText
 from doc_organize.context.context_history import ContextHistoryPolicy, append_context_build, build_record
 from doc_organize.context.context_registry import ContextRegistry
 from doc_organize.context.document_properties import read_document_properties
@@ -535,7 +535,7 @@ class ContextBuilder:
                 manifest.subfolder_axis.key: _rules_value(material_slug, material_names, material_score),
             }
             if tag_scorers:
-                folded = FoldedText.of(title, chunks_text)
+                folded = FoldedText.of(title, chunks_text[:TAG_AXIS_TEXT_CHARS])
                 axes.update({scorer.axis.key: scorer.classify(folded) for scorer in tag_scorers})
 
             resolved_title, document_type = resolve_title_and_type(document, title)

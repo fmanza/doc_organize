@@ -332,3 +332,21 @@ def test_v2_context_is_not_migrated_again() -> None:
 
     assert context.taxonomy_axes == []
     assert context.domains[0].documents[0].classification.axes == {}
+
+
+@pytest.mark.asyncio
+async def test_tag_axes_only_read_the_title_and_the_start_of_the_text(tmp_path) -> None:
+    """Un marco citado de pasada al final de un documento largo no lo etiqueta; en el título, sí (2.0.0)."""
+    from doc_organize.context.axis_rules import TAG_AXIS_TEXT_CHARS
+
+    project = _project(tmp_path)
+    frameworks = TaxonomyAxis(key="frameworks", name="Marcos", multiple=True, entries=[TaxonomyEntry(slug="ens", name="ENS")])
+    manifest = two_axis_manifest(_entries("calidad"), _entries("politica"), extra_axes=[frameworks])
+    late = _document(tmp_path, "late", "Manual", "relleno " * (TAG_AXIS_TEXT_CHARS // 8 + 10) + "ENS")
+    titled = _document(tmp_path, "titled", "Adecuación al ENS", "relleno " * (TAG_AXIS_TEXT_CHARS // 8 + 10))
+
+    context = await ContextBuilder().build(project, [late, titled], taxonomy_manifest=manifest)
+
+    documents = {document.source_path: document for domain in context.domains for document in domain.documents}
+    assert documents[late.source_path].classification.slugs("frameworks") == []
+    assert documents[titled.source_path].classification.slugs("frameworks") == ["ens"]
