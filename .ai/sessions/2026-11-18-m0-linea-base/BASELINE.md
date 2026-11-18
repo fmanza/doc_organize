@@ -1,7 +1,7 @@
 # BASELINE — Línea base de la clasificación (hito M0 del plan único 2.0.0)
 
 Estado: **primera medición hecha con una referencia provisional** (etiquetada por Claude, pendiente de la revisión del
-mantenedor, U6); sonda del proxy hecha. Falta: revisión de la referencia, construcción solo con reglas y coste.
+mantenedor, U6); sonda del proxy hecha. Falta: revisión de la referencia (y volver a medir) y los tokens por documento de una construcción con IA.
 Fecha: 2026-11-18. Versión medida: doc_organize **1.7.0** (igual que 1.6.0 en clasificación: 1.7.0 solo redacta lo que
 sale hacia la IA).
 
@@ -53,8 +53,11 @@ documentos reales). **Pendiente de revisión del mantenedor**: hasta entonces lo
 |---|---|---|---|---|---|
 | 1.6.0 reglas+IA (contexto actual, IA en 38 documentos) | dominio | 150 | **0,23** | 1,00 | reglas 0,22 · IA 0,29 |
 | 1.6.0 reglas+IA (contexto actual) | tipo de material | 150 | **0,22** | 1,00 | reglas 0,20 · IA 0,33 |
-| 1.7.0 reglas | dominio | | | | |
-| 1.7.0 reglas | tipo de material | | | | |
+| 1.7.0 reglas (en memoria, `measure_rules_only.py`, sin escribir en el proyecto) | dominio | 150 | **0,19** | 0,89 | reglas 0,19 |
+| 1.7.0 reglas (en memoria) | tipo de material | 150 | **0,19** | 1,00 | reglas 0,19 |
+
+La IA de 1.6.0 (Sub-fase B, solo para los 38 documentos que las reglas no resolvieron) sube unos 3-4 puntos sobre las
+reglas solas. Para 2.0, la referencia (ya revisada) y estas dos filas son la base del criterio de salida.
 
 Confusiones más frecuentes (etiqueta → asignado):
 
