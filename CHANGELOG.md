@@ -6,6 +6,36 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+En desarrollo en la rama `feature/2.0` (plan único de 2.0.0, `.ai/sessions/2026-11-17-ai-2.0/PLAN.md`). MAJOR con
+ruptura; la guía de migración completa llega con la versión.
+
+### Cambiado (ruptura)
+
+- **Taxonomía por ejes (M1, A1)**: `TaxonomyManifest` es una lista de ejes (`axes: list[TaxonomyAxis]`, `schema: 2`).
+  El dominio es el eje con `organizes: folder` y el tipo de material el de `organizes: subfolder` (exactamente uno de
+  cada); los demás ejes (marcos normativos, sistema de gestión...) solo etiquetan. Se retiran
+  `TaxonomyManifest.domains`/`material_types` (usar `manifest.folder_axis.entries`/`manifest.subfolder_axis.entries`)
+  y `TaxonomyCatalogEntry` (ahora `TaxonomyEntry`, con `examples`). `render_taxonomy_template` y
+  `render_taxonomy_manifest_markdown` escriben el formato 2.0.
+- Límites del manifiesto con mensaje claro: 10 ejes, 150 entradas por eje, descripciones de 500 caracteres, claves
+  `^[a-z][a-z0-9_]{0,40}$`.
+
+### Añadido
+
+- `migrate_manifest_v1(text)`: reescribe un manifiesto o plantilla de 1.x en formato 2.0 conservando el cuerpo, los
+  campos extra de las entradas y las claves que no se usan. `domains` y `material_types` pasan a ejes organizadores,
+  el bloque `facets:` y las claves de nivel superior con una lista de entradas `{slug, name}` (formato implícito, como
+  la plantilla de normas y gobernanza) pasan a ejes de varios valores.
+- `inspect_taxonomy_front_matter(text) -> TaxonomyFrontMatterReport` (`axes`, `implicit_axes`, `ignored_keys`,
+  `legacy_format`): para avisar al autor de qué se leerá y qué se ignora.
+- `TaxonomyManifestDraftResult.to_manifest()`.
+
+### Compatibilidad
+
+- Los manifiestos y plantillas de 1.x se siguen leyendo (se migran en memoria); `save_taxonomy_manifest` guarda el
+  texto tal cual. Las plantillas empaquetadas están en formato 2.0. Sin IA, la clasificación de dominio y tipo de
+  material es la de 1.7 (comprobado con el corpus de los tests y con CALIDAD_VD).
+
 ## [1.7.1] - 2026-11-18
 
 El sitio del contexto deja de crecer con el cuadrado del número de documentos. Sin cambios en la API ni dependencias

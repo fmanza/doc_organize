@@ -23,7 +23,7 @@ from pydantic import ValidationError
 
 from doc_organize.ai._http_client_base import AiHttpClientBase
 from doc_organize.core.exceptions import TaxonomyManifestDraftAuthError, TaxonomyManifestDraftConnectionError, TaxonomyManifestDraftError
-from doc_organize.core.models import LiteLLMTaxonomyManifestDraftConfig, TaxonomyCatalogEntry, TaxonomyManifestDraftResult
+from doc_organize.core.models import LiteLLMTaxonomyManifestDraftConfig, TaxonomyEntry, TaxonomyManifestDraftResult
 from doc_organize.security.credentials import redact_credentials
 from doc_organize.utils.logging import get_logger
 
@@ -103,7 +103,7 @@ class TaxonomyManifestDraftClient(AiHttpClientBase):
     Habla el mismo endpoint `chat/completions` OpenAI-compatible que los clientes de clasificación,
     pidiendo salida JSON (`response_format: json_object`) con AMBOS ejes a la vez, en una sola
     llamada para toda la muestra (no una llamada por documento). El resultado siempre se valida
-    contra el schema de `TaxonomyCatalogEntry` antes de devolverlo — un JSON malformado, un
+    contra el schema de `TaxonomyEntry` antes de devolverlo — un JSON malformado, un
     catálogo vacío en algún eje, o una respuesta que no es JSON válido se traducen en
     `TaxonomyManifestDraftError`, nunca en un borrador a medias silencioso.
 
@@ -217,8 +217,8 @@ class TaxonomyManifestDraftClient(AiHttpClientBase):
             )
 
         try:
-            domains = [TaxonomyCatalogEntry.model_validate(entry) for entry in parsed.get("domains") or []]
-            material_types = [TaxonomyCatalogEntry.model_validate(entry) for entry in parsed.get("material_types") or []]
+            domains = [TaxonomyEntry.model_validate(entry) for entry in parsed.get("domains") or []]
+            material_types = [TaxonomyEntry.model_validate(entry) for entry in parsed.get("material_types") or []]
         except ValidationError as exc:
             raise TaxonomyManifestDraftError(f"La respuesta del LiteLLM Proxy no cumple el schema de catálogo de taxonomía: {exc}") from exc
 
@@ -235,7 +235,7 @@ class TaxonomyManifestDraftClient(AiHttpClientBase):
         )
 
 
-def _dedupe_by_slug(entries: list[TaxonomyCatalogEntry]) -> list[TaxonomyCatalogEntry]:
+def _dedupe_by_slug(entries: list[TaxonomyEntry]) -> list[TaxonomyEntry]:
     """Descarta entradas repetidas por `slug` (primera gana), conservando el orden.
 
     El modelo puede alucinar el mismo slug dos veces (con distinto `name`/`description`) pese a
@@ -243,7 +243,7 @@ def _dedupe_by_slug(entries: list[TaxonomyCatalogEntry]) -> list[TaxonomyCatalog
     no valida unicidad de slug por sí mismo.
     """
     seen: set[str] = set()
-    deduped: list[TaxonomyCatalogEntry] = []
+    deduped: list[TaxonomyEntry] = []
     for entry in entries:
         if entry.slug not in seen:
             seen.add(entry.slug)

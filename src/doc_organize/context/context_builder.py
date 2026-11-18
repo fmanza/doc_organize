@@ -375,7 +375,7 @@ class ContextBuilder:
 
         has_predefined_catalog = bool(candidate_domains) or taxonomy_manifest is not None
         manifest_domains_by_slug = (
-            {DomainClassifier._slugify(entry.slug): entry for entry in taxonomy_manifest.domains} if taxonomy_manifest is not None else {}
+            {DomainClassifier._slugify(entry.slug): entry for entry in taxonomy_manifest.folder_axis.entries} if taxonomy_manifest is not None else {}
         )
         domains = [
             Domain(
@@ -444,26 +444,26 @@ class ContextBuilder:
         está activa, se aplica después vía `_classify_with_manifest_ai` sobre el resultado
         de este método.
         """
-        domain_slugs = [entry.slug for entry in manifest.domains]
-        material_slugs = [entry.slug for entry in manifest.material_types]
+        domain_slugs = [entry.slug for entry in manifest.folder_axis.entries]
+        material_slugs = [entry.slug for entry in manifest.subfolder_axis.entries]
         domain_classifier = DomainClassifier(candidate_domains=domain_slugs, threshold=threshold)
         material_classifier = MaterialTypeClassifier(material_slugs, threshold=threshold)
 
         # `entry.slug` saneado (no el original tal cual) porque es la clave por la que
         # `score_catalog()` busca en `extra_keywords` — debe coincidir con los slugs ya
         # saneados en `domain_classifier.candidate_domains`/`material_classifier.material_types`
-        # (AUDIT_CODE: antes de esto, `TaxonomyCatalogEntry.keywords` se leía del manifiesto
+        # (AUDIT_CODE: antes de esto, `TaxonomyEntry.keywords` se leía del manifiesto
         # pero no se usaba nunca en la puntuación).
-        domain_keywords = {DomainClassifier._slugify(entry.slug): entry.keywords for entry in manifest.domains if entry.keywords}
-        material_keywords = {DomainClassifier._slugify(entry.slug): entry.keywords for entry in manifest.material_types if entry.keywords}
+        domain_keywords = {DomainClassifier._slugify(entry.slug): entry.keywords for entry in manifest.folder_axis.entries if entry.keywords}
+        material_keywords = {DomainClassifier._slugify(entry.slug): entry.keywords for entry in manifest.subfolder_axis.entries if entry.keywords}
 
         # Mismo saneado que `domain_keywords`/`material_keywords`, para el mismo motivo:
-        # `TaxonomyCatalogEntry.name` (nombre legible declarado en el manifiesto) se leía
+        # `TaxonomyEntry.name` (nombre legible declarado en el manifiesto) se leía
         # pero nunca se propagaba a `DomainDocument.material_type_name` — `SiteGenerator`
         # acababa derivando la etiqueta del nav del slug (`"normativa" -> "Normativa"`) en vez
         # de usar el nombre declarado (AUDIT_CODE, mismo hallazgo que `Domain.name`/`.description`
         # en `build()`).
-        material_names = {DomainClassifier._slugify(entry.slug): entry.name for entry in manifest.material_types}
+        material_names = {DomainClassifier._slugify(entry.slug): entry.name for entry in manifest.subfolder_axis.entries}
 
         classified: dict[str, list[DomainDocument]] = {}
         unclassified: list[ConversionResult] = []
@@ -526,9 +526,11 @@ class ContextBuilder:
         (de placeholder a un valor real); se queda en `"rules"` si no cambió nada, aunque se haya
         intentado — un único campo string sigue bastando (mismo criterio que en modo de un eje).
         """
-        domain_slugs = list(dict.fromkeys(slug for slug in (DomainClassifier._slugify(entry.slug) for entry in manifest.domains) if slug))
-        material_slugs = list(dict.fromkeys(slug for slug in (DomainClassifier._slugify(entry.slug) for entry in manifest.material_types) if slug))
-        material_names = {DomainClassifier._slugify(entry.slug): entry.name for entry in manifest.material_types}
+        domain_slugs = list(dict.fromkeys(slug for slug in (DomainClassifier._slugify(entry.slug) for entry in manifest.folder_axis.entries) if slug))
+        material_slugs = list(
+            dict.fromkeys(slug for slug in (DomainClassifier._slugify(entry.slug) for entry in manifest.subfolder_axis.entries) if slug)
+        )
+        material_names = {DomainClassifier._slugify(entry.slug): entry.name for entry in manifest.subfolder_axis.entries}
 
         pending = [
             (domain_slug, document)

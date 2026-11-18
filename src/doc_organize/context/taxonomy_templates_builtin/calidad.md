@@ -1,24 +1,46 @@
 ---
+schema: 2
 title: Calidad
 description: Catálogo de dominios y tipos de material de un Sistema de Gestión de Calidad (ISO 9001).
-domains:
+axes:
+- key: domains
+  name: Dominios
+  organizes: folder
+  entries:
   - slug: procesos
     name: Procesos
     description: Procesos operativos y su documentación (mapas de proceso, fichas de proceso)
-    keywords: [proceso, mapa de procesos, ficha de proceso]
+    keywords:
+    - proceso
+    - mapa de procesos
+    - ficha de proceso
   - slug: mejora-continua
     name: Mejora Continua
     description: No conformidades, acciones correctivas y planes de mejora
-    keywords: [no conformidad, accion correctiva, mejora, plan de mejora]
+    keywords:
+    - no conformidad
+    - accion correctiva
+    - mejora
+    - plan de mejora
   - slug: satisfaccion-cliente
     name: Satisfacción del Cliente
     description: Encuestas, reclamaciones y seguimiento de la satisfacción del cliente
-    keywords: [cliente, satisfaccion, encuesta, reclamacion]
+    keywords:
+    - cliente
+    - satisfaccion
+    - encuesta
+    - reclamacion
   - slug: gestion-proveedores
     name: Gestión de Proveedores
     description: Evaluación y seguimiento de proveedores
-    keywords: [proveedor, evaluacion, homologacion]
-material_types:
+    keywords:
+    - proveedor
+    - evaluacion
+    - homologacion
+- key: material_types
+  name: Tipos de material
+  organizes: subfolder
+  entries:
   - slug: procedimiento
     name: Procedimiento
   - slug: instruccion-tecnica

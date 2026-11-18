@@ -13,15 +13,16 @@ import doc_organize
 from doc_organize.context import TaxonomyTemplateRegistry, taxonomy_templates
 from doc_organize.context.taxonomy_templates import list_builtin_templates, load_builtin_template, parse_taxonomy_template, render_taxonomy_template
 from doc_organize.core.exceptions import TaxonomyTemplateError
-from doc_organize.core.models import TaxonomyCatalogEntry, TaxonomyManifest
+from doc_organize.core.models import TaxonomyEntry, TaxonomyManifest
+from tests.unit.taxonomy_helpers import two_axis_manifest
 
 BUILTIN_DIR = Path(taxonomy_templates.__file__).parent / "taxonomy_templates_builtin"
 
 
 def _manifest(**kwargs) -> TaxonomyManifest:
-    return TaxonomyManifest(
-        domains=[TaxonomyCatalogEntry(slug="calidad", name="Calidad", description="Gestión", keywords=["iso 9001"])],
-        material_types=[TaxonomyCatalogEntry(slug="procedimiento", name="Procedimiento")],
+    return two_axis_manifest(
+        domains=[TaxonomyEntry(slug="calidad", name="Calidad", description="Gestión", keywords=["iso 9001"])],
+        material_types=[TaxonomyEntry(slug="procedimiento", name="Procedimiento")],
         **kwargs,
     )
 
@@ -36,7 +37,7 @@ def test_parse_ignores_the_body() -> None:
 
     manifest = parse_taxonomy_template(text)
 
-    assert [entry.slug for entry in manifest.domains] == ["a"]
+    assert [entry.slug for entry in manifest.folder_axis.entries] == ["a"]
 
 
 @pytest.mark.parametrize(
@@ -89,11 +90,11 @@ def test_render_then_parse_is_identity_for_random_texts() -> None:
         return "".join(rng.choice(pieces) for _ in range(rng.randint(1, 10)))
 
     for _ in range(500):
-        manifest = TaxonomyManifest(
+        manifest = two_axis_manifest(
             title=rng.choice([None, "", text()]),
             description=rng.choice([None, "", text()]),
-            domains=[TaxonomyCatalogEntry(slug=text(), name=text(), description=rng.choice([None, text()]), keywords=[text()])],
-            material_types=[TaxonomyCatalogEntry(slug=text(), name=text())],
+            domains=[TaxonomyEntry(slug=text(), name=text(), description=rng.choice([None, text()]), keywords=[text()])],
+            material_types=[TaxonomyEntry(slug=text(), name=text())],
         )
         assert parse_taxonomy_template(render_taxonomy_template(manifest, text())) == manifest
 
@@ -110,7 +111,7 @@ def test_builtin_templates_are_listed_and_loaded_from_the_package() -> None:
 
     assert names == sorted(path.stem for path in BUILTIN_DIR.glob("*.md"))
     for name in names:
-        assert load_builtin_template(name).domains
+        assert load_builtin_template(name).folder_axis.entries
 
 
 @pytest.mark.parametrize("name", ["../calidad", "Calidad", "no-existe", ""])
@@ -129,7 +130,7 @@ def test_builtin_templates_do_not_need_a_home_directory() -> None:
         "pathlib.Path.home = classmethod(fail)\n"
         "import importlib, doc_organize.context.taxonomy_templates as module\n"
         "importlib.reload(module)\n"
-        "print(len(module.list_builtin_templates()), bool(module.load_builtin_template('calidad').domains))\n"
+        "print(len(module.list_builtin_templates()), bool(module.load_builtin_template('calidad').folder_axis.entries))\n"
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120, check=False)
 

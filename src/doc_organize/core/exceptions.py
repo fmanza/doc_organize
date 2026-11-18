@@ -205,7 +205,7 @@ class TaxonomyManifestDraftError(DocOrganizeError):
 
     A diferencia de `TaxonomyClassificationError` (Sub-fase B, elige DENTRO de un catalogo ya
     confirmado), aqui el catalogo mismo es la propuesta que falla -- nunca degrada en silencio a
-    un borrador vacio (violaria `TaxonomyManifest.domains`/`material_types` min_length=1), siempre
+    un borrador vacio (violaria `TaxonomyManifestDraftResult.domains`/`material_types` min_length=1), siempre
     se propaga.
     """
 

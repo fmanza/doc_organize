@@ -1,28 +1,57 @@
 ---
+schema: 2
 title: SGI ISO 27001
 description: Catálogo de dominios y tipos de material de un Sistema de Gestión de Seguridad de la Información (ISO/IEC 27001).
-domains:
+axes:
+- key: domains
+  name: Dominios
+  organizes: folder
+  entries:
   - slug: gobierno-seguridad
     name: Gobierno de la Seguridad
     description: Política, roles, responsabilidades y objetivos del SGSI
-    keywords: [politica, gobierno, roles, objetivos]
+    keywords:
+    - politica
+    - gobierno
+    - roles
+    - objetivos
   - slug: gestion-riesgos
     name: Gestión de Riesgos
     description: Identificación, análisis y tratamiento de riesgos de seguridad de la información
-    keywords: [riesgo, analisis, tratamiento, declaracion de aplicabilidad, soa]
+    keywords:
+    - riesgo
+    - analisis
+    - tratamiento
+    - declaracion de aplicabilidad
+    - soa
   - slug: control-acceso
     name: Control de Acceso
     description: Gestión de identidades, permisos y accesos a sistemas e información
-    keywords: [acceso, identidad, permisos, autenticacion]
+    keywords:
+    - acceso
+    - identidad
+    - permisos
+    - autenticacion
   - slug: continuidad-negocio
     name: Continuidad de Negocio
     description: Planes de continuidad y recuperación ante incidentes
-    keywords: [continuidad, recuperacion, contingencia, bcp]
+    keywords:
+    - continuidad
+    - recuperacion
+    - contingencia
+    - bcp
   - slug: cumplimiento
     name: Cumplimiento Normativo
     description: Requisitos legales, contractuales y de cumplimiento aplicables al SGSI
-    keywords: [cumplimiento, legal, normativa, auditoria]
-material_types:
+    keywords:
+    - cumplimiento
+    - legal
+    - normativa
+    - auditoria
+- key: material_types
+  name: Tipos de material
+  organizes: subfolder
+  entries:
   - slug: politica
     name: Política
   - slug: procedimiento

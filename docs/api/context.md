@@ -329,15 +329,15 @@ class MaterialTypeClassifier:
 ```
 
 Mismo algoritmo de puntuación que `DomainClassifier` en modo catálogo (función
-compartida `domain_classifier.score_catalog()`), aplicado al catálogo
-`TaxonomyManifest.material_types` — sin modo descubrimiento: el manifiesto siempre
+compartida `domain_classifier.score_catalog()`), aplicado a las entradas del eje
+`organizes: subfolder` del manifiesto — sin modo descubrimiento: el manifiesto siempre
 declara su catálogo explícitamente. `classify_text()` devuelve `(None, score)` si
 el mejor candidato queda por debajo de `threshold`.
 
 Tanto `MaterialTypeClassifier.classify_text()` como `DomainClassifier.score_domain()`
 aceptan `extra_keywords: dict[str, list[str]] | None` — mapa slug saneado → palabras
 clave adicionales, poblado por `ContextBuilder._classify_with_manifest` desde
-`TaxonomyCatalogEntry.keywords` de cada entrada del manifiesto, sumadas a las
+`TaxonomyEntry.keywords` de cada entrada del manifiesto, sumadas a las
 derivadas del propio slug antes de puntuar.
 
 ---
@@ -353,26 +353,68 @@ Lee `<project.root_path>/taxonomy_manifest.md`, si existe: el front matter YAML
 el resto del fichero es prosa libre (descripción, tablas, diagramas) y no se
 parsea. `None` si el proyecto no tiene manifiesto — modo de un eje, sin cambios.
 
+Formato 2.0 (`schema: 2`): una lista de **ejes**. El eje con `organizes: folder` es el
+dominio (carpeta) y el de `organizes: subfolder` el tipo de material (subcarpeta);
+exactamente uno de cada. Los demás ejes solo etiquetan.
+
 ```yaml
 ---
-domains:
-  - slug: ciberseguridad
-    name: Ciberseguridad
-    description: Normas de seguridad de la información
-    keywords: [iso27001, ens]
-material_types:
-  - slug: normativa
-    name: Normativa
-  - slug: procedimiento
-    name: Procedimiento
+schema: 2
+axes:
+  - key: domains
+    name: Dominios
+    organizes: folder
+    entries:
+      - slug: ciberseguridad
+        name: Ciberseguridad
+        description: Normas de seguridad de la información
+        keywords: [iso27001, ens]
+  - key: material_types
+    name: Tipos de material
+    organizes: subfolder
+    entries:
+      - slug: normativa
+        name: Normativa
+      - slug: procedimiento
+        name: Procedimiento
+  - key: normative_frameworks
+    name: Marcos normativos
+    multiple: true          # varios valores por documento (como mucho 5)
+    threshold: 0.5          # opcional; por defecto, el de la construcción
+    entries:
+      - slug: ens
+        name: Esquema Nacional de Seguridad
+        keywords: [Esquema Nacional de Seguridad, ENS]
 ---
 
 Prosa libre — descripción, tablas, diagramas Mermaid. No se parsea.
 ```
 
+Opciones de un eje: `description`, `multiple` (no en los organizadores), `threshold`,
+`rules: false` (solo IA o semántica; no en los organizadores) y `organizes`. Entradas:
+`slug`, `name`, `description` (≤ 500 caracteres), `keywords`, `examples`. Límites: 10
+ejes, 150 entradas por eje, claves `^[a-z][a-z0-9_]{0,40}$`.
+
+**Formato de 1.x**: se sigue leyendo y se migra en memoria (el fichero no cambia).
+`domains` y `material_types` pasan a los ejes organizadores; cada faceta del bloque
+`facets:` y cada clave de nivel superior cuyo valor sea una lista de entradas
+`{slug, name}` (formato implícito) pasan a un eje de varios valores.
+
+```python
+def migrate_manifest_v1(text: str) -> str                                   # 2.0.0
+def inspect_taxonomy_front_matter(text: str) -> TaxonomyFrontMatterReport   # 2.0.0
+```
+
+`migrate_manifest_v1` reescribe el texto en formato 2.0 conservando el cuerpo, los
+campos extra de las entradas y las claves que no se usan; un texto que ya es 2.0 se
+devuelve tal cual. `inspect_taxonomy_front_matter` informa de qué ejes se leerán
+(`axes`), cuáles salen del formato implícito (`implicit_axes`), qué claves se ignoran
+(`ignored_keys`) y si el texto es de 1.x (`legacy_format`), para avisar al autor al
+guardar.
+
 **Excepciones**: `TaxonomyManifestError` si el fichero existe pero no empieza/cierra
-el delimitador de front matter, el YAML no es válido, o no cumple el schema
-(`domains`/`material_types` no vacíos, cada entrada con `slug`+`name`).
+el delimitador de front matter, el YAML no es válido, declara un `schema` distinto de
+2 o no cumple el schema (con el motivo: ejes organizadores, límites, claves repetidas).
 
 ---
 
@@ -841,9 +883,10 @@ class LiteLLMTaxonomyClassificationConfig(BaseModel):
     retry_backoff_s: float  # 0.14.0, default 0.5
 
 class TaxonomyManifestDraftResult(BaseModel):
-    domains: list[TaxonomyCatalogEntry]        # min 1
-    material_types: list[TaxonomyCatalogEntry]  # min 1
+    domains: list[TaxonomyEntry]        # min 1
+    material_types: list[TaxonomyEntry]  # min 1
     reasoning: str | None
+    def to_manifest(self) -> TaxonomyManifest   # 2.0.0: ejes domains (folder) y material_types (subfolder)
 
 class LiteLLMTaxonomyManifestDraftConfig(BaseModel):
     base_url: str
@@ -865,17 +908,38 @@ class LiteLLMEnrichmentConfig(BaseModel):  # 1.5.0
     retries: int            # default 0
     retry_backoff_s: float  # default 0.5
 
-class TaxonomyCatalogEntry(BaseModel):
+class TaxonomyEntry(BaseModel):              # 2.0.0 (antes TaxonomyCatalogEntry)
     slug: str
     name: str
-    description: str | None
+    description: str | None      # ≤ 500 caracteres
     keywords: list[str]
+    examples: list[str]
 
-class TaxonomyManifest(BaseModel):
+class TaxonomyAxis(BaseModel):               # 2.0.0
+    key: str                     # ^[a-z][a-z0-9_]{0,40}$, única en el manifiesto
+    name: str
+    description: str | None
+    multiple: bool               # default False; no en los ejes organizadores
+    threshold: float | None      # None = el de la construcción
+    rules: bool                  # default True; False = solo IA o semántica
+    organizes: Literal["folder", "subfolder"] | None
+    entries: list[TaxonomyEntry] # 1-150
+
+class TaxonomyManifest(BaseModel):           # 2.0.0: por ejes
+    schema_version: Literal[2]   # "schema" en el YAML
     title: str | None            # solo relevante en una plantilla compartida
     description: str | None      # solo relevante en una plantilla compartida
-    domains: list[TaxonomyCatalogEntry]        # min 1
-    material_types: list[TaxonomyCatalogEntry]  # min 1
+    axes: list[TaxonomyAxis]     # 1-10; exactamente un folder y un subfolder
+    folder_axis: TaxonomyAxis    # propiedad: el dominio
+    subfolder_axis: TaxonomyAxis # propiedad: el tipo de material
+    tag_axes: list[TaxonomyAxis] # propiedad: los que solo etiquetan
+    def axis(self, key: str) -> TaxonomyAxis | None
+
+class TaxonomyFrontMatterReport(BaseModel):  # 2.0.0
+    axes: list[str]
+    implicit_axes: list[str]
+    ignored_keys: list[str]
+    legacy_format: bool
 
 class TaxonomyTemplateSummary(BaseModel):
     name: str            # slug del fichero, sin extensión — identificador de load_template()
