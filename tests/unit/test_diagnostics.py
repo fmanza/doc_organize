@@ -142,18 +142,39 @@ async def test_ai_connection_error() -> None:
     assert check.status == "error" and "ConnectError" in check.detail
 
 
-@pytest.mark.asyncio
-async def test_ai_endpoints_come_from_the_environment(monkeypatch) -> None:
-    for variable in ("CLASSIFICATION", "TAXONOMY_CLASSIFICATION", "ENRICHMENT", "TAXONOMY_MANIFEST_DRAFT"):
-        for suffix in ("BASE_URL", "VIRTUAL_KEY", "MODEL"):
-            monkeypatch.delenv(f"DOC_ORGANIZE_LITELLM_{variable}_{suffix}", raising=False)
+def _clear_ai_env(monkeypatch) -> None:
+    import os
 
+    for name in list(os.environ):
+        if name.startswith("DOC_ORGANIZE_LITELLM_"):
+            monkeypatch.delenv(name, raising=False)
+
+
+@pytest.mark.asyncio
+async def test_ai_endpoints_come_from_the_2_0_environment(monkeypatch) -> None:
+    _clear_ai_env(monkeypatch)
     report = await check_environment(check_ai=True, build_site=False)
     assert _by_name(report)["ai"].detail.startswith("Ningún modelo")
 
-    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_ENRICHMENT_BASE_URL", "https://proxy.test")
-    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_ENRICHMENT_VIRTUAL_KEY", _KEY)
-    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_ENRICHMENT_MODEL", "modelo-y")
-    transport = _transport(httpx.Response(200, json={"choices": [{"message": {"content": '{"ok": true}'}}]}))
+    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_BASE_URL", "https://proxy.test")
+    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_VIRTUAL_KEY", _KEY)
+    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_MODEL_CLASSIFY", "modelo-c")
+    requests: list[httpx.Request] = []
+    transport = _transport(*[httpx.Response(200, json={"choices": [{"message": {"content": '{"ok": true}'}}]})] * 3, requests=requests)
     report = await check_environment(check_ai=True, build_site=False, transport=transport)
-    assert _by_name(report)["ai:enrichment"].status == "ok"
+
+    checks = _by_name(report)
+    assert [checks[name].status for name in ("ai:classify", "ai:enrich", "ai:taxonomy_design")] == ["ok", "ok", "ok"]
+    assert [json.loads(request.content)["model"] for request in requests] == ["modelo-c", "doc-organize-enrich", "doc-organize-taxonomy-design"]
+
+
+@pytest.mark.asyncio
+async def test_1_x_variables_are_reported_with_their_replacement(monkeypatch) -> None:
+    _clear_ai_env(monkeypatch)
+    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_ENRICHMENT_MODEL", "modelo-viejo")
+
+    report = await check_environment(check_ai=True, build_site=False)
+
+    check = _by_name(report)["ai"]
+    assert check.status == "error" and "DOC_ORGANIZE_LITELLM_MODEL_ENRICH" in check.detail and "modelo-viejo" not in check.detail
+    assert report.ok is False

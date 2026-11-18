@@ -1079,7 +1079,52 @@ class Domain(BaseModel):
 
 
 AiClassificationStopReason = Literal["auth", "connection", "budget"]
-"""Motivo por el que `ContextBuilder.build()` detuvo la Sub-fase B (`Context.ai_classification_stopped`, L-3a/L-3b)."""
+"""Motivo por el que `ContextBuilder.build()` detuvo una fase de IA (`AiPhaseStats.stopped`, L-3a/L-3b)."""
+
+AiScope = Literal["off", "unclassified"]
+"""Qué documentos van a la IA para clasificarse (`ContextBuilder.build(ai_scope=)`, 2.0.0): ninguno, o los que las reglas
+dejaron sin clasificar en algún eje organizador (la Sub-fase B de 1.x). `missing_axes` llega en M5."""
+
+
+class AiPhaseStats(BaseModel):
+    """Recuentos de una fase de IA de una construcción (2.0.0; antes campos sueltos `ai_documents_*` y `ai_enrichment_*`).
+
+    `sent == assigned + failed + enviados sin asignación` siempre.
+
+    Attributes:
+        sent (int): Documentos enviados (una llamada por documento).
+        assigned (int): Enviados en los que la IA asignó algo (un eje, o un campo al describir).
+        failed (int): Enviados cuya llamada falló.
+        stopped (str | None): Por qué paró antes de terminar (`auth`, `connection`, `budget`), o `None`.
+        prompt_tokens (int): Tokens de entrada, según el proxy.
+        completion_tokens (int): Tokens de salida, según el proxy.
+        response_format (str | None): `json_schema` o `json_object` (si el modelo no admite el esquema), en la última
+            llamada que respondió.
+    """
+
+    sent: int = Field(default=0, ge=0)
+    assigned: int = Field(default=0, ge=0)
+    failed: int = Field(default=0, ge=0)
+    stopped: AiClassificationStopReason | None = None
+    prompt_tokens: int = Field(default=0, ge=0)
+    completion_tokens: int = Field(default=0, ge=0)
+    response_format: Literal["json_schema", "json_object"] | None = None
+
+
+class AiStats(BaseModel):
+    """Qué hizo la IA en una construcción (2.0.0, `Context.ai_stats`).
+
+    Attributes:
+        scope (AiScope): Alcance de la clasificación con IA.
+        enrich (bool): Si se pidió describir los documentos que no declaran descripción o palabras clave.
+        classification (AiPhaseStats): Clasificación (tarea `classify`).
+        enrichment (AiPhaseStats): Descripción (tarea `enrich`).
+    """
+
+    scope: AiScope = "off"
+    enrich: bool = False
+    classification: AiPhaseStats = Field(default_factory=AiPhaseStats)
+    enrichment: AiPhaseStats = Field(default_factory=AiPhaseStats)
 
 
 class DocumentCredentialFindings(BaseModel):
@@ -1117,17 +1162,7 @@ class Context(BaseModel):
         description="Ejes con los que se clasificó (2.0.0), sin `keywords` ni `examples`; sin manifiesto, solo `domains`",
     )
     output_folder_name: str = Field(default="organizado", description="Nombre de la carpeta de salida reorganizada, relativa a `root_path`")
-    ai_classification_enabled: bool = Field(default=False, description="Si la Sub-fase B (IA) está activa para este proyecto — opt-in explícito")
-    ai_fallback_threshold: float = Field(default=0.5, description="Score mínimo (Sub-fase A) por debajo del cual se intenta la Sub-fase B")
-    ai_classification_model: str | None = Field(
-        default=None,
-        description=(
-            "Alias de modelo del LiteLLM Proxy con el que se ejecutó la Sub-fase B (lo rellena `ContextBuilder` desde 1.5.0); `None` si no se ejecutó"
-        ),
-    )
-    ai_enrichment_model: str | None = Field(
-        default=None, description="Alias de modelo con el que se ejecutó el enriquecimiento por IA (1.5.0); `None` si no se ejecutó"
-    )
+    ai_fallback_threshold: float = Field(default=0.5, description="Score mínimo de las reglas para clasificar un eje sin IA")
     built_with_version: str | None = Field(
         default=None,
         description=(
@@ -1186,40 +1221,14 @@ class Context(BaseModel):
             "elección en cada `POST`, igual que `candidate_domains`)"
         ),
     )
-    ai_classification_stopped: AiClassificationStopReason | None = Field(
-        default=None,
-        description=(
-            "Por qué se detuvo la Sub-fase B antes de terminar (L-3a/L-3b): `auth` (clave rechazada, 401/403), "
-            "`connection` (`ai_max_failures` errores de conexión seguidos) o `budget` (se alcanzó `ai_max_documents`); "
-            "`None` si terminó o no se ejecutó. Los documentos que no llegaron a enviarse quedan sin clasificar"
-        ),
+    ai_stats: AiStats = Field(default_factory=AiStats, description="Qué hizo la IA en esta construcción (2.0.0): alcance, recuentos y tokens")
+    ai_provenance: "list[PromptProvenance]" = Field(
+        default_factory=list, description="Prompt y modelo de cada tarea de IA que llegó a enviar algo (2.0.0, G1)"
     )
-    ai_documents_sent: int = Field(default=0, ge=0, description="Documentos enviados a la IA en la Sub-fase B (una llamada por documento, L-3c)")
-    ai_documents_classified: int = Field(
-        default=0, ge=0, description="Documentos enviados a los que la IA asignó al menos un eje del catálogo (L-3c)"
-    )
-    ai_documents_failed: int = Field(
-        default=0,
-        ge=0,
-        description=(
-            "Documentos enviados cuya llamada falló (auth, conexión u otro error, L-3c); `sent = classified + failed + enviados sin asignación`"
-        ),
-    )
-    ai_enrichment_enabled: bool = Field(
-        default=False,
-        description="Si la IA rellenó la descripción y las palabras clave que los documentos no declaraban (1.5.0) — opt-in explícito",
-    )
-    ai_enrichment_stopped: AiClassificationStopReason | None = Field(
-        default=None,
-        description="Por qué se detuvo el enriquecimiento por IA, con los mismos motivos y límites que `ai_classification_stopped` (1.5.0)",
-    )
-    ai_enrichment_sent: int = Field(default=0, ge=0, description="Documentos enviados a la IA para enriquecer (una llamada por documento, 1.5.0)")
-    ai_enrichment_applied: int = Field(default=0, ge=0, description="Documentos enviados en los que la IA rellenó al menos un campo (1.5.0)")
-    ai_enrichment_failed: int = Field(default=0, ge=0, description="Documentos enviados a enriquecer cuya llamada falló (1.5.0)")
     ai_redact_credentials: bool = Field(
         default=False,
         description=(
-            "Si el texto enviado a la IA se redactó antes (`ContextBuilder(ai_redact_credentials=True)`, 1.7.0). `False` en "
+            "Si el texto enviado a la IA se redactó antes (`AiSettings.redact_credentials`; en 1.7, `ContextBuilder(ai_redact_credentials=True)`). `False` en "
             "contextos anteriores a la 1.7.0"
         ),
     )
@@ -1253,6 +1262,46 @@ class Context(BaseModel):
         except InvalidPathError as exc:
             raise ValueError(str(exc)) from exc
 
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_v1_ai_fields(cls, data: Any) -> Any:
+        """Los recuentos de IA de 1.x (`ai_documents_*`, `ai_enrichment_*`...) pasan a `ai_stats` (2.0.0)."""
+        if not isinstance(data, dict) or "ai_stats" in data:
+            return data
+        data = dict(data)
+        legacy = {key: data.pop(key) for key in list(data) if key in _LEGACY_AI_FIELDS}
+        if legacy:
+            data["ai_stats"] = {
+                "scope": "unclassified" if legacy.get("ai_classification_enabled") else "off",
+                "enrich": bool(legacy.get("ai_enrichment_enabled")),
+                "classification": {
+                    "sent": legacy.get("ai_documents_sent") or 0,
+                    "assigned": legacy.get("ai_documents_classified") or 0,
+                    "failed": legacy.get("ai_documents_failed") or 0,
+                    "stopped": legacy.get("ai_classification_stopped"),
+                },
+                "enrichment": {
+                    "sent": legacy.get("ai_enrichment_sent") or 0,
+                    "assigned": legacy.get("ai_enrichment_applied") or 0,
+                    "failed": legacy.get("ai_enrichment_failed") or 0,
+                    "stopped": legacy.get("ai_enrichment_stopped"),
+                },
+            }
+            # El modelo de cada fase, con el prompt marcado como de 1.x (no se guardaba cuál).
+            data.setdefault(
+                "ai_provenance",
+                [
+                    {"task": task, "prompt_id": "1.x", "version": "1.x", "source": "builtin", "sha256": "", "model": legacy[key]}
+                    for task, key in (("classify", "ai_classification_model"), ("enrich", "ai_enrichment_model"))
+                    if legacy.get(key)
+                ],
+            )
+        return data
+
+    def model_for_task(self, task: "AiTask") -> str | None:
+        """Modelo con el que se hizo `task` en esta construcción (de `ai_provenance`), o `None`."""
+        return next((item.model for item in self.ai_provenance if item.task == task), None)
+
     @model_validator(mode="after")
     def _migrate_v1(self) -> "Context":
         """Un contexto de 1.x (o creado a mano sin `schema_version`) pasa a 2: ejes y clasificación desde sus campos."""
@@ -1263,6 +1312,23 @@ class Context(BaseModel):
         return self
 
 
+#: Campos de IA de un `context.json` de 1.x que pasan a `Context.ai_stats`.
+_LEGACY_AI_FIELDS = frozenset(
+    {
+        "ai_classification_enabled",
+        "ai_classification_model",
+        "ai_enrichment_model",
+        "ai_classification_stopped",
+        "ai_documents_sent",
+        "ai_documents_classified",
+        "ai_documents_failed",
+        "ai_enrichment_enabled",
+        "ai_enrichment_stopped",
+        "ai_enrichment_sent",
+        "ai_enrichment_applied",
+        "ai_enrichment_failed",
+    }
+)
 #: Versión de `context.json` que escribe esta versión de doc_organize.
 CONTEXT_SCHEMA_VERSION: Final = 2
 #: Claves de los ejes organizadores de un contexto de 1.x (y del modo sin manifiesto).
@@ -1369,14 +1435,6 @@ class ContextBuildRecord(BaseModel):
     classified: int = Field(..., ge=0, description="Documentos clasificados en algún dominio")
     unclassified: int = Field(..., ge=0, description="Documentos sin clasificar")
     changes: list[ContextChange] = Field(default_factory=list, description="Documentos que entraron, salieron o cambiaron de sitio")
-
-
-class DomainClassificationResult(BaseModel):
-    """Resultado de clasificar un documento por IA (Sub-fase B, `DomainClassificationClient`)."""
-
-    domain: str | None = Field(default=None, description="Slug del dominio elegido del catálogo, o `None` si no encaja en ninguno")
-    confidence: float = Field(..., ge=0.0, le=1.0, description="Confianza reportada por el modelo, 0-1")
-    reasoning: str | None = Field(default=None, description="Justificación breve devuelta por el modelo, si la reporta")
 
 
 #: Límites de un manifiesto de taxonomía (2.0.0, A1): protegen la construcción, el prompt y la web de un YAML enorme.
@@ -1546,9 +1604,6 @@ class TaxonomyManifest(BaseModel):
         return next((axis for axis in self.axes if axis.key == key), None)
 
 
-Context.model_rebuild()  # `taxonomy_axes` usa `TaxonomyAxis`, definido después
-
-
 class FreshnessReport(BaseModel):
     """Si el contexto de un proyecto sigue al día respecto a la caché del último escaneo (2.0.0, F4).
 
@@ -1695,63 +1750,11 @@ class AiSettings(BaseModel):
         return configured.virtual_key if configured is not None and configured.virtual_key else self.virtual_key
 
 
-class LiteLLMClassificationConfig(BaseModel):
-    """Configuración de acceso al LiteLLM Proxy para `DomainClassificationClient` (Sub-fase B).
-
-    Config propia, no comparte campos ni credenciales con `LiteLLMUsageConfig` (ISP —
-    ver §2.5 de `00_REQUEST.md`) aunque en despliegue pueda apuntar a la misma URL de proxy.
-    """
-
-    base_url: str = Field(..., description="URL base del LiteLLM Proxy")
-    virtual_key: str = Field(..., description="Virtual key con permiso de `chat/completions` para clasificación")
-    model: str = Field(default="claude-classifier", description="Alias de modelo configurado en el proxy para clasificar")
-    timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
-    retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
-    retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
-    rate_limit_retries: int = Field(default=3, ge=0, description=_HTTP_RATE_LIMIT_RETRIES_DESC)
-    max_retry_wait_s: float = Field(default=60.0, ge=0.0, description=_HTTP_MAX_RETRY_WAIT_DESC)
-
-
-class TaxonomyClassificationResult(BaseModel):
-    """Resultado de clasificar un documento por IA en los 2 ejes de un manifiesto de taxonomía
-    (Sub-fase B combinada, `TaxonomyClassificationClient`) — una sola llamada para dominio y
-    tipo de material de origen, en vez de dos llamadas independientes (decisión de la sesión que
-    añadió este cliente)."""
-
-    domain: str | None = Field(default=None, description="Slug del dominio elegido del catálogo, o `None` si no encaja en ninguno")
-    domain_confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="Confianza reportada por el modelo para el eje de dominio, 0-1")
-    material_type: str | None = Field(default=None, description="Slug del tipo de material elegido del catálogo, o `None` si no encaja en ninguno")
-    material_type_confidence: float = Field(
-        default=0.0, ge=0.0, le=1.0, description="Confianza reportada por el modelo para el eje de tipo de material, 0-1"
-    )
-    reasoning: str | None = Field(default=None, description="Justificación breve devuelta por el modelo, si la reporta")
-
-
-class LiteLLMTaxonomyClassificationConfig(BaseModel):
-    """Configuración de acceso al LiteLLM Proxy para `TaxonomyClassificationClient` (Sub-fase B,
-    manifiesto de taxonomía).
-
-    Config propia, no comparte campos ni credenciales con `LiteLLMClassificationConfig` (ISP —
-    mismo criterio que ya separa esa de `LiteLLMUsageConfig`): la clasificación combinada de 2 ejes
-    es una carga de trabajo distinta de la clasificación de dominio de 1 eje, aunque en despliegue
-    ambas puedan apuntar al mismo LiteLLM Proxy.
-    """
-
-    base_url: str = Field(..., description="URL base del LiteLLM Proxy")
-    virtual_key: str = Field(..., description="Virtual key con permiso de `chat/completions` para clasificación por manifiesto")
-    model: str = Field(default="claude-classifier", description="Alias de modelo configurado en el proxy para clasificar por manifiesto")
-    timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
-    retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
-    retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
-    rate_limit_retries: int = Field(default=3, ge=0, description=_HTTP_RATE_LIMIT_RETRIES_DESC)
-    max_retry_wait_s: float = Field(default=60.0, ge=0.0, description=_HTTP_MAX_RETRY_WAIT_DESC)
-
-
 class TaxonomyManifestDraftResult(BaseModel):
     """Resultado de pedir a la IA un borrador de manifiesto de taxonomía (dominios + tipos de
-    material) a partir de una muestra de documentos ya convertidos (`TaxonomyManifestDraftClient`).
+    material) a partir de una muestra de documentos ya convertidos (`doc_organize.ai.draft_taxonomy`).
 
-    A diferencia de `TaxonomyClassificationResult` (Sub-fase B, elige DENTRO de un catálogo ya
+    A diferencia de la clasificación (`classify_document`, elige DENTRO de un catálogo ya
     confirmado), aquí el catálogo mismo es la propuesta — nunca se aplica directamente, el
     usuario lo revisa/edita antes de guardarlo como `taxonomy_manifest.md`.
     """
@@ -1779,37 +1782,8 @@ class TaxonomyManifestDraftResult(BaseModel):
         )
 
 
-class LiteLLMTaxonomyManifestDraftConfig(BaseModel):
-    """Configuración de acceso al LiteLLM Proxy para `TaxonomyManifestDraftClient`.
-
-    Config propia (ISP, mismo criterio que separa `LiteLLMClassificationConfig` de
-    `LiteLLMTaxonomyClassificationConfig`): proponer un catálogo nuevo es una carga de trabajo
-    distinta de clasificar dentro de uno ya cerrado, aunque en despliegue las tres puedan apuntar
-    al mismo LiteLLM Proxy.
-    """
-
-    base_url: str = Field(..., description="URL base del LiteLLM Proxy")
-    virtual_key: str = Field(..., description="Virtual key con permiso de `chat/completions` para proponer manifiestos de taxonomía")
-    model: str = Field(default="claude-classifier", description="Alias de modelo configurado en el proxy para proponer manifiestos")
-    timeout_s: float = Field(
-        default=60.0,
-        description="Timeout de las peticiones HTTP, en segundos (más alto que el resto: el prompt incluye varios documentos a la vez, no uno solo)",
-    )
-    retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
-    retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
-    rate_limit_retries: int = Field(default=3, ge=0, description=_HTTP_RATE_LIMIT_RETRIES_DESC)
-    max_retry_wait_s: float = Field(default=60.0, ge=0.0, description=_HTTP_MAX_RETRY_WAIT_DESC)
-    redact_credentials: bool = Field(
-        default=True,
-        description=(
-            "Redacta las credenciales (`doc_organize.security.redact_credentials`) del título y el extracto de cada documento "
-            "de la muestra antes de enviarlos (1.7.0)"
-        ),
-    )
-
-
 class DocumentEnrichmentResult(BaseModel):
-    """Descripción y palabras clave que propone la IA para un documento (`DocumentEnrichmentClient`, 1.5.0).
+    """Descripción y palabras clave que propone la IA para un documento (`doc_organize.ai.enrich_document`).
 
     Ya saneadas por el cliente: una línea, longitud acotada y sin repetidos; `None`/lista vacía si el modelo no dio
     un valor utilizable.
@@ -1819,22 +1793,7 @@ class DocumentEnrichmentResult(BaseModel):
     keywords: list[str] = Field(default_factory=list, description="Palabras clave, o lista vacía")
 
 
-class LiteLLMEnrichmentConfig(BaseModel):
-    """Configuración de acceso al LiteLLM Proxy para `DocumentEnrichmentClient` (1.5.0).
-
-    Config propia (ISP, mismo criterio que el resto de clientes de `ai/`): describir un documento es una carga de
-    trabajo distinta de clasificarlo, aunque en despliegue apunten al mismo proxy.
-    """
-
-    base_url: str = Field(..., description="URL base del LiteLLM Proxy")
-    virtual_key: str = Field(..., description="Virtual key con permiso de `chat/completions` para describir documentos")
-    model: str = Field(default="claude-classifier", description="Alias de modelo configurado en el proxy para describir documentos")
-    timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
-    retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
-    retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
-    rate_limit_retries: int = Field(default=3, ge=0, description=_HTTP_RATE_LIMIT_RETRIES_DESC)
-    max_retry_wait_s: float = Field(default=60.0, ge=0.0, description=_HTTP_MAX_RETRY_WAIT_DESC)
-
+Context.model_rebuild()  # `taxonomy_axes` y `ai_provenance` usan modelos definidos después
 
 __all__ = [
     "AI_TASKS",
@@ -1842,7 +1801,10 @@ __all__ = [
     "LEGACY_FOLDER_AXIS_KEY",
     "LEGACY_SUBFOLDER_AXIS_KEY",
     "AiClassificationStopReason",
+    "AiPhaseStats",
+    "AiScope",
     "AiSettings",
+    "AiStats",
     "AiTask",
     "AvStatus",
     "AxisClassifiedBy",
@@ -1873,7 +1835,6 @@ __all__ = [
     "DocumentMetadata",
     "DocumentStatus",
     "Domain",
-    "DomainClassificationResult",
     "DomainDocument",
     "DomainStatus",
     "DuplicateGroup",
@@ -1884,10 +1845,6 @@ __all__ = [
     "FreshnessReport",
     "GitHubCopilotUsageConfig",
     "GpuStatus",
-    "LiteLLMClassificationConfig",
-    "LiteLLMEnrichmentConfig",
-    "LiteLLMTaxonomyClassificationConfig",
-    "LiteLLMTaxonomyManifestDraftConfig",
     "LiteLLMUsageConfig",
     "OcrMode",
     "OfficeStatus",
@@ -1903,7 +1860,6 @@ __all__ = [
     "ScannedFolder",
     "TaskSettings",
     "TaxonomyAxis",
-    "TaxonomyClassificationResult",
     "TaxonomyEntry",
     "TaxonomyFrontMatterReport",
     "TaxonomyManifest",

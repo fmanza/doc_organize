@@ -117,6 +117,7 @@ class LlmClient:
         schema: dict[str, Any],
         parse: Callable[[Any], T],
         schema_name: str | None = None,
+        on_redacted: Callable[[dict[str, int]], None] | None = None,
     ) -> LlmResult[T]:
         """Pide una respuesta JSON para `task` y la valida.
 
@@ -126,6 +127,8 @@ class LlmClient:
             schema: Esquema JSON de la respuesta: se envía como `json_schema` estricto.
             parse: Valida y convierte el JSON recibido (lanza `ValueError`/`TypeError`/`KeyError` si no vale).
             schema_name: Nombre del esquema para el proxy (por defecto, la tarea).
+            on_redacted: Recibe lo redactado (recuento por regla) **antes** de enviar, aunque la llamada falle después:
+                así quien llama puede anotarlo por documento (`Context.credential_findings`).
 
         Returns:
             `LlmResult` con el valor validado, el formato usado, los tokens y lo redactado.
@@ -138,6 +141,8 @@ class LlmClient:
         """
         model = self.model_for(task)
         sent, redacted = self._redact(messages)
+        if redacted and on_redacted is not None:
+            on_redacted(redacted)
         response_format: ResponseFormat = "json_object" if model in self._no_schema else "json_schema"
         payload = await self._chat(task, model, sent, self._format(response_format, schema, schema_name or task))
         if payload is None:  # el proxy rechazó el esquema: una sola caída a `json_object`

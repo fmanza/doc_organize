@@ -7,19 +7,13 @@ import logging
 
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from doc_organize import ContextBuilder, write_context_documents_xlsx
-from doc_organize.core.exceptions import TaxonomyClassificationError
-from doc_organize.core.models import (
-    ConversionResult,
-    DocumentEnrichmentResult,
-    Project,
-    TaxonomyClassificationResult,
-    TaxonomyEntry,
-)
+from doc_organize.core.models import ConversionResult, Project, TaxonomyEntry
+from tests.unit.fake_llm import FakeLlmClient, FakeRequest, fake_client
 from tests.unit.taxonomy_helpers import two_axis_manifest
 
 openpyxl = pytest.importorskip("openpyxl")
@@ -28,24 +22,21 @@ SECRET = "Xq7#Secreto-9931"
 TOKEN = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
 
 
-class _RecordingAI:
-    """Guarda lo que recibe y lo devuelve en la justificación (un modelo que repite el texto)."""
+def _echoing_ai(*, fail_on: str) -> FakeLlmClient:
+    """Un modelo que repite lo que recibe (en la justificación y la descripción) y falla con el documento `fail_on`,
+    devolviendo el texto en el error."""
 
-    config = SimpleNamespace(model="stub")
+    def classify(request: FakeRequest) -> object:
+        user = request.body["messages"][-1]["content"]
+        if fail_on in request.title:
+            return httpx.Response(500, text=f"El proxy rechazó: {user[:80]}")
+        folder, subfolder = request.axes[:2]
+        return {"reasoning": user[:300], folder: {"value": "calidad", "confidence": 0.8}, subfolder: {"value": None, "confidence": 0.0}}
 
-    def __init__(self, *, fail_on: str | None = None) -> None:
-        self.sent: list[str] = []
-        self.fail_on = fail_on
+    def enrich(request: FakeRequest) -> object:
+        return {"description": request.body["messages"][-1]["content"][:200], "keywords": ["acceso"]}
 
-    async def classify(self, *, chunks_text: str, title: str | None, **_: object) -> TaxonomyClassificationResult:
-        self.sent.append(f"{title} {chunks_text}")
-        if self.fail_on and self.fail_on in (title or ""):
-            raise TaxonomyClassificationError(f"El proxy rechazó: {chunks_text[:80]}")
-        return TaxonomyClassificationResult(domain="calidad", domain_confidence=0.8, material_type=None, reasoning=chunks_text[:300])
-
-    async def enrich(self, *, chunks_text: str, title: str | None) -> DocumentEnrichmentResult:
-        self.sent.append(f"{title} {chunks_text}")
-        return DocumentEnrichmentResult(description=chunks_text[:200], keywords=["acceso"])
+    return fake_client(classify=classify, enrich=enrich)
 
 
 def _documents(root: Path) -> list[ConversionResult]:
@@ -72,19 +63,18 @@ async def test_credential_values_never_leave_nor_get_stored(tmp_path, caplog) ->
     caplog.set_level(logging.DEBUG)
     project = Project(name="Demo", root_path=str(tmp_path), created_at=datetime.now(UTC).isoformat())
     manifest = two_axis_manifest([TaxonomyEntry(slug="calidad", name="Calidad")], [TaxonomyEntry(slug="politica", name="Política")])
-    ai = _RecordingAI(fail_on="Fallo")
+    ai = _echoing_ai(fail_on="Fallo")
 
     context = await ContextBuilder().build(
         project,
         _documents(tmp_path),
         taxonomy_manifest=manifest,
-        ai_classification_enabled=True,
-        taxonomy_classification_client=ai,
-        ai_enrichment_enabled=True,
-        ai_enrichment_client=ai,
+        llm=ai,
+        ai_scope="unclassified",
+        enrich=True,
     )
 
-    assert ai.sent and all(SECRET not in text and TOKEN not in text for text in ai.sent)
+    assert ai.sent_texts and all(SECRET not in text and TOKEN not in text for text in ai.sent_texts)
     assert {finding.source_path.rsplit("\\", 1)[-1].rsplit("/", 1)[-1] for finding in context.credential_findings} == {"acta.pdf", "fallo.pdf"}
     assert all(set(finding.rules.values()) <= {1, 2} for finding in context.credential_findings)
 
@@ -97,7 +87,7 @@ async def test_credential_values_never_leave_nor_get_stored(tmp_path, caplog) ->
         assert SECRET not in text and TOKEN not in text, path.name
 
     logged = "\n".join(record.getMessage() for record in caplog.records)
-    assert "El proxy rechazó" in logged  # el fallo se registró…
+    assert "Falló la clasificación por IA" in logged  # el fallo se registró…
     assert SECRET not in logged and TOKEN not in logged  # …sin el valor
 
     buffer = io.BytesIO()

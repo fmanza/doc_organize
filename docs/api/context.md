@@ -1,6 +1,6 @@
 # Organización Documental — Referencia Técnica
 
-API Reference de `doc_organize.context` (Sub-fase A) y `doc_organize.ai.DomainClassificationClient`/`TaxonomyClassificationClient` (Sub-fase B).
+API Reference de `doc_organize.context` (Sub-fase A, reglas) y de su uso de la IA (Sub-fase B, con el cliente único `doc_organize.ai.LlmClient`; ver [Cliente único de IA](llm_client.md)).
 
 ## Arquitectura
 
@@ -8,7 +8,7 @@ API Reference de `doc_organize.context` (Sub-fase A) y `doc_organize.ai.DomainCl
 classDiagram
     class ContextBuilder {
         +registry: ContextRegistry
-        +build(project, documents, candidate_domains, threshold, ai_classification_enabled, ai_classification_client, taxonomy_manifest, taxonomy_classification_client, taxonomy_template_name) Context
+        +build(project, documents, candidate_domains, threshold, taxonomy_manifest, llm, ai_scope, enrich, prompts) Context
     }
     class TaxonomyTemplateRegistry {
         +templates_dir: Path
@@ -39,85 +39,86 @@ classDiagram
         +build_site(project, timeout) None
         +delete_site(project, site_dir) None
     }
-    class DomainClassificationClient {
-        +config: LiteLLMClassificationConfig
-        +classify(chunks_text, title, candidate_domains) DomainClassificationResult
-    }
-    class TaxonomyClassificationClient {
-        +config: LiteLLMTaxonomyClassificationConfig
-        +classify(chunks_text, title, candidate_domains, candidate_material_types) TaxonomyClassificationResult
+    class LlmClient {
+        +settings: AiSettings
+        +complete_json(task, messages, schema, parse) LlmResult
     }
 
     ContextBuilder --> DomainClassifier
     ContextBuilder --> MaterialTypeClassifier
     ContextBuilder --> ContextRegistry
-    ContextBuilder --> DomainClassificationClient
-    ContextBuilder --> TaxonomyClassificationClient
+    ContextBuilder --> LlmClient : classify_document / enrich_document
 ```
 
 ## ContextBuilder
 
 ```python
 class ContextBuilder:
-    def __init__(self, registry: ContextRegistry | None = None) -> None
+    def __init__(
+        self,
+        registry: ContextRegistry | None = None,
+        *,
+        history_policy: ContextHistoryPolicy | None = None,  # 1.6.0
+        properties_concurrency: int = 4,                      # 1.6.0
+        ai_concurrency: int = 1,                              # 2.0.0
+    ) -> None
 
     async def build(
         self,
         project: Project,
         documents: list[ConversionResult],
+        *,                                              # 2.0.0: todo lo demás, solo por nombre
         candidate_domains: list[str] | None = None,
         threshold: float = 0.5,
-        ai_classification_enabled: bool = False,
-        ai_classification_client: DomainClassificationClient | None = None,
-        output_folder_name: str = "organizado",
         taxonomy_manifest: TaxonomyManifest | None = None,
-        taxonomy_classification_client: TaxonomyClassificationClient | None = None,
         taxonomy_template_name: str | None = None,
-        *,
+        output_folder_name: str = "organizado",
+        llm: LlmClient | None = None,                   # 2.0.0
+        ai_scope: Literal["off", "unclassified"] = "off",  # 2.0.0
+        enrich: bool = False,                           # 2.0.0
+        prompts: PromptRegistry | None = None,          # 2.0.0
         on_progress: ProgressCallback | None = None,
         cancel_token: CancelToken | None = None,
-        ai_max_failures: int | None = None,   # 0.14.0
-        ai_max_documents: int | None = None,  # 0.14.0
-        ai_enrichment_enabled: bool = False,                          # 1.5.0
-        ai_enrichment_client: DocumentEnrichmentClient | None = None, # 1.5.0
+        ai_max_failures: int | None = None,             # 0.14.0
+        ai_max_documents: int | None = None,            # 0.14.0
     ) -> Context
 ```
 
-Orquesta Sub-fase A (siempre) + Sub-fase B (opt-in) y persiste el `Context` resultante.
+Orquesta Sub-fase A (reglas, siempre) + Sub-fase B (IA, opt-in) y persiste el `Context` resultante.
 
 | Parámetro | Tipo | Descripción |
 |---|---|---|
-| `documents` | `list[ConversionResult]` | Documentos ya convertidos con éxito |
+| `documents` | `list[ConversionResult]` | Documentos ya convertidos con éxito (con `source_sha256`, el contexto puede comprobar su frescura) |
 | `candidate_domains` | `list[str] \| None` | Catálogo predefinido, o `None` para descubrir del contenido. Ignorado si se da `taxonomy_manifest` |
-| `threshold` | `float` | Score mínimo (0-1) de la Sub-fase A antes de intentar la Sub-fase B (o el placeholder `sin-clasificar` en modo manifiesto) |
-| `ai_classification_enabled` | `bool` | Activa la Sub-fase B — se persiste en `Context.ai_classification_enabled`. En modo manifiesto activa `taxonomy_classification_client` en vez de `ai_classification_client` |
-| `ai_classification_client` | `DomainClassificationClient \| None` | Cliente ya configurado para la Sub-fase B de 1 eje; si `enabled=True` sin cliente, la Sub-fase B no se ejecuta. Ignorado si hay `taxonomy_manifest` |
-| `taxonomy_manifest` | `TaxonomyManifest \| None` | Manifiesto de taxonomía (ver [TaxonomyManifest](#taxonomymanifest-manifiesto-de-taxonomia)) — activa la clasificación de 2 ejes (dominio + tipo de material) |
-| `taxonomy_classification_client` | `TaxonomyClassificationClient \| None` | Cliente ya configurado para la Sub-fase B de 2 ejes (una sola llamada combinada). Sin efecto si `taxonomy_manifest` es `None`, o si `enabled=False` |
-| `ai_max_failures` | `int \| None` | (0.14.0, L-3a) Detiene la Sub-fase B tras este número de errores de conexión **seguidos** (`Context.ai_classification_stopped = "connection"`). `None`: nunca para por eso. `< 1` → `ValueError` |
-| `ai_max_documents` | `int \| None` | (0.14.0, L-3b) Tope de documentos enviados a la IA en esta construcción; al alcanzarlo con documentos pendientes, para con `"budget"`. `None`: sin tope. `< 0` → `ValueError` |
-| `taxonomy_template_name` | `str \| None` | Nombre de la plantilla de `TaxonomyTemplateRegistry` de la que proviene `taxonomy_manifest`, o `None` si viene de un fichero local o si no hay manifiesto — puramente informativo, se persiste en `Context.taxonomy_template_name` |
-| `ai_enrichment_enabled` | `bool` | (1.5.0) Activa el enriquecimiento por IA — se persiste en `Context.ai_enrichment_enabled`. Ver [Autor, descripción y palabras clave](#autor-descripcion-y-palabras-clave-150) |
-| `ai_enrichment_client` | `DocumentEnrichmentClient \| None` | (1.5.0) Cliente ya configurado; sin él (o sin `ai_enrichment_enabled`), no se llama a la IA |
+| `threshold` | `float` | Score mínimo (0-1) de las reglas para dar un eje por clasificado |
+| `taxonomy_manifest` | `TaxonomyManifest \| None` | Manifiesto de taxonomía (ver [TaxonomyManifest](#taxonomymanifest-manifiesto-de-taxonomia)): clasificación por ejes |
+| `taxonomy_template_name` | `str \| None` | Plantilla de la que proviene `taxonomy_manifest`, si es de una plantilla (informativo, `Context.taxonomy_template_name`) |
+| `llm` | `LlmClient \| None` | (2.0.0) Cliente único de IA. Sin él no se llama a ninguna IA |
+| `ai_scope` | `"off" \| "unclassified"` | (2.0.0) `"unclassified"`: la IA clasifica lo que las reglas dejaron sin clasificar en algún eje organizador (la Sub-fase B de 1.x). Se guarda en `Context.ai_stats.scope` |
+| `enrich` | `bool` | (2.0.0) Describir con IA los documentos que no declaran descripción o palabras clave. Ver [Autor, descripción y palabras clave](#autor-descripcion-y-palabras-clave-150) |
+| `prompts` | `PromptRegistry \| None` | (2.0.0) Prompts de cada tarea; por defecto, los de `<raíz>/.doc_organize/prompts/` o los empaquetados |
+| `ai_max_failures` | `int \| None` | (0.14.0, L-3a) Detiene una fase de IA tras este número de errores de conexión **seguidos** (`AiPhaseStats.stopped = "connection"`). `None`: nunca para por eso. `< 1` → `ValueError` |
+| `ai_max_documents` | `int \| None` | (0.14.0, L-3b) Tope de documentos enviados en cada fase de IA; al alcanzarlo con documentos pendientes, para con `"budget"`. `None`: sin tope. `< 0` → `ValueError` |
 
-**Parada y recuento de la Sub-fase B (0.14.0, L-3a…L-3c)**: un error de autenticación (401/403,
-`DomainClassificationAuthError`/`TaxonomyClassificationAuthError`) detiene la Sub-fase B en el acto, con o sin
-`ai_max_failures`: con la clave rechazada se hace **exactamente 1 petición** en toda la construcción. Al detenerse
-(`"auth"`, `"connection"` o `"budget"`), los documentos pendientes no se leen ni se envían y quedan sin clasificar (o
-en `sin-clasificar`); siguen emitiendo su evento de progreso, el `cancel_token` se sigue comprobando entre ellos y el
-contexto se construye y persiste con normalidad. El motivo queda en `Context.ai_classification_stopped` y los
-recuentos en `Context.ai_documents_sent`, `ai_documents_classified` (al menos un eje asignado) y `ai_documents_failed`,
-con `sent = classified + failed + enviados sin asignación`. Una respuesta del servidor (incluido un 5xx) corta la racha
-de errores de conexión.
+`ai_scope` o `enrich` sin `llm` lanza `ValueError`.
+
+**Parada y recuento de cada fase de IA (0.14.0, L-3a…L-3c)**: un error de autenticación (401/403, `AiAuthError`)
+detiene la fase en el acto, con o sin `ai_max_failures`: con la clave rechazada se hace **exactamente 1 petición** en
+toda la fase. Al detenerse (`"auth"`, `"connection"` o `"budget"`), los documentos pendientes no se leen ni se envían y
+quedan sin clasificar (o en `sin-clasificar`); siguen emitiendo su evento de progreso, el `cancel_token` se sigue
+comprobando entre ellos y el contexto se construye y persiste con normalidad. Desde 2.0.0 los recuentos van en
+`Context.ai_stats` (`classification` y `enrichment`: `sent`, `assigned`, `failed`, `stopped`, `prompt_tokens`,
+`completion_tokens`, `response_format`), con `sent = assigned + failed + enviados sin asignación`. Una respuesta del
+servidor (incluido un 5xx) corta la racha de errores de conexión.
 
 **Reglas**: el catálogo de la Sub-fase B es `candidate_domains` si se dio uno, o los
 dominios que la Sub-fase A ya descubrió — nunca un dominio nuevo. Un fallo de la
-Sub-fase B (`DomainClassificationError`) en un documento no interrumpe el resto
+Sub-fase B (`AiError`) en un documento no interrumpe el resto
 del lote. Con `taxonomy_manifest`, un documento con los tres artefactos completos
 **siempre** se reorganiza: si un eje no alcanza `threshold`, se le asigna el slug
 placeholder `sin-clasificar` en ese eje en vez de excluirse — `unclassified_documents`
 queda reservado a artefactos incompletos. Con `taxonomy_manifest` + Sub-fase B activa,
-`TaxonomyClassificationClient.classify()` se invoca **una sola vez por documento** que
+`classify_document` se invoca **una sola vez por documento** que
 sigue en placeholder en algún eje, resolviendo ambos ejes en la misma llamada — pero
 solo se aplica la sugerencia al eje que seguía en `sin-clasificar`; un eje ya resuelto
 por reglas con confianza nunca se sobreescribe.
@@ -131,7 +132,7 @@ Cada `DomainDocument` guarda cómo se llegó a su dominio, y el `Context`, con q
 | `DomainDocument.rules_domain`, `rules_confidence` | Lo que propusieron las reglas (Sub-fase A), **también cuando no alcanzó el umbral y decidió la IA**. En modo de un eje se recalcula para los documentos que clasifica la IA |
 | `DomainDocument.ai_domain`, `ai_confidence`, `ai_reasoning` | Dominio que propuso la IA, su confianza y su justificación (hasta 500 caracteres), si se le preguntó por el documento; `None` si no. En modo manifiesto se guardan aunque las reglas ya hubieran decidido el dominio y la IA solo resolviera el tipo de material: entonces `ai_domain` puede no coincidir con el dominio del documento |
 | `DomainDocument.material_type_confidence` | Score del eje de tipo de material, de quien lo decidió (reglas o IA); `None` sin manifiesto |
-| `Context.ai_classification_model`, `ai_enrichment_model` | Alias de modelo con el que se ejecutó cada fase de IA; `None` si esa fase no llegó a enviar ningún documento |
+| `Context.ai_provenance` | (2.0.0) Prompt (id, versión, origen, SHA-256) y modelo de cada tarea de IA que llegó a enviar algún documento; `context.model_for_task("classify")` da el modelo. Antes `ai_classification_model`/`ai_enrichment_model` |
 | `Context.built_with_version` | Versión de doc_organize que construyó el contexto. Las reglas son código, así que esta versión las identifica |
 
 La fecha de clasificación es `Context.updated_at`: todos los documentos de una construcción se clasifican a la vez.
@@ -153,7 +154,7 @@ de guardar el nuevo y añade una línea (`ContextBuildRecord`) a `historial_cont
 | Campo | Contenido |
 |---|---|
 | `built_at`, `previous_built_at` | Esta construcción y la anterior con la que se compara (`None` si es la primera o la anterior no se pudo leer: entonces todo cuenta como `added`) |
-| `built_with_version`, `ai_classification_model`, `ai_enrichment_model`, `taxonomy_manifest_used` | Con qué se construyó |
+| `built_with_version`, `ai_classification_model`, `ai_enrichment_model`, `taxonomy_manifest_used` | Con qué se construyó (los modelos salen de `Context.ai_provenance` desde 2.0.0) |
 | `classified`, `unclassified` | Recuentos |
 | `changes` | Un `ContextChange` por documento que entra (`added`), sale (`removed`) o cambia de dominio o de tipo de material (`reclassified`, también de clasificado a sin clasificar y al revés), con el antes, el después y `classified_by` |
 
@@ -245,14 +246,14 @@ hazlo también bajo ese cerrojo.
 `None`: con textos cortos el detector se equivoca (un título como «Política de calidad» sale gallego al 33 %). No se
 usa el idioma que declaran Word o PDF, que suele ser el del ordenador del autor y no el del texto.
 
-Con `ai_enrichment_enabled=True` y `ai_enrichment_client`, la IA propone descripción y palabras clave **solo para los
+Con `llm` y `enrich=True` (antes `ai_enrichment_enabled` y `ai_enrichment_client`), la IA propone descripción y
+palabras clave **solo para los
 documentos clasificados que no las declaran** (una llamada por documento) y solo se rellena lo que falta: lo declarado
 nunca se sustituye y el autor nunca sale de la IA. `DomainDocument.ai_filled` dice qué campos rellenó. Usa los mismos
 `ai_max_failures` y `ai_max_documents` que la Sub-fase B, con las mismas paradas (`"auth"` en el acto, `"connection"`,
 `"budget"`), pero con su propio recuento: **cada fase puede enviar hasta `ai_max_documents`**. El resultado queda en
-`Context.ai_enrichment_stopped`, `ai_enrichment_sent`, `ai_enrichment_applied` (al menos un campo rellenado) y
-`ai_enrichment_failed`. Emite `ProgressEvent(phase="enrichment")` por documento y comprueba `cancel_token` entre ellos;
-no llama a `on_ai_progress`, que sigue siendo solo de la Sub-fase B.
+`Context.ai_stats.enrichment` (`assigned` = al menos un campo rellenado). Emite `ProgressEvent(phase="enrichment")` por
+documento y comprueba `cancel_token` entre ellos.
 
 ---
 
@@ -282,19 +283,17 @@ for detail in context.unclassified_details:
 
 ### Credenciales redactadas antes de la IA (1.7.0)
 
-`ContextBuilder(ai_redact_credentials=True)` (*keyword-only*, **activado por defecto**) pasa el título y el texto de cada
-documento por [`redact_credentials`](#credenciales-doc_organizesecurity-170) antes de enviarlo a la IA, en la
-Sub-fase B (un eje y manifiesto) y en el enriquecimiento. Solo cambia lo que **sale**: las reglas, el idioma y lo que
-se guarda en `context.json` usan el texto original.
+Desde 2.0.0 la redacción la hace `LlmClient`, el único punto de salida hacia la IA: el texto de cada mensaje pasa por
+[`redact_credentials`](#credenciales-doc_organizesecurity-170) antes de enviarlo, en todas las tareas (clasificación,
+descripción y borrador de taxonomía). Se controla con `AiSettings.redact_credentials` (**activado por defecto**; en 1.7
+era `ContextBuilder(ai_redact_credentials=)` y `LiteLLMTaxonomyManifestDraftConfig.redact_credentials`). Solo cambia lo
+que **sale**: las reglas, el idioma y lo que se guarda en `context.json` usan el texto original.
 
-- `Context.ai_redact_credentials` (`bool`, `False` en contextos anteriores) dice si la construcción redactó.
+- `Context.ai_redact_credentials` dice si la construcción redactó (`False` en contextos anteriores a 1.7.0).
 - `Context.credential_findings` (`list[DocumentCredentialFindings]`): por cada documento enviado en el que se redactó algo,
-  `source_path` y `rules` (recuento por regla, sumando todas las fases de IA). **Nunca el valor.**
-- `ai_redact_credentials=False` envía el texto original (comportamiento de 1.6.0).
-
-`TaxonomyManifestDraftClient` hace lo mismo con la muestra (títulos y extractos) según
-`LiteLLMTaxonomyManifestDraftConfig.redact_credentials` (`True` por defecto), porque el consumidor lo llama sin pasar por
-`ContextBuilder`.
+  `source_path` y `rules` (recuento por regla, sumando todas las fases de IA). **Nunca el valor.** Se anota antes de
+  enviar, también si la llamada falla después.
+- `AiSettings(redact_credentials=False)` envía el texto original.
 
 ### Credenciales: `doc_organize.security` (1.7.0)
 
@@ -730,134 +729,12 @@ otra página). Al regenerar, se borran las `eje-*.md` de ejes que ya no están. 
 
 ---
 
-## DomainClassificationClient (Sub-fase B, `doc_organize.ai`)
+## IA: cliente único y servicios (2.0.0)
 
-```python
-class DomainClassificationClient:
-    def __init__(self, config: LiteLLMClassificationConfig, *, transport: httpx.AsyncBaseTransport | None = None) -> None
-    async def classify(self, *, chunks_text: str, title: str | None, candidate_domains: list[str]) -> DomainClassificationResult
-
-def litellm_classification_config_from_env() -> LiteLLMClassificationConfig
-```
-
-Llama `chat/completions` (OpenAI-compatible) de un LiteLLM Proxy pidiendo salida
-JSON. `domain` en el resultado **siempre** está en `candidate_domains` o es
-`None` — validado en el propio cliente, no solo por instrucción al modelo.
-`litellm_classification_config_from_env()` lee
-`DOC_ORGANIZE_LITELLM_CLASSIFICATION_BASE_URL`/`_VIRTUAL_KEY` (obligatorias) y
-`_MODEL` (opcional). Config propia — no comparte credenciales con
-`LiteLLMUsageConfig` (monitorización de uso, ver
-[Monitorización de uso IA](ai_usage_monitoring.md)) aunque apunte al mismo proxy.
-
-**Excepciones**: `DomainClassificationAuthError` (401/403), `DomainClassificationConnectionError`
-(red/timeout), `DomainClassificationError` (cualquier otro error, incluida una
-respuesta que no es el JSON esperado).
-
----
-
-## TaxonomyClassificationClient (Sub-fase B, manifiesto de taxonomía)
-
-```python
-class TaxonomyClassificationClient:
-    def __init__(self, config: LiteLLMTaxonomyClassificationConfig, *, transport: httpx.AsyncBaseTransport | None = None) -> None
-    async def classify(
-        self, *, chunks_text: str, title: str | None, candidate_domains: list[str], candidate_material_types: list[str]
-    ) -> TaxonomyClassificationResult
-
-def litellm_taxonomy_classification_config_from_env() -> LiteLLMTaxonomyClassificationConfig
-```
-
-Mismo endpoint/patrón que `DomainClassificationClient`, pero resuelve **dominio + tipo de
-material en una sola llamada** (`chat/completions`, `response_format: json_object`) — decisión
-explícita de la sesión que añadió este cliente, en vez de dos llamadas independientes. `domain`
-del resultado siempre está en `candidate_domains` o es `None`; `material_type` siempre está en
-`candidate_material_types` o es `None` — cada eje se valida contra su propio catálogo, no solo
-por instrucción al modelo. `litellm_taxonomy_classification_config_from_env()` lee
-`DOC_ORGANIZE_LITELLM_TAXONOMY_CLASSIFICATION_BASE_URL`/`_VIRTUAL_KEY` (obligatorias) y `_MODEL`
-(opcional). Config propia — no comparte credenciales con `LiteLLMClassificationConfig` (1 eje,
-ISP) aunque en despliegue ambas apunten al mismo LiteLLM Proxy.
-
-**Excepciones**: `TaxonomyClassificationAuthError` (401/403), `TaxonomyClassificationConnectionError`
-(red/timeout), `TaxonomyClassificationError` (cualquier otro error, incluida una respuesta que no
-es el JSON esperado).
-
----
-
-## TaxonomyManifestDraftClient (borrador de manifiesto de taxonomía por IA)
-
-```python
-class TaxonomyManifestDraftClient:
-    def __init__(self, config: LiteLLMTaxonomyManifestDraftConfig, *, transport: httpx.AsyncBaseTransport | None = None) -> None
-    async def propose_manifest(self, *, documents: list[SampledDocument]) -> TaxonomyManifestDraftResult
-
-def litellm_taxonomy_manifest_draft_config_from_env() -> LiteLLMTaxonomyManifestDraftConfig
-```
-
-Endpoint nuevo, distinto de la Sub-fase B: `DomainClassificationClient`/`TaxonomyClassificationClient`
-**eligen** dentro de un catálogo ya confirmado por el usuario; este cliente **propone el catálogo
-mismo** (dominios + tipos de material) a partir de una muestra de documentos ya convertidos —
-nunca se aplica directamente, el usuario revisa/edita el borrador devuelto antes de guardarlo a
-mano como `taxonomy_manifest.md` (no hay hoy ningún endpoint que persista ese fichero por el
-usuario). Independiente de `ContextBuilder`: se invoca directamente desde
-`POST .../context/taxonomy-manifest-draft` (ver "Rutas HTTP"), nunca como parte de
-`ContextBuilder.build()`.
-
-Mismo endpoint `chat/completions` OpenAI-compatible que los otros dos clientes de IA, pero en una
-única llamada para **toda la muestra** (no una por documento). `domains`/`material_types` del
-resultado siempre cumplen el schema de `TaxonomyCatalogEntry` y nunca tienen slugs repetidos
-dentro del mismo eje — validado en el propio cliente, no solo por instrucción al modelo; un
-catálogo vacío en cualquier eje se trata como error (`TaxonomyManifestDraftError`), nunca como un
-borrador a medias. Config propia (`LiteLLMTaxonomyManifestDraftConfig`) — no comparte credenciales
-con `LiteLLMClassificationConfig`/`LiteLLMTaxonomyClassificationConfig` (ISP, mismo criterio que ya
-las separa entre sí), aunque en despliegue las tres puedan apuntar al mismo LiteLLM Proxy.
-`litellm_taxonomy_manifest_draft_config_from_env()` lee
-`DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_BASE_URL`/`_VIRTUAL_KEY` (obligatorias) y `_MODEL`
-(opcional).
-
-La muestra de documentos se selecciona con `context.select_document_sample(documents, sample_size, *, roots=None)`
-(`context/taxonomy_manifest_sampler.py`): hasta `sample_size` documentos, repartidos en
-round-robin determinista entre carpetas contenedoras (hasta 2 niveles, sin rutas absolutas) para
-dar diversidad real en vez de los primeros N alfabéticos de una única carpeta. Un documento cuyo
-`.json` de conversión no se puede leer se descarta de la muestra (mismo criterio que
-`DomainClassifier`), así que la muestra final puede ser más pequeña que `sample_size`.
-Con `roots` (0.14.0, L-3d; las raíces escaneadas del proyecto), la carpeta de cada documento es relativa a la raíz
-que lo contiene (gana la más profunda, mismo criterio que `relative_source_path`, G23) y nunca muestra nombres por
-encima de ella: un documento en la propia raíz, o fuera de todas, tiene carpeta `""` (el prompt dice `(raíz)`). Sin
-`roots`, se envían hasta 2 carpetas contenedoras de `source_path`, como antes (y un documento en la raíz de un montaje
-deja ver las carpetas del montaje): **los consumidores multiusuario deben pasar `roots`**.
-
-El borrador estructurado se puede renderizar como el mismo formato de fichero que
-`load_taxonomy_manifest()` espera con `context.render_taxonomy_manifest_markdown(manifest, *,
-reasoning, sample_document_count, total_document_count)` (`context/taxonomy_manifest.py`) — front
-matter YAML + una nota/tabla de prosa indicando que es un borrador generado por IA pendiente de
-revisión. No escribe nada en disco; el llamador decide qué hacer con el
-texto devuelto.
-
-**Excepciones**: `TaxonomyManifestDraftAuthError` (401/403), `TaxonomyManifestDraftConnectionError`
-(red/timeout), `TaxonomyManifestDraftError` (cualquier otro error, incluida una respuesta que no
-cumple el schema de catálogo de taxonomía esperado, o un catálogo vacío en algún eje).
-
----
-
-## DocumentEnrichmentClient (descripción y palabras clave por IA, 1.5.0)
-
-```python
-class DocumentEnrichmentClient:
-    def __init__(self, config: LiteLLMEnrichmentConfig, *, transport: httpx.AsyncBaseTransport | None = None) -> None
-    async def enrich(self, *, chunks_text: str, title: str | None) -> DocumentEnrichmentResult
-
-def litellm_enrichment_config_from_env() -> LiteLLMEnrichmentConfig
-```
-
-Mismo endpoint y patrón que `DomainClassificationClient` (`chat/completions`, `response_format: json_object`,
-`temperature: 0`, primeros 4000 caracteres del contenido). La respuesta se sanea en el cliente: descripción en una
-línea (hasta 500 caracteres) y hasta 8 palabras clave sin repetir; un valor que no es texto se descarta. El prompt pide
-ignorar instrucciones que aparezcan en el contenido, pero eso no es una garantía: lo devuelto se trata siempre como
-texto, nunca se ejecuta ni se usa como ruta. `litellm_enrichment_config_from_env()` lee
-`DOC_ORGANIZE_LITELLM_ENRICHMENT_BASE_URL`/`_VIRTUAL_KEY` (obligatorias) y `_MODEL` (opcional). Config propia (ISP).
-
-**Excepciones**: `DocumentEnrichmentAuthError` (401/403), `DocumentEnrichmentConnectionError` (red/timeout),
-`DocumentEnrichmentError` (cualquier otro error, incluida una respuesta que no es un objeto JSON).
+Los cuatro clientes de 1.x (`DomainClassificationClient`, `TaxonomyClassificationClient`, `DocumentEnrichmentClient`,
+`TaxonomyManifestDraftClient`) y sus `*Config` se retiraron en 2.0.0. Todo pasa por `LlmClient` y los servicios
+`classify_document`, `enrich_document` y `draft_taxonomy`: ver [Cliente único de IA](llm_client.md) y
+[De 1.x a 2.0](../guides/migracion_2_0.md).
 
 ---
 
@@ -931,10 +808,7 @@ class Context(BaseModel):
     project_name: str
     taxonomy_axes: list[TaxonomyAxis]  # 2.0.0: ejes usados, sin keywords ni examples; sin manifiesto, solo "domains"
     output_folder_name: str  # default "organizado"; validado con validate_output_folder_name desde 0.14.0 (L-8f)
-    ai_classification_enabled: bool
-    ai_fallback_threshold: float
-    ai_classification_model: str | None  # desde 1.5.0 lo rellena ContextBuilder (modelo usado en la Sub-fase B)
-    ai_enrichment_model: str | None      # 1.5.0
+    ai_fallback_threshold: float         # umbral de las reglas
     built_with_version: str | None       # 1.5.0: versión de doc_organize; None en contextos anteriores
     domains: list[Domain]
     unclassified_documents: list[str]
@@ -945,49 +819,28 @@ class Context(BaseModel):
     site_built: bool                         # ídem con mkdocs_site_built
     taxonomy_manifest_used: bool  # default False
     taxonomy_template_name: str | None  # default None — nombre de la plantilla usada, o None (fichero local / sin manifiesto)
-    ai_classification_stopped: Literal["auth", "connection", "budget"] | None  # 0.14.0, default None
-    ai_documents_sent: int        # 0.14.0, default 0
-    ai_documents_classified: int  # 0.14.0, default 0
-    ai_documents_failed: int      # 0.14.0, default 0
-    ai_enrichment_enabled: bool   # 1.5.0, default False
-    ai_enrichment_stopped: Literal["auth", "connection", "budget"] | None  # 1.5.0
-    ai_enrichment_sent: int       # 1.5.0, default 0
-    ai_enrichment_applied: int    # 1.5.0, default 0
-    ai_enrichment_failed: int     # 1.5.0, default 0
+    ai_stats: AiStats                    # 2.0.0: alcance, recuentos y tokens (antes ai_documents_*, ai_enrichment_*...)
+    ai_provenance: list[PromptProvenance]  # 2.0.0: prompt y modelo por tarea (antes ai_classification_model...)
+    ai_redact_credentials: bool          # 1.7.0
+    credential_findings: list[DocumentCredentialFindings]  # 1.7.0
+    def model_for_task(self, task) -> str | None  # 2.0.0
     created_at: str
     updated_at: str
 
-class DomainClassificationResult(BaseModel):
-    domain: str | None
-    confidence: float
-    reasoning: str | None
+class AiPhaseStats(BaseModel):  # 2.0.0
+    sent: int
+    assigned: int
+    failed: int
+    stopped: Literal["auth", "connection", "budget"] | None
+    prompt_tokens: int
+    completion_tokens: int
+    response_format: Literal["json_schema", "json_object"] | None
 
-class LiteLLMClassificationConfig(BaseModel):
-    base_url: str
-    virtual_key: str
-    model: str  # default "claude-classifier"
-    timeout_s: float
-    retries: int            # 0.14.0, default 0 — ver «Reintentos» en ai_usage_monitoring.md
-    retry_backoff_s: float  # 0.14.0, default 0.5
-    rate_limit_retries: int  # 2.0.0, default 3: reintentos ante 429/503
-    max_retry_wait_s: float  # 2.0.0, default 60
-
-class TaxonomyClassificationResult(BaseModel):
-    domain: str | None
-    domain_confidence: float
-    material_type: str | None
-    material_type_confidence: float
-    reasoning: str | None
-
-class LiteLLMTaxonomyClassificationConfig(BaseModel):
-    base_url: str
-    virtual_key: str
-    model: str  # default "claude-classifier"
-    timeout_s: float
-    retries: int            # 0.14.0, default 0
-    retry_backoff_s: float  # 0.14.0, default 0.5
-    rate_limit_retries: int  # 2.0.0, default 3: reintentos ante 429/503
-    max_retry_wait_s: float  # 2.0.0, default 60
+class AiStats(BaseModel):  # 2.0.0
+    scope: Literal["off", "unclassified"]
+    enrich: bool
+    classification: AiPhaseStats
+    enrichment: AiPhaseStats
 
 class TaxonomyManifestDraftResult(BaseModel):
     domains: list[TaxonomyEntry]        # min 1
@@ -995,29 +848,9 @@ class TaxonomyManifestDraftResult(BaseModel):
     reasoning: str | None
     def to_manifest(self) -> TaxonomyManifest   # 2.0.0: ejes domains (folder) y material_types (subfolder)
 
-class LiteLLMTaxonomyManifestDraftConfig(BaseModel):
-    base_url: str
-    virtual_key: str
-    model: str      # default "claude-classifier"
-    timeout_s: float  # default 60.0 (prompt más grande, varios documentos a la vez)
-    retries: int            # 0.14.0, default 0
-    retry_backoff_s: float  # 0.14.0, default 0.5
-    rate_limit_retries: int  # 2.0.0, default 3: reintentos ante 429/503
-    max_retry_wait_s: float  # 2.0.0, default 60
-
 class DocumentEnrichmentResult(BaseModel):  # 1.5.0
     description: str | None
     keywords: list[str]
-
-class LiteLLMEnrichmentConfig(BaseModel):  # 1.5.0
-    base_url: str
-    virtual_key: str
-    model: str  # default "claude-classifier"
-    timeout_s: float  # default 30.0
-    retries: int            # default 0
-    retry_backoff_s: float  # default 0.5
-    rate_limit_retries: int  # 2.0.0, default 3
-    max_retry_wait_s: float  # 2.0.0, default 60
 
 class TaxonomyEntry(BaseModel):              # 2.0.0 (antes TaxonomyCatalogEntry)
     slug: str
@@ -1065,9 +898,9 @@ class TaxonomyTemplateSummary(BaseModel):
 | `converter.DocumentConverter.resolve_output_paths()` | Recalcula `markdown_path`/`json_path` desde `cache.db`, sin persistirlos aparte |
 | `cache.CacheManager` | Fuente de los documentos ya convertidos con éxito |
 | `projects.ScannedFoldersStore` | Carpetas de escaneo guardadas, usadas como `scan_roots` |
-| `core.exceptions` | `ContextError`, `DomainClassificationError`, `TaxonomyClassificationError`, `TaxonomyManifestError`, `TaxonomyTemplateError` y sus subclases |
+| `core.exceptions` | `ContextError`, `TaxonomyManifestError`, `TaxonomyTemplateError` y, de la IA, `AiError` y sus subclases |
 | `zensical` (extra `site`) | `zensical build` del sitio de contexto (`SiteGenerator`); sin él, `SiteBuildError` |
-| `httpx` | Cliente HTTP de `DomainClassificationClient`/`TaxonomyClassificationClient`/`DocumentEnrichmentClient` (ya incluido en el extra `ai`) |
+| `httpx` | Cliente HTTP de `LlmClient` (ya incluido en el extra `ai`) |
 | `pypdfium2` | (1.5.0) Lee `/Author`, `/Subject` y `/Keywords` de los PDF; ya lo instalaba Docling, ahora es dependencia declarada |
 | `py3langid` | (1.5.0) Idioma de cada documento (`DomainDocument.language`); 4,6 MB, solo depende de numpy |
 | `pyyaml` (extra `context`) | Parseo y escritura del front matter de `taxonomy_manifest.md`/plantillas de `TaxonomyTemplateRegistry` |

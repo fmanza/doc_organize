@@ -1,6 +1,6 @@
 """Autor, descripción y palabras clave de cada DomainDocument (1.5.0): lo declarado en el documento y, con opt-in, la IA.
 
-La IA se sustituye por un doble con guion (sin red); el cliente real se prueba en `test_document_enrichment_client.py`.
+La IA es el `LlmClient` real contra un proxy falso con guion (`tests.unit.fake_llm`, sin red).
 """
 
 import json
@@ -8,15 +8,15 @@ import zipfile
 
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from doc_organize.context.context_builder import ContextBuilder
 from doc_organize.context.context_registry import ContextRegistry
-from doc_organize.core.exceptions import DocumentEnrichmentAuthError, DocumentEnrichmentConnectionError
-from doc_organize.core.models import Context, ConversionResult, DocumentEnrichmentResult, DomainDocument, Project
+from doc_organize.core.models import Context, ConversionResult, DomainDocument, Project
 from doc_organize.core.progress import ProgressEvent
+from tests.unit.fake_llm import FakeLlmClient, FakeRequest, fake_client
 from tests.unit.test_document_properties import core_xml, make_pdf
 from tests.unit.test_language_detection import SPANISH
 
@@ -50,23 +50,23 @@ def _by_name(context: Context) -> dict[str, DomainDocument]:
     return {Path(document.source_path).name: document for domain in context.domains for document in domain.documents}
 
 
-class _ScriptedEnrichment:
-    """Doble de `DocumentEnrichmentClient`: `"ok"` propone descripción y palabras clave; `"auth"`/`"conn"` fallan."""
+def _scripted_enrichment(script: list[str] | None = None) -> FakeLlmClient:
+    """Tarea `enrich` con guion: `"ok"` propone descripción y palabras clave; `"auth"`/`"conn"` fallan."""
+    queue = list(script or [])
 
-    config = SimpleNamespace(model="stub-enricher")
-
-    def __init__(self, script: list[str] | None = None) -> None:
-        self.script = list(script or [])
-        self.titles: list[str | None] = []
-
-    async def enrich(self, *, chunks_text: str, title: str | None) -> DocumentEnrichmentResult:
-        outcome = self.script[len(self.titles)] if len(self.titles) < len(self.script) else "ok"
-        self.titles.append(title)
+    def respond(request: FakeRequest) -> object:
+        outcome = queue.pop(0) if queue else "ok"
         if outcome == "auth":
-            raise DocumentEnrichmentAuthError("clave rechazada")
+            return httpx.Response(401)
         if outcome == "conn":
-            raise DocumentEnrichmentConnectionError("sin red")
-        return DocumentEnrichmentResult(description=f"Resumen de {title}", keywords=["ia"])
+            raise httpx.ConnectError("sin red")
+        return {"description": f"Resumen de {request.title}", "keywords": ["ia"]}
+
+    return fake_client(enrich=respond)
+
+
+def _titles(client: FakeLlmClient) -> list[str]:
+    return [request.title for request in client.proxy.calls("enrich")]
 
 
 async def _build(tmp_path: Path, documents: list[ConversionResult], **kwargs: object) -> Context:
@@ -92,8 +92,8 @@ async def test_declared_properties_are_applied_without_ai(tmp_path: Path) -> Non
     assert (docs["plan.docx"].author, docs["plan.docx"].keywords) == ("Luis Gil", ["auditoría"])
     assert (docs["borrado.pdf"].author, docs["borrado.pdf"].description, docs["borrado.pdf"].keywords) == (None, None, [])
     assert all(not doc.ai_filled for doc in docs.values())
-    assert context.ai_enrichment_enabled is False
-    assert context.ai_enrichment_sent == 0
+    assert context.ai_stats.enrich is False
+    assert context.ai_stats.enrichment.sent == 0
 
 
 @pytest.mark.asyncio
@@ -103,18 +103,18 @@ async def test_ai_fills_only_what_the_document_does_not_declare(tmp_path: Path) 
         _document(tmp_path, "sin-claves.pdf", make_pdf("<</Author(Ana)/Subject(Declarada)>>")),
         _document(tmp_path, "vacio.pdf", make_pdf(None)),
     ]
-    client = _ScriptedEnrichment()
+    client = _scripted_enrichment()
 
-    context = await _build(tmp_path, documents, ai_enrichment_enabled=True, ai_enrichment_client=client)
+    context = await _build(tmp_path, documents, enrich=True, llm=client)
 
     docs = _by_name(context)
-    assert sorted(client.titles) == ["sin-claves", "vacio"]  # el documento completo no se envía
+    assert sorted(_titles(client)) == ["sin-claves", "vacio"]  # el documento completo no se envía
     assert (docs["completo.pdf"].description, docs["completo.pdf"].keywords, docs["completo.pdf"].ai_filled) == ("Declarada", ["propia"], [])
     assert (docs["sin-claves.pdf"].description, docs["sin-claves.pdf"].keywords) == ("Declarada", ["ia"])
     assert docs["sin-claves.pdf"].ai_filled == ["keywords"]
     assert (docs["vacio.pdf"].description, docs["vacio.pdf"].ai_filled) == ("Resumen de vacio", ["description", "keywords"])
     assert docs["vacio.pdf"].author is None  # el autor nunca sale de la IA
-    assert (context.ai_enrichment_enabled, context.ai_enrichment_sent, context.ai_enrichment_applied) == (True, 2, 2)
+    assert (context.ai_stats.enrich, context.ai_stats.enrichment.sent, context.ai_stats.enrichment.assigned) == (True, 2, 2)
 
     reloaded = _by_name(await ContextRegistry().load_context(_project(tmp_path)))
     assert reloaded["vacio.pdf"].model_dump() == docs["vacio.pdf"].model_dump()
@@ -137,21 +137,21 @@ async def test_language_is_detected_from_the_converted_text(tmp_path: Path) -> N
 
 @pytest.mark.asyncio
 async def test_enrichment_needs_the_opt_in(tmp_path: Path) -> None:
-    client = _ScriptedEnrichment()
-    context = await _build(tmp_path, [_document(tmp_path, "vacio.pdf", make_pdf(None))], ai_enrichment_client=client)
-    assert client.titles == []
+    client = _scripted_enrichment()
+    context = await _build(tmp_path, [_document(tmp_path, "vacio.pdf", make_pdf(None))], llm=client)
+    assert _titles(client) == []
     assert _by_name(context)["vacio.pdf"].description is None
 
 
 @pytest.mark.asyncio
 async def test_rejected_key_stops_enrichment_after_one_call(tmp_path: Path) -> None:
     documents = [_document(tmp_path, f"d{i}.pdf", make_pdf(None)) for i in range(3)]
-    client = _ScriptedEnrichment(["auth"])
+    client = _scripted_enrichment(["auth"])
 
-    context = await _build(tmp_path, documents, ai_enrichment_enabled=True, ai_enrichment_client=client)
+    context = await _build(tmp_path, documents, enrich=True, llm=client)
 
-    assert len(client.titles) == 1
-    assert (context.ai_enrichment_stopped, context.ai_enrichment_sent, context.ai_enrichment_failed) == ("auth", 1, 1)
+    assert len(_titles(client)) == 1
+    assert (context.ai_stats.enrichment.stopped, context.ai_stats.enrichment.sent, context.ai_stats.enrichment.failed) == ("auth", 1, 1)
     assert all(doc.description is None for doc in _by_name(context).values())
 
 
@@ -159,13 +159,13 @@ async def test_rejected_key_stops_enrichment_after_one_call(tmp_path: Path) -> N
 async def test_enrichment_has_its_own_budget_and_connection_limit(tmp_path: Path) -> None:
     documents = [_document(tmp_path, f"d{i}.pdf", make_pdf(None)) for i in range(3)]
 
-    budget = await _build(tmp_path, documents, ai_enrichment_enabled=True, ai_enrichment_client=_ScriptedEnrichment(), ai_max_documents=1)
-    assert (budget.ai_enrichment_stopped, budget.ai_enrichment_sent, budget.ai_enrichment_applied) == ("budget", 1, 1)
+    budget = await _build(tmp_path, documents, enrich=True, llm=_scripted_enrichment(), ai_max_documents=1)
+    assert (budget.ai_stats.enrichment.stopped, budget.ai_stats.enrichment.sent, budget.ai_stats.enrichment.assigned) == ("budget", 1, 1)
 
-    client = _ScriptedEnrichment(["conn", "conn", "ok"])
-    failing = await _build(tmp_path, documents, ai_enrichment_enabled=True, ai_enrichment_client=client, ai_max_failures=2)
-    assert len(client.titles) == 2
-    assert (failing.ai_enrichment_stopped, failing.ai_enrichment_failed) == ("connection", 2)
+    client = _scripted_enrichment(["conn", "conn", "ok"])
+    failing = await _build(tmp_path, documents, enrich=True, llm=client, ai_max_failures=2)
+    assert len(_titles(client)) == 2
+    assert (failing.ai_stats.enrichment.stopped, failing.ai_stats.enrichment.failed) == ("connection", 2)
 
 
 @pytest.mark.asyncio
@@ -173,6 +173,6 @@ async def test_enrichment_reports_its_own_progress_phase(tmp_path: Path) -> None
     documents = [_document(tmp_path, f"d{i}.pdf", make_pdf(None)) for i in range(2)]
     events: list[ProgressEvent] = []
 
-    await _build(tmp_path, documents, ai_enrichment_enabled=True, ai_enrichment_client=_ScriptedEnrichment(), on_progress=events.append)
+    await _build(tmp_path, documents, enrich=True, llm=_scripted_enrichment(), on_progress=events.append)
 
     assert [(event.phase, event.processed, event.total) for event in events] == [("enrichment", 1, 2), ("enrichment", 2, 2)]

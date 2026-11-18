@@ -22,6 +22,7 @@ from pathlib import Path
 
 import httpx
 
+from doc_organize.core.exceptions import AiConfigurationError
 from doc_organize.core.models import EnvironmentCheck, EnvironmentReport
 
 #: Versiones de Zensical con las que se ha probado el sitio del contexto: [mínima, máxima). Fuera del rango puede
@@ -87,8 +88,12 @@ async def check_environment(
         await asyncio.to_thread(_check_av),
     ]
     if check_ai:
-        endpoints = list(ai_endpoints) if ai_endpoints is not None else _endpoints_from_env()
-        if not endpoints:
+        try:
+            endpoints = list(ai_endpoints) if ai_endpoints is not None else _endpoints_from_env()
+        except AiConfigurationError as exc:  # p. ej. variables de 1.x (D15): el mensaje dice cuáles usar, sin valores
+            checks.append(EnvironmentCheck(name="ai", status="error", detail=str(exc), remedy="Configura la IA con las variables de 2.0"))
+            endpoints = []
+        if not endpoints and not any(check.name == "ai" for check in checks):
             checks.append(EnvironmentCheck(name="ai", status="ok", detail="Ningún modelo de IA configurado: la IA no se usará"))
         for endpoint in endpoints:
             checks.append(await _check_ai(endpoint, transport))
@@ -251,28 +256,27 @@ def _check_av() -> EnvironmentCheck:
     return EnvironmentCheck(name="extra:av", status="warning", detail="Sin transcripción de audio y vídeo", remedy=status.instructions)
 
 
-def _endpoints_from_env() -> list[AiEndpoint]:
-    """Los modelos configurados por variables de entorno (los clientes de 1.x; en 2.0, M4, las tareas del cliente único)."""
-    from doc_organize.ai import (
-        litellm_classification_config_from_env,
-        litellm_enrichment_config_from_env,
-        litellm_taxonomy_classification_config_from_env,
-        litellm_taxonomy_manifest_draft_config_from_env,
-    )
+#: Tareas de texto que se comprueban siempre que la IA esté configurada (con su alias recomendado si no tienen modelo);
+#: `agent` solo si tiene modelo propio, y `embed` no (usa `/embeddings`, no `chat/completions`).
+_CHECKED_TASKS = ("classify", "enrich", "taxonomy_design")
 
-    endpoints = []
-    for name, factory in (
-        ("classification", litellm_classification_config_from_env),
-        ("taxonomy_classification", litellm_taxonomy_classification_config_from_env),
-        ("enrichment", litellm_enrichment_config_from_env),
-        ("taxonomy_manifest_draft", litellm_taxonomy_manifest_draft_config_from_env),
-    ):
-        try:
-            config = factory()
-        except ValueError:
-            continue  # sin configurar
-        endpoints.append(AiEndpoint(name=name, base_url=config.base_url, virtual_key=config.virtual_key, model=config.model))
-    return endpoints
+
+def _endpoints_from_env() -> list[AiEndpoint]:
+    """Un `AiEndpoint` por tarea del cliente único configurado por variables de entorno (`settings_from_env`).
+
+    Raises:
+        AiConfigurationError: Configuración incompleta o con variables de 1.x (lo recoge `check_environment`).
+    """
+    from doc_organize.ai.settings import settings_from_env
+
+    settings = settings_from_env()
+    if settings is None:
+        return []
+    tasks = [*_CHECKED_TASKS, *(["agent"] if "agent" in settings.tasks else [])]
+    return [
+        AiEndpoint(name=task, base_url=settings.base_url, virtual_key=settings.key_for(task), model=settings.model_for(task))  # type: ignore[arg-type]
+        for task in tasks
+    ]
 
 
 _PROBE_MESSAGES = [

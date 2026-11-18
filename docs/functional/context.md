@@ -37,7 +37,7 @@ sequenceDiagram
     participant API as Consumidor (CLI propio, doc_organize_web…)
     participant Builder as ContextBuilder
     participant RulesA as DomainClassifier (Sub-fase A)
-    participant IA as DomainClassificationClient (Sub-fase B)
+    participant IA as LlmClient (Sub-fase B)
     participant Reorg as Reorganizer
     participant Site as SiteGenerator
 
@@ -110,9 +110,8 @@ copia física y el sitio reflejan el segundo eje:
 `<output_folder_name>/<dominio>/<tipo-de-material>/<stem>/`, y el nav de
 `zensical.toml` se agrupa `dominio > tipo de material > documentos`.
 
-Con `ai_classification_enabled=True` (y el proxy de clasificación de 2 ejes
-configurado, ver más abajo), cada documento que las reglas dejan con el placeholder
-`sin-clasificar` en algún eje se reintenta por IA — `TaxonomyClassificationClient`
+Con `llm=LlmClient(...)` y `ai_scope="unclassified"` (ver la guía del proxy), cada documento que las reglas dejan con
+el placeholder `sin-clasificar` en algún eje se reintenta por IA — `classify_document`
 resuelve dominio + tipo de material **en una sola llamada combinada**, pero solo se
 aplica al eje que seguía sin clasificar; un eje que las reglas ya resolvieron con
 confianza nunca se sobreescribe, aunque la IA sugiera algo distinto para ese eje en
@@ -225,8 +224,7 @@ diciendo que había una contraseña):
 
 | Dónde | Qué se redacta | Cómo se desactiva |
 |---|---|---|
-| Clasificación y enriquecimiento con IA (`ContextBuilder`) | Título y texto enviados | `ContextBuilder(ai_redact_credentials=False)` |
-| Borrador de manifiesto con IA | Títulos y extractos de la muestra | `LiteLLMTaxonomyManifestDraftConfig(redact_credentials=False)` |
+| Todo lo que sale hacia la IA (`LlmClient`: clasificación, descripción, borrador de taxonomía) | Texto de cada mensaje | `AiSettings(redact_credentials=False)` |
 | Sitio (`SiteGenerator.generate`) | Páginas de la carpeta reorganizada y títulos del `nav` | `generate(redact_credentials=False)` |
 
 Está **activado por defecto** en los tres. `Conversión/` y los originales no se tocan; `context.json` guarda el título
@@ -257,7 +255,7 @@ deduplicación desde 0.12.1:
 |---|---|
 | **Fuente de clasificación** | El `.json` de conversión (`chunks`/`title`), nunca el `.md` — ya troceado por sección, sin reparsear Markdown |
 | **Nunca inventa dominios** | Con catálogo predefinido, un documento solo se asigna a un dominio de ese catálogo — ni las reglas ni la IA crean uno nuevo |
-| **IA es fallback, nunca primera pasada** | Sub-fase B solo se intenta con documentos que la Sub-fase A deja por debajo del umbral de confianza, y opt-in explícito (`ai_classification_enabled`, `False` por defecto) |
+| **IA es fallback, nunca primera pasada** | Sub-fase B solo se intenta con documentos que la Sub-fase A deja por debajo del umbral de confianza, y opt-in explícito (`ai_scope="unclassified"`; por defecto `"off"`) |
 | **Copiar, nunca mover** | `Reorganizer` copia los tres artefactos (original + `.md` + `.json`); la fuente original nunca se toca |
 | **Reconstrucción limpia** | Cada `POST` reconstruye desde cero: dominios/documentos ya no vigentes se eliminan de `context.json` y de `organizado/`, sin copias huérfanas |
 | **Estado honesto ante fallo parcial** | Si la reorganización o la generación del sitio fallan a mitad, `context.json` persiste `reorganized`/`site_generated=false` — nunca se reporta éxito falso. `SiteGenerator` lanza `SiteBuildError` si no puede construir el sitio, nunca lo deja sin construir en silencio |
@@ -288,7 +286,7 @@ deduplicación desde 0.12.1:
   `_VIRTUAL_KEY` sin definir (modo manifiesto, 2 ejes) — nunca un error genérico.
 - **IA sugiere un dominio o tipo de material fuera del catálogo**: se descarta y se
   trata como "no encaja en ninguno" en ese eje — validado en
-  `DomainClassificationClient`/`TaxonomyClassificationClient`, no solo por
+  los servicios de `doc_organize.ai` (`classify_document`), no solo por
   instrucción al modelo.
 - **Fallo de red/autenticación con el proxy** durante la Sub-fase B: el
   documento afectado queda sin clasificar (en el eje que la IA no llegó a

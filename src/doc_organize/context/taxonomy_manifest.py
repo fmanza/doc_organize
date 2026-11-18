@@ -113,7 +113,7 @@ def render_taxonomy_manifest_markdown(
     nueva de `TaxonomyTemplateRegistry`).
 
     Pensado para componer la respuesta de un
-    borrador propuesto por IA (`ai.TaxonomyManifestDraftClient`) — nunca escribe nada en disco por
+    borrador propuesto por IA (`ai.draft_taxonomy`) — nunca escribe nada en disco por
     sí mismo; no existe hoy ningún endpoint que persista `taxonomy_manifest.md` por el usuario, así
     que "confirmar" el borrador es siempre una acción manual fuera de esta función.
 

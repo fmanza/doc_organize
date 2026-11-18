@@ -17,9 +17,9 @@ el uso de IA, primero hay que poder verlo.
 ❌ `LiteLLMUsageClient`/`GitHubCopilotUsageClient` (este documento) no enrutan ni
 interceptan llamadas de inferencia — son solo lectura de uso/coste. El paquete
 `doc_organize.ai` sí ganó un consumidor real de `chat/completions` después
-(`DomainClassificationClient`, Sub-fase B de la organización documental por
-dominios — ver [Organización documental](context.md)), pero es un cliente
-aparte con su propia config (`LiteLLMClassificationConfig`), no una ampliación
+(desde 2.0.0, `LlmClient`, que hace todas las tareas de IA de la organización documental
+— ver [Organización documental](context.md)), pero es un cliente
+aparte con su propia config (`AiSettings`), no una ampliación
 de los clientes de este documento  
 ❌ No calcula presupuestos ni bloquea acceso — solo lectura
 

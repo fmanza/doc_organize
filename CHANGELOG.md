@@ -78,8 +78,25 @@ ruptura; la guía de migración completa llega con la versión.
   `_VIRTUAL_KEY`, `_MODEL_<TAREA>` y `_VIRTUAL_KEY_<TAREA>`, y lanza `AiConfigurationError` con la equivalencia si
   encuentra variables de 1.x. `PromptRegistry`: prompts empaquetados por tarea (`ai/prompts/<tarea>.md`, con `id` y
   `version`), sustituibles en `<raíz>/.doc_organize/prompts/`, y `PromptProvenance`. Excepciones `AiError`,
-  `AiAuthError`, `AiConnectionError`, `AiResponseError` y `AiConfigurationError`. Los clientes de 1.x siguen hasta el
-  siguiente paso.
+  `AiAuthError`, `AiConnectionError`, `AiResponseError` y `AiConfigurationError`.
+- **Servicios por tarea y builder sobre el cliente único (M4, segundo paso)**: `classify_document`, `enrich_document`
+  y `draft_taxonomy` (`doc_organize.ai`). `ContextBuilder.build(project, documents, *, ..., llm=None, ai_scope="off",
+  enrich=False, prompts=None, ...)`: todo tras `documents` solo por nombre. `Context.ai_stats` (alcance, recuentos y
+  tokens por fase) y `Context.ai_provenance` (prompt y modelo por tarea; `context.model_for_task(...)`). La redacción la
+  hace `LlmClient` (`AiSettings.redact_credentials`); lo redactado se anota por documento aunque la llamada falle.
+  `check_environment(check_ai=True)` comprueba las tareas de `settings_from_env()` e informa de las variables de 1.x.
+  Guía nueva: [De 1.x a 2.0](docs/guides/migracion_2_0.md).
+
+### Retirado (ruptura)
+
+- `DomainClassificationClient`, `TaxonomyClassificationClient`, `DocumentEnrichmentClient`,
+  `TaxonomyManifestDraftClient`, sus `LiteLLM*Config`, sus `*_config_from_env()` y sus excepciones; `DomainClassificationResult`
+  y `TaxonomyClassificationResult`. Las variables `DOC_ORGANIZE_LITELLM_<CLIENTE>_*` ya no se leen (su presencia da error
+  con la equivalente, D15).
+- `ContextBuilder.build(ai_classification_enabled=, ai_classification_client=, taxonomy_classification_client=,
+  ai_enrichment_enabled=, ai_enrichment_client=, on_ai_progress=)` y `ContextBuilder(ai_redact_credentials=)`.
+- `Context.ai_classification_enabled`, `ai_classification_model`, `ai_enrichment_model`, `ai_classification_stopped`,
+  `ai_documents_*` y `ai_enrichment_*` (pasan a `ai_stats` y `ai_provenance`; un `context.json` de 1.x se migra al leerlo).
 
 ### Compatibilidad
 

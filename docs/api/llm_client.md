@@ -1,8 +1,8 @@
 # Cliente único de IA (2.0)
 
 `LlmClient` es, desde 2.0.0, el único camino por el que doc_organize envía algo a un modelo. Sustituye a los cuatro
-clientes de 1.x (clasificación, clasificación por manifiesto, enriquecimiento y borrador de taxonomía), que se retiran en
-el mismo ciclo de 2.0 (la guía de migración llega con ese paso).
+clientes de 1.x (clasificación, clasificación por manifiesto, enriquecimiento y borrador de taxonomía); ver
+[De 1.x a 2.0](../guides/migracion_2_0.md).
 
 ```python
 from doc_organize.ai import LlmClient, PromptRegistry, settings_from_env
@@ -45,6 +45,19 @@ desactivada en silencio.
 
 `complete_with_tools` (una vuelta de conversación con herramientas, para los agentes) y `embed` (embeddings) siguen las
 mismas reglas.
+
+## Servicios por tarea
+
+| Servicio | Tarea | Devuelve |
+|---|---|---|
+| `classify_document(llm, prompts, *, axes, title, content)` | `classify` | `ClassificationAnswer`: por eje pedido (`AxisRequest(key, slugs)`), `AxisAnswer(slug \| None, confidence)`, y `reasoning`. El esquema lleva un `enum` con los slugs de cada eje; un valor fuera del catálogo no pasa la validación |
+| `enrich_document(llm, prompts, *, title, content)` | `enrich` | `DocumentEnrichmentResult` (descripción y hasta 8 palabras clave, limpias) |
+| `draft_taxonomy(llm, prompts, documents)` | `taxonomy_design` | `TaxonomyManifestDraftResult` sin slugs repetidos; `.to_manifest()` y `render_taxonomy_manifest_markdown` para revisarlo |
+
+Todos devuelven `LlmResult` (`value`, `model`, `response_format`, `usage`, `redacted`) y aceptan `on_redacted` para
+anotar lo redactado por documento. `ContextBuilder.build(llm=..., ai_scope="unclassified", enrich=True)` los usa por
+dentro. En este paso envían lo mismo que 1.x (slugs y los primeros 4000 caracteres); en M5 se añaden descripciones,
+perfil del proyecto y extracto.
 
 ## Prompts
 
