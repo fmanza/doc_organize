@@ -1,8 +1,9 @@
 # BASELINE — Línea base de la clasificación (hito M0 del plan único 2.0.0)
 
-Estado: **línea base de clasificación cerrada** (U6): referencia aceptada por el mantenedor el 2026-11-18 (39 filas
-revisadas una a una, `notas = Revisado`, y las otras 111 aceptadas tal como las propuso Claude); sonda del proxy hecha.
-Falta: los tokens por documento de una construcción con IA.
+Estado: **M0 cerrado**. Línea base de clasificación cerrada (U6): referencia aceptada por el mantenedor el 2026-11-18
+(39 filas revisadas una a una, `notas = Revisado`, y las otras 111 aceptadas tal como las propuso Claude); sonda del
+proxy hecha; tokens y tiempo por documento enviado medidos con `measure_with_ai.py` (en memoria, sin reconstruir el
+proyecto).
 Fecha: 2026-11-18. Versión medida: doc_organize **1.7.1** (igual que 1.6.0 en clasificación: 1.7.0 solo redacta lo que
 sale hacia la IA y 1.7.1 solo cambia la navegación del sitio).
 
@@ -14,7 +15,7 @@ sube en los documentos que van a la IA; ningún eje empeora más de 2 puntos; co
 | Medida | Herramienta | Necesita |
 |---|---|---|
 | Exactitud y cobertura por eje, por quién clasificó y confusiones | `measure_baseline.py` | Contexto de CALIDAD_VD + `referencia.xlsx` etiquetada |
-| Tokens, coste y latencia por documento enviado a la IA | Uso de LiteLLM del run (página «Uso de IA» de la web o `LiteLLMUsageClient`) + `ai_documents_sent` del contexto | Construcción con IA sobre CALIDAD_VD |
+| Tokens, coste y latencia por documento enviado a la IA | `measure_with_ai.py`: reglas + Sub-fase B en memoria con el cliente real; un transporte `httpx` anota `usage` y duración de cada llamada | Contexto de CALIDAD_VD, plantilla, proxy y virtual key en una variable de entorno |
 | Tiempo de construcción (sin IA y con IA) | Duración del run en la web | Las dos construcciones |
 | Salida `json_schema` estricta, `enum` de 150, caché de prefijo | `probe_litellm.py` (texto sintético) | Acceso al proxy y una virtual key en una variable de entorno |
 
@@ -32,8 +33,16 @@ sube en los documentos que van a la IA; ningún eje empeora más de 2 puntos; co
    separados por `;`, para medir las facetas de 2.0). Rutas relativas al proyecto; no sale del equipo.
 2. **Medir 1.7.0 solo reglas**: `python measure_baseline.py --project-root <raíz> --reference referencia.xlsx
    --label "1.7.0 reglas" --json reglas.json`.
-3. **Reconstruir con IA** (Sub-fase B, mismo catálogo) y medir: `--label "1.7.0 reglas+IA"`. Anotar del run:
-   documentos enviados, tokens de entrada y salida, coste (LiteLLM) y duración.
+3. **Reglas + IA en memoria** (Sub-fase B, mismo catálogo y umbral, sin escribir en el proyecto):
+
+   ```
+   python measure_with_ai.py --project-root <raíz> --template <plantilla.md> --reference referencia.xlsx \
+       --base-url http://localhost:4000 --model <alias> --key-env <VARIABLE> --label "1.7.1 reglas+IA" \
+       [--path-map /mnt/documentation=C:/Desarrollo/documentation] --json ia.json
+   ```
+
+   Da exactitud por eje como `measure_baseline.py` y, de cada llamada, tokens de entrada y salida y duración (con una
+   llamada de calentamiento aparte). El texto sale redactado (`ai_redact_credentials`, como en 1.7.0).
 4. **Sondear el proxy**: `python probe_litellm.py --base-url <proxy> --model <alias de clasificación>` (la clave en
    `DOC_ORGANIZE_LITELLM_TAXONOMY_CLASSIFICATION_VIRTUAL_KEY`).
 5. Pegar aquí las tablas y el JSON de la sonda.
@@ -98,12 +107,24 @@ Criterios de la referencia provisional:
 - Marcos normativos: solo los del catálogo (`ens`, `iso-27001`, `iso-9001`, `iso-20000`, `iso-14001`, `rgpd`,
   `lo-3-2018`…); `ninguno` si no aplica.
 
-### Coste y tiempo (pendiente)
+### Coste y tiempo
 
-| Configuración | Documentos | Enviados a la IA | Tokens entrada / salida | Coste | Duración |
-|---|---|---|---|---|---|
-| 1.7.0 reglas | | — | — | — | |
-| 1.7.0 reglas+IA | | | | | |
+Medido el 2026-11-18 con `measure_with_ai.py` (1.7.1, plantilla de CALIDAD_VD, `DOC_ORGANIZE_LITELLM_ENRICHMENT_MODEL` =
+`qwen2.5-coder:14b` local):
+
+| Configuración | Documentos | Enviados a la IA | Tokens entrada / salida por documento enviado (media; p95) | Total entrada / salida | Coste | Duración |
+|---|---|---|---|---|---|---|
+| 1.7.1 reglas | 213 | — | — | — | 0 | 1,5 s (clasificación, `.json` locales) |
+| 1.7.1 reglas+IA | 213 | **38** (36 con algún eje asignado, 0 fallos) | **1226 / 112** (1782 / 137) | 46 584 / 4259 | 0 (modelo local) | Sub-fase B: 1918 s; **50 s por llamada** (p50 54, p95 69) + 35 s de calentamiento |
+
+- Exactitud con IA: dominio 0,23 (IA 0,33 en sus documentos), tipo 0,22: la misma que el contexto actual (1.6.0
+  reglas+IA). Un documento salió con credenciales redactadas.
+- **Base del criterio «coste ≤ 1,5×»**: ≤ 1840 tokens de entrada y ≤ 168 de salida de media por documento enviado.
+- **El tiempo no es fiable como base**: la sonda dio 3-5 s por llamada parecida con el modelo cargado, y aquí 50 s,
+  con el equipo ejecutando a la vez la batería de tests de M1. Para comparar tiempos en M10, repetir las dos mediciones
+  en las mismas condiciones; los tokens no dependen de eso.
+- Marcos normativos (eje que 1.7 ignora): sin valores (exhaustividad 0 contra `marcos_ok`). La primera medición del eje
+  con reglas de 2.0 está en el PR #52 (M1).
 
 ### Proxy LiteLLM
 
