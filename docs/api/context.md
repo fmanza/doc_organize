@@ -342,6 +342,38 @@ derivadas del propio slug antes de puntuar.
 
 ---
 
+## AxisRuleScorer (ejes que solo etiquetan, 2.0.0)
+
+```python
+class AxisRuleScorer:
+    def __init__(self, axis: TaxonomyAxis, threshold: float) -> None
+    def classify(self, text: FoldedText) -> list[AxisValue]
+    def terms(self, slug: str) -> tuple[str, ...]
+```
+
+Reglas de los ejes sin `organizes` (marcos normativos, sistema de gestión...). Los
+ejes organizadores siguen con `score_catalog`, para que carpetas y sitio sean los de 1.x.
+
+- **Términos de una entrada**: el slug como frase (`iso-27001` → «iso 27001»), el
+  slug sin un prefijo que comparte con otra entrada («27001»), las palabras clave y el
+  nombre, también partido por « - » y paréntesis (una parte de una sola palabra solo
+  cuenta si es una sigla: «ENS», «RGPD»).
+- **Palabra o frase completa** tras plegar acentos y mayúsculas: «ens» no encaja en
+  «ensayos».
+- Los términos que tienen **dos o más entradas** del eje no cuentan («iso»,
+  «seguridad»).
+- **Confianza por términos distintos encontrados**: 1 → 0,6; 2 → 0,8; 3 o más → 1,0.
+  Añadir palabras clave no baja la nota.
+- Valores con confianza ≥ `threshold` del eje (o el de la construcción): como mucho 5
+  en un eje `multiple`, solo el mejor en los demás; ninguno si el eje es `rules: false`.
+
+Las palabras clave genéricas («datos», «procesos», «servicios») hacen que casi todo
+documento de un corpus de sistemas de gestión reciba ese valor: en un eje que solo
+etiqueta conviene usar siglas, nombres propios y frases («Esquema Nacional de
+Seguridad», «LOPDGDD», «declaración de aplicabilidad»).
+
+---
+
 ## TaxonomyManifest (manifiesto de taxonomía)
 
 ```python
@@ -802,6 +834,19 @@ class DomainDocument(BaseModel):
     keywords: list[str]         # 1.5.0: declaradas, o de la IA si faltan
     language: str | None        # 1.5.0: ISO 639-1 detectado en el texto convertido; None si no es seguro
     ai_filled: list[Literal["description", "keywords"]]  # 1.5.0: lo que rellenó la IA
+    classification: DocumentClassification  # 2.0.0: valores de todos los ejes
+
+class AxisValue(BaseModel):  # 2.0.0
+    slug: str
+    name: str
+    confidence: float           # 0-1
+    classified_by: Literal["rules", "semantic", "ai", "human"]
+    evidence: str | None        # cita literal (IA, M5); no se escribe si es None
+    evidence_verified: bool | None
+
+class DocumentClassification(BaseModel):  # 2.0.0
+    axes: dict[str, list[AxisValue]]  # clave de eje -> valores; [] = evaluado, sin valor
+    def slugs(self, key: str) -> list[str]
 
 class UnclassifiedDocument(BaseModel):  # 1.6.0
     source_path: str
@@ -816,6 +861,7 @@ class UnclassifiedDocument(BaseModel):  # 1.6.0
     description: str | None   # nunca de la IA
     keywords: list[str]       # nunca de la IA
     language: str | None
+    classification: DocumentClassification  # 2.0.0; vacía en 2.0 (los sin clasificar del modo manifiesto van a «sin-clasificar»)
 
 class Domain(BaseModel):
     slug: str
@@ -826,7 +872,9 @@ class Domain(BaseModel):
     documents: list[DomainDocument]
 
 class Context(BaseModel):
+    schema_version: int      # 2.0.0: 2; un context.json de 1.x se migra al leerlo
     project_name: str
+    taxonomy_axes: list[TaxonomyAxis]  # 2.0.0: ejes usados, sin keywords ni examples; sin manifiesto, solo "domains"
     output_folder_name: str  # default "organizado"; validado con validate_output_folder_name desde 0.14.0 (L-8f)
     ai_classification_enabled: bool
     ai_fallback_threshold: float

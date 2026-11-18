@@ -29,11 +29,24 @@ ruptura; la guía de migración completa llega con la versión.
 - `inspect_taxonomy_front_matter(text) -> TaxonomyFrontMatterReport` (`axes`, `implicit_axes`, `ignored_keys`,
   `legacy_format`): para avisar al autor de qué se leerá y qué se ignora.
 - `TaxonomyManifestDraftResult.to_manifest()`.
+- **Clasificación por ejes (M1, A2 y A3)**: cada `DomainDocument` lleva `classification: DocumentClassification`, con
+  una lista de `AxisValue` (`slug`, `name`, `confidence`, `classified_by`: `rules`, `semantic`, `ai` o `human`) por cada
+  eje del manifiesto; lista vacía = evaluado sin valor (en un eje organizador, «Sin Clasificar»). Los ejes que solo
+  etiquetan se clasifican por reglas con `AxisRuleScorer`: palabra o frase completa sin acentos ni mayúsculas, sin los
+  términos que comparten varias entradas, y confianza por términos distintos encontrados (1 → 0,6; 2 → 0,8; 3+ → 1,0);
+  como mucho 5 valores en un eje `multiple` y el mejor en los demás; `threshold` propio del eje y `rules: false`. Los
+  ejes organizadores siguen con las reglas de 1.x. La Sub-fase B marca con `ai` solo el eje que decide.
+- `context.json` v2: `Context.schema_version = 2` y `Context.taxonomy_axes` (los ejes usados, sin `keywords` ni
+  `examples`; sin manifiesto, el eje `domains`). `index.json` no escribe `evidence`/`evidence_verified` cuando no hay
+  cita.
 
 ### Compatibilidad
 
 - Los manifiestos y plantillas de 1.x se siguen leyendo (se migran en memoria); `save_taxonomy_manifest` guarda el
-  texto tal cual. Las plantillas empaquetadas están en formato 2.0. Sin IA, la clasificación de dominio y tipo de
+  texto tal cual. Un `context.json` de 1.x se migra al leerlo: `taxonomy_axes` y la clasificación de los ejes
+  organizadores salen del dominio y del tipo de material de cada documento (quién decidió cada eje es una aproximación
+  en los contextos de 1.x, que solo guardaban `classified_by` por documento). `material_type`, `classified_by` y el
+  dominio de cada documento se siguen guardando como en 1.x. Las plantillas empaquetadas están en formato 2.0. Sin IA, la clasificación de dominio y tipo de
   material es la de 1.7 (comprobado con el corpus de los tests y con CALIDAD_VD).
 
 ## [1.7.1] - 2026-11-18
