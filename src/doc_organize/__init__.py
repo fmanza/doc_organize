@@ -48,6 +48,12 @@ _EXPORTS: dict[str, str] = {
     "check_context_freshness": "doc_organize.context.freshness",
     # Diagnóstico del entorno (2.0.0, F2)
     "check_environment": "doc_organize.diagnostics",
+    # Cliente único de IA (2.0.0, G1)
+    "LlmClient": "doc_organize.ai.llm_client",
+    "PromptRegistry": "doc_organize.ai.prompts",
+    "settings_from_env": "doc_organize.ai.settings",
+    "AiSettings": "doc_organize.core.models",
+    "TaskSettings": "doc_organize.core.models",
     "AiEndpoint": "doc_organize.diagnostics",
     "EnvironmentCheck": "doc_organize.core.models",
     "EnvironmentReport": "doc_organize.core.models",
@@ -184,6 +190,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         SiteBuildError,
     )
     from doc_organize.core.models import (
+        AiSettings,
         AvStatus,
         AxisValue,
         CacheEntry,
@@ -217,6 +224,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         ScanOptions,
         ScanResult,
         ScanRunReport,
+        TaskSettings,
         TaxonomyAxis,
         TaxonomyEntry,
         TaxonomyFrontMatterReport,

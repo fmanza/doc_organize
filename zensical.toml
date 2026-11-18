@@ -49,6 +49,7 @@ nav = [
     { "Cache" = "api/cache.md" },
     { "Projects" = "api/projects.md" },
     { "Exportación" = "api/export.md" },
+    { "Cliente único de IA (2.0)" = "api/llm_client.md" },
     { "Monitorización de uso IA" = "api/ai_usage_monitoring.md" },
     { "Diagnóstico del entorno" = "api/diagnostics.md" },
     { "Organización documental (dominios y contextos)" = "api/context.md" },

@@ -1608,6 +1608,93 @@ class TaxonomyTemplateSummary(BaseModel):
     )
 
 
+AiTask = Literal["classify", "enrich", "taxonomy_design", "agent", "embed"]
+"""Tareas del cliente único de IA (2.0.0, G1): clasificar ejes, enriquecer, diseñar la taxonomía, agentes y embeddings."""
+
+AI_TASKS: Final[tuple[AiTask, ...]] = ("classify", "enrich", "taxonomy_design", "agent", "embed")
+
+
+class TaskSettings(BaseModel):
+    """Modelo y, si se quiere, clave propia de una tarea de IA (2.0.0, G1; claves por tarea opcionales, D12).
+
+    Attributes:
+        model (str): Alias del modelo en el LiteLLM Proxy (o el nombre real del modelo: los alias se recomiendan, no se
+            exigen, U10).
+        virtual_key (str | None): Clave propia de la tarea (presupuesto y límites aparte en el proxy); `None` = la de
+            `AiSettings`.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    model: str = Field(..., min_length=1, description="Alias del modelo en el proxy para esta tarea")
+    virtual_key: str | None = Field(default=None, repr=False, description="Clave propia de la tarea; None = la general")
+
+
+class PromptProvenance(BaseModel):
+    """Con qué prompt y qué modelo se hizo una tarea de IA en una construcción (2.0.0, G1; `Context.ai_provenance`).
+
+    Attributes:
+        task (AiTask): Tarea.
+        prompt_id (str): `id` del prompt.
+        version (str): `version` del prompt.
+        source (str): `builtin` (empaquetado) o `project` (`<raíz>/.doc_organize/prompts/`).
+        sha256 (str): Huella del texto del prompt: distingue dos prompts de proyecto con el mismo `id` y `version`.
+        model (str): Modelo usado.
+    """
+
+    task: AiTask
+    prompt_id: str
+    version: str
+    source: Literal["builtin", "project"]
+    sha256: str
+    model: str
+
+
+class AiSettings(BaseModel):
+    """Configuración del cliente único de IA (`LlmClient`, 2.0.0): un proxy, una clave y un modelo por tarea.
+
+    Sustituye a las cuatro `LiteLLM*Config` de 1.x (clasificación, clasificación por manifiesto, enriquecimiento y
+    borrador). Una tarea sin entrada en `tasks` usa el alias recomendado `doc-organize-<tarea>`.
+
+    Attributes:
+        base_url (str): URL del LiteLLM Proxy.
+        virtual_key (str): Clave general (las tareas pueden tener la suya).
+        tasks (dict[AiTask, TaskSettings]): Modelo (y clave) por tarea.
+        timeout_s (float): Timeout de cada llamada; un modelo local en frío puede tardar (M0: 47 s).
+        retries, retry_backoff_s, rate_limit_retries, max_retry_wait_s: Reintentos (ver `AiHttpClientBase`).
+        redact_credentials (bool): Redactar credenciales de todo lo que sale (D7); por defecto activado.
+        tags (list[str]): Etiquetas para el proxy (`metadata.tags`), además de `doc_organize` y `task:<tarea>`.
+
+    Example:
+        >>> settings = AiSettings(base_url="http://localhost:4000", virtual_key="sk-x", tasks={"classify": TaskSettings(model="qwen")})
+        >>> settings.model_for("classify"), settings.model_for("enrich")
+        ('qwen', 'doc-organize-enrich')
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    base_url: str = Field(..., min_length=1, description="URL del LiteLLM Proxy")
+    virtual_key: str = Field(..., min_length=1, repr=False, description="Clave general del proxy")
+    tasks: dict[AiTask, TaskSettings] = Field(default_factory=dict, description="Modelo y clave por tarea")
+    timeout_s: float = Field(default=120.0, gt=0, description="Timeout de cada llamada, en segundos")
+    retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
+    retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
+    rate_limit_retries: int = Field(default=3, ge=0, description=_HTTP_RATE_LIMIT_RETRIES_DESC)
+    max_retry_wait_s: float = Field(default=60.0, ge=0.0, description=_HTTP_MAX_RETRY_WAIT_DESC)
+    redact_credentials: bool = Field(default=True, description="Redactar credenciales de todo lo que sale hacia la IA (D7)")
+    tags: list[str] = Field(default_factory=list, description="Etiquetas para el proxy (`metadata.tags`)")
+
+    def model_for(self, task: AiTask) -> str:
+        """El modelo de `task`: el configurado o el alias recomendado `doc-organize-<tarea>`."""
+        configured = self.tasks.get(task)
+        return configured.model if configured is not None else f"doc-organize-{task.replace('_', '-')}"
+
+    def key_for(self, task: AiTask) -> str:
+        """La clave de `task`: la suya si la tiene, si no la general."""
+        configured = self.tasks.get(task)
+        return configured.virtual_key if configured is not None and configured.virtual_key else self.virtual_key
+
+
 class LiteLLMClassificationConfig(BaseModel):
     """Configuración de acceso al LiteLLM Proxy para `DomainClassificationClient` (Sub-fase B).
 
@@ -1750,10 +1837,13 @@ class LiteLLMEnrichmentConfig(BaseModel):
 
 
 __all__ = [
+    "AI_TASKS",
     "CONTEXT_SCHEMA_VERSION",
     "LEGACY_FOLDER_AXIS_KEY",
     "LEGACY_SUBFOLDER_AXIS_KEY",
     "AiClassificationStopReason",
+    "AiSettings",
+    "AiTask",
     "AvStatus",
     "AxisClassifiedBy",
     "AxisValue",
@@ -1803,6 +1893,7 @@ __all__ = [
     "OfficeStatus",
     "Project",
     "ProjectNameValidation",
+    "PromptProvenance",
     "ScanErrorEntry",
     "ScanErrorReport",
     "ScanEvent",
@@ -1810,6 +1901,7 @@ __all__ = [
     "ScanResult",
     "ScanRunReport",
     "ScannedFolder",
+    "TaskSettings",
     "TaxonomyAxis",
     "TaxonomyClassificationResult",
     "TaxonomyEntry",
