@@ -6,7 +6,7 @@ import asyncio
 
 from collections import Counter
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from doc_organize import __version__
@@ -47,6 +47,7 @@ from doc_organize.core.models import (
     DomainStatus,
     Project,
     TaxonomyAxis,
+    TaxonomyClassificationResult,
     TaxonomyEntry,
     TaxonomyManifest,
     UnclassifiedDocument,
@@ -118,9 +119,17 @@ class _AiRun:
         self.sent += 1
         return True
 
+    def release(self) -> None:
+        """Devuelve un envío reservado que no llegó a hacerse (el `.json` no se pudo leer, 2.0.0)."""
+        self.sent -= 1
+
+    def record_response(self) -> None:
+        """La llamada respondió: corta la racha de errores de conexión (el recuento se hace al aplicar el resultado)."""
+        self.consecutive_connection_failures = 0
+
     def record_result(self, *, assigned: bool) -> None:
         """La llamada respondió: corta la racha de errores de conexión y cuenta si asignó algún eje."""
-        self.consecutive_connection_failures = 0
+        self.record_response()
         if assigned:
             self.classified += 1
 
@@ -136,6 +145,23 @@ class _AiRun:
         else:
             # El servidor respondió (5xx, respuesta mal formada...): no es un error de conexión.
             self.consecutive_connection_failures = 0
+
+
+@dataclass
+class _ReadFacts:
+    """Lo que una construcción conserva de la lectura de un `.json` de conversión (2.0.0, B): no el texto."""
+
+    title: str | None
+    language: str | None
+    #: Propuesta de las reglas por debajo del umbral (modo sin manifiesto), para el detalle de los sin clasificar.
+    rules: tuple[str | None, float | None] = (None, None)
+
+
+@dataclass
+class _BuildReads:
+    """Hechos de la lectura única de cada `.json` en una construcción, por `json_path` (2.0.0, B)."""
+
+    facts: dict[str, _ReadFacts] = field(default_factory=dict)
 
 
 def _model_used(client: DomainClassificationClient | TaxonomyClassificationClient | DocumentEnrichmentClient | None, run: _AiRun) -> str | None:
@@ -236,6 +262,7 @@ class ContextBuilder:
         history_policy: ContextHistoryPolicy | None = None,
         properties_concurrency: int = _DEFAULT_PROPERTIES_CONCURRENCY,
         ai_redact_credentials: bool = True,
+        ai_concurrency: int = 1,
     ) -> None:
         """
         Args:
@@ -248,11 +275,20 @@ class ContextBuilder:
                 defecto **activado**: cambia lo que sale hacia la IA, no lo que se clasifica con reglas ni lo que se
                 guarda. Lo redactado se resume, sin valores, en `Context.credential_findings`.
 
+            ai_concurrency: Llamadas a la IA a la vez en cada fase (Sub-fase B y enriquecimiento, 2.0.0). `1` = una
+                detrás de otra, como en 1.x. Los resultados se aplican en el orden de los documentos: el contexto es el
+                mismo con 1 que con 4. `ai_max_documents` nunca se supera; tras alcanzar `ai_max_failures` no se envía
+                nada más, pero las llamadas que ya estaban en vuelo pueden sumar hasta `ai_concurrency - 1` fallos. Ante
+                respuestas 429, ver los reintentos del cliente.
+
         Raises:
-            ValueError: Si `properties_concurrency` es menor que 1.
+            ValueError: Si `properties_concurrency` o `ai_concurrency` es menor que 1.
         """
         if properties_concurrency < 1:
             raise ValueError(f"properties_concurrency debe ser al menos 1, no {properties_concurrency}")
+        if ai_concurrency < 1:
+            raise ValueError(f"ai_concurrency debe ser al menos 1, no {ai_concurrency}")
+        self.ai_concurrency = ai_concurrency
         self.registry = registry or ContextRegistry()
         self.history_policy = history_policy or ContextHistoryPolicy()
         self.properties_concurrency = properties_concurrency
@@ -383,16 +419,18 @@ class ContextBuilder:
         async def _enrichment_progress(index: int, total: int, source_path: str) -> None:
             _report("enrichment", index, total, source_path)
 
-        rules: DomainClassifier | None = None  # para la propuesta de las reglas en los sin clasificar (1.6.0)
+        reads = _BuildReads()  # lectura única de cada `.json` para todo lo que no es IA (2.0.0, B)
         if taxonomy_manifest is not None:
-            classified, unclassified = await self._classify_with_manifest(documents, taxonomy_manifest, threshold)
+            classified, unclassified = await self._classify_with_manifest(
+                documents, taxonomy_manifest, threshold, reads=reads, cancel_token=cancel_token
+            )
             if ai_classification_enabled and taxonomy_classification_client is not None:
                 classified = await self._classify_with_manifest_ai(
                     taxonomy_classification_client, classified, taxonomy_manifest, on_progress=_ai_progress, run=ai_run
                 )
         else:
-            classifier = rules = DomainClassifier(candidate_domains=candidate_domains, threshold=threshold)
-            classified, unclassified = await classifier.classify(documents)
+            classifier = DomainClassifier(candidate_domains=candidate_domains, threshold=threshold)
+            classified, unclassified = await self._classify_by_rules(documents, classifier, reads, cancel_token)
 
             if ai_classification_enabled and ai_classification_client is not None and unclassified:
                 classified, unclassified = await self._classify_with_ai(
@@ -404,10 +442,10 @@ class ContextBuilder:
                     run=ai_run,
                 )
 
-        unclassified_details = await self._describe_unclassified(unclassified, rules, cancel_token)
+        unclassified_details = self._describe_unclassified(unclassified, reads)
         enrichment_run = self._new_ai_run(ai_max_failures, ai_max_documents, credential_ledger)
         await self._describe_documents(
-            classified, unclassified_details, ai_enrichment_enabled, ai_enrichment_client, enrichment_run, _enrichment_progress, cancel_token
+            classified, unclassified_details, reads, ai_enrichment_enabled, ai_enrichment_client, enrichment_run, _enrichment_progress, cancel_token
         )
 
         has_predefined_catalog = bool(candidate_domains) or taxonomy_manifest is not None
@@ -470,20 +508,105 @@ class ContextBuilder:
     def _new_ai_run(self, max_failures: int | None, max_documents: int | None, ledger: dict[str, Counter[str]]) -> _AiRun:
         return _AiRun(max_failures=max_failures, max_documents=max_documents, redact=self.ai_redact_credentials, credential_ledger=ledger)
 
-    async def _classify_with_manifest(
-        self, documents: list[ConversionResult], manifest: TaxonomyManifest, threshold: float
+    async def _read_conversions[T](
+        self,
+        documents: Sequence[ConversionResult],
+        process: Callable[[ConversionResult, str, str | None], T],
+        reads: _BuildReads | None,
+        cancel_token: CancelToken | None,
+    ) -> list[T | None]:
+        """Lee el `.json` de conversión de cada documento **una sola vez** para todo lo que no es IA (2.0.0, B).
+
+        Con hasta `properties_concurrency` lecturas a la vez (en una carpeta de red es lo que más cuesta). `process`
+        (clasificar por reglas) corre en un hilo junto a la detección del idioma, y de cada documento solo se guarda el
+        resultado, no el texto. Devuelve un resultado por documento, en el orden de `documents`: `None` si le falta algún
+        artefacto o su `.json` no se puede leer. Los hechos de la lectura (título, idioma, propuesta de las reglas) quedan
+        en `reads` para describir después los documentos sin volver a leerlos.
+        """
+        results: list[T | None] = [None] * len(documents)
+
+        async def read(item: tuple[int, ConversionResult]) -> None:
+            index, document = item
+            if not document.success or not document.markdown_path or not document.json_path:
+                return
+            conversion = await read_conversion_json(document.json_path)
+            if conversion is None:
+                return
+            chunks_text, title = conversion
+
+            def work() -> tuple[T, str | None]:
+                return process(document, chunks_text, title), detect_language(f"{title or ''}\n{chunks_text}")
+
+            results[index], language = await asyncio.to_thread(work)
+            if reads is not None:
+                reads.facts[document.json_path] = _ReadFacts(title=title, language=language)
+
+        await self._for_each_bounded(list(enumerate(documents)), read, cancel_token)
+        return results
+
+    async def _classify_by_rules(
+        self, documents: list[ConversionResult], classifier: DomainClassifier, reads: _BuildReads, cancel_token: CancelToken | None
     ) -> tuple[dict[str, list[DomainDocument]], list[ConversionResult]]:
-        """Clasifica `documents` en 2 ejes (dominio + tipo de material) usando `manifest`.
+        """Sub-fase A sin manifiesto: lo mismo que `DomainClassifier.classify`, con la lectura única de `_read_conversions`.
+
+        De los que quedan por debajo del umbral, la propuesta de las reglas queda en `reads` (la usa
+        `_describe_unclassified`).
+        """
+
+        def score(document: ConversionResult, chunks_text: str, title: str | None) -> tuple[str | None, float, str | None]:
+            slug, value = classifier.score_domain(document, chunks_text, title)
+            return slug, value, title
+
+        scores = await self._read_conversions(documents, score, reads, cancel_token)
+        classified: dict[str, list[DomainDocument]] = {}
+        unclassified: list[ConversionResult] = []
+        for document, scored in zip(documents, scores, strict=True):
+            if scored is None:
+                unclassified.append(document)
+                continue
+            slug, value, title = scored
+            if slug is None or value < classifier.threshold:
+                unclassified.append(document)
+                if document.json_path in reads.facts:
+                    reads.facts[document.json_path].rules = (slug, value)
+                continue
+            resolved_title, document_type = resolve_title_and_type(document, title)
+            classified.setdefault(slug, []).append(
+                DomainDocument(
+                    source_path=document.source_path,
+                    markdown_path=document.markdown_path,
+                    json_path=document.json_path,  # type: ignore[arg-type]  # leído: no es None
+                    images_dir=document.images_dir,
+                    title=resolved_title,
+                    document_type=document_type,
+                    confidence=value,
+                    classified_by="rules",
+                    rules_domain=slug,
+                    rules_confidence=value,
+                )
+            )
+        return classified, unclassified
+
+    async def _classify_with_manifest(
+        self,
+        documents: list[ConversionResult],
+        manifest: TaxonomyManifest,
+        threshold: float,
+        *,
+        reads: _BuildReads | None = None,
+        cancel_token: CancelToken | None = None,
+    ) -> tuple[dict[str, list[DomainDocument]], list[ConversionResult]]:
+        """Clasifica `documents` en todos los ejes de `manifest`, solo por reglas (Sub-fase A).
 
         A diferencia del modo de un eje (`DomainClassifier.classify()`), un documento con
-        los tres artefactos completos SIEMPRE se reorganiza aquí: si un eje no alcanza
+        los tres artefactos completos SIEMPRE se reorganiza aquí: si un eje organizador no alcanza
         `threshold`, se le asigna el slug placeholder `_UNCLASSIFIED_SLUG` en ese eje en vez
         de excluir el documento por completo — decisión de negocio explícita de esta
         sesión (manifiesto de taxonomía). Solo un documento con algún artefacto incompleto
         (falta original/`.md`/`.json`) queda en `unclassified_documents`, igual criterio que
-        el modo de un eje. Solo reglas (Sub-fase A) — la Sub-fase B combinada de 2 ejes, si
-        está activa, se aplica después vía `_classify_with_manifest_ai` sobre el resultado
-        de este método.
+        el modo de un eje. La Sub-fase B, si está activa, se aplica después vía
+        `_classify_with_manifest_ai` sobre el resultado de este método. Cada `.json` se lee una vez
+        (`_read_conversions`); el idioma queda ya en cada `DomainDocument`.
         """
         domain_slugs = [entry.slug for entry in manifest.folder_axis.entries]
         material_slugs = [entry.slug for entry in manifest.subfolder_axis.entries]
@@ -510,19 +633,7 @@ class ContextBuilder:
         # siguen con `score_catalog` (mismo resultado que 1.x).
         tag_scorers = [AxisRuleScorer(axis, threshold) for axis in manifest.tag_axes]
 
-        classified: dict[str, list[DomainDocument]] = {}
-        unclassified: list[ConversionResult] = []
-
-        for document in documents:
-            if not document.success or not document.markdown_path or not document.json_path:
-                unclassified.append(document)
-                continue
-            chunks_result = await read_conversion_json(document.json_path)
-            if chunks_result is None:
-                unclassified.append(document)
-                continue
-            chunks_text, title = chunks_result
-
+        def classify(document: ConversionResult, chunks_text: str, title: str | None) -> tuple[str, DomainDocument]:
             rules_domain, domain_score = domain_classifier.score_domain(document, chunks_text, title, extra_keywords=domain_keywords)
             domain_slug = rules_domain if rules_domain is not None and domain_score >= threshold else _UNCLASSIFIED_SLUG
 
@@ -539,26 +650,71 @@ class ContextBuilder:
                 axes.update({scorer.axis.key: scorer.classify(folded) for scorer in tag_scorers})
 
             resolved_title, document_type = resolve_title_and_type(document, title)
-            classified.setdefault(domain_slug, []).append(
-                DomainDocument(
-                    source_path=document.source_path,
-                    markdown_path=document.markdown_path,
-                    json_path=document.json_path,
-                    images_dir=document.images_dir,
-                    title=resolved_title,
-                    document_type=document_type,
-                    material_type=material_slug,
-                    material_type_name=material_names.get(material_slug),
-                    confidence=domain_score,
-                    classified_by="rules",
-                    rules_domain=rules_domain,
-                    rules_confidence=domain_score,
-                    material_type_confidence=material_score,
-                    classification=DocumentClassification(axes=axes),
-                )
+            return domain_slug, DomainDocument(
+                source_path=document.source_path,
+                markdown_path=document.markdown_path,  # type: ignore[arg-type]  # leído: no es None
+                json_path=document.json_path,  # type: ignore[arg-type]
+                images_dir=document.images_dir,
+                title=resolved_title,
+                document_type=document_type,
+                material_type=material_slug,
+                material_type_name=material_names.get(material_slug),
+                confidence=domain_score,
+                classified_by="rules",
+                rules_domain=rules_domain,
+                rules_confidence=domain_score,
+                material_type_confidence=material_score,
+                classification=DocumentClassification(axes=axes),
             )
 
+        reads = reads if reads is not None else _BuildReads()
+        results = await self._read_conversions(documents, classify, reads, cancel_token)
+        classified: dict[str, list[DomainDocument]] = {}
+        unclassified: list[ConversionResult] = []
+        for document, result in zip(documents, results, strict=True):
+            if result is None:
+                unclassified.append(document)
+                continue
+            domain_slug, domain_document = result
+            domain_document.language = reads.facts[domain_document.json_path].language
+            classified.setdefault(domain_slug, []).append(domain_document)
         return classified, unclassified
+
+    async def _run_ai_phase[T, R](
+        self,
+        items: Sequence[T],
+        call: Callable[[T], Awaitable[R | None]],
+        run: _AiRun,
+        on_progress: Callable[[int, int, str], Awaitable[None]] | None,
+        path_of: Callable[[T], str],
+        *,
+        stage: str = "Sub-fase B detenida",
+        outcome: str = "quedan sin clasificar",
+    ) -> list[R | None]:
+        """Una fase de IA con hasta `ai_concurrency` llamadas a la vez (2.0.0, B).
+
+        `call` hace la llamada de un elemento y devuelve lo que haya que aplicar; el llamador lo aplica **después**, en
+        el orden de `items`, para que el resultado no dependa del orden de llegada (`context.json` idéntico con 1 y con
+        4). Tras parar la fase (`run.stopped`) no se despacha nada más; las llamadas en vuelo terminan y su resultado se
+        conserva, así que con `ai_concurrency > 1` puede haber hasta `ai_concurrency - 1` fallos más que
+        `ai_max_failures`. El progreso cuenta los terminados (monótono). Con `ai_concurrency=1`, mismas llamadas y en
+        el mismo orden que 1.x.
+        """
+        results: list[R | None] = [None] * len(items)
+        finished = 0
+
+        async def attempt(item: tuple[int, T]) -> None:
+            nonlocal finished
+            index, value = item
+            if run.stopped is None:
+                results[index] = await call(value)
+            finished += 1
+            self._log_stop(run, len(items) - finished, stage=stage, outcome=outcome)
+            if on_progress is not None:
+                await on_progress(finished, len(items), path_of(value))
+
+        await self._for_each_bounded(list(enumerate(items)), attempt, None, limit=self.ai_concurrency)
+        return results
 
     async def _classify_with_manifest_ai(
         self,
@@ -579,12 +735,13 @@ class ContextBuilder:
         `DomainDocument.classified_by` pasa a `"ai"` si la IA cambió efectivamente al menos un eje
         (de placeholder a un valor real); se queda en `"rules"` si no cambió nada, aunque se haya
         intentado — un único campo string sigue bastando (mismo criterio que en modo de un eje).
+        Las llamadas pueden ir varias a la vez (`ai_concurrency`); los resultados se aplican en el
+        orden de los documentos.
         """
         domain_slugs = list(dict.fromkeys(slug for slug in (DomainClassifier._slugify(entry.slug) for entry in manifest.folder_axis.entries) if slug))
         material_slugs = list(
             dict.fromkeys(slug for slug in (DomainClassifier._slugify(entry.slug) for entry in manifest.subfolder_axis.entries) if slug)
         )
-        material_names = {DomainClassifier._slugify(entry.slug): entry.name for entry in manifest.subfolder_axis.entries}
 
         pending = [
             (domain_slug, document)
@@ -595,58 +752,61 @@ class ContextBuilder:
         if not pending:
             return classified
 
-        run = run if run is not None else _AiRun()
-        total = len(pending)
-        for index, (old_domain_slug, document) in enumerate(pending, start=1):
-            if run.stopped is None:
-                await self._try_classify_document_with_manifest_ai(
-                    client, document, old_domain_slug, classified, domain_slugs, material_slugs, material_names, run, manifest
+        ai_run = run if run is not None else _AiRun()
+
+        async def call(item: tuple[str, DomainDocument]) -> TaxonomyClassificationResult | None:
+            document = item[1]
+            texts = await self._outgoing_texts(document.source_path, document.json_path, ai_run)
+            if texts is None:
+                return None
+            try:
+                result = await client.classify(
+                    chunks_text=texts[0], title=texts[1], candidate_domains=domain_slugs, candidate_material_types=material_slugs
                 )
-                self._log_stop(run, total - index)
-            if on_progress is not None:
-                await on_progress(index, total, document.source_path)
+            except TaxonomyClassificationError as exc:
+                ai_run.record_failure(exc, TaxonomyClassificationAuthError, TaxonomyClassificationConnectionError)
+                self.logger.warning(f"Fallo la clasificación por IA (manifiesto) de '{document.source_path}': {exc} — sigue sin clasificar")
+                return None
+            ai_run.record_response()
+            return result
+
+        results = await self._run_ai_phase(pending, call, ai_run, on_progress, lambda item: item[1].source_path)
+        for (old_domain_slug, document), result in zip(pending, results, strict=True):
+            if result is not None:
+                self._apply_manifest_ai(document, old_domain_slug, result, classified, manifest, ai_run)
 
         # Poda buckets que quedaron vacíos (p.ej. todo "sin-clasificar" se resolvió a otros
         # dominios) — sin esto, `build()` crearía un `Domain` fantasma sin documentos.
         return {slug: documents for slug, documents in classified.items() if documents}
 
-    async def _try_classify_document_with_manifest_ai(
+    async def _outgoing_texts(self, source_path: str, json_path: str | None, run: _AiRun) -> tuple[str, str | None] | None:
+        """Texto y título de un documento tal como salen hacia la IA, si hay presupuesto; `None` si no.
+
+        El envío se reserva **antes** de leer (`may_send`), para que con varias llamadas a la vez el presupuesto se
+        reparta en el orden de los documentos y no en el de las lecturas; si el `.json` no se puede leer, se devuelve.
+        """
+        if not json_path or not run.may_send():
+            return None
+        conversion = await read_conversion_json(json_path)
+        if conversion is None:
+            run.release()
+            return None
+        return run.outgoing(source_path, *conversion)
+
+    def _apply_manifest_ai(
         self,
-        client: TaxonomyClassificationClient,
         document: DomainDocument,
         old_domain_slug: str,
+        result: TaxonomyClassificationResult,
         classified: dict[str, list[DomainDocument]],
-        domain_slugs: list[str],
-        material_slugs: list[str],
-        material_names: dict[str, str],
-        run: _AiRun,
         manifest: TaxonomyManifest,
+        run: _AiRun,
     ) -> None:
-        """Resuelve un único `document` vía `client.classify()` y aplica el resultado a
-        `classified` in-place — mueve el documento de bucket si el eje de dominio cambió,
-        o lo muta in-place si solo cambió el eje de tipo de material (mismo objeto en la
-        misma lista, sin necesidad de mover nada). El eje que cambia queda en
-        `document.classification` con `classified_by="ai"` (2.0.0).
-        """
-        folder_key, subfolder_key = manifest.folder_axis.key, manifest.subfolder_axis.key
+        """Aplica la respuesta de la IA a `document` y a `classified`: mueve el documento de bucket si el eje de
+        dominio cambió, o lo muta in-place si solo cambió el de tipo de material. El eje que cambia queda en
+        `document.classification` con `classified_by="ai"` (2.0.0)."""
         domain_names = {DomainClassifier._slugify(entry.slug): entry.name for entry in manifest.folder_axis.entries}
-        chunks_result = await read_conversion_json(document.json_path)
-        if chunks_result is None:
-            return
-        chunks_text, title = chunks_result
-        if not run.may_send():
-            return
-
-        sent_text, sent_title = run.outgoing(document.source_path, chunks_text, title)
-        try:
-            result = await client.classify(
-                chunks_text=sent_text, title=sent_title, candidate_domains=domain_slugs, candidate_material_types=material_slugs
-            )
-        except TaxonomyClassificationError as exc:
-            run.record_failure(exc, TaxonomyClassificationAuthError, TaxonomyClassificationConnectionError)
-            self.logger.warning(f"Fallo la clasificación por IA (manifiesto) de '{document.source_path}': {exc} — sigue sin clasificar")
-            return
-
+        material_names = {DomainClassifier._slugify(entry.slug): entry.name for entry in manifest.subfolder_axis.entries}
         document.ai_domain = result.domain
         document.ai_confidence = result.domain_confidence
         document.ai_reasoning = clean_text(result.reasoning)
@@ -656,7 +816,7 @@ class ContextBuilder:
             classified[old_domain_slug] = [candidate for candidate in classified[old_domain_slug] if candidate is not document]
             document.confidence = result.domain_confidence
             classified.setdefault(result.domain, []).append(document)
-            axes[folder_key] = [
+            axes[manifest.folder_axis.key] = [
                 AxisValue(
                     slug=result.domain, name=domain_names.get(result.domain, result.domain), confidence=result.domain_confidence, classified_by="ai"
                 )
@@ -666,7 +826,7 @@ class ContextBuilder:
             document.material_type = result.material_type
             document.material_type_name = material_names.get(result.material_type)
             document.material_type_confidence = result.material_type_confidence
-            axes[subfolder_key] = [
+            axes[manifest.subfolder_axis.key] = [
                 AxisValue(
                     slug=result.material_type,
                     name=material_names.get(result.material_type, result.material_type),
@@ -677,7 +837,7 @@ class ContextBuilder:
             changed = True
         if changed:
             document.classified_by = "ai"
-        run.record_result(assigned=changed)
+            run.classified += 1
 
     async def _classify_with_ai(
         self,
@@ -693,27 +853,26 @@ class ContextBuilder:
         o los dominios que la Sub-fase A ya descubrió) — nunca crea uno nuevo.
 
         `rules` es el clasificador de la Sub-fase A: da el catálogo y la propuesta que las reglas dejaron por debajo
-        del umbral (`DomainDocument.rules_domain`/`rules_confidence`).
+        del umbral (`DomainDocument.rules_domain`/`rules_confidence`). Las llamadas pueden ir varias a la vez
+        (`ai_concurrency`); los resultados se aplican en el orden de los documentos.
         """
         catalog = rules.candidate_domains if rules.candidate_domains else list(classified.keys())
         if not catalog:
             return classified, unclassified
 
-        run = run if run is not None else _AiRun()
-        total = len(unclassified)
+        ai_run = run if run is not None else _AiRun()
+
+        async def call(document: ConversionResult) -> tuple[str, DomainDocument] | None:
+            return await self._try_classify_document_with_ai(client, document, catalog, rules, ai_run)
+
+        results = await self._run_ai_phase(unclassified, call, ai_run, on_progress, lambda document: document.source_path)
         still_unclassified: list[ConversionResult] = []
-        for index, document in enumerate(unclassified, start=1):
-            assigned: tuple[str, DomainDocument] | None = None
-            if run.stopped is None:
-                assigned = await self._try_classify_document_with_ai(client, document, catalog, rules, run)
-                self._log_stop(run, total - index)
+        for document, assigned in zip(unclassified, results, strict=True):
             if assigned is None:
                 still_unclassified.append(document)
             else:
                 slug, domain_document = assigned
                 classified.setdefault(slug, []).append(domain_document)
-            if on_progress is not None:
-                await on_progress(index, total, document.source_path)
         return classified, still_unclassified
 
     async def _try_classify_document_with_ai(
@@ -721,12 +880,13 @@ class ContextBuilder:
     ) -> tuple[str, DomainDocument] | None:
         if not document.success or not document.markdown_path or not document.json_path:
             return None
-        chunks_result = await read_conversion_json(document.json_path)
-        if chunks_result is None:
-            return None
-        chunks_text, title = chunks_result
         if not run.may_send():
             return None
+        conversion = await read_conversion_json(document.json_path)
+        if conversion is None:
+            run.release()
+            return None
+        chunks_text, title = conversion
 
         sent_text, sent_title = run.outgoing(document.source_path, chunks_text, title)
         try:
@@ -782,29 +942,18 @@ class ContextBuilder:
         except OSError as exc:
             self.logger.warning(f"No se pudo añadir la construcción al histórico del contexto de '{project.name}': {exc}")
 
-    async def _describe_unclassified(
-        self, unclassified: list[ConversionResult], rules: DomainClassifier | None, cancel_token: CancelToken | None
-    ) -> list[UnclassifiedDocument]:
+    def _describe_unclassified(self, unclassified: list[ConversionResult], reads: _BuildReads) -> list[UnclassifiedDocument]:
         """Motivo, título, propuesta de las reglas e idioma de cada documento sin clasificar (1.6.0, G42), en el orden de
         `unclassified`. Autor, descripción y palabras clave los rellena después `_apply_document_properties`.
 
         Sin `.md`/`.json` o con un `.json` ilegible, `"incomplete_artifacts"`; si no, `"below_threshold"`, con lo que
-        propusieron las reglas (`rules`; `None` en modo manifiesto, donde solo quedan sin clasificar los incompletos).
-        Los `.json` se leen de `properties_concurrency` en `properties_concurrency` (pueden estar en una carpeta de
-        red); el idioma se detecta después, de uno en uno, como en los clasificados.
+        propusieron las reglas (vacío en modo manifiesto, donde solo quedan sin clasificar los incompletos). Todo sale
+        de la lectura de la Sub-fase A (`reads`): no se vuelve a leer ningún `.json` (2.0.0, B).
         """
-        conversions: list[tuple[str, str | None] | None] = [None] * len(unclassified)
-
-        async def read_json(item: tuple[int, ConversionResult]) -> None:
-            index, document = item
-            if document.success and document.markdown_path and document.json_path:
-                conversions[index] = await read_conversion_json(document.json_path)
-
-        await self._for_each_bounded(list(enumerate(unclassified)), read_json, cancel_token)
-
         details: list[UnclassifiedDocument] = []
-        for document, conversion in zip(unclassified, conversions, strict=True):
-            if conversion is None:
+        for document in unclassified:
+            facts = reads.facts.get(document.json_path) if document.success and document.markdown_path and document.json_path else None
+            if facts is None:
                 title, document_type = resolve_title_and_type(document, None)
                 details.append(
                     UnclassifiedDocument(
@@ -816,30 +965,29 @@ class ContextBuilder:
                         reason="incomplete_artifacts",
                     )
                 )
-            else:
-                chunks_text, json_title = conversion
-                title, document_type = resolve_title_and_type(document, json_title)
-                rules_domain, rules_confidence = rules.score_domain(document, chunks_text, json_title) if rules is not None else (None, None)
-                details.append(
-                    UnclassifiedDocument(
-                        source_path=document.source_path,
-                        title=title or None,
-                        document_type=document_type,
-                        markdown_path=document.markdown_path,
-                        json_path=document.json_path,
-                        reason="below_threshold",
-                        rules_domain=rules_domain,
-                        rules_confidence=rules_confidence if rules_domain is not None else None,
-                        language=await asyncio.to_thread(detect_language, f"{json_title or ''}\n{chunks_text}"),
-                    )
+                continue
+            title, document_type = resolve_title_and_type(document, facts.title)
+            rules_domain, rules_confidence = facts.rules
+            details.append(
+                UnclassifiedDocument(
+                    source_path=document.source_path,
+                    title=title or None,
+                    document_type=document_type,
+                    markdown_path=document.markdown_path,
+                    json_path=document.json_path,
+                    reason="below_threshold",
+                    rules_domain=rules_domain,
+                    rules_confidence=rules_confidence if rules_domain is not None else None,
+                    language=facts.language,
                 )
-            checkpoint(cancel_token)
+            )
         return details
 
     async def _describe_documents(
         self,
         classified: dict[str, list[DomainDocument]],
         unclassified: list[UnclassifiedDocument],
+        reads: _BuildReads,
         enrichment_enabled: bool,
         enrichment_client: DocumentEnrichmentClient | None,
         run: _AiRun,
@@ -849,29 +997,31 @@ class ContextBuilder:
         """Autor, descripción, palabras clave e idioma de cada documento clasificado; con el enriquecimiento activo y
         cliente, la IA rellena después la descripción y las palabras clave que falten (1.5.0). De los sin clasificar,
         solo lo que declara el original (1.6.0): la IA no los enriquece."""
-        await self._apply_document_properties(classified, unclassified, cancel_token)
+        await self._apply_document_properties(classified, unclassified, reads, cancel_token)
         if enrichment_enabled and enrichment_client is not None:
             await self._enrich_with_ai(enrichment_client, classified, on_progress=on_progress, run=run)
 
     async def _apply_document_properties(
-        self, classified: dict[str, list[DomainDocument]], unclassified: list[UnclassifiedDocument], cancel_token: CancelToken | None
+        self,
+        classified: dict[str, list[DomainDocument]],
+        unclassified: list[UnclassifiedDocument],
+        reads: _BuildReads,
+        cancel_token: CancelToken | None,
     ) -> None:
         """Rellena `author`, `description` y `keywords` con lo que declara cada documento original, y `language` con
-        el idioma detectado en su texto convertido (1.5.0). Los originales de los sin clasificar se leen en la misma
-        pasada (1.6.0); su idioma ya lo puso `_describe_unclassified`.
+        el idioma detectado en su texto convertido al clasificarlo (1.5.0; desde 2.0.0 sin volver a leer el `.json`).
+        Los originales de los sin clasificar se leen en la misma pasada (1.6.0); su idioma ya lo puso
+        `_describe_unclassified`.
 
-        Un original ilegible o borrado deja los campos vacíos (`read_document_properties` no lanza); un `.json` de
-        conversión ilegible deja `language` en `None`. Los originales se leen de `properties_concurrency` en
-        `properties_concurrency` (1.6.0); el idioma, después y de uno en uno.
+        Un original ilegible o borrado deja los campos vacíos (`read_document_properties` no lanza). Los originales se
+        leen de `properties_concurrency` en `properties_concurrency` (1.6.0).
         """
         documents = [document for domain_documents in classified.values() for document in domain_documents]
         await self._read_properties([*documents, *unclassified], cancel_token)
         for document in documents:
-            conversion = await read_conversion_json(document.json_path)
-            if conversion is not None:
-                chunks_text, title = conversion
-                document.language = await asyncio.to_thread(detect_language, f"{title or ''}\n{chunks_text}")
-            checkpoint(cancel_token)
+            facts = reads.facts.get(document.json_path)
+            if facts is not None:
+                document.language = facts.language
 
     async def _read_properties(self, documents: Sequence[DomainDocument | UnclassifiedDocument], cancel_token: CancelToken | None) -> None:
         """Autor, descripción y palabras clave de cada original, con hasta `properties_concurrency` lecturas a la vez.
@@ -887,12 +1037,14 @@ class ContextBuilder:
 
         await self._for_each_bounded(documents, read, cancel_token)
 
-    async def _for_each_bounded[T](self, items: Sequence[T], action: Callable[[T], Awaitable[None]], cancel_token: CancelToken | None) -> None:
-        """`action` sobre cada elemento de `items`, con hasta `properties_concurrency` a la vez (1.6.0).
+    async def _for_each_bounded[T](
+        self, items: Sequence[T], action: Callable[[T], Awaitable[None]], cancel_token: CancelToken | None, *, limit: int | None = None
+    ) -> None:
+        """`action` sobre cada elemento de `items`, con hasta `limit` a la vez (`properties_concurrency` por defecto).
 
-        Cada tarea toma el siguiente elemento pendiente y comprueba la cancelación antes de empezarlo. Si una falla, las
-        demás se detienen y se propaga la primera excepción tal cual (no un `ExceptionGroup`, para que la cancelación
-        siga siendo `OperationCancelledError`); las demás distintas, si las hay, se registran como aviso.
+        Cada tarea toma el siguiente elemento pendiente, en orden, y comprueba la cancelación antes de empezarlo. Si una
+        falla, las demás se detienen y se propaga la primera excepción tal cual (no un `ExceptionGroup`, para que la
+        cancelación siga siendo `OperationCancelledError`); las demás distintas, si las hay, se registran como aviso.
         """
         pending = iter(items)
 
@@ -903,7 +1055,7 @@ class ContextBuilder:
 
         try:
             async with asyncio.TaskGroup() as group:
-                for _ in range(min(self.properties_concurrency, len(items))):
+                for _ in range(min(limit or self.properties_concurrency, len(items))):
                     group.create_task(worker())
         except BaseExceptionGroup as errors:
             first, *others = errors.exceptions
@@ -923,27 +1075,29 @@ class ContextBuilder:
 
         Solo rellena lo que falta; lo declarado por el documento nunca se sustituye. Mismas paradas que la
         Sub-fase B (`_AiRun`), con su propio recuento: `run.classified` cuenta los documentos en los que se rellenó
-        algo.
+        algo. Con `ai_concurrency`, varias llamadas a la vez (cada una solo toca su documento).
         """
         pending = [document for documents in classified.values() for document in documents if document.description is None or not document.keywords]
-        total = len(pending)
-        for index, document in enumerate(pending, start=1):
-            if run.stopped is None:
-                await self._try_enrich_document(client, document, run)
-                self._log_stop(run, total - index, stage="Enriquecimiento por IA detenido", outcome="quedan solo con lo que declaran")
-            await on_progress(index, total, document.source_path)
+
+        async def call(document: DomainDocument) -> None:
+            await self._try_enrich_document(client, document, run)
+
+        await self._run_ai_phase(
+            pending,
+            call,
+            run,
+            on_progress,
+            lambda document: document.source_path,
+            stage="Enriquecimiento por IA detenido",
+            outcome="quedan solo con lo que declaran",
+        )
 
     async def _try_enrich_document(self, client: DocumentEnrichmentClient, document: DomainDocument, run: _AiRun) -> None:
-        chunks_result = await read_conversion_json(document.json_path)
-        if chunks_result is None:
+        texts = await self._outgoing_texts(document.source_path, document.json_path, run)
+        if texts is None:
             return
-        chunks_text, title = chunks_result
-        if not run.may_send():
-            return
-
-        sent_text, sent_title = run.outgoing(document.source_path, chunks_text, title)
         try:
-            result = await client.enrich(chunks_text=sent_text, title=sent_title)
+            result = await client.enrich(chunks_text=texts[0], title=texts[1])
         except DocumentEnrichmentError as exc:
             run.record_failure(exc, DocumentEnrichmentAuthError, DocumentEnrichmentConnectionError)
             self.logger.warning(f"Fallo el enriquecimiento por IA de '{document.source_path}': {exc} — queda con lo que declara")

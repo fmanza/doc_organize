@@ -216,6 +216,19 @@ ContextBuilder(properties_concurrency=8)  # más lecturas a la vez; con un NAS d
 ContextBuilder(properties_concurrency=1)  # de una en una, como en 1.5.0
 ```
 
+**Una lectura por documento (2.0.0).** Sin IA, el `.json` de conversión de cada documento se lee una sola vez, también
+de `properties_concurrency` en `properties_concurrency`: de esa lectura salen la clasificación por reglas, los ejes, el
+idioma y, para los sin clasificar, la propuesta de las reglas (antes se leía dos o tres veces y de una en una). Solo se
+guarda el resultado, no el texto. Medido en un corpus de 213 documentos con 20 ms por lectura: de 13,1 s a 3,5 s.
+
+**IA en paralelo (2.0.0).** `ContextBuilder(ai_concurrency=4)` hace hasta 4 llamadas a la vez en la Sub-fase B y en el
+enriquecimiento (por defecto 1, como en 1.x). Los resultados se aplican en el orden de los documentos, así que el
+contexto es el mismo con 1 que con 4. El presupuesto (`ai_max_documents`) se reserva al despachar cada documento y
+nunca se supera; al parar por `ai_max_failures` no se envía nada más, pero las llamadas en vuelo terminan (puede haber
+hasta `ai_concurrency - 1` fallos de más). Con un proveedor en la nube suele acelerar casi en proporción (38 llamadas de
+0,5 s: de 19 s a 5 s con 4); con un modelo local en una sola GPU, las llamadas se encolan en el servidor y apenas
+cambia.
+
 PDFium (la librería que lee los PDF) no admite llamadas desde varios hilos a la vez, así que `read_document_properties`
 lee los bytes del PDF en paralelo y solo analiza uno cada vez, bajo un cerrojo. Un PDF de más de 16 MB se abre por
 ruta, para no cargarlo entero en memoria. `read_document_properties` se puede llamar desde varios hilos. El idioma se
