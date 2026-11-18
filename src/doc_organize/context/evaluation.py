@@ -243,21 +243,33 @@ def _gold_values(cell: object) -> list[str] | None:
     return [] if values == [NONE_LABEL] else [value for value in values if value != NONE_LABEL]
 
 
+def document_keys(source_paths: Iterable[str], roots: Sequence[str] | None = None) -> dict[str, str]:
+    """La clave de cada original (`source_path` → clave), con `roots` o, por defecto, con la carpeta común de todos.
+
+    Example:
+        >>> document_keys(["/mnt/e/ENS/a.pdf", "/mnt/e/ISO/b.pdf"])
+        {'/mnt/e/ENS/a.pdf': 'ENS/a.pdf', '/mnt/e/ISO/b.pdf': 'ISO/b.pdf'}
+    """
+    paths = list(source_paths)
+    if roots is None:
+        root = common_root(paths)
+        roots = [root] if root else []
+    return {path: _key(path, roots) for path in paths}
+
+
 def _predictions(context: Context, roots: Sequence[str] | None) -> dict[str, dict[str, tuple[list[str], str]]]:
     """Por clave de documento y eje: los valores asignados y quién los asignó."""
     documents = [document for domain in context.domains for document in domain.documents]
     unclassified = context.unclassified_details
-    if roots is None:
-        root = common_root([document.source_path for document in documents] + [document.source_path for document in unclassified])
-        roots = [root] if root else []
+    keys = document_keys([document.source_path for document in documents] + [detail.source_path for detail in unclassified], roots)
     found: dict[str, dict[str, tuple[list[str], str]]] = {}
     for document in documents:
-        found[_key(document.source_path, roots)] = {
+        found[keys[document.source_path]] = {
             axis: ([value.slug for value in values], values[0].classified_by if values else UNCLASSIFIED)
             for axis, values in document.classification.axes.items()
         }
     for detail in unclassified:
-        found[_key(detail.source_path, roots)] = {}
+        found[keys[detail.source_path]] = {}
     return found
 
 
@@ -315,6 +327,7 @@ __all__ = [
     "LabelConfusion",
     "common_root",
     "document_key",
+    "document_keys",
     "evaluate_classification",
     "load_gold_xlsx",
 ]

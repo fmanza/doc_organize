@@ -53,6 +53,11 @@ _EXPORTS: dict[str, str] = {
     "GoldLabel": "doc_organize.context.evaluation",
     "EvaluationReport": "doc_organize.context.evaluation",
     "AxisEvaluation": "doc_organize.context.evaluation",
+    # Decisiones de personas (2.0.0, F6)
+    "ClassificationDecision": "doc_organize.core.models",
+    "ClassificationDecisionStore": "doc_organize.context.decisions",
+    "DecisionIssue": "doc_organize.core.models",
+    "gold_from_decisions": "doc_organize.context.decisions",
     # Diagnóstico del entorno (2.0.0, F2)
     "check_environment": "doc_organize.diagnostics",
     # Cliente único de IA (2.0.0, G1)
@@ -171,6 +176,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
     from doc_organize.cache.cache_manager import CacheManager
     from doc_organize.context.context_builder import ContextBuilder
     from doc_organize.context.context_registry import ContextRegistry
+    from doc_organize.context.decisions import ClassificationDecisionStore, gold_from_decisions
     from doc_organize.context.evaluation import (
         AxisEvaluation,
         EvaluationReport,
@@ -211,6 +217,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         AvStatus,
         AxisValue,
         CacheEntry,
+        ClassificationDecision,
         Context,
         ContextBuildEvent,
         ContextBuildEventType,
@@ -218,6 +225,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         ContextDeleteEventType,
         ConversionResult,
         ConversionStatus,
+        DecisionIssue,
         DedupEvent,
         DedupEventType,
         DeduplicationReport,
