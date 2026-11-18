@@ -164,60 +164,6 @@ class IncompleteConversionArtifactsError(ContextError):
     """
 
 
-class DomainClassificationError(DocOrganizeError):
-    """Error base del cliente de clasificacion de dominios por IA (`doc_organize.ai`, Sub-fase B)."""
-
-
-class DomainClassificationAuthError(DomainClassificationError):
-    """El LiteLLM Proxy rechazo la virtual key de clasificacion (credencial invalida o sin permiso)."""
-
-
-class DomainClassificationConnectionError(DomainClassificationError):
-    """Error de red o timeout consultando el LiteLLM Proxy para clasificar un documento."""
-
-
-class TaxonomyClassificationError(DocOrganizeError):
-    """Error base del cliente de clasificacion combinada dominio + tipo de material por IA (`doc_organize.ai`, Sub-fase B, manifiesto de taxonomia)."""
-
-
-class TaxonomyClassificationAuthError(TaxonomyClassificationError):
-    """El LiteLLM Proxy rechazo la virtual key de clasificacion por manifiesto (credencial invalida o sin permiso)."""
-
-
-class TaxonomyClassificationConnectionError(TaxonomyClassificationError):
-    """Error de red o timeout consultando el LiteLLM Proxy para clasificar un documento por manifiesto."""
-
-
-class DocumentEnrichmentError(DocOrganizeError):
-    """Error base del cliente que describe documentos por IA (`doc_organize.ai`, 1.5.0)."""
-
-
-class DocumentEnrichmentAuthError(DocumentEnrichmentError):
-    """El LiteLLM Proxy rechazo la virtual key de descripcion de documentos (credencial invalida o sin permiso)."""
-
-
-class DocumentEnrichmentConnectionError(DocumentEnrichmentError):
-    """Error de red o timeout consultando el LiteLLM Proxy para describir un documento."""
-
-
-class TaxonomyManifestDraftError(DocOrganizeError):
-    """Error base del cliente de propuesta de manifiesto de taxonomia por IA (`doc_organize.ai`).
-
-    A diferencia de `TaxonomyClassificationError` (Sub-fase B, elige DENTRO de un catalogo ya
-    confirmado), aqui el catalogo mismo es la propuesta que falla -- nunca degrada en silencio a
-    un borrador vacio (violaria `TaxonomyManifestDraftResult.domains`/`material_types` min_length=1), siempre
-    se propaga.
-    """
-
-
-class TaxonomyManifestDraftAuthError(TaxonomyManifestDraftError):
-    """El LiteLLM Proxy rechazo la virtual key de propuesta de manifiesto (credencial invalida o sin permiso)."""
-
-
-class TaxonomyManifestDraftConnectionError(TaxonomyManifestDraftError):
-    """Error de red o timeout consultando el LiteLLM Proxy para proponer un manifiesto de taxonomia."""
-
-
 class AiError(DocOrganizeError):
     """Error base del cliente único de IA (`doc_organize.ai.LlmClient`, 2.0.0): el proxy respondió con un error."""
 
@@ -254,13 +200,7 @@ __all__ = [
     "ContextNotFoundError",
     "ConversionError",
     "DocOrganizeError",
-    "DocumentEnrichmentAuthError",
-    "DocumentEnrichmentConnectionError",
-    "DocumentEnrichmentError",
     "DocumentError",
-    "DomainClassificationAuthError",
-    "DomainClassificationConnectionError",
-    "DomainClassificationError",
     "DomainNotFoundError",
     "IncompleteConversionArtifactsError",
     "InvalidPathError",
@@ -276,12 +216,6 @@ __all__ = [
     "ScannedFolderInUseError",
     "ScannedFolderNotFoundError",
     "SiteBuildError",
-    "TaxonomyClassificationAuthError",
-    "TaxonomyClassificationConnectionError",
-    "TaxonomyClassificationError",
-    "TaxonomyManifestDraftAuthError",
-    "TaxonomyManifestDraftConnectionError",
-    "TaxonomyManifestDraftError",
     "TaxonomyManifestError",
     "TaxonomyTemplateError",
     "UsageSourceAuthError",

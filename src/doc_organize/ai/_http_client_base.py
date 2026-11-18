@@ -1,8 +1,8 @@
 """
 Base compartida de los clientes HTTP de `ai/` (LiteLLM Proxy / GitHub Billing).
 
-Los clientes de este paquete (`DomainClassificationClient`, `TaxonomyClassificationClient`,
-`TaxonomyManifestDraftClient`, `LiteLLMUsageClient`, `GitHubCopilotUsageClient`) repetían de forma
+Los clientes de este paquete (`LlmClient`, `LiteLLMUsageClient`, `GitHubCopilotUsageClient`; hasta 1.7, también los
+cuatro clientes de clasificación, enriquecimiento y borrador) repetían de forma
 idéntica la construcción de `httpx.AsyncClient`, el ciclo de vida de context manager async, y el
 mapeo try/except de timeout/error de red/401-403/HTTP de error a sus excepciones de dominio
 respectivas (`/tech-debt`, sesión 2026-09-17). Esta clase centraliza esa parte mecánica; cada

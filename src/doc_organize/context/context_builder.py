@@ -8,9 +8,12 @@ from collections import Counter
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 from doc_organize import __version__
-from doc_organize.ai import DocumentEnrichmentClient, DomainClassificationClient, TaxonomyClassificationClient
+from doc_organize.ai.llm_client import LlmClient, LlmResult, ResponseFormat
+from doc_organize.ai.prompts import PromptRegistry
+from doc_organize.ai.services import AxisRequest, ClassificationAnswer, classify_document, enrich_document
 from doc_organize.context.axis_rules import TAG_AXIS_TEXT_CHARS, AxisRuleScorer, FoldedText
 from doc_organize.context.context_history import ContextHistoryPolicy, append_context_build, build_record
 from doc_organize.context.context_registry import ContextRegistry
@@ -19,23 +22,15 @@ from doc_organize.context.domain_classifier import DomainClassifier, MaterialTyp
 from doc_organize.context.language_detection import detect_language
 from doc_organize.context.reorganizer import assign_organized_paths
 from doc_organize.core.constants import UNCLASSIFIED_SLUG
-from doc_organize.core.exceptions import (
-    ContextError,
-    ContextNotFoundError,
-    DocumentEnrichmentAuthError,
-    DocumentEnrichmentConnectionError,
-    DocumentEnrichmentError,
-    DomainClassificationAuthError,
-    DomainClassificationConnectionError,
-    DomainClassificationError,
-    TaxonomyClassificationAuthError,
-    TaxonomyClassificationConnectionError,
-    TaxonomyClassificationError,
-)
+from doc_organize.core.exceptions import AiAuthError, AiConnectionError, AiError, ContextError, ContextNotFoundError
 from doc_organize.core.models import (
     CONTEXT_SCHEMA_VERSION,
     LEGACY_FOLDER_AXIS_KEY,
     AiClassificationStopReason,
+    AiPhaseStats,
+    AiScope,
+    AiStats,
+    AiTask,
     AxisClassifiedBy,
     AxisValue,
     Context,
@@ -46,17 +41,15 @@ from doc_organize.core.models import (
     DomainDocument,
     DomainStatus,
     Project,
+    PromptProvenance,
     TaxonomyAxis,
-    TaxonomyClassificationResult,
     TaxonomyEntry,
     TaxonomyManifest,
     UnclassifiedDocument,
 )
 from doc_organize.core.progress import CancelToken, Phase, ProgressCallback, ProgressEvent, checkpoint
 from doc_organize.projects.layout import ProjectLayout
-from doc_organize.security.credentials import redact_credentials
 from doc_organize.utils.logging import get_logger
-from doc_organize.utils.text_clean import clean_text
 
 _DEFAULT_THRESHOLD = 0.5
 #: Medido en un NAS por SMB (G44, 2026-11-16): con 4 lecturas a la vez, 28 ms por documento frente a 88 ms de una en
@@ -75,11 +68,10 @@ lógica especial: `"sin-clasificar".replace("-", " ").title()` ya da un nombre l
 
 @dataclass
 class _AiRun:
-    """Estado de la Sub-fase B en una construcción (L-3a…L-3c): recuentos, racha de errores de conexión y parada.
+    """Estado de una fase de IA en una construcción (L-3a…L-3c): recuentos, tokens, racha de errores y parada.
 
-    Compartido por los dos modos (`_classify_with_ai` y `_classify_with_manifest_ai`). Un documento cuenta como
-    enviado al llamar a `client.classify()` una vez (los reintentos de transporte del cliente no cuentan aparte), así
-    que `sent == classified + failed + enviados sin asignación` siempre.
+    Un documento cuenta como enviado al reservar su llamada (`may_send`; los reintentos del cliente no cuentan aparte),
+    así que `sent == classified + failed + enviados sin asignación` siempre.
     """
 
     max_failures: int | None = None
@@ -90,24 +82,20 @@ class _AiRun:
     consecutive_connection_failures: int = 0
     stopped: AiClassificationStopReason | None = None
     stop_logged: bool = False
-    #: Redactar credenciales del título y el texto antes de enviarlos (1.7.0, `ContextBuilder(ai_redact_credentials=)`).
-    redact: bool = True
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    response_format: ResponseFormat | None = None
     #: Recuento por documento y regla de lo redactado, compartido por todas las fases de IA de una construcción.
     credential_ledger: dict[str, Counter[str]] | None = None
 
-    def outgoing(self, source_path: str, chunks_text: str, title: str | None) -> tuple[str, str | None]:
-        """Título y texto tal como salen hacia la IA: redactados si `redact`, y lo redactado anotado en el registro.
+    def redaction_note(self, source_path: str) -> Callable[[dict[str, int]], None]:
+        """Callback para `LlmClient`: anota lo redactado en lo enviado de `source_path` (aunque la llamada falle)."""
 
-        Solo para enviar: las reglas, el idioma y lo que se guarda siguen usando el texto original.
-        """
-        if not self.redact:
-            return chunks_text, title
-        body = redact_credentials(chunks_text)
-        head = redact_credentials(title) if title else None
-        found = [*body.findings, *(head.findings if head is not None else ())]
-        if found and self.credential_ledger is not None:
-            self.credential_ledger.setdefault(source_path, Counter()).update(finding.rule for finding in found)
-        return body.text, head.text if head is not None else title
+        def note(counts: dict[str, int]) -> None:
+            if self.credential_ledger is not None:
+                self.credential_ledger.setdefault(source_path, Counter()).update(counts)
+
+        return note
 
     def may_send(self) -> bool:
         """Reserva un envío si se puede; al agotar `max_documents` marca la parada `"budget"` y devuelve `False`."""
@@ -123,28 +111,38 @@ class _AiRun:
         """Devuelve un envío reservado que no llegó a hacerse (el `.json` no se pudo leer, 2.0.0)."""
         self.sent -= 1
 
-    def record_response(self) -> None:
-        """La llamada respondió: corta la racha de errores de conexión (el recuento se hace al aplicar el resultado)."""
+    def record_response(self, result: LlmResult[Any]) -> None:
+        """La llamada respondió: corta la racha de errores de conexión y suma sus tokens (el recuento de asignados se
+        hace al aplicar el resultado)."""
         self.consecutive_connection_failures = 0
+        self.prompt_tokens += result.usage.prompt_tokens or 0
+        self.completion_tokens += result.usage.completion_tokens or 0
+        self.response_format = result.response_format
 
-    def record_result(self, *, assigned: bool) -> None:
-        """La llamada respondió: corta la racha de errores de conexión y cuenta si asignó algún eje."""
-        self.record_response()
-        if assigned:
-            self.classified += 1
-
-    def record_failure(self, exc: Exception, auth_error_cls: type[Exception], connection_error_cls: type[Exception]) -> None:
+    def record_failure(self, exc: AiError) -> None:
         """La llamada falló: `auth` para en el acto; `connection` para tras `max_failures` seguidos."""
         self.failed += 1
-        if isinstance(exc, auth_error_cls):
+        if isinstance(exc, AiAuthError):
             self.stopped = "auth"
-        elif isinstance(exc, connection_error_cls):
+        elif isinstance(exc, AiConnectionError):
             self.consecutive_connection_failures += 1
             if self.max_failures is not None and self.consecutive_connection_failures >= self.max_failures:
                 self.stopped = "connection"
         else:
             # El servidor respondió (5xx, respuesta mal formada...): no es un error de conexión.
             self.consecutive_connection_failures = 0
+
+    def stats(self) -> AiPhaseStats:
+        """Los recuentos de la fase, para `Context.ai_stats`."""
+        return AiPhaseStats(
+            sent=self.sent,
+            assigned=self.classified,
+            failed=self.failed,
+            stopped=self.stopped,
+            prompt_tokens=self.prompt_tokens,
+            completion_tokens=self.completion_tokens,
+            response_format=self.response_format,
+        )
 
 
 @dataclass
@@ -164,21 +162,11 @@ class _BuildReads:
     facts: dict[str, _ReadFacts] = field(default_factory=dict)
 
 
-def _model_used(client: DomainClassificationClient | TaxonomyClassificationClient | DocumentEnrichmentClient | None, run: _AiRun) -> str | None:
-    """Alias de modelo del cliente si esa fase de IA llegó a enviar algún documento; si no, `None` (1.5.0)."""
-    if client is None or run.sent == 0:
-        return None
-    return client.config.model
-
-
-def _classification_model(
-    manifest: TaxonomyManifest | None,
-    domain_client: DomainClassificationClient | None,
-    taxonomy_client: TaxonomyClassificationClient | None,
-    run: _AiRun,
-) -> str | None:
-    """Modelo de la Sub-fase B: el cliente de 2 ejes en modo manifiesto, el de 1 eje si no (1.5.0)."""
-    return _model_used(taxonomy_client if manifest is not None else domain_client, run)
+def _provenance(llm: LlmClient | None, prompts: PromptRegistry, runs: Sequence[tuple[AiTask, _AiRun]]) -> list[PromptProvenance]:
+    """Prompt y modelo de cada tarea que llegó a enviar algún documento (2.0.0, G1)."""
+    if llm is None:
+        return []
+    return [prompts.get(task).provenance(llm.model_for(task)) for task, run in runs if run.sent > 0]
 
 
 def _rules_value(slug: str, names: dict[str, str], confidence: float) -> list[AxisValue]:
@@ -215,12 +203,11 @@ class ContextBuilder:
     Dos sub-fases (ver `.ai/sessions/2026-09-08-organizacion-documental-contextos/00_REQUEST.md`):
 
     - **Sub-fase A** (siempre): `DomainClassifier`, reglas sobre `chunks`/`title`.
-    - **Sub-fase B** (opt-in vía `ai_classification_enabled` + `ai_classification_client`, o
-      `+ taxonomy_classification_client` en modo manifiesto): fallback por IA, **solo** para
+    - **Sub-fase B** (opt-in: `build(llm=..., ai_scope="unclassified")`): clasificación con IA, **solo** para
       los documentos que la Sub-fase A deja sin clasificar (en cualquiera de los dos ejes, en
       modo manifiesto), y **solo** eligiendo entre el catálogo ya confirmado por la Sub-fase A
       (el propio catálogo predefinido/manifiesto, o los dominios descubiertos) — nunca crea un
-      dominio o tipo de material nuevo. En modo manifiesto, `TaxonomyClassificationClient`
+      dominio o tipo de material nuevo. En modo manifiesto, `classify_document`
       resuelve ambos ejes en una sola llamada combinada, pero solo se aplica al eje que seguía
       en el placeholder `sin-clasificar` — un eje que la Sub-fase A ya clasificó con confianza
       nunca se sobreescribe.
@@ -261,7 +248,6 @@ class ContextBuilder:
         *,
         history_policy: ContextHistoryPolicy | None = None,
         properties_concurrency: int = _DEFAULT_PROPERTIES_CONCURRENCY,
-        ai_redact_credentials: bool = True,
         ai_concurrency: int = 1,
     ) -> None:
         """
@@ -270,16 +256,14 @@ class ContextBuilder:
             history_policy: Giro de `CONTEXT_HISTORY.jsonl` (1.6.0); `None` = `ContextHistoryPolicy()` (5 MB, 4 copias).
             properties_concurrency: Originales cuyas propiedades se leen a la vez (1.6.0). En una carpeta de red, 4
                 lecturas a la vez cuestan un tercio que de una en una; `1` = una detrás de otra, como en 1.5.0.
-            ai_redact_credentials: Redacta las credenciales (`doc_organize.security.redact_credentials`) del título y el texto
-                de cada documento antes de enviarlo a la IA, en la Sub-fase B y el enriquecimiento (1.7.0). Por
-                defecto **activado**: cambia lo que sale hacia la IA, no lo que se clasifica con reglas ni lo que se
-                guarda. Lo redactado se resume, sin valores, en `Context.credential_findings`.
-
-            ai_concurrency: Llamadas a la IA a la vez en cada fase (Sub-fase B y enriquecimiento, 2.0.0). `1` = una
+            ai_concurrency: Llamadas a la IA a la vez en cada fase (clasificación y descripción, 2.0.0). `1` = una
                 detrás de otra, como en 1.x. Los resultados se aplican en el orden de los documentos: el contexto es el
                 mismo con 1 que con 4. `ai_max_documents` nunca se supera; tras alcanzar `ai_max_failures` no se envía
                 nada más, pero las llamadas que ya estaban en vuelo pueden sumar hasta `ai_concurrency - 1` fallos. Ante
                 respuestas 429, ver los reintentos del cliente.
+
+        La redacción de credenciales de lo que sale hacia la IA la hace `LlmClient` (`AiSettings.redact_credentials`,
+        2.0.0); hasta 1.7 era `ContextBuilder(ai_redact_credentials=)`.
 
         Raises:
             ValueError: Si `properties_concurrency` o `ai_concurrency` es menor que 1.
@@ -292,116 +276,83 @@ class ContextBuilder:
         self.registry = registry or ContextRegistry()
         self.history_policy = history_policy or ContextHistoryPolicy()
         self.properties_concurrency = properties_concurrency
-        self.ai_redact_credentials = ai_redact_credentials
         self.logger = get_logger(__name__)
 
     async def build(
         self,
         project: Project,
         documents: list[ConversionResult],
+        *,
         candidate_domains: list[str] | None = None,
         threshold: float = _DEFAULT_THRESHOLD,
-        ai_classification_enabled: bool = False,
-        ai_classification_client: DomainClassificationClient | None = None,
-        output_folder_name: str = "organizado",
-        on_ai_progress: Callable[[int, int, str], Awaitable[None]] | None = None,
         taxonomy_manifest: TaxonomyManifest | None = None,
-        taxonomy_classification_client: TaxonomyClassificationClient | None = None,
         taxonomy_template_name: str | None = None,
-        *,
+        output_folder_name: str = "organizado",
+        llm: LlmClient | None = None,
+        ai_scope: AiScope = "off",
+        enrich: bool = False,
+        prompts: PromptRegistry | None = None,
         on_progress: ProgressCallback | None = None,
         cancel_token: CancelToken | None = None,
         ai_max_failures: int | None = None,
         ai_max_documents: int | None = None,
-        ai_enrichment_enabled: bool = False,
-        ai_enrichment_client: DocumentEnrichmentClient | None = None,
     ) -> Context:
         """Clasifica `documents` y persiste el contexto de `project`.
 
-        Sin `taxonomy_manifest` (default): comportamiento sin cambios — Sub-fase A
-        (`DomainClassifier`, un eje) + Sub-fase B opcional (IA, fallback vía
-        `ai_classification_client`). Con `taxonomy_manifest`: clasificación de 2 ejes
-        (dominio + tipo de material de origen) vía `_classify_with_manifest` (reglas) +
-        Sub-fase B opcional vía `taxonomy_classification_client` (`_classify_with_manifest_ai`,
-        una sola llamada combinada para ambos ejes) — `ai_classification_client` (de un eje)
-        se ignora en modo manifiesto, que usa `taxonomy_classification_client` en su lugar.
+        Sin `taxonomy_manifest`: un eje (dominio), por reglas (`DomainClassifier`). Con `taxonomy_manifest`: todos sus
+        ejes, por reglas (`_classify_with_manifest`). Con `llm` y `ai_scope="unclassified"`, la IA clasifica después lo
+        que las reglas dejaron sin clasificar en un eje organizador (la Sub-fase B de 1.x), eligiendo solo entre el
+        catálogo (nunca crea un valor) y sin sustituir nunca lo que decidieron las reglas.
 
         Args:
             project: Proyecto propietario del contexto.
-            documents: Documentos ya convertidos (`converter/`) a clasificar.
-            candidate_domains: Catálogo de dominios permitidos, o `None` para descubrirlos
-                del contenido escaneado (ver `DomainClassifier`). Ignorado si se da
-                `taxonomy_manifest` (su catálogo de dominios manda).
-            threshold: Score mínimo de la Sub-fase A antes de considerar un documento
-                candidato a la Sub-fase B (o "sin clasificar"/placeholder según el modo).
-            ai_classification_enabled: Activa la Sub-fase B — opt-in explícito, se
-                persiste en `Context.ai_classification_enabled`. En modo manifiesto activa
-                `_classify_with_manifest_ai` en vez de `_classify_with_ai` (ver arriba).
-            ai_classification_client: Cliente ya configurado para la Sub-fase B de un eje. Si
-                `ai_classification_enabled=True` pero no se pasa cliente, la Sub-fase B
-                simplemente no se ejecuta (los documentos quedan sin clasificar). Ignorado si
-                hay `taxonomy_manifest`.
-            output_folder_name: Nombre de la carpeta de salida reorganizada, relativa
-                a `root_path` — solo tiene efecto en la primera construcción de un
-                proyecto; el consumidor reutiliza el valor ya persistido en
-                reconstrucciones posteriores (el campo queda fijo tras la primera vez).
-            on_ai_progress: Si se da, se invoca `await on_ai_progress(index, total, source_path)`
-                tras cada documento intentado en la Sub-fase B (clasificado o no),
-                `index` empezando en 1 — pensado para que el consumidor
-                retransmita el progreso en tiempo real (semáforo). `None` (default)
-                no tiene efecto ninguno: los llamadores existentes no cambian de
-                comportamiento.
-            taxonomy_manifest: Manifiesto de taxonomía del proyecto (ver
-                `doc_organize.context.taxonomy_manifest.load_taxonomy_manifest`), o `None`
-                (default) para el modo de un eje sin cambios.
-            taxonomy_classification_client: Cliente ya configurado para la Sub-fase B en modo
-                manifiesto (2 ejes, una sola llamada combinada). Sin efecto si `taxonomy_manifest`
-                es `None`, o si `ai_classification_enabled=False`.
-            taxonomy_template_name: Nombre de la plantilla de `TaxonomyTemplateRegistry` de la que
-                proviene `taxonomy_manifest`, o `None` si viene de un `taxonomy_manifest.md` local o
-                si no hay manifiesto — puramente informativo, se persiste en
-                `Context.taxonomy_template_name` para que la UI pueda mostrar/preseleccionar qué
-                plantilla se usó; no afecta a la clasificación (ya resuelta en `taxonomy_manifest`).
+            documents: Documentos ya convertidos (`converter/`) a clasificar. Con `ConversionResult.source_sha256`, el
+                contexto podrá comprobar su frescura (`check_context_freshness`).
+            candidate_domains: Catálogo de dominios permitidos, o `None` para descubrirlos de las carpetas. Ignorado si
+                se da `taxonomy_manifest` (su catálogo manda).
+            threshold: Confianza mínima de las reglas para dar por clasificado un eje.
+            taxonomy_manifest: Manifiesto de taxonomía (`load_taxonomy_manifest` o una plantilla), o `None`.
+            taxonomy_template_name: Plantilla de la que viene `taxonomy_manifest`, si es de una plantilla (informativo,
+                `Context.taxonomy_template_name`).
+            output_folder_name: Carpeta de salida reorganizada, relativa a `root_path`; solo tiene efecto en la primera
+                construcción (el consumidor reutiliza la persistida).
+            llm: Cliente de IA (`LlmClient`). Sin él no se llama a ninguna IA.
+            ai_scope: `"off"` (por defecto) o `"unclassified"`: clasificar con IA los documentos que las reglas dejaron
+                sin clasificar en algún eje organizador. Se guarda en `Context.ai_stats.scope`.
+            enrich: Describir con IA (tarea `enrich`) los documentos clasificados que no declaran descripción o palabras
+                clave; solo se rellena lo que falta (`DomainDocument.ai_filled`). El autor nunca sale de la IA.
+            prompts: Prompts de cada tarea; por defecto, los del proyecto (`<raíz>/.doc_organize/prompts/`) o los
+                empaquetados.
+            on_progress: Recibe un `ProgressEvent` (`operation="context_build"`, fase `classification` o `enrichment`)
+                tras cada documento de una fase de IA (L-2). Un fallo del callback se registra y no para la construcción.
+            cancel_token: Si se cancela, la construcción para entre documentos con `OperationCancelledError`, **sin**
+                persistir un contexto a medias (L-2).
+            ai_max_failures: Una fase de IA se detiene tras este número de errores de conexión **seguidos**
+                (`AiPhaseStats.stopped = "connection"`, L-3a); un 401/403 la detiene siempre en el acto (`"auth"`).
+            ai_max_documents: Tope de documentos enviados en cada fase de IA (L-3b); al alcanzarlo, `"budget"`.
 
-            on_progress: Recibe un `ProgressEvent` (`operation="context_build"`, fase `classification`) tras cada
-                documento de la Sub-fase B (L-2). Un fallo del callback se registra y no para la construcción.
-            cancel_token: Si se cancela, la construcción para **entre documentos** de la Sub-fase B (o antes de
-                empezar) con `OperationCancelledError`, **sin** persistir un contexto a medias (L-2).
-            ai_max_failures: Si se da, la Sub-fase B se detiene tras este número de errores de conexión **seguidos**
-                (`Context.ai_classification_stopped = "connection"`, L-3a). `None` (por defecto): nunca para por eso.
-                Un error de autenticación (401/403) la detiene siempre en el acto (`"auth"`), con o sin este
-                parámetro: no se hace ni una petición más.
-            ai_max_documents: Tope de documentos enviados a la IA en esta construcción (L-3b). Al alcanzarlo con
-                documentos aún pendientes, la Sub-fase B se detiene (`"budget"`). `None` (por defecto): sin tope.
-
-            Al detenerse la Sub-fase B, los documentos pendientes no se leen ni se envían: quedan sin clasificar (o en
-            el placeholder `sin-clasificar`, en modo manifiesto), siguen emitiendo su evento de progreso (y el
-            `cancel_token` se sigue comprobando entre ellos), y la construcción termina y persiste el contexto con
-            normalidad. Los recuentos quedan en `Context.ai_documents_sent/_classified/_failed` (L-3c).
-
-            ai_enrichment_enabled: Activa el enriquecimiento por IA (1.5.0) — opt-in explícito, se persiste en
-                `Context.ai_enrichment_enabled`. Sin él, `author`, `description` y `keywords` de cada `DomainDocument`
-                salen solo de las propiedades que declara el propio documento (PDF y Office), que se leen siempre.
-            ai_enrichment_client: Cliente ya configurado. Con `ai_enrichment_enabled=True`, se llama una vez por
-                documento clasificado que no declara descripción o palabras clave, y solo se rellena lo que falta
-                (`DomainDocument.ai_filled`); el autor nunca sale de la IA. Usa los mismos `ai_max_failures` y
-                `ai_max_documents` que la Sub-fase B, pero con su propio recuento: cada fase puede enviar hasta
-                `ai_max_documents`. Al detenerse, el resto queda solo con lo declarado (`Context.ai_enrichment_*`).
+            Al detenerse una fase, los documentos pendientes no se envían y la construcción termina con normalidad. Los
+            recuentos y tokens quedan en `Context.ai_stats`, y el prompt y modelo de cada tarea en
+            `Context.ai_provenance`.
 
         Returns:
             El `Context` construido y ya persistido vía `self.registry`.
 
         Raises:
             OperationCancelledError: Se canceló con `cancel_token`.
-            ValueError: `ai_max_failures < 1` o `ai_max_documents < 0`.
+            ValueError: `ai_max_failures < 1`, `ai_max_documents < 0`, o `ai_scope`/`enrich` sin `llm`.
         """
         if ai_max_failures is not None and ai_max_failures < 1:
             raise ValueError("ai_max_failures debe ser >= 1 (o None)")
         if ai_max_documents is not None and ai_max_documents < 0:
             raise ValueError("ai_max_documents debe ser >= 0 (o None)")
+        if (ai_scope != "off" or enrich) and llm is None:
+            raise ValueError("ai_scope y enrich necesitan un cliente de IA (llm)")
         checkpoint(cancel_token)
+        prompts = prompts if prompts is not None else PromptRegistry(project.root_path)
         credential_ledger: dict[str, Counter[str]] = {}
-        ai_run = self._new_ai_run(ai_max_failures, ai_max_documents, credential_ledger)
+        ai_run = _AiRun(max_failures=ai_max_failures, max_documents=ai_max_documents, credential_ledger=credential_ledger)
+        enrichment_run = _AiRun(max_failures=ai_max_failures, max_documents=ai_max_documents, credential_ledger=credential_ledger)
 
         def _report(phase: Phase, index: int, total: int, source_path: str) -> None:
             if on_progress is not None:
@@ -409,11 +360,9 @@ class ContextBuilder:
                     on_progress(ProgressEvent(operation="context_build", phase=phase, processed=index, total=total, current=source_path))
                 except Exception as exc:  # noqa: BLE001 - un callback del consumidor nunca debe parar la operación
                     self.logger.warning(f"El callback de progreso falló: {type(exc).__name__}: {exc}")
-            checkpoint(cancel_token)  # L-2: parada entre documentos de la Sub-fase B o del enriquecimiento
+            checkpoint(cancel_token)  # L-2: parada entre documentos de una fase de IA
 
         async def _ai_progress(index: int, total: int, source_path: str) -> None:
-            if on_ai_progress is not None:
-                await on_ai_progress(index, total, source_path)
             _report("classification", index, total, source_path)
 
         async def _enrichment_progress(index: int, total: int, source_path: str) -> None:
@@ -424,29 +373,20 @@ class ContextBuilder:
             classified, unclassified = await self._classify_with_manifest(
                 documents, taxonomy_manifest, threshold, reads=reads, cancel_token=cancel_token
             )
-            if ai_classification_enabled and taxonomy_classification_client is not None:
-                classified = await self._classify_with_manifest_ai(
-                    taxonomy_classification_client, classified, taxonomy_manifest, on_progress=_ai_progress, run=ai_run
-                )
+            if llm is not None and ai_scope == "unclassified":
+                classified = await self._classify_with_manifest_ai(llm, prompts, classified, taxonomy_manifest, on_progress=_ai_progress, run=ai_run)
         else:
             classifier = DomainClassifier(candidate_domains=candidate_domains, threshold=threshold)
             classified, unclassified = await self._classify_by_rules(documents, classifier, reads, cancel_token)
-
-            if ai_classification_enabled and ai_classification_client is not None and unclassified:
+            if llm is not None and ai_scope == "unclassified" and unclassified:
                 classified, unclassified = await self._classify_with_ai(
-                    ai_classification_client,
-                    classified,
-                    unclassified,
-                    classifier,
-                    on_progress=_ai_progress,
-                    run=ai_run,
+                    llm, prompts, classified, unclassified, classifier, on_progress=_ai_progress, run=ai_run
                 )
 
         unclassified_details = self._describe_unclassified(unclassified, reads)
-        enrichment_run = self._new_ai_run(ai_max_failures, ai_max_documents, credential_ledger)
-        await self._describe_documents(
-            classified, unclassified_details, reads, ai_enrichment_enabled, ai_enrichment_client, enrichment_run, _enrichment_progress, cancel_token
-        )
+        await self._apply_document_properties(classified, unclassified_details, reads, cancel_token)
+        if llm is not None and enrich:
+            await self._enrich_with_ai(llm, prompts, classified, on_progress=_enrichment_progress, run=enrichment_run)
 
         has_predefined_catalog = bool(candidate_domains) or taxonomy_manifest is not None
         manifest_domains_by_slug = (
@@ -472,26 +412,16 @@ class ContextBuilder:
             taxonomy_axes=_context_axes(taxonomy_manifest, domains),
             project_name=project.name,
             output_folder_name=output_folder_name,
-            ai_classification_enabled=ai_classification_enabled,
             ai_fallback_threshold=threshold,
-            ai_classification_model=_classification_model(taxonomy_manifest, ai_classification_client, taxonomy_classification_client, ai_run),
-            ai_enrichment_model=_model_used(ai_enrichment_client, enrichment_run),
             built_with_version=__version__,
             domains=domains,
             unclassified_documents=[document.source_path for document in unclassified],
             unclassified_details=unclassified_details,
             taxonomy_manifest_used=taxonomy_manifest is not None,
             taxonomy_template_name=taxonomy_template_name,
-            ai_classification_stopped=ai_run.stopped,
-            ai_documents_sent=ai_run.sent,
-            ai_documents_classified=ai_run.classified,
-            ai_documents_failed=ai_run.failed,
-            ai_enrichment_enabled=ai_enrichment_enabled,
-            ai_enrichment_stopped=enrichment_run.stopped,
-            ai_enrichment_sent=enrichment_run.sent,
-            ai_enrichment_applied=enrichment_run.classified,
-            ai_enrichment_failed=enrichment_run.failed,
-            ai_redact_credentials=self.ai_redact_credentials,
+            ai_stats=AiStats(scope=ai_scope, enrich=enrich, classification=ai_run.stats(), enrichment=enrichment_run.stats()),
+            ai_provenance=_provenance(llm, prompts, [("classify", ai_run), ("enrich", enrichment_run)]),
+            ai_redact_credentials=llm.settings.redact_credentials if llm is not None else True,
             credential_findings=[
                 DocumentCredentialFindings(source_path=source_path, rules=dict(sorted(counts.items())))
                 for source_path, counts in sorted(credential_ledger.items())
@@ -504,9 +434,6 @@ class ContextBuilder:
         await self._save_and_record(project, context)
         self.logger.info(f"Contexto construido para '{project.name}': {len(domains)} dominio(s), {len(unclassified)} documento(s) sin clasificar")
         return context
-
-    def _new_ai_run(self, max_failures: int | None, max_documents: int | None, ledger: dict[str, Counter[str]]) -> _AiRun:
-        return _AiRun(max_failures=max_failures, max_documents=max_documents, redact=self.ai_redact_credentials, credential_ledger=ledger)
 
     async def _read_conversions[T](
         self,
@@ -720,31 +647,25 @@ class ContextBuilder:
 
     async def _classify_with_manifest_ai(
         self,
-        client: TaxonomyClassificationClient,
+        llm: LlmClient,
+        prompts: PromptRegistry,
         classified: dict[str, list[DomainDocument]],
         manifest: TaxonomyManifest,
         on_progress: Callable[[int, int, str], Awaitable[None]] | None = None,
         run: _AiRun | None = None,
     ) -> dict[str, list[DomainDocument]]:
-        """Sub-fase B en modo manifiesto: para cada documento que `_classify_with_manifest` dejó
-        con el placeholder `_UNCLASSIFIED_SLUG` en el eje de dominio y/o en el de tipo de
-        material, intenta resolver AMBOS ejes en una sola llamada combinada a `client.classify()`
-        — decisión de esta sesión, en vez de una llamada por eje. Solo se aplica la sugerencia de
-        la IA al eje que seguía en el placeholder; un eje que la Sub-fase A ya clasificó con
-        confianza nunca se sobreescribe, aunque la IA sugiera algo distinto para ese eje en la
-        misma respuesta.
+        """Clasificación con IA en modo manifiesto (`ai_scope="unclassified"`): para cada documento que las reglas
+        dejaron con el placeholder `_UNCLASSIFIED_SLUG` en el eje de dominio y/o en el de tipo de material, pide ambos
+        ejes en una sola llamada (`classify_document`). Solo se aplica la respuesta al eje que seguía en el placeholder;
+        un eje que las reglas ya clasificaron nunca se sobreescribe.
 
-        `DomainDocument.classified_by` pasa a `"ai"` si la IA cambió efectivamente al menos un eje
-        (de placeholder a un valor real); se queda en `"rules"` si no cambió nada, aunque se haya
-        intentado — un único campo string sigue bastando (mismo criterio que en modo de un eje).
-        Las llamadas pueden ir varias a la vez (`ai_concurrency`); los resultados se aplican en el
-        orden de los documentos.
+        `DomainDocument.classified_by` pasa a `"ai"` si la IA cambió al menos un eje. Las llamadas pueden ir varias a la
+        vez (`ai_concurrency`); los resultados se aplican en el orden de los documentos.
         """
-        domain_slugs = list(dict.fromkeys(slug for slug in (DomainClassifier._slugify(entry.slug) for entry in manifest.folder_axis.entries) if slug))
-        material_slugs = list(
-            dict.fromkeys(slug for slug in (DomainClassifier._slugify(entry.slug) for entry in manifest.subfolder_axis.entries) if slug)
-        )
-
+        axes = [
+            AxisRequest(axis.key, list(dict.fromkeys(slug for slug in (DomainClassifier._slugify(entry.slug) for entry in axis.entries) if slug)))
+            for axis in (manifest.folder_axis, manifest.subfolder_axis)
+        ]
         pending = [
             (domain_slug, document)
             for domain_slug, documents in classified.items()
@@ -756,33 +677,34 @@ class ContextBuilder:
 
         ai_run = run if run is not None else _AiRun()
 
-        async def call(item: tuple[str, DomainDocument]) -> TaxonomyClassificationResult | None:
+        async def call(item: tuple[str, DomainDocument]) -> ClassificationAnswer | None:
             document = item[1]
-            texts = await self._outgoing_texts(document.source_path, document.json_path, ai_run)
-            if texts is None:
+            conversion = await self._reserve_and_read(document.json_path, ai_run)
+            if conversion is None:
                 return None
+            chunks_text, title = conversion
             try:
-                result = await client.classify(
-                    chunks_text=texts[0], title=texts[1], candidate_domains=domain_slugs, candidate_material_types=material_slugs
+                result = await classify_document(
+                    llm, prompts, axes=axes, title=title, content=chunks_text, on_redacted=ai_run.redaction_note(document.source_path)
                 )
-            except TaxonomyClassificationError as exc:
-                ai_run.record_failure(exc, TaxonomyClassificationAuthError, TaxonomyClassificationConnectionError)
-                self.logger.warning(f"Fallo la clasificación por IA (manifiesto) de '{document.source_path}': {exc} — sigue sin clasificar")
+            except AiError as exc:
+                ai_run.record_failure(exc)
+                self.logger.warning(f"Falló la clasificación por IA de '{document.source_path}': {exc} — sigue sin clasificar")
                 return None
-            ai_run.record_response()
-            return result
+            ai_run.record_response(result)
+            return result.value
 
         results = await self._run_ai_phase(pending, call, ai_run, on_progress, lambda item: item[1].source_path)
-        for (old_domain_slug, document), result in zip(pending, results, strict=True):
-            if result is not None:
-                self._apply_manifest_ai(document, old_domain_slug, result, classified, manifest, ai_run)
+        for (old_domain_slug, document), answer in zip(pending, results, strict=True):
+            if answer is not None:
+                self._apply_manifest_ai(document, old_domain_slug, answer, classified, manifest, ai_run)
 
         # Poda buckets que quedaron vacíos (p.ej. todo "sin-clasificar" se resolvió a otros
         # dominios) — sin esto, `build()` crearía un `Domain` fantasma sin documentos.
         return {slug: documents for slug, documents in classified.items() if documents}
 
-    async def _outgoing_texts(self, source_path: str, json_path: str | None, run: _AiRun) -> tuple[str, str | None] | None:
-        """Texto y título de un documento tal como salen hacia la IA, si hay presupuesto; `None` si no.
+    async def _reserve_and_read(self, json_path: str | None, run: _AiRun) -> tuple[str, str | None] | None:
+        """Texto y título de un documento para enviarlo a la IA, si hay presupuesto; `None` si no.
 
         El envío se reserva **antes** de leer (`may_send`), para que con varias llamadas a la vez el presupuesto se
         reparta en el orden de los documentos y no en el de las lecturas; si el `.json` no se puede leer, se devuelve.
@@ -792,48 +714,44 @@ class ContextBuilder:
         conversion = await read_conversion_json(json_path)
         if conversion is None:
             run.release()
-            return None
-        return run.outgoing(source_path, *conversion)
+        return conversion
 
     def _apply_manifest_ai(
         self,
         document: DomainDocument,
         old_domain_slug: str,
-        result: TaxonomyClassificationResult,
+        answer: ClassificationAnswer,
         classified: dict[str, list[DomainDocument]],
         manifest: TaxonomyManifest,
         run: _AiRun,
     ) -> None:
         """Aplica la respuesta de la IA a `document` y a `classified`: mueve el documento de bucket si el eje de
         dominio cambió, o lo muta in-place si solo cambió el de tipo de material. El eje que cambia queda en
-        `document.classification` con `classified_by="ai"` (2.0.0)."""
-        domain_names = {DomainClassifier._slugify(entry.slug): entry.name for entry in manifest.folder_axis.entries}
-        material_names = {DomainClassifier._slugify(entry.slug): entry.name for entry in manifest.subfolder_axis.entries}
-        document.ai_domain = result.domain
-        document.ai_confidence = result.domain_confidence
-        document.ai_reasoning = clean_text(result.reasoning)
+        `document.classification` con `classified_by="ai"`."""
+        folder, subfolder = manifest.folder_axis, manifest.subfolder_axis
+        domain_names = {DomainClassifier._slugify(entry.slug): entry.name for entry in folder.entries}
+        material_names = {DomainClassifier._slugify(entry.slug): entry.name for entry in subfolder.entries}
+        domain, material = answer.axes[folder.key], answer.axes[subfolder.key]
+        document.ai_domain = domain.slug
+        document.ai_confidence = domain.confidence
+        document.ai_reasoning = answer.reasoning
         changed = False
         axes = document.classification.axes
-        if old_domain_slug == _UNCLASSIFIED_SLUG and result.domain is not None:
+        if old_domain_slug == _UNCLASSIFIED_SLUG and domain.slug is not None:
             classified[old_domain_slug] = [candidate for candidate in classified[old_domain_slug] if candidate is not document]
-            document.confidence = result.domain_confidence
-            classified.setdefault(result.domain, []).append(document)
-            axes[manifest.folder_axis.key] = [
-                AxisValue(
-                    slug=result.domain, name=domain_names.get(result.domain, result.domain), confidence=result.domain_confidence, classified_by="ai"
-                )
+            document.confidence = domain.confidence
+            classified.setdefault(domain.slug, []).append(document)
+            axes[folder.key] = [
+                AxisValue(slug=domain.slug, name=domain_names.get(domain.slug, domain.slug), confidence=domain.confidence, classified_by="ai")
             ]
             changed = True
-        if document.material_type == _UNCLASSIFIED_SLUG and result.material_type is not None:
-            document.material_type = result.material_type
-            document.material_type_name = material_names.get(result.material_type)
-            document.material_type_confidence = result.material_type_confidence
-            axes[manifest.subfolder_axis.key] = [
+        if document.material_type == _UNCLASSIFIED_SLUG and material.slug is not None:
+            document.material_type = material.slug
+            document.material_type_name = material_names.get(material.slug)
+            document.material_type_confidence = material.confidence
+            axes[subfolder.key] = [
                 AxisValue(
-                    slug=result.material_type,
-                    name=material_names.get(result.material_type, result.material_type),
-                    confidence=result.material_type_confidence,
-                    classified_by="ai",
+                    slug=material.slug, name=material_names.get(material.slug, material.slug), confidence=material.confidence, classified_by="ai"
                 )
             ]
             changed = True
@@ -843,20 +761,21 @@ class ContextBuilder:
 
     async def _classify_with_ai(
         self,
-        client: DomainClassificationClient,
+        llm: LlmClient,
+        prompts: PromptRegistry,
         classified: dict[str, list[DomainDocument]],
         unclassified: list[ConversionResult],
         rules: DomainClassifier,
         on_progress: Callable[[int, int, str], Awaitable[None]] | None = None,
         run: _AiRun | None = None,
     ) -> tuple[dict[str, list[DomainDocument]], list[ConversionResult]]:
-        """Sub-fase B: intenta clasificar por IA lo que la Sub-fase A dejó sin
-        clasificar, eligiendo solo entre el catálogo ya confirmado (el predefinido,
-        o los dominios que la Sub-fase A ya descubrió) — nunca crea uno nuevo.
+        """Clasificación con IA sin manifiesto (`ai_scope="unclassified"`): lo que las reglas dejaron sin clasificar,
+        eligiendo solo entre el catálogo ya confirmado (el predefinido, o los dominios que las reglas descubrieron),
+        nunca uno nuevo.
 
-        `rules` es el clasificador de la Sub-fase A: da el catálogo y la propuesta que las reglas dejaron por debajo
-        del umbral (`DomainDocument.rules_domain`/`rules_confidence`). Las llamadas pueden ir varias a la vez
-        (`ai_concurrency`); los resultados se aplican en el orden de los documentos.
+        `rules` es el clasificador de las reglas: da el catálogo y la propuesta que dejaron por debajo del umbral
+        (`DomainDocument.rules_domain`/`rules_confidence`). Las llamadas pueden ir varias a la vez (`ai_concurrency`);
+        los resultados se aplican en el orden de los documentos.
         """
         catalog = rules.candidate_domains if rules.candidate_domains else list(classified.keys())
         if not catalog:
@@ -865,7 +784,7 @@ class ContextBuilder:
         ai_run = run if run is not None else _AiRun()
 
         async def call(document: ConversionResult) -> tuple[str, DomainDocument] | None:
-            return await self._try_classify_document_with_ai(client, document, catalog, rules, ai_run)
+            return await self._try_classify_document_with_ai(llm, prompts, document, catalog, rules, ai_run)
 
         results = await self._run_ai_phase(unclassified, call, ai_run, on_progress, lambda document: document.source_path)
         still_unclassified: list[ConversionResult] = []
@@ -878,33 +797,36 @@ class ContextBuilder:
         return classified, still_unclassified
 
     async def _try_classify_document_with_ai(
-        self, client: DomainClassificationClient, document: ConversionResult, catalog: list[str], rules: DomainClassifier, run: _AiRun
+        self, llm: LlmClient, prompts: PromptRegistry, document: ConversionResult, catalog: list[str], rules: DomainClassifier, run: _AiRun
     ) -> tuple[str, DomainDocument] | None:
         if not document.success or not document.markdown_path or not document.json_path:
             return None
-        if not run.may_send():
-            return None
-        conversion = await read_conversion_json(document.json_path)
+        conversion = await self._reserve_and_read(document.json_path, run)
         if conversion is None:
-            run.release()
             return None
         chunks_text, title = conversion
-
-        sent_text, sent_title = run.outgoing(document.source_path, chunks_text, title)
         try:
-            result = await client.classify(chunks_text=sent_text, title=sent_title, candidate_domains=catalog)
-        except DomainClassificationError as exc:
-            run.record_failure(exc, DomainClassificationAuthError, DomainClassificationConnectionError)
-            self.logger.warning(f"Fallo la clasificación por IA de '{document.source_path}': {exc} — queda sin clasificar")
+            result = await classify_document(
+                llm,
+                prompts,
+                axes=[AxisRequest(LEGACY_FOLDER_AXIS_KEY, catalog)],
+                title=title,
+                content=chunks_text,
+                on_redacted=run.redaction_note(document.source_path),
+            )
+        except AiError as exc:
+            run.record_failure(exc)
+            self.logger.warning(f"Falló la clasificación por IA de '{document.source_path}': {exc} — queda sin clasificar")
             return None
 
-        run.record_result(assigned=result.domain is not None)
-        if result.domain is None:
+        run.record_response(result)
+        answer = result.value.axes[LEGACY_FOLDER_AXIS_KEY]
+        if answer.slug is None:
             return None
-
+        run.classified += 1
         resolved_title, document_type = resolve_title_and_type(document, title)
         rules_domain, rules_confidence = rules.score_domain(document, chunks_text, title)
-        return result.domain, DomainDocument(
+        return answer.slug, DomainDocument(
             source_path=document.source_path,
             markdown_path=document.markdown_path,
             json_path=document.json_path,
@@ -912,13 +834,13 @@ class ContextBuilder:
             source_sha256=document.source_sha256,
             title=resolved_title,
             document_type=document_type,
-            confidence=result.confidence,
+            confidence=answer.confidence,
             classified_by="ai",
             rules_domain=rules_domain,
             rules_confidence=rules_confidence,
-            ai_domain=result.domain,
-            ai_confidence=result.confidence,
-            ai_reasoning=clean_text(result.reasoning),
+            ai_domain=answer.slug,
+            ai_confidence=answer.confidence,
+            ai_reasoning=result.value.reasoning,
         )
 
     async def _save_and_record(self, project: Project, context: Context) -> None:
@@ -988,24 +910,6 @@ class ContextBuilder:
             )
         return details
 
-    async def _describe_documents(
-        self,
-        classified: dict[str, list[DomainDocument]],
-        unclassified: list[UnclassifiedDocument],
-        reads: _BuildReads,
-        enrichment_enabled: bool,
-        enrichment_client: DocumentEnrichmentClient | None,
-        run: _AiRun,
-        on_progress: Callable[[int, int, str], Awaitable[None]],
-        cancel_token: CancelToken | None,
-    ) -> None:
-        """Autor, descripción, palabras clave e idioma de cada documento clasificado; con el enriquecimiento activo y
-        cliente, la IA rellena después la descripción y las palabras clave que falten (1.5.0). De los sin clasificar,
-        solo lo que declara el original (1.6.0): la IA no los enriquece."""
-        await self._apply_document_properties(classified, unclassified, reads, cancel_token)
-        if enrichment_enabled and enrichment_client is not None:
-            await self._enrich_with_ai(enrichment_client, classified, on_progress=on_progress, run=run)
-
     async def _apply_document_properties(
         self,
         classified: dict[str, list[DomainDocument]],
@@ -1071,21 +975,22 @@ class ContextBuilder:
 
     async def _enrich_with_ai(
         self,
-        client: DocumentEnrichmentClient,
+        llm: LlmClient,
+        prompts: PromptRegistry,
         classified: dict[str, list[DomainDocument]],
         on_progress: Callable[[int, int, str], Awaitable[None]],
         run: _AiRun,
     ) -> None:
-        """Pide a la IA la descripción y las palabras clave de los documentos que no las declaran (1.5.0).
+        """Pide a la IA la descripción y las palabras clave de los documentos que no las declaran (tarea `enrich`).
 
         Solo rellena lo que falta; lo declarado por el documento nunca se sustituye. Mismas paradas que la
-        Sub-fase B (`_AiRun`), con su propio recuento: `run.classified` cuenta los documentos en los que se rellenó
+        clasificación (`_AiRun`), con su propio recuento: `run.classified` cuenta los documentos en los que se rellenó
         algo. Con `ai_concurrency`, varias llamadas a la vez (cada una solo toca su documento).
         """
         pending = [document for documents in classified.values() for document in documents if document.description is None or not document.keywords]
 
         async def call(document: DomainDocument) -> None:
-            await self._try_enrich_document(client, document, run)
+            await self._try_enrich_document(llm, prompts, document, run)
 
         await self._run_ai_phase(
             pending,
@@ -1093,28 +998,31 @@ class ContextBuilder:
             run,
             on_progress,
             lambda document: document.source_path,
-            stage="Enriquecimiento por IA detenido",
+            stage="Descripción con IA detenida",
             outcome="quedan solo con lo que declaran",
         )
 
-    async def _try_enrich_document(self, client: DocumentEnrichmentClient, document: DomainDocument, run: _AiRun) -> None:
-        texts = await self._outgoing_texts(document.source_path, document.json_path, run)
-        if texts is None:
+    async def _try_enrich_document(self, llm: LlmClient, prompts: PromptRegistry, document: DomainDocument, run: _AiRun) -> None:
+        conversion = await self._reserve_and_read(document.json_path, run)
+        if conversion is None:
             return
+        chunks_text, title = conversion
         try:
-            result = await client.enrich(chunks_text=texts[0], title=texts[1])
-        except DocumentEnrichmentError as exc:
-            run.record_failure(exc, DocumentEnrichmentAuthError, DocumentEnrichmentConnectionError)
-            self.logger.warning(f"Fallo el enriquecimiento por IA de '{document.source_path}': {exc} — queda con lo que declara")
+            result = await enrich_document(llm, prompts, title=title, content=chunks_text, on_redacted=run.redaction_note(document.source_path))
+        except AiError as exc:
+            run.record_failure(exc)
+            self.logger.warning(f"Falló la descripción con IA de '{document.source_path}': {exc} — queda con lo que declara")
             return
 
-        if document.description is None and result.description is not None:
-            document.description = result.description
+        run.record_response(result)
+        if document.description is None and result.value.description is not None:
+            document.description = result.value.description
             document.ai_filled.append("description")
-        if not document.keywords and result.keywords:
-            document.keywords = result.keywords
+        if not document.keywords and result.value.keywords:
+            document.keywords = result.value.keywords
             document.ai_filled.append("keywords")
-        run.record_result(assigned=bool(document.ai_filled))
+        if document.ai_filled:
+            run.classified += 1
 
     def _log_stop(self, run: _AiRun, remaining: int, *, stage: str = "Sub-fase B detenida", outcome: str = "quedan sin clasificar") -> None:
         """Avisa una sola vez, justo tras el documento que la provocó, de que una fase de IA se detuvo."""

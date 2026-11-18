@@ -25,6 +25,7 @@ nav = [
     { "Descarga Offline" = "guides/downloads.md" },
     { "Desplegar un LiteLLM Proxy" = "guides/litellm_proxy_setup.md" },
     { "De la web integrada a doc_organize_web" = "guides/migracion_web.md" },
+    { "De 1.x a 2.0" = "guides/migracion_2_0.md" },
   ] },
   { "Funcionalidad" = [
     { "Descripción general" = "functional/index.md" },

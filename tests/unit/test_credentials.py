@@ -7,25 +7,16 @@ Valores sintéticos evidentes: nunca un secreto real.
 import json
 
 from datetime import UTC, datetime
-from types import SimpleNamespace
 
-import httpx
 import pytest
 
 from doc_organize import redact_credentials, scan_credentials
-from doc_organize.ai import TaxonomyManifestDraftClient
-from doc_organize.ai.taxonomy_manifest_draft_client import SampledDocument
+from doc_organize.ai import PromptRegistry, SampledDocument, draft_taxonomy
 from doc_organize.context.context_builder import ContextBuilder
 from doc_organize.context.site_generator import SiteGenerator
-from doc_organize.core.models import (
-    Context,
-    ConversionResult,
-    DocumentEnrichmentResult,
-    DomainClassificationResult,
-    LiteLLMTaxonomyManifestDraftConfig,
-    Project,
-)
+from doc_organize.core.models import AiSettings, Context, ConversionResult, Project
 from doc_organize.security import CREDENTIAL_RULES, REDACTED, CredentialFinding
+from tests.unit.fake_llm import FakeLlmClient, enrichment, fake_client
 from tests.unit.test_site_generator import _PAGE, _site_with_page
 
 FAKE = "Abc123FakeSecretValue9"
@@ -133,45 +124,28 @@ def _document(tmp_path, folder: str, stem: str, text: str, title: str) -> Conver
     return ConversionResult(source_path=str(source), markdown_path=str(markdown_path), json_path=str(json_path), success=True)
 
 
-class _Recorder:
-    """Doble de los clientes de clasificación y enriquecimiento: guarda lo que recibe."""
-
-    config = SimpleNamespace(model="stub")
-
-    def __init__(self) -> None:
-        self.received: list[tuple[str, str | None]] = []
-
-    async def classify(self, *, chunks_text: str, title: str | None, candidate_domains: list[str]) -> DomainClassificationResult:
-        self.received.append((chunks_text, title))
-        return DomainClassificationResult(domain="calidad", confidence=0.9)
-
-    async def enrich(self, *, chunks_text: str, title: str | None) -> DocumentEnrichmentResult:
-        self.received.append((chunks_text, title))
-        return DocumentEnrichmentResult(description="Resumen", keywords=["ia"])
+def _client(*, redact: bool = True) -> FakeLlmClient:
+    """IA que clasifica en `calidad` y describe; guarda lo que recibe (`sent_texts`)."""
+    settings = AiSettings(base_url="https://proxy.test", virtual_key="sk-test", rate_limit_retries=0, redact_credentials=redact)
+    return fake_client(settings=settings, classify=lambda request: {request.axes[0]: ("calidad", 0.9)}, enrich=enrichment("Resumen", ["ia"]))
 
 
-async def _build(tmp_path, documents, client: _Recorder, **builder_kwargs: object) -> Context:
-    return await ContextBuilder(**builder_kwargs).build(  # type: ignore[arg-type]
-        _project(tmp_path),
-        documents,
-        candidate_domains=["calidad"],
-        ai_classification_enabled=True,
-        ai_classification_client=client,  # type: ignore[arg-type]
-        ai_enrichment_enabled=True,
-        ai_enrichment_client=client,  # type: ignore[arg-type]
+async def _build(tmp_path, documents, client: FakeLlmClient) -> Context:
+    return await ContextBuilder().build(
+        _project(tmp_path), documents, candidate_domains=["calidad"], llm=client, ai_scope="unclassified", enrich=True
     )
 
 
 @pytest.mark.asyncio
 async def test_text_sent_to_the_ai_is_redacted_and_summarised_without_values(tmp_path) -> None:
     documents = [_document(tmp_path, "varios", "acta", f"Acceso al servidor: password={FAKE}", f"token: {FAKE}XYZ")]
-    client = _Recorder()
+    client = _client()
 
     context = await _build(tmp_path, documents, client)
 
-    assert client.received, "el documento sin clasificar va a la IA"
-    assert all(FAKE not in text and FAKE not in (title or "") for text, title in client.received)
-    assert any(REDACTED in text for text, _ in client.received)
+    assert client.sent_texts, "el documento sin clasificar va a la IA"
+    assert all(FAKE not in text for text in client.sent_texts)
+    assert any(REDACTED in text for text in client.sent_texts)
     assert context.ai_redact_credentials is True
     [finding] = context.credential_findings
     assert finding.source_path == documents[0].source_path
@@ -183,11 +157,11 @@ async def test_text_sent_to_the_ai_is_redacted_and_summarised_without_values(tmp
 @pytest.mark.asyncio
 async def test_redaction_can_be_turned_off(tmp_path) -> None:
     documents = [_document(tmp_path, "varios", "acta", f"password={FAKE}", "Acta")]
-    client = _Recorder()
+    client = _client(redact=False)
 
-    context = await _build(tmp_path, documents, client, ai_redact_credentials=False)
+    context = await _build(tmp_path, documents, client)
 
-    assert any(FAKE in text for text, _ in client.received)
+    assert any(FAKE in text for text in client.sent_texts)
     assert context.ai_redact_credentials is False
     assert context.credential_findings == []
 
@@ -207,29 +181,21 @@ def test_a_context_from_before_1_6_1_still_loads() -> None:
     assert (context.ai_redact_credentials, context.credential_findings) == (False, [])
 
 
-# --- TaxonomyManifestDraftClient ------------------------------------------------------------------------------------------
+# --- Borrador de taxonomía (draft_taxonomy) --------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("redact", [True, False])
 async def test_the_manifest_draft_sample_is_redacted(redact: bool) -> None:
-    prompts: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        prompts.append(json.loads(request.content)["messages"][1]["content"])
-        content = {
-            "domains": [{"slug": "ti", "name": "TI"}],
-            "material_types": [{"slug": "acta", "name": "Acta"}],
-            "reasoning": "x",
-        }
-        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(content)}}]})
-
-    config = LiteLLMTaxonomyManifestDraftConfig(base_url="https://litellm.example.com", virtual_key="k", redact_credentials=redact)
+    settings = AiSettings(base_url="https://proxy.test", virtual_key="k", rate_limit_retries=0, redact_credentials=redact)
+    draft = {"domains": [{"slug": "ti", "name": "TI"}], "material_types": [{"slug": "acta", "name": "Acta"}], "reasoning": "x"}
+    client = fake_client(settings=settings, taxonomy_design=lambda _request: draft)
     sample = [SampledDocument(folder="TI", title=f"token: {FAKE}XYZ", chunks_text=f"password={FAKE}")]
-    async with TaxonomyManifestDraftClient(config, transport=httpx.MockTransport(handler)) as client:
-        await client.propose_manifest(documents=sample)
 
-    assert (FAKE in prompts[0]) is not redact
+    async with client:
+        await draft_taxonomy(client, PromptRegistry(), sample)
+
+    assert (FAKE in client.sent_texts[0]) is not redact
 
 
 # --- SiteGenerator ----------------------------------------------------------------------------------------------------------

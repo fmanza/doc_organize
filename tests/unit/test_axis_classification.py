@@ -4,7 +4,6 @@
 import json
 
 from datetime import UTC, datetime
-from types import SimpleNamespace
 
 import pytest
 
@@ -18,9 +17,9 @@ from doc_organize.core.models import (
     DomainDocument,
     Project,
     TaxonomyAxis,
-    TaxonomyClassificationResult,
     TaxonomyEntry,
 )
+from tests.unit.fake_llm import taxonomy_ai
 from tests.unit.taxonomy_helpers import two_axis_manifest
 
 #: Plantilla con la forma de la de CALIDAD_VD (1.x, ejes implícitos) y sus marcos normativos tal como están escritos:
@@ -232,13 +231,6 @@ async def test_context_v2_persists_axes_without_keywords_and_classification(tmp_
     assert documents[unmatched.source_path].classification.axes == {"domains": [], "material_types": [], "normative_frameworks": []}
 
 
-class _StubTaxonomyAI:
-    config = SimpleNamespace(model="stub")
-
-    async def classify(self, **_: object) -> TaxonomyClassificationResult:
-        return TaxonomyClassificationResult(domain="calidad", domain_confidence=0.9, material_type="politica", material_type_confidence=0.7)
-
-
 @pytest.mark.asyncio
 async def test_ai_marks_only_the_axis_it_decided(tmp_path) -> None:
     project = _project(tmp_path)
@@ -248,7 +240,7 @@ async def test_ai_marks_only_the_axis_it_decided(tmp_path) -> None:
     document = _document(tmp_path, "m", "Manual", "manual sin dominio")
 
     context = await ContextBuilder().build(
-        project, [document], taxonomy_manifest=manifest, ai_classification_enabled=True, taxonomy_classification_client=_StubTaxonomyAI()
+        project, [document], taxonomy_manifest=manifest, llm=taxonomy_ai("calidad", 0.9, "politica", 0.7), ai_scope="unclassified"
     )
 
     result = context.domains[0].documents[0]

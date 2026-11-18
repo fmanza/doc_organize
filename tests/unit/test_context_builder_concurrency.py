@@ -10,21 +10,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
+from doc_organize.ai import LlmClient
 from doc_organize.context import context_builder as builder_module
 from doc_organize.context.context_builder import ContextBuilder
 from doc_organize.core.exceptions import OperationCancelledError
-from doc_organize.core.models import (
-    ConversionResult,
-    DocumentEnrichmentResult,
-    DomainClassificationResult,
-    Project,
-    TaxonomyAxis,
-    TaxonomyClassificationResult,
-    TaxonomyEntry,
-)
-from doc_organize.core.progress import CancelToken
+from doc_organize.core.models import AiSettings, ConversionResult, Project, TaxonomyAxis, TaxonomyEntry
+from doc_organize.core.progress import CancelToken, ProgressEvent
+from tests.unit.fake_llm import FakeRequest
 from tests.unit.taxonomy_helpers import two_axis_manifest
 
 
@@ -99,41 +94,34 @@ async def test_without_ai_each_json_is_read_once_without_manifest(tmp_path, read
 # --- IA en paralelo --------------------------------------------------------------------------------------------------
 
 
-class _SlowTaxonomyAI:
-    """Responde según el número del documento, tras una espera aleatoria; mide cuántas llamadas hay a la vez."""
+def _slow_llm(seed: int) -> tuple[LlmClient, SimpleNamespace]:
+    """IA con latencias aleatorias que responde según el número del documento; mide cuántas llamadas hay a la vez."""
+    rng = random.Random(seed)
+    stats = SimpleNamespace(in_flight=0, max_in_flight=0, calls=0)
 
-    config = SimpleNamespace(model="stub")
+    async def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        task = next(tag.removeprefix("task:") for tag in body["metadata"]["tags"] if tag.startswith("task:"))
+        fake = FakeRequest(task=task, body=body)
+        stats.calls += 1
+        stats.in_flight += 1
+        stats.max_in_flight = max(stats.max_in_flight, stats.in_flight)
+        await asyncio.sleep(rng.uniform(0, 0.02))
+        stats.in_flight -= 1
+        number = int(fake.title.split()[-1])
+        if task == "classify":
+            folder, subfolder = fake.axes[:2]
+            answer: dict = {
+                "reasoning": None,
+                folder: {"value": ("calidad", "seguridad", None)[number % 3], "confidence": 0.7},
+                subfolder: {"value": ("politica", "manual")[number % 2], "confidence": 0.6},
+            }
+        else:
+            answer = {"description": f"Sobre {fake.title}", "keywords": ["uno", str(number)]}
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(answer)}}]})
 
-    def __init__(self, seed: int) -> None:
-        self.random = random.Random(seed)
-        self.in_flight = 0
-        self.max_in_flight = 0
-        self.calls = 0
-
-    async def classify(self, *, title: str | None, **_: object) -> TaxonomyClassificationResult:
-        self.calls += 1
-        self.in_flight += 1
-        self.max_in_flight = max(self.max_in_flight, self.in_flight)
-        await asyncio.sleep(self.random.uniform(0, 0.02))
-        self.in_flight -= 1
-        number = int((title or "0").split()[-1])
-        return TaxonomyClassificationResult(
-            domain=("calidad", "seguridad", None)[number % 3],
-            domain_confidence=0.7,
-            material_type=("politica", "manual")[number % 2],
-            material_type_confidence=0.6,
-        )
-
-
-class _SlowEnrichment:
-    config = SimpleNamespace(model="stub-enrich")
-
-    def __init__(self, seed: int) -> None:
-        self.random = random.Random(seed)
-
-    async def enrich(self, *, title: str | None, **_: object) -> DocumentEnrichmentResult:
-        await asyncio.sleep(self.random.uniform(0, 0.02))
-        return DocumentEnrichmentResult(description=f"Sobre {title}", keywords=["uno", (title or "").split()[-1]])
+    settings = AiSettings(base_url="https://proxy.test", virtual_key="sk-test", rate_limit_retries=0)
+    return LlmClient(settings, transport=httpx.MockTransport(handler)), stats
 
 
 def _saved_context(root: Path) -> dict:
@@ -151,20 +139,19 @@ async def test_parallel_ai_gives_the_same_context_as_serial(tmp_path) -> None:
     for concurrency in (1, 4):
         root = tmp_path / f"raiz-concurrencia-{concurrency}"
         documents = _documents(root, 12)
-        client = _SlowTaxonomyAI(seed=concurrency)  # latencias distintas en cada ejecución
+        client, stats = _slow_llm(seed=concurrency)  # latencias distintas en cada ejecución
         await ContextBuilder(ai_concurrency=concurrency).build(
             _project(root),
             documents,
             taxonomy_manifest=_manifest(),
-            ai_classification_enabled=True,
-            taxonomy_classification_client=client,
-            ai_enrichment_enabled=True,
-            ai_enrichment_client=_SlowEnrichment(seed=concurrency + 10),
+            llm=client,
+            ai_scope="unclassified",
+            enrich=True,
         )
         results[concurrency] = _saved_context(root)
-        assert client.max_in_flight <= concurrency
+        assert stats.max_in_flight <= concurrency
         if concurrency == 4:
-            assert client.max_in_flight > 1  # de verdad hubo llamadas a la vez
+            assert stats.max_in_flight > 1  # de verdad hubo llamadas a la vez
 
     serial, parallel = results[1], results[4]
     assert serial["indexes"].keys() == parallel["indexes"].keys()
@@ -176,34 +163,37 @@ async def test_parallel_ai_gives_the_same_context_as_serial(tmp_path) -> None:
     assert json.dumps(serial["context"]).replace("raiz-concurrencia-1", "R") == json.dumps(parallel["context"]).replace("raiz-concurrencia-4", "R")
 
 
-class _CountingDomainAI:
-    config = SimpleNamespace(model="stub")
+def _counting_domain_llm() -> tuple[LlmClient, list[str]]:
+    """IA de un eje que siempre elige `calidad`, con esperas que cambian el orden de llegada; guarda los títulos."""
+    titles: list[str] = []
 
-    def __init__(self) -> None:
-        self.titles: list[str] = []
+    async def handler(request: httpx.Request) -> httpx.Response:
+        fake = FakeRequest(task="classify", body=json.loads(request.content))
+        titles.append(fake.title)
+        await asyncio.sleep(0.005 * (5 - len(titles) % 5))
+        answer = {"reasoning": None, fake.axes[0]: {"value": "calidad", "confidence": 0.9}}
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(answer)}}]})
 
-    async def classify(self, *, title: str | None, **_: object) -> DomainClassificationResult:
-        self.titles.append(title or "")
-        await asyncio.sleep(0.005 * (5 - len(self.titles) % 5))
-        return DomainClassificationResult(domain="calidad", confidence=0.9)
+    settings = AiSettings(base_url="https://proxy.test", virtual_key="sk-test", rate_limit_retries=0)
+    return LlmClient(settings, transport=httpx.MockTransport(handler)), titles
 
 
 @pytest.mark.asyncio
 async def test_budget_is_never_exceeded_and_goes_to_the_first_documents(tmp_path) -> None:
     documents = _documents(tmp_path, 10)
-    client = _CountingDomainAI()
+    client, titles = _counting_domain_llm()
 
     context = await ContextBuilder(ai_concurrency=4).build(
         _project(tmp_path),
         documents,
         candidate_domains=["calidad"],
-        ai_classification_enabled=True,
-        ai_classification_client=client,
+        llm=client,
+        ai_scope="unclassified",
         ai_max_documents=3,
     )
 
-    assert sorted(client.titles) == ["Documento 0", "Documento 1", "Documento 2"]
-    assert (context.ai_documents_sent, context.ai_classification_stopped) == (3, "budget")
+    assert sorted(titles) == ["Documento 0", "Documento 1", "Documento 2"]
+    assert (context.ai_stats.classification.sent, context.ai_stats.classification.stopped) == (3, "budget")
     assert [document.source_path for document in context.domains[0].documents] == [document.source_path for document in documents[:3]]
 
 
@@ -213,9 +203,9 @@ async def test_progress_is_monotonic_and_cancellation_stops_with_calls_in_flight
     token = CancelToken()
     seen: list[int] = []
 
-    async def on_ai_progress(index: int, total: int, _path: str) -> None:
-        seen.append(index)
-        if index == 3:
+    def on_progress(event: ProgressEvent) -> None:
+        seen.append(event.processed)
+        if event.processed == 3:
             token.cancel()
 
     with pytest.raises(OperationCancelledError):
@@ -223,9 +213,9 @@ async def test_progress_is_monotonic_and_cancellation_stops_with_calls_in_flight
             _project(tmp_path),
             documents,
             taxonomy_manifest=_manifest(),
-            ai_classification_enabled=True,
-            taxonomy_classification_client=_SlowTaxonomyAI(seed=3),
-            on_ai_progress=on_ai_progress,
+            llm=_slow_llm(seed=3)[0],
+            ai_scope="unclassified",
+            on_progress=on_progress,
             cancel_token=token,
         )
 
