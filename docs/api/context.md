@@ -74,10 +74,11 @@ class ContextBuilder:
         taxonomy_template_name: str | None = None,
         output_folder_name: str = "organizado",
         llm: LlmClient | None = None,                   # 2.0.0
-        ai_scope: Literal["off", "unclassified"] = "off",  # 2.0.0
+        ai_scope: Literal["off", "unclassified", "missing_axes"] = "off",  # 2.0.0
         enrich: bool = False,                           # 2.0.0
         prompts: PromptRegistry | None = None,          # 2.0.0
         ai_cache: bool | AiResultCache = True,          # 2.0.0
+        profile: ProjectProfile | None = None,          # 2.0.0
         on_progress: ProgressCallback | None = None,
         cancel_token: CancelToken | None = None,
         ai_max_failures: int | None = None,             # 0.14.0
@@ -95,10 +96,11 @@ Orquesta Sub-fase A (reglas, siempre) + Sub-fase B (IA, opt-in) y persiste el `C
 | `taxonomy_manifest` | `TaxonomyManifest \| None` | Manifiesto de taxonomía (ver [TaxonomyManifest](#taxonomymanifest-manifiesto-de-taxonomia)): clasificación por ejes |
 | `taxonomy_template_name` | `str \| None` | Plantilla de la que proviene `taxonomy_manifest`, si es de una plantilla (informativo, `Context.taxonomy_template_name`) |
 | `llm` | `LlmClient \| None` | (2.0.0) Cliente único de IA. Sin él no se llama a ninguna IA |
-| `ai_scope` | `"off" \| "unclassified"` | (2.0.0) `"unclassified"`: la IA clasifica lo que las reglas dejaron sin clasificar en algún eje organizador (la Sub-fase B de 1.x). Se guarda en `Context.ai_stats.scope` |
+| `ai_scope` | `"off" \| "unclassified" \| "missing_axes"` | (2.0.0) `"unclassified"`: la IA clasifica lo que las reglas dejaron sin clasificar en algún eje organizador (la Sub-fase B de 1.x). `"missing_axes"` (con manifiesto): además, los documentos con algún eje que solo etiqueta vacío (también los de `rules: false`). Una llamada por documento con solo los ejes que le faltan; la IA **solo rellena ejes vacíos**, nunca cambia lo que decidieron las reglas. Se guarda en `Context.ai_stats.scope` |
 | `enrich` | `bool` | (2.0.0) Describir con IA los documentos que no declaran descripción o palabras clave. Ver [Autor, descripción y palabras clave](#autor-descripcion-y-palabras-clave-150) |
 | `prompts` | `PromptRegistry \| None` | (2.0.0) Prompts de cada tarea; por defecto, los de `<raíz>/.doc_organize/prompts/` o los empaquetados |
 | `ai_cache` | `bool \| AiResultCache` | (2.0.0) Caché de resultados de IA (por defecto, la del proyecto): reconstruir sin cambios no llama al modelo. Ver [Caché de resultados](llm_client.md#cache-de-resultados) |
+| `profile` | `ProjectProfile \| None` | (2.0.0) Perfil del proyecto para el prompt de clasificación. Por defecto, el de `taxonomy_manifest` más el de `<raíz>/.doc_organize/profile.md` (ver [Lo que recibe el modelo](llm_client.md#lo-que-recibe-el-modelo-200-m5)) |
 | `ai_max_failures` | `int \| None` | (0.14.0, L-3a) Detiene una fase de IA tras este número de errores de conexión **seguidos** (`AiPhaseStats.stopped = "connection"`). `None`: nunca para por eso. `< 1` → `ValueError` |
 | `ai_max_documents` | `int \| None` | (0.14.0, L-3b) Tope de documentos enviados en cada fase de IA; al alcanzarlo con documentos pendientes, para con `"budget"`. `None`: sin tope. `< 0` → `ValueError` |
 

@@ -50,14 +50,14 @@ mismas reglas.
 
 | Servicio | Tarea | Devuelve |
 |---|---|---|
-| `classify_document(llm, prompts, *, axes, title, content)` | `classify` | `ClassificationAnswer`: por eje pedido (`AxisRequest(key, slugs)`), `AxisAnswer(slug \| None, confidence)`, y `reasoning`. El esquema lleva un `enum` con los slugs de cada eje; un valor fuera del catálogo no pasa la validación |
+| `classify_document(llm, prompts, *, axes, title, content, profile="")` | `classify` | `ClassificationAnswer`: por eje pedido (`AxisRequest.from_axis(eje)` o `AxisRequest.from_slugs(clave, slugs)`), un `AxisAnswer` con sus `choices` (`AxisChoice`: `slug`, `confidence`, `evidence`, `evidence_verified`; uno como mucho, o 5 si el eje es múltiple) y `reasoning`. El esquema lleva un `enum` con los slugs de cada eje; un valor fuera del catálogo se descarta |
 | `enrich_document(llm, prompts, *, title, content)` | `enrich` | `DocumentEnrichmentResult` (descripción y hasta 8 palabras clave, limpias) |
 | `draft_taxonomy(llm, prompts, documents)` | `taxonomy_design` | `TaxonomyManifestDraftResult` sin slugs repetidos; `.to_manifest()` y `render_taxonomy_manifest_markdown` para revisarlo |
 
 Todos devuelven `LlmResult` (`value`, `model`, `response_format`, `usage`, `redacted`) y aceptan `on_redacted` para
 anotar lo redactado por documento. `ContextBuilder.build(llm=..., ai_scope="unclassified", enrich=True)` los usa por
-dentro. En este paso envían lo mismo que 1.x (slugs y los primeros 4000 caracteres); en M5 se añaden descripciones,
-perfil del proyecto y extracto.
+dentro. La clasificación envía el catálogo con nombres y descripciones, el perfil del proyecto y el extracto (ver
+abajo); el enriquecimiento, todavía los primeros 4000 caracteres.
 
 ## Caché de resultados
 
@@ -78,8 +78,8 @@ claves: trátala como `Conversión/`.
 
 ## Lo que recibe el modelo (2.0.0, M5)
 
-Para que el modelo clasifique como lo haría alguien del proyecto, M5 cambia lo que se le envía. Estas piezas ya existen;
-la clasificación las usa a partir del siguiente paso de M5:
+Para que el modelo clasifique como lo haría alguien del proyecto, M5 cambia lo que se le envía en la tarea `classify`
+(prompt versión 2):
 
 - **`.json` completo** (`read_conversion_document`): título, fragmentos con su ruta de títulos de sección y huella del
   original (hasta 1.7 se descartaban los títulos).
@@ -90,6 +90,19 @@ la clasificación las usa a partir del siguiente paso de M5:
   `## Reglas de desempate`, `## Glosario` y `## Ejemplos` del cuerpo del manifiesto o la plantilla, más las de
   `<raíz>/.doc_organize/profile.md`, que se añaden detrás (D11). Como mucho 8000 caracteres y 20 ejemplos, sin
   caracteres de control.
+- **Catálogo con nombres y descripciones** (`render_catalog`): por eje, su nombre, si admite varios valores y qué
+  clasifica, y cada valor con su nombre y descripción, una línea cada uno. El modelo solo puede responder slugs (`enum`).
+
+El mensaje `system` lleva las instrucciones, el perfil y el catálogo (el mismo prefijo en todo el proyecto); el `user`,
+solo el extracto entre `<<<DOCUMENTO` y `DOCUMENTO>>>` (el texto del documento no puede cerrar el bloque). El modelo
+responde, por eje, `values`: una lista de `{value, confidence, evidence}`, donde `evidence` es una cita literal del
+documento. La cita se comprueba contra lo enviado, sin distinguir mayúsculas, acentos ni espacios
+(`AxisChoice.evidence_verified`); **si no aparece, la confianza del valor queda justo por debajo del umbral del eje**
+(D10): el valor se conserva en el contexto, con su cita, para revisarlo. En los ejes que solo etiquetan, los valores
+por debajo del umbral del eje se descartan.
+
+`render_prompt_preview(manifest)` devuelve los mensajes que recibiría el modelo con ese manifiesto, sin llamar a nadie:
+para revisar el catálogo y el perfil antes de gastar llamadas.
 
 ## Prompts
 

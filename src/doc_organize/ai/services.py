@@ -1,10 +1,10 @@
 """
-Servicios por tarea sobre el cliente único de IA (2.0.0, G1): clasificar ejes, describir un documento y proponer una
-taxonomía. Sustituyen a los métodos de los cuatro clientes de 1.x.
+Servicios por tarea sobre el cliente único de IA (2.0.0, G1 y G2): clasificar ejes, describir un documento y proponer
+una taxonomía. Sustituyen a los métodos de los cuatro clientes de 1.x.
 
 Cada servicio arma los mensajes con el prompt de su tarea (`PromptRegistry`), define el esquema de la respuesta (que
-`LlmClient` envía como `json_schema` estricto) y la valida. El contenido de lo que se envía es, en este paso, el mismo que
-en 1.x (slugs del catálogo y los primeros 4000 caracteres del documento); cambia en M5 (descripciones, perfil y extracto).
+`LlmClient` envía como `json_schema` estricto) y la valida. La clasificación (M5) envía el catálogo con nombres y
+descripciones, el perfil del proyecto y el extracto del documento, y pide una cita por valor.
 """
 
 from collections.abc import Callable, Sequence
@@ -14,9 +14,19 @@ from typing import Any
 from pydantic import ValidationError
 
 from doc_organize.ai.cache import AiResultCache
+from doc_organize.ai.excerpt import MAX_EXCERPT_CHARS
 from doc_organize.ai.llm_client import LlmClient, LlmResult
 from doc_organize.ai.prompts import PromptRegistry
-from doc_organize.core.models import AiTask, DocumentEnrichmentResult, TaxonomyEntry, TaxonomyManifestDraftResult
+from doc_organize.core.models import (
+    AiTask,
+    DocumentEnrichmentResult,
+    ProjectProfile,
+    TaxonomyAxis,
+    TaxonomyEntry,
+    TaxonomyManifest,
+    TaxonomyManifestDraftResult,
+)
+from doc_organize.utils.folding import FoldedText, fold
 from doc_organize.utils.text_clean import clean_text
 
 #: Caracteres del documento que se envían para clasificar y describir (como en 1.x).
@@ -26,30 +36,6 @@ MAX_SAMPLE_CHARS_PER_DOCUMENT = 600
 MAX_KEYWORDS = 8
 _KEYWORD_MAX_CHARS = 60
 _DESCRIPTION_MAX_CHARS = 500
-
-
-@dataclass(frozen=True)
-class AxisRequest:
-    """Un eje que se pide clasificar: su clave y sus valores posibles (slugs)."""
-
-    key: str
-    slugs: Sequence[str]
-
-
-@dataclass(frozen=True)
-class AxisAnswer:
-    """Lo que respondió el modelo para un eje: un valor del catálogo o `None`, y su confianza (0-1)."""
-
-    slug: str | None
-    confidence: float
-
-
-@dataclass(frozen=True)
-class ClassificationAnswer:
-    """Respuesta validada de `classify_document`: una entrada por eje pedido y la justificación."""
-
-    axes: dict[str, AxisAnswer]
-    reasoning: str | None
 
 
 @dataclass(frozen=True)
@@ -89,28 +75,175 @@ class TaskRequest[T]:
         )
 
 
+@dataclass(frozen=True)
+class AxisOption:
+    """Un valor posible de un eje, como se le presenta al modelo: slug, nombre y qué cubre."""
+
+    slug: str
+    name: str | None = None
+    description: str | None = None
+
+
+@dataclass(frozen=True)
+class AxisRequest:
+    """Un eje que se pide clasificar (2.0.0, G2): su clave, nombre, descripción, si admite varios valores y sus valores.
+
+    El modelo recibe nombres y descripciones (no solo slugs, se revierte S3 con las mitigaciones de G2.2), pero solo
+    puede responder slugs de `options` (`enum` del esquema).
+    """
+
+    key: str
+    options: Sequence[AxisOption]
+    name: str | None = None
+    description: str | None = None
+    multiple: bool = False
+
+    @property
+    def slugs(self) -> list[str]:
+        return [option.slug for option in self.options]
+
+    @classmethod
+    def from_slugs(cls, key: str, slugs: Sequence[str]) -> "AxisRequest":
+        """Un eje del que solo se conocen los slugs (sin manifiesto: los dominios)."""
+        return cls(key=key, options=[AxisOption(slug) for slug in slugs])
+
+    @classmethod
+    def from_axis(cls, axis: TaxonomyAxis, slugify: Callable[[str], str] = str) -> "AxisRequest":
+        """Un eje del manifiesto; `slugify` sanea los slugs como lo hace quien aplica la respuesta."""
+        options = {}
+        for entry in axis.entries:
+            slug = slugify(entry.slug)
+            if slug and slug not in options:
+                options[slug] = AxisOption(slug=slug, name=entry.name, description=entry.description)
+        return cls(key=axis.key, options=list(options.values()), name=axis.name, description=axis.description, multiple=axis.multiple)
+
+
+@dataclass(frozen=True)
+class AxisChoice:
+    """Un valor que eligió el modelo para un eje, con su confianza y la cita que lo justifica.
+
+    Attributes:
+        slug (str): Valor del catálogo del eje.
+        confidence (float): Confianza 0-1 que dio el modelo.
+        evidence (str | None): Cita literal que dio el modelo, o `None`.
+        evidence_verified (bool | None): Si la cita aparece en lo enviado (sin distinguir mayúsculas, acentos ni
+            espacios); `None` sin cita.
+    """
+
+    slug: str
+    confidence: float
+    evidence: str | None = None
+    evidence_verified: bool | None = None
+
+
+@dataclass(frozen=True)
+class AxisAnswer:
+    """Lo que respondió el modelo para un eje: como mucho un valor (o 5 si el eje es múltiple), del catálogo."""
+
+    choices: tuple[AxisChoice, ...] = ()
+
+    @property
+    def slug(self) -> str | None:
+        """El primer valor, o `None` (para los ejes de un valor)."""
+        return self.choices[0].slug if self.choices else None
+
+    @property
+    def confidence(self) -> float:
+        """La confianza del primer valor, o 0."""
+        return self.choices[0].confidence if self.choices else 0.0
+
+
+@dataclass(frozen=True)
+class ClassificationAnswer:
+    """Respuesta validada de `classify_document`: una entrada por eje pedido y la justificación."""
+
+    axes: dict[str, AxisAnswer]
+    reasoning: str | None
+
+
+#: Delimitadores del documento en el mensaje: lo de dentro es material, no instrucciones (G2.2).
+DOCUMENT_START = "<<<DOCUMENTO"
+DOCUMENT_END = "DOCUMENTO>>>"
+#: Valores como mucho por eje de varios valores (como las reglas, A2).
+MAX_VALUES_PER_AXIS = 5
+_MAX_EVIDENCE_CHARS = 300
+
+
+def render_catalog(axes: Sequence[AxisRequest]) -> str:
+    """El catálogo como lo lee el modelo: por eje, su nombre, si admite varios valores, qué clasifica y sus valores con
+    nombre y descripción (una línea cada uno, sin caracteres de control).
+
+    Example:
+        >>> print(render_catalog([AxisRequest("domains", [AxisOption("calidad", "Calidad", "Sistema de gestión de calidad")], name="Dominios")]))
+        Eje domains: Dominios (un valor)
+        - calidad: Calidad. Sistema de gestión de calidad
+    """
+    blocks = []
+    for axis in axes:
+        cardinality = f"varios valores, hasta {MAX_VALUES_PER_AXIS}" if axis.multiple else "un valor"
+        lines = [f"Eje {axis.key}: {_line(axis.name) or axis.key} ({cardinality})"]
+        if axis.description:
+            lines.append(f"  {_line(axis.description)}")
+        for option in axis.options:
+            details = ". ".join(part for part in (_line(option.name), _line(option.description)) if part)
+            lines.append(f"- {option.slug}" + (f": {details}" if details else ""))
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
 def classification_request(
-    prompts: PromptRegistry, *, axes: Sequence[AxisRequest], title: str | None, content: str
+    prompts: PromptRegistry,
+    *,
+    axes: Sequence[AxisRequest],
+    title: str | None,
+    content: str,
+    profile: str = "",
 ) -> TaskRequest[ClassificationAnswer]:
     """La petición de `classify_document`, sin enviarla.
+
+    Args:
+        prompts: Prompts de cada tarea.
+        axes: Ejes que se piden (solo los que faltan).
+        title: Título del documento.
+        content: Lo que se envía del documento: el extracto (`build_document_excerpt`), hasta `MAX_EXCERPT_CHARS`.
+        profile: Perfil del proyecto ya preparado (`profile_prompt_text`).
 
     Raises:
         ValueError: `axes` está vacío.
     """
     if not axes:
         raise ValueError("No se puede clasificar sin ningún eje")
-    catalog = "\n".join(f"- {axis.key}: {', '.join(axis.slugs) or '(ninguno)'}" for axis in axes)
+    document = content[:MAX_EXCERPT_CHARS].replace(DOCUMENT_END, "DOCUMENTO").replace(DOCUMENT_START, "DOCUMENTO")
     messages = prompts.get("classify").render(
-        catalog=f"Ejes y sus valores:\n{catalog}", title=title or "(sin título)", content=content[:MAX_CONTENT_CHARS]
+        catalog=render_catalog(axes),
+        profile=f"Perfil del proyecto:\n{profile}" if profile else "",
+        document=f"{DOCUMENT_START}\n{document}\n{DOCUMENT_END}",
+        title=title or "(sin título)",
+        content=document,
     )
+    choice_properties: dict[str, Any] = {"confidence": {"type": "number"}, "evidence": {"type": ["string", "null"]}}
+
+    def choice_schema(slugs: list[str]) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {"value": {"type": "string", "enum": slugs}, **choice_properties},
+            "required": ["value", "confidence", "evidence"],
+            "additionalProperties": False,
+        }
+
     schema: dict[str, Any] = {
         "type": "object",
         "properties": {
             **{
                 axis.key: {
                     "type": "object",
-                    "properties": {"value": {"type": ["string", "null"], "enum": [*axis.slugs, None]}, "confidence": {"type": "number"}},
-                    "required": ["value", "confidence"],
+                    "properties": {
+                        "values": {
+                            "type": "array",
+                            "items": choice_schema(axis.slugs),
+                        }
+                    },
+                    "required": ["values"],
                     "additionalProperties": False,
                 }
                 for axis in axes
@@ -120,6 +253,7 @@ def classification_request(
         "required": [*(axis.key for axis in axes), "reasoning"],
         "additionalProperties": False,
     }
+    sent = FoldedText.of(document)
 
     def parse(data: Any) -> ClassificationAnswer:
         if not isinstance(data, dict):
@@ -127,14 +261,30 @@ def classification_request(
         answers = {}
         for axis in axes:
             entry = data.get(axis.key)
-            if not isinstance(entry, dict):
+            values = entry.get("values") if isinstance(entry, dict) else None
+            if not isinstance(values, list):
                 raise TypeError(f"falta el eje {axis.key}")
-            value = entry.get("value")
-            answers[axis.key] = AxisAnswer(slug=value if value in axis.slugs else None, confidence=_confidence(entry.get("confidence")))
+            answers[axis.key] = AxisAnswer(choices=_choices(axis, values, sent))
         reasoning = data.get("reasoning")
         return ClassificationAnswer(axes=answers, reasoning=clean_text(reasoning) if isinstance(reasoning, str) else None)
 
     return TaskRequest("classify", messages, schema, parse, "clasificacion")
+
+
+def _choices(axis: AxisRequest, values: list[Any], sent: FoldedText) -> tuple[AxisChoice, ...]:
+    """Los valores válidos de un eje: del catálogo, sin repetir, como mucho 1 (o 5 si es múltiple), con la cita
+    comprobada contra lo enviado."""
+    allowed = set(axis.slugs)
+    choices: list[AxisChoice] = []
+    for item in values:
+        if not isinstance(item, dict) or item.get("value") not in allowed or any(choice.slug == item["value"] for choice in choices):
+            continue
+        evidence = item.get("evidence")
+        cleaned = clean_text(evidence) if isinstance(evidence, str) else None
+        text = cleaned[:_MAX_EVIDENCE_CHARS] if cleaned else None
+        verified = None if text is None else bool(fold(text)) and sent.contains(fold(text))
+        choices.append(AxisChoice(slug=item["value"], confidence=_confidence(item.get("confidence")), evidence=text, evidence_verified=verified))
+    return tuple(choices[: MAX_VALUES_PER_AXIS if axis.multiple else 1])
 
 
 async def classify_document(
@@ -144,21 +294,71 @@ async def classify_document(
     axes: Sequence[AxisRequest],
     title: str | None,
     content: str,
+    profile: str = "",
     on_redacted: Redacted | None = None,
     cache: AiResultCache | None = None,
 ) -> LlmResult[ClassificationAnswer]:
     """Clasifica un documento en `axes` con una sola llamada (tarea `classify`).
 
-    El esquema tiene, por eje, `value` con un `enum` de sus slugs (o `null`) y `confidence`. Un valor fuera del catálogo
-    no pasa la validación aunque el modelo no admita el esquema estricto. Con `cache`, una petición idéntica a una ya
-    hecha no llama al modelo.
+    El modelo recibe el catálogo con nombres y descripciones, el perfil del proyecto y el documento (el extracto) entre
+    delimitadores. Responde, por eje, una lista de valores del catálogo (`enum` del esquema), cada uno con su confianza
+    y una cita literal; la cita se comprueba contra lo enviado (`AxisChoice.evidence_verified`). Un valor fuera del
+    catálogo se descarta aunque el modelo no admita el esquema estricto. Con `cache`, una petición idéntica a una ya hecha
+    no llama al modelo.
 
     Raises:
         ValueError: `axes` está vacío.
         AiError: Ver `LlmClient.complete_json`.
     """
-    request = classification_request(prompts, axes=axes, title=title, content=content)
+    request = classification_request(prompts, axes=axes, title=title, content=content, profile=profile)
     return await request.send(llm, on_redacted=on_redacted, cache=cache)
+
+
+def render_prompt_preview(
+    manifest: TaxonomyManifest,
+    *,
+    prompts: PromptRegistry | None = None,
+    profile: ProjectProfile | None = None,
+    title: str = "Título del documento",
+    excerpt: str = "(aquí va el extracto de cada documento)",
+) -> list[dict[str, str]]:
+    """Los mensajes que recibiría el modelo al clasificar con `manifest`, **sin llamar a nadie** (2.0.0, G2): para
+    revisar el catálogo y el perfil antes de gastar una sola llamada.
+
+    Args:
+        manifest: Manifiesto o plantilla (todos sus ejes; en una construcción solo se piden los que faltan).
+        prompts: Prompts (por defecto, los empaquetados).
+        profile: Perfil (por defecto, `manifest.profile`).
+        title: Título de ejemplo.
+        excerpt: Extracto de ejemplo.
+
+    Example:
+        >>> from doc_organize.core.models import TaxonomyAxis, TaxonomyEntry
+        >>> manifest = TaxonomyManifest(axes=[
+        ...     TaxonomyAxis(key="domains", name="Dominios", organizes="folder", entries=[TaxonomyEntry(slug="calidad", name="Calidad")]),
+        ...     TaxonomyAxis(key="material_types", name="Tipos", organizes="subfolder", entries=[TaxonomyEntry(slug="politica", name="Política")]),
+        ... ])
+        >>> messages = render_prompt_preview(manifest)
+        >>> "- calidad: Calidad" in messages[0]["content"], messages[1]["content"].startswith(DOCUMENT_START)
+        (True, True)
+    """
+    from doc_organize.context.project_profile import profile_prompt_text
+
+    request = classification_request(
+        prompts or PromptRegistry(),
+        axes=[AxisRequest.from_axis(axis) for axis in manifest.axes],
+        title=title,
+        content=excerpt,
+        profile=profile_prompt_text(profile if profile is not None else manifest.profile),
+    )
+    return request.messages
+
+
+def _line(text: str | None) -> str:
+    """Una línea sin caracteres de control (los nombres y descripciones del catálogo van al prompt, S3)."""
+    if not text:
+        return ""
+    return " ".join("".join(char if char.isprintable() else " " for char in text).split())
 
 
 def enrichment_request(prompts: PromptRegistry, *, title: str | None, content: str) -> TaskRequest[DocumentEnrichmentResult]:
@@ -283,8 +483,13 @@ def _dedupe(entries: list[TaxonomyEntry]) -> list[TaxonomyEntry]:
 
 
 __all__ = [
+    "DOCUMENT_END",
+    "DOCUMENT_START",
     "MAX_CONTENT_CHARS",
+    "MAX_VALUES_PER_AXIS",
     "AxisAnswer",
+    "AxisChoice",
+    "AxisOption",
     "AxisRequest",
     "ClassificationAnswer",
     "SampledDocument",
@@ -294,4 +499,6 @@ __all__ = [
     "draft_taxonomy",
     "enrich_document",
     "enrichment_request",
+    "render_catalog",
+    "render_prompt_preview",
 ]

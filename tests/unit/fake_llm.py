@@ -71,9 +71,7 @@ class FakeProxy:
         answer = responder(fake)
         if isinstance(answer, httpx.Response):
             return answer
-        if task == "classify" and not (
-            isinstance(answer, dict) and "reasoning" in answer and all(isinstance(answer.get(key), dict) for key in fake.axes)
-        ):
+        if task == "classify":
             answer = _classification(fake, answer)
         return httpx.Response(
             200, json={"choices": [{"message": {"content": json.dumps(answer)}}], "usage": {"prompt_tokens": 100, "completion_tokens": 10}}
@@ -83,15 +81,34 @@ class FakeProxy:
         return [request for request in self.requests if request.task == task]
 
 
-def _classification(request: FakeRequest, answer: Any) -> dict[str, Any]:
-    """`{"eje": slug | (slug, confianza) | None}` → la respuesta del esquema de clasificación."""
-    values = answer if isinstance(answer, dict) else {}
-    result: dict[str, Any] = {"reasoning": values.get("reasoning", "Justificación de prueba")}
+def _classification(request: FakeRequest, answer: Any) -> Any:
+    """Cualquier forma cómoda de respuesta de clasificación → la del esquema de 2.0 (`values` por eje).
+
+    Por eje se acepta: un slug, `(slug, confianza)`, `None` (nada), una lista de esas formas, el objeto de 1.x
+    (`{"value", "confidence"}`) o ya el de 2.0 (`{"values": [...]}`); sin cita salvo que se dé (`evidence`). Lo que no es
+    un diccionario se devuelve tal cual (para probar respuestas no válidas).
+    """
+    if not isinstance(answer, dict):
+        return answer
+    result: dict[str, Any] = {"reasoning": answer.get("reasoning", "Justificación de prueba")}
     for key in request.axes:
-        value = values.get(key)
-        slug, confidence = value if isinstance(value, tuple) else (value, 0.8)
-        result[key] = {"value": slug, "confidence": confidence}
+        result[key] = {"values": _choices(answer.get(key))}
     return result
+
+
+def _choices(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        if "values" in value:
+            return list(value["values"])
+        if value.get("value") is None:
+            return []
+        return [{"value": value["value"], "confidence": value.get("confidence", 0.8), "evidence": value.get("evidence")}]
+    if isinstance(value, list):
+        return [choice for item in value for choice in _choices(item)]
+    slug, confidence = value if isinstance(value, tuple) else (value, 0.8)
+    return [{"value": slug, "confidence": confidence, "evidence": None}] if slug is not None else []
 
 
 def fake_llm(*, settings: AiSettings | None = None, **responders: Responder) -> LlmClient:
@@ -140,7 +157,7 @@ class FakeLlmClient(LlmClient):
         catalogs = []
         for request in self.proxy.calls("classify"):
             schema = request.body["response_format"]["json_schema"]["schema"]["properties"]
-            enums = [[slug for slug in schema[key]["properties"]["value"]["enum"] if slug is not None] for key in request.axes]
+            enums = [list(schema[key]["properties"]["values"]["items"]["properties"]["value"]["enum"]) for key in request.axes]
             catalogs.append(enums[0] if len(enums) == 1 else tuple(enums))
         return catalogs
 

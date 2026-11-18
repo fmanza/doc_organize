@@ -97,8 +97,17 @@ ruptura; la guía de migración completa llega con la versión.
   título, carpeta de dos niveles, metadatos, esquema de títulos, comienzo con texto de verdad y fragmentos con términos del
   catálogo; `EXCERPT_VERSION`); `ProjectProfile` y `TaxonomyManifest.profile`, leído de las secciones `## Contexto del
   proyecto`, `## Reglas de desempate`, `## Glosario` y `## Ejemplos` del cuerpo, con el de
-  `<raíz>/.doc_organize/profile.md` añadido detrás (`compose_profile`, D11). Todavía no se envían: lo hará la
-  clasificación del siguiente paso.
+  `<raíz>/.doc_organize/profile.md` añadido detrás (`compose_profile`, D11).
+- **Clasificación con IA de 2.0 (M5, G1.4 y G2)**: el prompt `classify` (versión 2) envía el catálogo con nombres y
+  descripciones (`render_catalog`), el perfil del proyecto y el extracto del documento entre `<<<DOCUMENTO` y
+  `DOCUMENTO>>>`. La respuesta es, por eje, una lista `values` de `{value, confidence, evidence}` (uno como mucho, o 5
+  en un eje múltiple); la cita se comprueba contra lo enviado y, si no aparece, la confianza queda por debajo del umbral
+  del eje (D10). `AxisRequest` pasa a llevar `AxisOption` (`from_axis`, `from_slugs`), `AxisAnswer.choices` con
+  `AxisChoice` (`evidence`, `evidence_verified`), `classify_document(..., profile=)`, `render_prompt_preview(manifest)`
+  (los mensajes, sin llamar a nadie) y `ContextBuilder.build(profile=)`.
+- `ai_scope="missing_axes"`: la IA clasifica también los documentos con algún eje que solo etiqueta vacío (incluidos los
+  de `rules: false`), con una llamada por documento y solo los ejes que le faltan. La IA solo rellena ejes vacíos; los
+  valores de los ejes que etiquetan pasan por su umbral. `AxisValue.evidence`/`evidence_verified` guardan la cita.
 
 ### Retirado (ruptura)
 

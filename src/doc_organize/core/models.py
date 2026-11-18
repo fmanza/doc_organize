@@ -1081,9 +1081,10 @@ class Domain(BaseModel):
 AiClassificationStopReason = Literal["auth", "connection", "budget"]
 """Motivo por el que `ContextBuilder.build()` detuvo una fase de IA (`AiPhaseStats.stopped`, L-3a/L-3b)."""
 
-AiScope = Literal["off", "unclassified"]
-"""Qué documentos van a la IA para clasificarse (`ContextBuilder.build(ai_scope=)`, 2.0.0): ninguno, o los que las reglas
-dejaron sin clasificar en algún eje organizador (la Sub-fase B de 1.x). `missing_axes` llega en M5."""
+AiScope = Literal["off", "unclassified", "missing_axes"]
+"""Qué documentos van a la IA para clasificarse (`ContextBuilder.build(ai_scope=)`, 2.0.0): ninguno; los que las reglas
+dejaron sin clasificar en algún eje organizador (`unclassified`, la Sub-fase B de 1.x); o además los que tienen vacío
+algún eje que solo etiqueta (`missing_axes`, opt-in: más documentos van a la IA)."""
 
 
 class AiPhaseStats(BaseModel):
