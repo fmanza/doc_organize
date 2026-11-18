@@ -41,6 +41,12 @@ ruptura; la guía de migración completa llega con la versión.
   `examples`; sin manifiesto, el eje `domains`). `index.json` no escribe `evidence`/`evidence_verified` cuando no hay
   cita.
 
+- **Salidas por ejes (M1, A4)**: el sitio tiene una página `eje-<clave>.md` por cada eje que solo etiqueta (tabla de
+  valores con su recuento y enlaces a los documentos de cada valor), en el `nav` («Ejes de clasificación») y en
+  `index.md`. `write_context_documents_xlsx(destination, context)` (D4): hoja `Documentos` con una columna por eje y
+  hoja `Ejes` con los recuentos por valor, con la misma protección contra fórmulas, progreso y cancelación que las demás
+  exportaciones.
+
 ### Compatibilidad
 
 - Los manifiestos y plantillas de 1.x se siguen leyendo (se migran en memoria); `save_taxonomy_manifest` guarda el

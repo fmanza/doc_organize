@@ -16,7 +16,7 @@ Example:
 """
 
 from doc_organize.export.sources import load_cache_entries, load_context_history, load_scan_error_history
-from doc_organize.export.xlsx_export import write_cache_xlsx, write_context_history_xlsx, write_scan_errors_xlsx
+from doc_organize.export.xlsx_export import write_cache_xlsx, write_context_documents_xlsx, write_context_history_xlsx, write_scan_errors_xlsx
 from doc_organize.export.zip_export import CACHE_SNAPSHOT_NAME, ExportStats, preview_project_zip, write_project_zip
 
 __all__ = [
@@ -27,6 +27,7 @@ __all__ = [
     "load_scan_error_history",
     "preview_project_zip",
     "write_cache_xlsx",
+    "write_context_documents_xlsx",
     "write_context_history_xlsx",
     "write_project_zip",
     "write_scan_errors_xlsx",

@@ -1,4 +1,4 @@
-"""Excel de la caché y de los errores de escaneo (L-7, hueco G8 de doc_organize_web).
+"""Excel de la caché, de los errores de escaneo, del historial y de los documentos del contexto (L-7, G8; 2.0.0).
 
 `openpyxl` (extra `export`) se importa al escribir, no al importar el módulo, y en modo `write_only`: las filas se
 vuelcan según se generan. Ese modo guarda el XML de cada hoja en un temporal del sistema (`openpyxl.*.xml`) hasta
@@ -12,15 +12,29 @@ import contextlib
 import os
 import re
 
+from collections import Counter
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 from typing import Any, BinaryIO
 
-from doc_organize.core.constants import MAX_AUTO_ERROR_RETRIES
+from doc_organize.core.constants import MAX_AUTO_ERROR_RETRIES, UNCLASSIFIED_SLUG
 from doc_organize.core.exceptions import MissingDependencyError
-from doc_organize.core.models import CacheEntry, ContextBuildRecord, ContextChange, ConversionStatus, ScanErrorEntry, ScanErrorReport
+from doc_organize.core.models import (
+    CacheEntry,
+    Context,
+    ContextBuildRecord,
+    ContextChange,
+    ConversionStatus,
+    DocumentClassification,
+    Domain,
+    DomainDocument,
+    ScanErrorEntry,
+    ScanErrorReport,
+    TaxonomyAxis,
+    UnclassifiedDocument,
+)
 from doc_organize.core.progress import CancelToken, ProgressCallback, checkpoint
 from doc_organize.export._progress import ExportProgress
 from doc_organize.utils.logging import get_logger
@@ -223,6 +237,141 @@ def write_context_history_xlsx(
     return _write_workbook(destination, sheets, on_progress, cancel_token)
 
 
+#: Hojas y cabeceras fijas del Excel de los documentos del contexto (2.0.0, D4): tras ellas, una columna por cada eje
+#: que solo etiqueta, en el orden de `Context.taxonomy_axes`.
+CONTEXT_DOCUMENTS_SHEET = "Documentos"
+CONTEXT_AXES_SHEET = "Ejes"
+CONTEXT_DOCUMENTS_COLUMNS = (
+    _COL_ARCHIVO,
+    _COL_CARPETA,
+    _COL_RUTA_COMPLETA,
+    "Título",
+    "Tipo de documento",
+    "Dominio",
+    "Nombre del dominio",
+    "Tipo de material",
+    "Nombre del tipo de material",
+    "Confianza",
+    "Clasificado por",
+    "Estado",
+    "Autor",
+    "Idioma",
+    "Palabras clave",
+)
+CONTEXT_AXES_COLUMNS = ("Eje", "Nombre del eje", "Organiza", "Valor", "Nombre del valor", "Documentos")
+_ORGANIZES_LABELS = {"folder": "Carpeta (dominio)", "subfolder": "Subcarpeta (tipo de material)"}
+_UNCLASSIFIED_REASON_LABELS = {
+    "incomplete_artifacts": "Sin clasificar: conversión incompleta",
+    "below_threshold": "Sin clasificar: no llega al umbral",
+}
+
+
+def write_context_documents_xlsx(
+    destination: str | Path | BinaryIO,
+    context: Context,
+    *,
+    on_progress: ProgressCallback | None = None,
+    cancel_token: CancelToken | None = None,
+) -> int:
+    """Escribe un Excel con los documentos del contexto y sus ejes (2.0.0, D4): hojas `Documentos` y `Ejes`.
+
+    `Documentos` tiene una fila por documento clasificado (en el orden de los dominios) y después una por cada
+    documento sin clasificar, con su motivo; tras las columnas fijas (`CONTEXT_DOCUMENTS_COLUMNS`), una por cada eje que
+    solo etiqueta, con los nombres de sus valores separados por «; ». `Ejes` tiene una fila por eje y valor del catálogo
+    con el número de documentos que lo tienen (también los que no tiene ninguno): sirve para ver si un eje etiqueta de
+    más. Síncrona: un consumidor async la llama con `asyncio.to_thread`.
+
+    Args:
+        destination: Ruta del `.xlsx` (se crea o sobrescribe) o fichero binario abierto para escritura.
+        context: Contexto del proyecto (`ContextRegistry.load_context`).
+        on_progress: Recibe `ProgressEvent(operation="export")` por fila (`started`, `export`, `done`).
+        cancel_token: Si se cancela, para entre dos filas.
+
+    Returns:
+        Filas de datos escritas en las dos hojas (sin las cabeceras).
+
+    Raises:
+        MissingDependencyError: Falta `openpyxl` (extra `export`).
+        OperationCancelledError: Se canceló; si `destination` es una ruta, el fichero parcial se borra.
+
+    Example:
+        >>> import io
+        >>> from doc_organize.core.models import Context
+        >>> write_context_documents_xlsx(io.BytesIO(), Context(project_name="P", created_at="a", updated_at="b"))
+        0
+    """
+    tag_axes = [axis for axis in context.taxonomy_axes if axis.organizes is None]
+    columns = (*CONTEXT_DOCUMENTS_COLUMNS, *(_excel_safe(axis.name) for axis in tag_axes))
+    rows: list[Row] = [_context_document_row(domain, document, tag_axes) for domain in context.domains for document in domain.documents]
+    rows += [_unclassified_detail_row(detail, tag_axes) for detail in context.unclassified_details]
+    counts = Counter(
+        (key, value.slug)
+        for domain in context.domains
+        for document in domain.documents
+        for key, values in document.classification.axes.items()
+        for value in values
+    )
+    axis_rows: list[Row] = [
+        (
+            _excel_safe(axis.key),
+            _excel_safe(axis.name),
+            _ORGANIZES_LABELS.get(axis.organizes or "", "No (solo etiqueta)"),
+            _excel_safe(entry.slug),
+            _excel_safe(entry.name),
+            counts.get((axis.key, entry.slug), 0),
+        )
+        for axis in context.taxonomy_axes
+        for entry in axis.entries
+    ]
+    sheets = [(CONTEXT_DOCUMENTS_SHEET, columns, rows), (CONTEXT_AXES_SHEET, CONTEXT_AXES_COLUMNS, axis_rows)]
+    return _write_workbook(destination, sheets, on_progress, cancel_token)
+
+
+def _axis_cells(classification: DocumentClassification, tag_axes: Sequence[TaxonomyAxis]) -> list[str]:
+    """Una celda por eje que etiqueta: los nombres de sus valores separados por «; »."""
+    return [_excel_safe("; ".join(value.name for value in classification.axes.get(axis.key, []))) for axis in tag_axes]
+
+
+def _context_document_row(domain: Domain, document: DomainDocument, tag_axes: Sequence[TaxonomyAxis]) -> Row:
+    unclassified = domain.slug == UNCLASSIFIED_SLUG
+    material = None if document.material_type == UNCLASSIFIED_SLUG else document.material_type
+    return (
+        *_file_columns(document.source_path),
+        _excel_safe(document.title),
+        _excel_safe(document.document_type),
+        _UNCLASSIFIED_LABEL if unclassified else _excel_safe(domain.slug),
+        "" if unclassified else _excel_safe(domain.name),
+        _placement_label(material, True),
+        _excel_safe(document.material_type_name or ""),
+        round(document.confidence, 4),
+        _excel_safe(document.classified_by),
+        "Sin clasificar: ningún dominio llega al umbral" if unclassified else "Clasificado",
+        _excel_safe(document.author or ""),
+        _excel_safe(document.language or ""),
+        _excel_safe("; ".join(document.keywords)),
+        *_axis_cells(document.classification, tag_axes),
+    )
+
+
+def _unclassified_detail_row(detail: UnclassifiedDocument, tag_axes: Sequence[TaxonomyAxis]) -> Row:
+    return (
+        *_file_columns(detail.source_path),
+        _excel_safe(detail.title or ""),
+        _excel_safe(detail.document_type),
+        _UNCLASSIFIED_LABEL,
+        "",
+        "",
+        "",
+        None,
+        "",
+        _UNCLASSIFIED_REASON_LABELS[detail.reason],
+        _excel_safe(detail.author or ""),
+        _excel_safe(detail.language or ""),
+        _excel_safe("; ".join(detail.keywords)),
+        *_axis_cells(detail.classification, tag_axes),
+    )
+
+
 def _excel_safe(value: str) -> str:
     """Neutraliza la inyección de fórmulas: `value` viene de un nombre de fichero o un mensaje de error reales, no
     controlados por quien abre el Excel. Un fichero llamado p. ej. `=cmd|'/c calc'!A1` se interpretaría como fórmula al
@@ -381,15 +530,20 @@ def _discard_temporary_sheets(workbook: Any) -> None:
 __all__ = [
     "CACHE_COLUMNS",
     "CACHE_SHEET",
+    "CONTEXT_AXES_COLUMNS",
+    "CONTEXT_AXES_SHEET",
     "CONTEXT_BUILDS_COLUMNS",
     "CONTEXT_BUILDS_SHEET",
     "CONTEXT_CHANGES_COLUMNS",
     "CONTEXT_CHANGES_SHEET",
+    "CONTEXT_DOCUMENTS_COLUMNS",
+    "CONTEXT_DOCUMENTS_SHEET",
     "SCAN_ERRORS_CURRENT_COLUMNS",
     "SCAN_ERRORS_CURRENT_SHEET",
     "SCAN_ERRORS_HISTORY_COLUMNS",
     "SCAN_ERRORS_HISTORY_SHEET",
     "write_cache_xlsx",
+    "write_context_documents_xlsx",
     "write_context_history_xlsx",
     "write_scan_errors_xlsx",
 ]

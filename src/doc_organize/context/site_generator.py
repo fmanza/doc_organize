@@ -19,7 +19,7 @@ from typing import Any
 from doc_organize.context.reorganizer import Reorganizer, _remove_dir_or_link, resolve_organized_paths
 from doc_organize.core.constants import SITE_FOLDER_NAME
 from doc_organize.core.exceptions import InvalidPathError, SiteBuildError
-from doc_organize.core.models import Context, Domain, DomainDocument, Project
+from doc_organize.core.models import Context, Domain, DomainDocument, Project, TaxonomyAxis
 from doc_organize.projects.layout import RESERVED_OUTPUT_FOLDER_NAMES, ProjectLayout, _folder_key, validate_output_folder_name
 from doc_organize.security import credentials
 from doc_organize.utils.atomic_write import write_text_atomic
@@ -160,8 +160,13 @@ class SiteGenerator:
         await asyncio.to_thread(output_root.mkdir, parents=True, exist_ok=True)
         index_path = output_root / _INDEX_MD_NAME
         await asyncio.to_thread(write_text_atomic, index_path, _render_index(context))
-        pages = [_INDEX_MD_NAME] + [path for domain in context.domains for path in resolve_organized_paths(domain, project.root_path)]
-        credentials_redacted = await asyncio.to_thread(_redact_pages, output_root, pages[1:]) if redact_credentials else ()
+        document_pages = [path for domain in context.domains for path in resolve_organized_paths(domain, project.root_path)]
+        credentials_redacted = await asyncio.to_thread(_redact_pages, output_root, document_pages) if redact_credentials else ()
+        axis_pages = _render_axis_pages(context, project.root_path, redact=redact_credentials)
+        for name, text in axis_pages.items():
+            await asyncio.to_thread(write_text_atomic, output_root / name, text)
+        await asyncio.to_thread(_remove_stale_axis_pages, output_root, set(axis_pages))
+        pages = [_INDEX_MD_NAME, *axis_pages, *document_pages]
         search_excluded = await asyncio.to_thread(_exclude_oversized_from_search, output_root, pages)
 
         relative_site_dir = target_site_dir.relative_to(os.path.abspath(layout.output_root)).as_posix()
@@ -252,6 +257,9 @@ class SiteGenerator:
             domain_nav = self._build_domain_nav(domain, context.taxonomy_manifest_used, project.root_path, redact=redact)
             if domain_nav:
                 nav.append({_label(domain.name): domain_nav})
+        axes_nav = [{_label(axis.name): _axis_page_name(axis.key)} for axis in _tag_axes(context)]
+        if axes_nav:
+            nav.append({"Ejes de clasificación": axes_nav})
         return {
             "project": {
                 "site_name": _label(f"{project.name} — Documentación organizada"),
@@ -328,7 +336,68 @@ def _render_index(context: Context) -> str:
         lines.append("*No aplica: todavía no hay dominios clasificados.*")
     else:
         lines.extend(f"- **{_escape_markdown(domain.name)}** ({len(domain.documents)} documento(s))" for domain in context.domains)
+    tag_axes = _tag_axes(context)
+    if tag_axes:
+        lines.extend(["", "## Ejes de clasificación", ""])
+        for axis in tag_axes:
+            tagged = sum(1 for domain in context.domains for document in domain.documents if document.classification.axes.get(axis.key))
+            lines.append(f"- [{_link_text(axis.name)}]({_axis_page_name(axis.key)}) ({tagged} documento(s) con algún valor)")
     return "\n".join(lines) + "\n"
+
+
+# --- Páginas de los ejes que solo etiquetan (2.0.0, A4) ---------------------------------------------------------------
+# Una página por eje, no por valor (U13: 10 ejes × 150 valores serían 1500 páginas más). Se llaman `eje-<clave>.md` y
+# están en la raíz de la carpeta reorganizada, junto a `index.md`: los dominios son carpetas, así que no chocan.
+
+_AXIS_PAGE_PREFIX = "eje-"
+
+
+def _tag_axes(context: Context) -> list[TaxonomyAxis]:
+    return [axis for axis in context.taxonomy_axes if axis.organizes is None]
+
+
+def _axis_page_name(key: str) -> str:
+    return f"{_AXIS_PAGE_PREFIX}{key}.md"
+
+
+def _link_text(text: str) -> str:
+    """Texto de un enlace Markdown: escapado como una etiqueta y sin corchetes ni barras verticales que lo rompan."""
+    return _escape_markdown(text).replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]").replace("|", "\\|")
+
+
+def _render_axis_pages(context: Context, project_root: str, *, redact: bool) -> dict[str, str]:
+    """`eje-<clave>.md` de cada eje que solo etiqueta: tabla de valores con su recuento y, por valor con documentos, la
+    lista de enlaces a sus páginas. Los títulos de los documentos salen sin credenciales si `redact`."""
+    tag_axes = _tag_axes(context)
+    if not tag_axes:
+        return {}
+    links: dict[tuple[str, str], list[str]] = {}
+    for domain in context.domains:
+        for document, path in zip(domain.documents, resolve_organized_paths(domain, project_root), strict=True):
+            title = credentials.redact_credentials(document.title).text if redact else document.title
+            for key, values in document.classification.axes.items():
+                for value in values:
+                    links.setdefault((key, value.slug), []).append(f"- [{_link_text(title)}](<{path}>)")
+    pages = {}
+    for axis in tag_axes:
+        lines = [f"# {_escape_markdown(axis.name)}", ""]
+        if axis.description:
+            lines.extend([_escape_markdown(axis.description), ""])
+        lines.extend(["| Valor | Documentos |", "|---|---|"])
+        lines.extend(f"| {_link_text(entry.name)} | {len(links.get((axis.key, entry.slug), []))} |" for entry in axis.entries)
+        for entry in axis.entries:
+            entry_links = links.get((axis.key, entry.slug), [])
+            if entry_links:
+                lines.extend(["", f"## {_escape_markdown(entry.name)} ({len(entry_links)})", "", *entry_links])
+        pages[_axis_page_name(axis.key)] = "\n".join(lines) + "\n"
+    return pages
+
+
+def _remove_stale_axis_pages(output_root: Path, current: set[str]) -> None:
+    """Borra las `eje-*.md` de un eje que ya no está (nunca a través de un enlace)."""
+    for page in output_root.glob(f"{_AXIS_PAGE_PREFIX}*.md"):
+        if page.name not in current and page.is_file() and not page.is_symlink():
+            page.unlink(missing_ok=True)
 
 
 def _escape_markdown(text: str) -> str:

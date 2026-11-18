@@ -64,6 +64,7 @@ _EXPORTS: dict[str, str] = {
     "write_project_zip": "doc_organize.export.zip_export",
     "write_cache_xlsx": "doc_organize.export.xlsx_export",
     "write_scan_errors_xlsx": "doc_organize.export.xlsx_export",
+    "write_context_documents_xlsx": "doc_organize.export.xlsx_export",
     "load_cache_entries": "doc_organize.export.sources",
     "load_scan_error_history": "doc_organize.export.sources",
     "ProjectValidator": "doc_organize.validators.project_validator",
@@ -214,7 +215,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
     from doc_organize.core.progress import CancelToken, ProgressEvent
     from doc_organize.dedup.deduplication import DeduplicationManager
     from doc_organize.export.sources import load_cache_entries, load_scan_error_history
-    from doc_organize.export.xlsx_export import write_cache_xlsx, write_scan_errors_xlsx
+    from doc_organize.export.xlsx_export import write_cache_xlsx, write_context_documents_xlsx, write_scan_errors_xlsx
     from doc_organize.export.zip_export import ExportStats, preview_project_zip, write_project_zip
     from doc_organize.projects.layout import (
         RESERVED_OUTPUT_FOLDER_NAMES,
