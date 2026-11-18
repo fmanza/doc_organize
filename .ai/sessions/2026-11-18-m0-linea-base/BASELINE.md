@@ -1,9 +1,10 @@
 # BASELINE — Línea base de la clasificación (hito M0 del plan único 2.0.0)
 
-Estado: **primera medición hecha con una referencia provisional** (etiquetada por Claude, pendiente de la revisión del
-mantenedor, U6); sonda del proxy hecha. Falta: revisión de la referencia (y volver a medir) y los tokens por documento de una construcción con IA.
-Fecha: 2026-11-18. Versión medida: doc_organize **1.7.0** (igual que 1.6.0 en clasificación: 1.7.0 solo redacta lo que
-sale hacia la IA).
+Estado: **línea base de clasificación cerrada** (U6): referencia aceptada por el mantenedor el 2026-11-18 (39 filas
+revisadas una a una, `notas = Revisado`, y las otras 111 aceptadas tal como las propuso Claude); sonda del proxy hecha.
+Falta: los tokens por documento de una construcción con IA.
+Fecha: 2026-11-18. Versión medida: doc_organize **1.7.1** (igual que 1.6.0 en clasificación: 1.7.0 solo redacta lo que
+sale hacia la IA y 1.7.1 solo cambia la navegación del sitio).
 
 ## Qué se mide y para qué
 
@@ -47,23 +48,38 @@ de la carpeta (otro catálogo, sin usar en la construcción). Muestra de 150 (se
 
 **Referencia provisional**: la etiquetó Claude con el título, la ruta y un extracto de cada documento (sin ver lo que
 asignó doc_organize) y criterios escritos (abajo). Está en el scratchpad de la sesión, no en el repositorio (nombres de
-documentos reales). **Pendiente de revisión del mantenedor**: hasta entonces los números son orientativos.
+documentos reales). **Aceptada por el mantenedor**: 39 filas revisadas y 111 aceptadas sin cambios; las
+correcciones respecto a la propuesta son pocas (la exactitud de dominio de reglas+IA pasa de 0,227 a 0,233; las demás
+no se mueven).
+
+Referencia aceptada (150 filas), medida el 2026-11-18 tras la revisión — **es la línea base del criterio de salida**:
 
 | Configuración | Eje | Etiquetadas | Exactitud | Cobertura | Por quién |
 |---|---|---|---|---|---|
-| 1.6.0 reglas+IA (contexto actual, IA en 38 documentos) | dominio | 150 | **0,23** | 1,00 | reglas 0,22 · IA 0,29 |
+| 1.6.0 reglas+IA (contexto actual, IA en 38 documentos) | dominio | 150 | **0,23** | 1,00 | reglas 0,22 · IA 0,33 |
 | 1.6.0 reglas+IA (contexto actual) | tipo de material | 150 | **0,22** | 1,00 | reglas 0,20 · IA 0,33 |
-| 1.7.0 reglas (en memoria, `measure_rules_only.py`, sin escribir en el proyecto) | dominio | 150 | **0,19** | 0,89 | reglas 0,19 |
-| 1.7.0 reglas (en memoria) | tipo de material | 150 | **0,19** | 1,00 | reglas 0,19 |
+| 1.7.1 reglas (en memoria, `measure_rules_only.py`, sin escribir en el proyecto) | dominio | 150 | **0,19** | 0,89 | reglas 0,19 |
+| 1.7.1 reglas (en memoria) | tipo de material | 150 | **0,19** | 1,00 | reglas 0,19 |
+
+Solo las 39 filas revisadas (muestra pequeña: orientativo):
+
+| Configuración | Eje | Etiquetadas | Exactitud | Cobertura | Por quién |
+|---|---|---|---|---|---|
+| 1.6.0 reglas+IA | dominio | 39 | 0,26 | 1,00 | reglas 0,28 · IA 0,14 (7 docs) |
+| 1.6.0 reglas+IA | tipo de material | 39 | 0,23 | 1,00 | reglas 0,22 · IA 0,29 |
+| 1.7.1 reglas | dominio | 39 | 0,23 | 0,90 | reglas 0,23 |
+| 1.7.1 reglas | tipo de material | 39 | 0,21 | 1,00 | reglas 0,21 |
 
 La IA de 1.6.0 (Sub-fase B, solo para los 38 documentos que las reglas no resolvieron) sube unos 3-4 puntos sobre las
-reglas solas. Para 2.0, la referencia (ya revisada) y estas dos filas son la base del criterio de salida.
+reglas solas en la referencia completa. Para 2.0, la referencia aceptada y la primera tabla son la base del criterio de
+salida; la de las 39 revisadas es solo un contraste.
 
 Confusiones más frecuentes (etiqueta → asignado):
 
 - Dominio: `cumplimiento-legal → riesgos-amenazas` (22), `tecnologia-sistemas → riesgos-amenazas` (12),
-  `gobernanza-liderazgo → riesgos-amenazas` (11), `gobernanza-liderazgo → cumplimiento-legal` (10),
-  `cumplimiento-legal → gobernanza-liderazgo` (8). **`riesgos-amenazas` atrae lo que no es suyo** (83 de 213
+  `gobernanza-liderazgo → riesgos-amenazas` (11), `cumplimiento-legal → gobernanza-liderazgo` (10),
+  `gobernanza-liderazgo → cumplimiento-legal` (7-10). En las 39 revisadas manda la frontera
+  `cumplimiento-legal ↔ gobernanza-liderazgo` (7 + 3). **`riesgos-amenazas` atrae lo que no es suyo** (83 de 213
   documentos): palabras como «riesgo», «amenaza» o «tratamiento» aparecen en casi cualquier texto de seguridad.
 - Tipo de material: ninguna norma, ley o guía oficial se reconoce como `referencial-normativo`
   (→ `procedimiento-control` 25, `manual-sgsi` 19, `analisis-riesgo` 14). Las palabras clave de ese tipo («norma»,
