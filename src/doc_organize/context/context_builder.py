@@ -577,6 +577,7 @@ class ContextBuilder:
                     markdown_path=document.markdown_path,
                     json_path=document.json_path,  # type: ignore[arg-type]  # leído: no es None
                     images_dir=document.images_dir,
+                    source_sha256=document.source_sha256,
                     title=resolved_title,
                     document_type=document_type,
                     confidence=value,
@@ -655,6 +656,7 @@ class ContextBuilder:
                 markdown_path=document.markdown_path,  # type: ignore[arg-type]  # leído: no es None
                 json_path=document.json_path,  # type: ignore[arg-type]
                 images_dir=document.images_dir,
+                source_sha256=document.source_sha256,
                 title=resolved_title,
                 document_type=document_type,
                 material_type=material_slug,
@@ -907,6 +909,7 @@ class ContextBuilder:
             markdown_path=document.markdown_path,
             json_path=document.json_path,
             images_dir=document.images_dir,
+            source_sha256=document.source_sha256,
             title=resolved_title,
             document_type=document_type,
             confidence=result.confidence,
@@ -963,6 +966,7 @@ class ContextBuilder:
                         markdown_path=document.markdown_path,
                         json_path=document.json_path,
                         reason="incomplete_artifacts",
+                        source_sha256=document.source_sha256,
                     )
                 )
                 continue
@@ -976,6 +980,7 @@ class ContextBuilder:
                     markdown_path=document.markdown_path,
                     json_path=document.json_path,
                     reason="below_threshold",
+                    source_sha256=document.source_sha256,
                     rules_domain=rules_domain,
                     rules_confidence=rules_confidence if rules_domain is not None else None,
                     language=facts.language,

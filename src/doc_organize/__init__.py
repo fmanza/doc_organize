@@ -45,6 +45,7 @@ _EXPORTS: dict[str, str] = {
     "load_builtin_template": "doc_organize.context.taxonomy_templates",
     # Manifiesto 2.0 por ejes (A1)
     "migrate_manifest_v1": "doc_organize.context.taxonomy_front_matter",
+    "check_context_freshness": "doc_organize.context.freshness",
     "inspect_taxonomy_front_matter": "doc_organize.context.taxonomy_front_matter",
     "ProjectRegistry": "doc_organize.projects.project_registry",
     "ProjectLayout": "doc_organize.projects.layout",
@@ -105,6 +106,7 @@ _EXPORTS: dict[str, str] = {
     "TaxonomyAxis": "doc_organize.core.models",
     "TaxonomyEntry": "doc_organize.core.models",
     "TaxonomyFrontMatterReport": "doc_organize.core.models",
+    "FreshnessReport": "doc_organize.core.models",
     "AxisValue": "doc_organize.core.models",
     "DocumentClassification": "doc_organize.core.models",
     "DocumentCredentialFindings": "doc_organize.core.models",
@@ -149,6 +151,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
     from doc_organize.cache.cache_manager import CacheManager
     from doc_organize.context.context_builder import ContextBuilder
     from doc_organize.context.context_registry import ContextRegistry
+    from doc_organize.context.freshness import check_context_freshness
     from doc_organize.context.reorganizer import Reorganizer, resolve_organized_paths
     from doc_organize.context.site_generator import SiteGenerator, SiteResult
     from doc_organize.context.taxonomy_front_matter import inspect_taxonomy_front_matter, migrate_manifest_v1

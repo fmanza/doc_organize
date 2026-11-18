@@ -59,6 +59,11 @@ ruptura; la guía de migración completa llega con la versión.
   llamadas en vuelo. **Cambio de comportamiento**: en 1.x un 429 fallaba en el acto; `rate_limit_retries=0` lo
   mantiene.
 
+- **Frescura del contexto (M2, F4)**: `ConversionResult.source_sha256` (el consumidor pasa `CacheEntry.sha256_hash`),
+  que el builder guarda en `DomainDocument.source_sha256` y `UnclassifiedDocument.source_sha256`.
+  `check_context_freshness(project, context, cache_entries, *, site_dir=None, scanned_at=None) -> FreshnessReport`
+  (`changed`, `added`, `removed`, `unknown`, `stale_site`, `scanned_at`, `up_to_date`), sin leer originales ni `.json`.
+
 ### Compatibilidad
 
 - Los manifiestos y plantillas de 1.x se siguen leyendo (se migran en memoria); `save_taxonomy_manifest` guarda el
