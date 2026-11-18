@@ -646,9 +646,15 @@ class Project(BaseModel):
 
 _HTTP_TIMEOUT_DESC = "Timeout de las peticiones HTTP, en segundos"
 _HTTP_RETRIES_DESC = (
-    "Reintentos ante timeout o error de red/transporte (nunca ante una respuesta HTTP, ni 4xx ni 5xx); 0 (por defecto) "
-    "no reintenta. Ojo: reintentar un POST que hizo timeout puede cobrarse dos veces si el proxy sí lo recibió (L-3b)"
+    "Reintentos ante timeout o error de red/transporte; 0 (por defecto) no reintenta. Las respuestas HTTP no se "
+    "reintentan, salvo 429/503 (`rate_limit_retries`). Ojo: reintentar un POST que hizo timeout puede cobrarse dos veces "
+    "si el proxy sí lo recibió (L-3b)"
 )
+_HTTP_RATE_LIMIT_RETRIES_DESC = (
+    "Reintentos ante una respuesta 429 o 503 (D5, 2.0.0), esperando lo que pida `Retry-After` o, si no lo trae, "
+    "`retry_backoff_s` doblado en cada intento; la espera es compartida por todas las llamadas del cliente. 0 no reintenta"
+)
+_HTTP_MAX_RETRY_WAIT_DESC = "Tope de cada espera ante 429/503, en segundos (aunque `Retry-After` pida más)"
 _HTTP_RETRY_BACKOFF_DESC = "Espera base entre reintentos, en segundos: se duplica en cada intento (0.5, 1, 2...) (L-3b)"
 
 
@@ -790,6 +796,8 @@ class LiteLLMUsageConfig(BaseModel):
     timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
     retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
     retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
+    rate_limit_retries: int = Field(default=3, ge=0, description=_HTTP_RATE_LIMIT_RETRIES_DESC)
+    max_retry_wait_s: float = Field(default=60.0, ge=0.0, description=_HTTP_MAX_RETRY_WAIT_DESC)
 
 
 class GitHubCopilotUsageConfig(BaseModel):
@@ -807,6 +815,8 @@ class GitHubCopilotUsageConfig(BaseModel):
     timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
     retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
     retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
+    rate_limit_retries: int = Field(default=3, ge=0, description=_HTTP_RATE_LIMIT_RETRIES_DESC)
+    max_retry_wait_s: float = Field(default=60.0, ge=0.0, description=_HTTP_MAX_RETRY_WAIT_DESC)
 
 
 # ===== Modelos de contexto y dominios (organización documental, `doc_organize.context`) =====
@@ -1575,6 +1585,8 @@ class LiteLLMClassificationConfig(BaseModel):
     timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
     retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
     retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
+    rate_limit_retries: int = Field(default=3, ge=0, description=_HTTP_RATE_LIMIT_RETRIES_DESC)
+    max_retry_wait_s: float = Field(default=60.0, ge=0.0, description=_HTTP_MAX_RETRY_WAIT_DESC)
 
 
 class TaxonomyClassificationResult(BaseModel):
@@ -1608,6 +1620,8 @@ class LiteLLMTaxonomyClassificationConfig(BaseModel):
     timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
     retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
     retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
+    rate_limit_retries: int = Field(default=3, ge=0, description=_HTTP_RATE_LIMIT_RETRIES_DESC)
+    max_retry_wait_s: float = Field(default=60.0, ge=0.0, description=_HTTP_MAX_RETRY_WAIT_DESC)
 
 
 class TaxonomyManifestDraftResult(BaseModel):
@@ -1660,6 +1674,8 @@ class LiteLLMTaxonomyManifestDraftConfig(BaseModel):
     )
     retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
     retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
+    rate_limit_retries: int = Field(default=3, ge=0, description=_HTTP_RATE_LIMIT_RETRIES_DESC)
+    max_retry_wait_s: float = Field(default=60.0, ge=0.0, description=_HTTP_MAX_RETRY_WAIT_DESC)
     redact_credentials: bool = Field(
         default=True,
         description=(
@@ -1693,6 +1709,8 @@ class LiteLLMEnrichmentConfig(BaseModel):
     timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
     retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
     retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
+    rate_limit_retries: int = Field(default=3, ge=0, description=_HTTP_RATE_LIMIT_RETRIES_DESC)
+    max_retry_wait_s: float = Field(default=60.0, ge=0.0, description=_HTTP_MAX_RETRY_WAIT_DESC)
 
 
 __all__ = [
