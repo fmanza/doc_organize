@@ -132,10 +132,16 @@ Context manager async para consultar el consumo de premium requests de Copilot P
 
 **Reintentos (0.14.0, L-3b)**: todas las `*Config` de `doc_organize.ai` tienen `retries` (`int >= 0`, por defecto `0`:
 sin reintentos, como hasta 0.13.0) y `retry_backoff_s` (`float >= 0`, por defecto `0.5`). Solo se reintenta un timeout
-o un error de red/transporte (`httpx.TransportError`), con espera `retry_backoff_s * 2**n` (0.5, 1, 2...); una respuesta
-HTTP no se reintenta nunca (ni 401/403, ni 429, ni 5xx). Al agotar los reintentos se lanza la misma
-`*ConnectionError` de siempre. Ojo: reintentar un `POST` de clasificación que hizo timeout puede cobrarse dos veces si
-el proxy sí lo recibió.
+o un error de red/transporte (`httpx.TransportError`), con espera `retry_backoff_s * 2**n` (0.5, 1, 2...). Al agotar
+los reintentos se lanza la misma `*ConnectionError` de siempre. Ojo: reintentar un `POST` de clasificación que hizo
+timeout puede cobrarse dos veces si el proxy sí lo recibió.
+
+**429 y 503 (2.0.0, D5)**: `rate_limit_retries` (por defecto `3`) reintentos ante una respuesta 429 (límite de
+peticiones) o 503 (servicio saturado). Se espera lo que pida `Retry-After` (segundos o fecha HTTP) o, si no lo trae,
+`retry_backoff_s * 2**n`; cada espera tiene un tope de `max_retry_wait_s` (por defecto 60 s). La espera es **compartida**
+por todas las llamadas del mismo cliente: con `ContextBuilder(ai_concurrency=4)`, mientras dura nadie más envía. Al
+agotarlos se lanza el `*Error` de siempre. `rate_limit_retries=0` deja el comportamiento de 1.x. Ninguna otra respuesta
+HTTP se reintenta (ni 401/403, ni 500).
 
 Ninguna config lee variables de entorno en su constructor. Usa las factories:
 

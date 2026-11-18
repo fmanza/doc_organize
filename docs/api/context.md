@@ -942,6 +942,8 @@ class LiteLLMClassificationConfig(BaseModel):
     timeout_s: float
     retries: int            # 0.14.0, default 0 — ver «Reintentos» en ai_usage_monitoring.md
     retry_backoff_s: float  # 0.14.0, default 0.5
+    rate_limit_retries: int  # 2.0.0, default 3: reintentos ante 429/503
+    max_retry_wait_s: float  # 2.0.0, default 60
 
 class TaxonomyClassificationResult(BaseModel):
     domain: str | None
@@ -957,6 +959,8 @@ class LiteLLMTaxonomyClassificationConfig(BaseModel):
     timeout_s: float
     retries: int            # 0.14.0, default 0
     retry_backoff_s: float  # 0.14.0, default 0.5
+    rate_limit_retries: int  # 2.0.0, default 3: reintentos ante 429/503
+    max_retry_wait_s: float  # 2.0.0, default 60
 
 class TaxonomyManifestDraftResult(BaseModel):
     domains: list[TaxonomyEntry]        # min 1
@@ -971,6 +975,8 @@ class LiteLLMTaxonomyManifestDraftConfig(BaseModel):
     timeout_s: float  # default 60.0 (prompt más grande, varios documentos a la vez)
     retries: int            # 0.14.0, default 0
     retry_backoff_s: float  # 0.14.0, default 0.5
+    rate_limit_retries: int  # 2.0.0, default 3: reintentos ante 429/503
+    max_retry_wait_s: float  # 2.0.0, default 60
 
 class DocumentEnrichmentResult(BaseModel):  # 1.5.0
     description: str | None
@@ -983,6 +989,8 @@ class LiteLLMEnrichmentConfig(BaseModel):  # 1.5.0
     timeout_s: float  # default 30.0
     retries: int            # default 0
     retry_backoff_s: float  # default 0.5
+    rate_limit_retries: int  # 2.0.0, default 3
+    max_retry_wait_s: float  # 2.0.0, default 60
 
 class TaxonomyEntry(BaseModel):              # 2.0.0 (antes TaxonomyCatalogEntry)
     slug: str
