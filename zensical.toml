@@ -55,6 +55,7 @@ nav = [
     { "Diagnóstico del entorno" = "api/diagnostics.md" },
     { "Organización documental (dominios y contextos)" = "api/context.md" },
     { "Evaluación contra una referencia (2.0)" = "api/evaluation.md" },
+    { "Decisiones de personas (2.0)" = "api/decisions.md" },
   ] },
   { "Ejemplos" = [
     { "Validadores" = "examples/validators-scan.md" },
