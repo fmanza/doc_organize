@@ -1818,10 +1818,11 @@ class TaxonomyManifestDraftResult(BaseModel):
 
     domains: list[TaxonomyEntry] = Field(..., min_length=1, description="Catálogo de dominios propuesto por la IA")
     material_types: list[TaxonomyEntry] = Field(..., min_length=1, description="Catálogo de tipos de material propuesto por la IA")
+    profile: ProjectProfile | None = Field(default=None, description="Perfil inicial del proyecto propuesto por la IA (2.0.0)")
     reasoning: str | None = Field(default=None, description="Justificación breve devuelta por el modelo, si la reporta")
 
     def to_manifest(self) -> TaxonomyManifest:
-        """El borrador como manifiesto v2: eje `domains` (carpeta) y eje `material_types` (subcarpeta).
+        """El borrador como manifiesto v2: eje `domains` (carpeta), eje `material_types` (subcarpeta) y su perfil.
 
         Example:
             >>> draft = TaxonomyManifestDraftResult(
@@ -1835,7 +1836,8 @@ class TaxonomyManifestDraftResult(BaseModel):
             axes=[
                 TaxonomyAxis(key="domains", name="Dominios", organizes="folder", entries=self.domains),
                 TaxonomyAxis(key="material_types", name="Tipos de material", organizes="subfolder", entries=self.material_types),
-            ]
+            ],
+            profile=self.profile,
         )
 
 

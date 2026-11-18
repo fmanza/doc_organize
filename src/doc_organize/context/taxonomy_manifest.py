@@ -7,6 +7,7 @@ import asyncio
 
 from pathlib import Path
 
+from doc_organize.context.project_profile import render_profile_sections
 from doc_organize.context.taxonomy_front_matter import manifest_from_text, render_front_matter
 from doc_organize.core.constants import TAXONOMY_MANIFEST_FILE_NAME
 from doc_organize.core.exceptions import TaxonomyManifestError
@@ -143,6 +144,8 @@ def render_taxonomy_manifest_markdown(
     front_matter = render_front_matter(manifest.model_copy(update={"title": None, "description": None}))
     rows = "".join(f"| {axis.name} | {', '.join(entry.name for entry in axis.entries)} |\n" for axis in manifest.axes)
     reasoning_paragraph = f"\n{reasoning}\n" if reasoning else ""
+    # El perfil propuesto, en las secciones que se vuelven a leer al cargar el manifiesto (G2).
+    profile = f"\n{render_profile_sections(manifest.profile)}" if manifest.profile and not manifest.profile.is_empty else ""
     return (
         f"{front_matter}\n"
         "# Borrador de taxonomía (generado por IA)\n\n"
@@ -153,6 +156,7 @@ def render_taxonomy_manifest_markdown(
         "| Eje | Propuestas |\n"
         "|---|---|\n"
         f"{rows}"
+        f"{profile}"
     )
 
 

@@ -29,7 +29,8 @@ from doc_organize.core.models import (
 from doc_organize.utils.folding import FoldedText, fold
 from doc_organize.utils.text_clean import clean_text
 
-#: Caracteres del documento que se envían para clasificar y describir (como en 1.x).
+#: Caracteres del documento que se envían para describirlo (`enrich`, como en 1.x): su extracto, más corto que el de
+#: clasificar (`MAX_EXCERPT_CHARS`).
 MAX_CONTENT_CHARS = 4000
 #: Caracteres de cada documento de la muestra al proponer una taxonomía (como en 1.x).
 MAX_SAMPLE_CHARS_PER_DOCUMENT = 600
@@ -213,10 +214,10 @@ def classification_request(
     """
     if not axes:
         raise ValueError("No se puede clasificar sin ningún eje")
-    document = content[:MAX_EXCERPT_CHARS].replace(DOCUMENT_END, "DOCUMENTO").replace(DOCUMENT_START, "DOCUMENTO")
+    document = _material(content, MAX_EXCERPT_CHARS)
     messages = prompts.get("classify").render(
         catalog=render_catalog(axes),
-        profile=f"Perfil del proyecto:\n{profile}" if profile else "",
+        profile=_profile_block(profile),
         document=f"{DOCUMENT_START}\n{document}\n{DOCUMENT_END}",
         title=title or "(sin título)",
         content=document,
@@ -354,6 +355,15 @@ def render_prompt_preview(
     return request.messages
 
 
+def _material(content: str, max_chars: int) -> str:
+    """Lo que se envía del documento: hasta `max_chars`, sin los delimitadores (no puede cerrar su bloque, G2.2)."""
+    return content[:max_chars].replace(DOCUMENT_END, "DOCUMENTO").replace(DOCUMENT_START, "DOCUMENTO")
+
+
+def _profile_block(profile: str) -> str:
+    return f"Perfil del proyecto:\n{profile}" if profile else ""
+
+
 def _line(text: str | None) -> str:
     """Una línea sin caracteres de control (los nombres y descripciones del catálogo van al prompt, S3)."""
     if not text:
@@ -361,9 +371,23 @@ def _line(text: str | None) -> str:
     return " ".join("".join(char if char.isprintable() else " " for char in text).split())
 
 
-def enrichment_request(prompts: PromptRegistry, *, title: str | None, content: str) -> TaskRequest[DocumentEnrichmentResult]:
-    """La petición de `enrich_document`, sin enviarla."""
-    messages = prompts.get("enrich").render(max_keywords=MAX_KEYWORDS, title=title or "(sin título)", content=content[:MAX_CONTENT_CHARS])
+def enrichment_request(prompts: PromptRegistry, *, title: str | None, content: str, profile: str = "") -> TaskRequest[DocumentEnrichmentResult]:
+    """La petición de `enrich_document`, sin enviarla.
+
+    Args:
+        prompts: Prompts de cada tarea.
+        title: Título del documento.
+        content: Lo que se envía del documento: su extracto (`build_document_excerpt`), hasta `MAX_CONTENT_CHARS`.
+        profile: Perfil del proyecto ya preparado (`profile_prompt_text`): el glosario ayuda a describir.
+    """
+    document = _material(content, MAX_CONTENT_CHARS)
+    messages = prompts.get("enrich").render(
+        max_keywords=MAX_KEYWORDS,
+        profile=_profile_block(profile),
+        document=f"{DOCUMENT_START}\n{document}\n{DOCUMENT_END}",
+        title=title or "(sin título)",
+        content=document,
+    )
     schema = {
         "type": "object",
         "properties": {"description": {"type": ["string", "null"]}, "keywords": {"type": "array", "items": {"type": "string"}}},
@@ -393,20 +417,25 @@ async def enrich_document(
     *,
     title: str | None,
     content: str,
+    profile: str = "",
     on_redacted: Redacted | None = None,
     cache: AiResultCache | None = None,
 ) -> LlmResult[DocumentEnrichmentResult]:
-    """Descripción y palabras clave de un documento (tarea `enrich`); con `cache`, como `classify_document`.
+    """Descripción y palabras clave de un documento (tarea `enrich`) a partir de su extracto, con el perfil del
+    proyecto; con `cache`, como `classify_document`.
 
     Raises:
         AiError: Ver `LlmClient.complete_json`.
     """
-    return await enrichment_request(prompts, title=title, content=content).send(llm, on_redacted=on_redacted, cache=cache)
+    request = enrichment_request(prompts, title=title, content=content, profile=profile)
+    return await request.send(llm, on_redacted=on_redacted, cache=cache)
 
 
 async def draft_taxonomy(llm: LlmClient, prompts: PromptRegistry, documents: Sequence[SampledDocument]) -> LlmResult[TaxonomyManifestDraftResult]:
     """Propone un borrador de taxonomía (dominios y tipos de material) a partir de una muestra (tarea `taxonomy_design`).
 
+    Cada entrada lleva su descripción (qué cubre, que es lo que lee el modelo al clasificar) y el borrador trae un
+    perfil inicial del proyecto (contexto, reglas de desempate y glosario, `TaxonomyManifestDraftResult.profile`).
     Nunca se aplica solo: el usuario lo revisa (`TaxonomyManifestDraftResult.to_manifest()` y
     `render_taxonomy_manifest_markdown`).
 
@@ -439,9 +468,15 @@ async def draft_taxonomy(llm: LlmClient, prompts: PromptRegistry, documents: Seq
         "properties": {
             "domains": {"type": "array", "items": entry_schema},
             "material_types": {"type": "array", "items": entry_schema},
+            "profile": {
+                "type": "object",
+                "properties": {field: {"type": ["string", "null"]} for field in _DRAFT_PROFILE_FIELDS},
+                "required": list(_DRAFT_PROFILE_FIELDS),
+                "additionalProperties": False,
+            },
             "reasoning": {"type": ["string", "null"]},
         },
-        "required": ["domains", "material_types", "reasoning"],
+        "required": ["domains", "material_types", "profile", "reasoning"],
         "additionalProperties": False,
     }
 
@@ -457,10 +492,31 @@ async def draft_taxonomy(llm: LlmClient, prompts: PromptRegistry, documents: Seq
             raise ValueError("la IA no propuso ningún dominio o ningún tipo de material (muestra insuficiente)")
         reasoning = data.get("reasoning")
         return TaxonomyManifestDraftResult(
-            domains=domains, material_types=material_types, reasoning=reasoning if isinstance(reasoning, str) else None
+            domains=domains,
+            material_types=material_types,
+            profile=_draft_profile(data.get("profile")),
+            reasoning=reasoning if isinstance(reasoning, str) else None,
         )
 
     return await llm.complete_json("taxonomy_design", messages, schema=schema, parse=parse, schema_name="borrador_taxonomia")
+
+
+#: Secciones del perfil que propone el borrador (los ejemplos los pone quien conoce los documentos).
+_DRAFT_PROFILE_FIELDS = ("context", "tie_breakers", "glossary")
+_DRAFT_PROFILE_FIELD_CHARS = 1500
+
+
+def _draft_profile(raw: Any) -> ProjectProfile | None:
+    """El perfil inicial del borrador, con cada sección limpia y acotada; `None` si no trae nada."""
+    if not isinstance(raw, dict):
+        return None
+    fields = {}
+    for field in _DRAFT_PROFILE_FIELDS:
+        value = raw.get(field)
+        text = "\n".join(_line(line) for line in value.splitlines()).strip() if isinstance(value, str) else ""
+        fields[field] = text[:_DRAFT_PROFILE_FIELD_CHARS] or None
+    profile = ProjectProfile(**fields)
+    return None if profile.is_empty else profile
 
 
 def _confidence(raw: Any) -> float:

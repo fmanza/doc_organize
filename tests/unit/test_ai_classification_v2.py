@@ -170,3 +170,18 @@ async def test_an_explicit_profile_replaces_the_composed_one(tmp_path) -> None:
 
     system = llm.proxy.requests[0].body["messages"][0]["content"]
     assert "Otro" in system and "Consultora" not in system
+
+
+@pytest.mark.asyncio
+async def test_enrichment_describes_from_the_excerpt_with_the_profile(tmp_path) -> None:
+    document = _document(tmp_path, "manual", "Manual de calidad")
+    manifest = _manifest(profile=ProjectProfile(glossary="SGC: sistema de gestión de la calidad"))
+    llm = fake_client(enrich=lambda request: {"description": "Manual del SGC", "keywords": ["calidad"]})
+
+    context = await ContextBuilder().build(_project(tmp_path), [document], taxonomy_manifest=manifest, llm=llm, enrich=True, ai_cache=False)
+
+    system, user = (message["content"] for message in llm.proxy.requests[0].body["messages"])
+    assert "SGC: sistema de gestión de la calidad" in system
+    for line in ("Título: Manual de calidad", "Carpeta: Calidad/2024", "Tipo de fichero: pdf", "- 1. Objeto", TEXT):
+        assert line in user
+    assert context.domains[0].documents[0].description == "Manual del SGC"

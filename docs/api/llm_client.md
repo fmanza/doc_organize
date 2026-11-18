@@ -51,13 +51,13 @@ mismas reglas.
 | Servicio | Tarea | Devuelve |
 |---|---|---|
 | `classify_document(llm, prompts, *, axes, title, content, profile="")` | `classify` | `ClassificationAnswer`: por eje pedido (`AxisRequest.from_axis(eje)` o `AxisRequest.from_slugs(clave, slugs)`), un `AxisAnswer` con sus `choices` (`AxisChoice`: `slug`, `confidence`, `evidence`, `evidence_verified`; uno como mucho, o 5 si el eje es múltiple) y `reasoning`. El esquema lleva un `enum` con los slugs de cada eje; un valor fuera del catálogo se descarta |
-| `enrich_document(llm, prompts, *, title, content)` | `enrich` | `DocumentEnrichmentResult` (descripción y hasta 8 palabras clave, limpias) |
-| `draft_taxonomy(llm, prompts, documents)` | `taxonomy_design` | `TaxonomyManifestDraftResult` sin slugs repetidos; `.to_manifest()` y `render_taxonomy_manifest_markdown` para revisarlo |
+| `enrich_document(llm, prompts, *, title, content, profile="")` | `enrich` | `DocumentEnrichmentResult` (descripción y hasta 8 palabras clave, limpias), a partir del extracto (hasta `MAX_CONTENT_CHARS`) entre delimitadores |
+| `draft_taxonomy(llm, prompts, documents)` | `taxonomy_design` | `TaxonomyManifestDraftResult` sin slugs repetidos, con descripciones y un perfil inicial (`profile`: contexto, reglas de desempate y glosario); `.to_manifest()` y `render_taxonomy_manifest_markdown` para revisarlo (el perfil va en las secciones del cuerpo) |
 
 Todos devuelven `LlmResult` (`value`, `model`, `response_format`, `usage`, `redacted`) y aceptan `on_redacted` para
 anotar lo redactado por documento. `ContextBuilder.build(llm=..., ai_scope="unclassified", enrich=True)` los usa por
 dentro. La clasificación envía el catálogo con nombres y descripciones, el perfil del proyecto y el extracto (ver
-abajo); el enriquecimiento, todavía los primeros 4000 caracteres.
+abajo); el enriquecimiento, el perfil y un extracto más corto (4000 caracteres, como en 1.x).
 
 ## Caché de resultados
 

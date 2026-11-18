@@ -108,6 +108,12 @@ ruptura; la guía de migración completa llega con la versión.
 - `ai_scope="missing_axes"`: la IA clasifica también los documentos con algún eje que solo etiqueta vacío (incluidos los
   de `rules: false`), con una llamada por documento y solo los ejes que le faltan. La IA solo rellena ejes vacíos; los
   valores de los ejes que etiquetan pasan por su umbral. `AxisValue.evidence`/`evidence_verified` guardan la cita.
+- **Enriquecimiento y borrador sobre la entrada nueva (M5)**: `enrich` (prompt versión 2) describe a partir del extracto
+  del documento (hasta `MAX_CONTENT_CHARS`, 4000, como en 1.x) entre delimitadores, con el perfil del proyecto
+  (`enrich_document(..., profile=)`). `taxonomy_design` (versión 2) pide descripciones que digan qué entra en cada
+  entrada y qué no, y un **perfil inicial** (`TaxonomyManifestDraftResult.profile`: contexto, reglas de desempate y
+  glosario); `to_manifest()` lo lleva al manifiesto y `render_taxonomy_manifest_markdown` lo escribe en las secciones
+  que se vuelven a leer al cargarlo.
 
 ### Retirado (ruptura)
 

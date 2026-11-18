@@ -16,7 +16,15 @@ from doc_organize.ai.cache import AiResultCache
 from doc_organize.ai.excerpt import build_document_excerpt
 from doc_organize.ai.llm_client import LlmClient, LlmResult, ResponseFormat
 from doc_organize.ai.prompts import PromptRegistry
-from doc_organize.ai.services import AxisChoice, AxisRequest, ClassificationAnswer, TaskRequest, classification_request, enrichment_request
+from doc_organize.ai.services import (
+    MAX_CONTENT_CHARS,
+    AxisChoice,
+    AxisRequest,
+    ClassificationAnswer,
+    TaskRequest,
+    classification_request,
+    enrichment_request,
+)
 from doc_organize.context.axis_rules import TAG_AXIS_TEXT_CHARS, AxisRuleScorer, FoldedText
 from doc_organize.context.context_history import ContextHistoryPolicy, append_context_build, build_record
 from doc_organize.context.context_registry import ContextRegistry
@@ -193,6 +201,11 @@ def _ai_value(choice: AxisChoice, axis: TaxonomyAxis, threshold: float, *, slugi
         evidence=choice.evidence,
         evidence_verified=choice.evidence_verified,
     )
+
+
+def _excerpt_metadata(source_path: str) -> dict[str, str | None]:
+    """Los metadatos del extracto de un documento: el tipo de fichero."""
+    return {"Tipo de fichero": Path(source_path).suffix.lstrip(".").lower() or None}
 
 
 def _rules_value(slug: str, names: dict[str, str], confidence: float) -> list[AxisValue]:
@@ -437,7 +450,9 @@ class ContextBuilder:
         unclassified_details = self._describe_unclassified(unclassified, reads)
         await self._apply_document_properties(classified, unclassified_details, reads, cancel_token)
         if llm is not None and enrich:
-            await self._enrich_with_ai(llm, prompts, classified, on_progress=_enrichment_progress, run=enrichment_run, cache=cache)
+            await self._enrich_with_ai(
+                llm, prompts, classified, on_progress=_enrichment_progress, run=enrichment_run, cache=cache, profile=profile_text
+            )
 
         has_predefined_catalog = bool(candidate_domains) or taxonomy_manifest is not None
         manifest_domains_by_slug = (
@@ -753,7 +768,7 @@ class ContextBuilder:
                 excerpt = build_document_excerpt(
                     conversion,
                     folder=str(Path(source_path).parent),
-                    metadata={"Tipo de fichero": Path(source_path).suffix.lstrip(".").lower() or None},
+                    metadata=_excerpt_metadata(source_path),
                     catalog_terms=[term for key in keys for term in terms_by_key[key]],
                 )
                 return classification_request(
@@ -1140,8 +1155,10 @@ class ContextBuilder:
         on_progress: Callable[[int, int, str], Awaitable[None]],
         run: _AiRun,
         cache: AiResultCache | None = None,
+        profile: str = "",
     ) -> None:
-        """Pide a la IA la descripción y las palabras clave de los documentos que no las declaran (tarea `enrich`).
+        """Pide a la IA la descripción y las palabras clave de los documentos que no las declaran (tarea `enrich`), a
+        partir de su extracto (`MAX_CONTENT_CHARS`) y con el perfil del proyecto.
 
         Solo rellena lo que falta; lo declarado por el documento nunca se sustituye. Mismas paradas que la
         clasificación (`_AiRun`), con su propio recuento: `run.classified` cuenta los documentos en los que se rellenó
@@ -1150,8 +1167,11 @@ class ContextBuilder:
         """
         pending = [document for documents in classified.values() for document in documents if document.description is None or not document.keywords]
 
-        def request(conversion: ConversionDocument, _source_path: str) -> TaskRequest[DocumentEnrichmentResult]:
-            return enrichment_request(prompts, title=conversion.title, content=conversion.text)
+        def request(conversion: ConversionDocument, source_path: str) -> TaskRequest[DocumentEnrichmentResult]:
+            excerpt = build_document_excerpt(
+                conversion, folder=str(Path(source_path).parent), metadata=_excerpt_metadata(source_path), max_chars=MAX_CONTENT_CHARS
+            )
+            return enrichment_request(prompts, title=conversion.title, content=excerpt, profile=profile)
 
         hits = await self._cache_hits(llm, cache, [(document.json_path, document.source_path, request) for document in pending])
 

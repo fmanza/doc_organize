@@ -230,7 +230,7 @@ def test_builtin_prompts_load_with_their_provenance(task: str) -> None:
     assert (provenance.task, provenance.prompt_id, provenance.version, provenance.source, provenance.model) == (
         task,
         task,
-        {"classify": "2"}.get(task, "1"),
+        "2",
         "builtin",
         "modelo-x",
     )
