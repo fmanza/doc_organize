@@ -108,6 +108,11 @@ ruptura; la guía de migración completa llega con la versión.
 - `ai_scope="missing_axes"`: la IA clasifica también los documentos con algún eje que solo etiqueta vacío (incluidos los
   de `rules: false`), con una llamada por documento y solo los ejes que le faltan. La IA solo rellena ejes vacíos; los
   valores de los ejes que etiquetan pasan por su umbral. `AxisValue.evidence`/`evidence_verified` guardan la cita.
+- **Evaluación contra una referencia (M6, G3)**: `evaluate_classification(context, gold) -> EvaluationReport`, con
+  exactitud, cobertura, precisión y *recall* por eje, exactitud según quién clasificó y confusiones más frecuentes
+  (`to_markdown()`); `load_gold_xlsx` lee la hoja de la línea base (`dominio_ok`, `tipo_ok`, o las columnas que se
+  indiquen; `ninguno` = eje vacío correcto), `GoldStandard`/`GoldLabel` para construirla a mano. Los documentos se
+  identifican por su ruta relativa a la raíz de escaneo (`document_key`).
 
 ### Retirado (ruptura)
 
