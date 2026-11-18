@@ -64,6 +64,13 @@ ruptura; la guía de migración completa llega con la versión.
   `check_context_freshness(project, context, cache_entries, *, site_dir=None, scanned_at=None) -> FreshnessReport`
   (`changed`, `added`, `removed`, `unknown`, `stale_site`, `scanned_at`, `up_to_date`), sin leer originales ni `.json`.
 
+- **Diagnóstico del entorno (M3, F2)**: `check_environment(*, check_ai=False, ai_endpoints=None, artifacts_path=None,
+  build_site=True) -> EnvironmentReport` comprueba Python, docling y sus modelos, los extras (`export`, `site` con un
+  build de prueba y el rango probado de Zensical, `ocr-gpu`, `av`) y LibreOffice; con `check_ai=True`, que cada modelo de
+  IA configurado responde y si admite `json_schema` estricto, con texto sintético. Sin rutas ni claves en el informe.
+- **Puerta de la redacción (M3, F1)**: test de extremo a extremo de que el valor de una credencial del texto no sale
+  hacia la IA ni aparece en `context.json`, los `index.json`, `unclassified.json`, el historial, los logs ni el Excel.
+
 - **Cliente único de IA (M4, G1, primer paso)**: `doc_organize.ai.LlmClient(AiSettings)` con `complete_json`,
   `complete_with_tools` y `embed`; modelo y clave por tarea (`classify`, `enrich`, `taxonomy_design`, `agent`, `embed`;
   `TaskSettings`); redacción de credenciales en el único punto de salida; `json_schema` estricto con caída una vez a

@@ -46,6 +46,11 @@ _EXPORTS: dict[str, str] = {
     # Manifiesto 2.0 por ejes (A1)
     "migrate_manifest_v1": "doc_organize.context.taxonomy_front_matter",
     "check_context_freshness": "doc_organize.context.freshness",
+    # Diagnóstico del entorno (2.0.0, F2)
+    "check_environment": "doc_organize.diagnostics",
+    "AiEndpoint": "doc_organize.diagnostics",
+    "EnvironmentCheck": "doc_organize.core.models",
+    "EnvironmentReport": "doc_organize.core.models",
     "inspect_taxonomy_front_matter": "doc_organize.context.taxonomy_front_matter",
     "ProjectRegistry": "doc_organize.projects.project_registry",
     "ProjectLayout": "doc_organize.projects.layout",
@@ -200,6 +205,8 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         DocumentStatus,
         DuplicateGroup,
         DuplicateReason,
+        EnvironmentCheck,
+        EnvironmentReport,
         GpuStatus,
         OfficeStatus,
         Project,
@@ -219,6 +226,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
     )
     from doc_organize.core.progress import CancelToken, ProgressEvent
     from doc_organize.dedup.deduplication import DeduplicationManager
+    from doc_organize.diagnostics import AiEndpoint, check_environment
     from doc_organize.export.sources import load_cache_entries, load_scan_error_history
     from doc_organize.export.xlsx_export import write_cache_xlsx, write_context_documents_xlsx, write_scan_errors_xlsx
     from doc_organize.export.zip_export import ExportStats, preview_project_zip, write_project_zip
