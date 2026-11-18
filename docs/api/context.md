@@ -678,6 +678,18 @@ else:
 
 ---
 
+### Páginas por eje (2.0.0)
+
+Con ejes que solo etiquetan (`Context.taxonomy_axes` sin `organizes`), `generate` escribe en la carpeta reorganizada
+una página `eje-<clave>.md` por eje (no una por valor: U13) y la añade al `nav` en «Ejes de clasificación» y a
+`index.md`. Cada página tiene una tabla con todos los valores del catálogo y su número de documentos y, por cada valor
+con documentos, la lista de enlaces a sus páginas. Los nombres se escapan como los del `nav` y los títulos de los
+documentos salen redactados si `redact_credentials`. Entran en el buscador salvo que superen su límite (como cualquier
+otra página). Al regenerar, se borran las `eje-*.md` de ejes que ya no están. Sin ejes que etiqueten, el sitio es el de
+1.x.
+
+---
+
 ## DomainClassificationClient (Sub-fase B, `doc_organize.ai`)
 
 ```python
