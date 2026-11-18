@@ -47,6 +47,12 @@ ruptura; la guía de migración completa llega con la versión.
   hoja `Ejes` con los recuentos por valor, con la misma protección contra fórmulas, progreso y cancelación que las demás
   exportaciones.
 
+- **Rendimiento de la construcción (M2, B)**: sin IA, cada `.json` de conversión se lee una sola vez (clasificación,
+  ejes, idioma y propuesta de los sin clasificar), con `properties_concurrency` lecturas a la vez; con 213 documentos y
+  20 ms por lectura, de 13,1 s a 3,5 s. `ContextBuilder(ai_concurrency=1)`: llamadas a la IA a la vez en la Sub-fase B
+  y el enriquecimiento, con los resultados aplicados en el orden de los documentos (mismo contexto con 1 y con 4); el
+  presupuesto se reserva al despachar y nunca se supera.
+
 ### Compatibilidad
 
 - Los manifiestos y plantillas de 1.x se siguen leyendo (se migran en memoria); `save_taxonomy_manifest` guarda el
