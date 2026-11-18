@@ -1,5 +1,6 @@
 """Organización documental por dominios y contextos."""
 
+from doc_organize.context.axis_rules import AxisRuleScorer
 from doc_organize.context.context_builder import ContextBuilder
 from doc_organize.context.context_history import ContextHistoryPolicy, diff_contexts, list_context_builds
 from doc_organize.context.context_registry import ContextRegistry
@@ -18,6 +19,7 @@ from doc_organize.context.taxonomy_templates import (
 )
 
 __all__ = [
+    "AxisRuleScorer",
     "ContextBuilder",
     "ContextHistoryPolicy",
     "ContextRegistry",

@@ -16,9 +16,9 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Final, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler, field_validator, model_serializer, model_validator
 
-from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME
+from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME, UNCLASSIFIED_SLUG
 
 # ===== Enumeraciones =====
 
@@ -809,6 +809,65 @@ DocumentEnrichmentField = Literal["description", "keywords"]
 """Campos de `DomainDocument` que la IA puede rellenar (`DomainDocument.ai_filled`, 1.5.0)."""
 
 
+AxisClassifiedBy = Literal["rules", "semantic", "ai", "human"]
+"""Quién asignó un valor de un eje (`AxisValue.classified_by`, 2.0.0): reglas, semántica (embeddings), IA o una persona."""
+
+
+class AxisValue(BaseModel):
+    """Un valor de un eje asignado a un documento (2.0.0, A3).
+
+    Attributes:
+        slug (str): Valor del catálogo del eje (saneado).
+        name (str): Nombre legible del valor.
+        confidence (float): Confianza 0-1 de quien lo asignó.
+        classified_by (str): `rules`, `semantic`, `ai` o `human`.
+        evidence (str | None): Cita literal del documento que lo justifica (IA, 2.0.0 M5); `None` si no hay.
+        evidence_verified (bool | None): Si la cita aparece en el texto enviado; `None` sin cita.
+
+    Example:
+        >>> AxisValue(slug="ens", name="ENS", confidence=0.6, classified_by="rules").evidence is None
+        True
+    """
+
+    slug: str = Field(..., min_length=1, description="Valor del catálogo del eje")
+    name: str = Field(..., description="Nombre legible del valor")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Confianza 0-1")
+    classified_by: AxisClassifiedBy = Field(..., description="Quién lo asignó")
+    evidence: str | None = Field(default=None, description="Cita literal que justifica el valor, si la hay")
+    evidence_verified: bool | None = Field(default=None, description="Si la cita aparece en el texto del documento; `None` sin cita")
+
+    @model_serializer(mode="wrap")
+    def _omit_missing_evidence(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Sin cita, `evidence` y `evidence_verified` no se escriben: hay un valor por eje y documento, y en un corpus
+        grande esos dos `null` pesaban casi un tercio de la clasificación en `index.json`."""
+        data: dict[str, Any] = handler(self)
+        for key in ("evidence", "evidence_verified"):
+            if data.get(key) is None:
+                data.pop(key, None)
+        return data
+
+
+class DocumentClassification(BaseModel):
+    """Clasificación de un documento en todos los ejes de la taxonomía (2.0.0, A3).
+
+    `axes` tiene una clave por eje del contexto (`Context.taxonomy_axes`): una lista vacía significa que el eje se
+    evaluó y no se asignó ningún valor (en un eje organizador, el documento queda en «Sin Clasificar»).
+
+    Example:
+        >>> classification = DocumentClassification(
+        ...     axes={"normative_frameworks": [AxisValue(slug="ens", name="ENS", confidence=0.6, classified_by="rules")]}
+        ... )
+        >>> classification.slugs("normative_frameworks"), classification.slugs("evidence")
+        (['ens'], [])
+    """
+
+    axes: dict[str, list[AxisValue]] = Field(default_factory=dict, description="Valores asignados por clave de eje")
+
+    def slugs(self, key: str) -> list[str]:
+        """Los slugs asignados en el eje `key` (vacío si ninguno o si el eje no existe)."""
+        return [value.slug for value in self.axes.get(key, [])]
+
+
 class DomainDocument(BaseModel):
     """Un documento clasificado dentro de un `Domain` (Sub-fase A o B, ver `.ai/sessions/2026-09-08-organizacion-documental-contextos/00_REQUEST.md` §2.4-§2.5)."""
 
@@ -897,6 +956,13 @@ class DomainDocument(BaseModel):
     ai_filled: list[DocumentEnrichmentField] = Field(
         default_factory=list, description="Campos que rellenó la IA porque el documento no los declaraba (1.5.0); vacío si ninguno"
     )
+    classification: DocumentClassification = Field(
+        default_factory=DocumentClassification,
+        description=(
+            "Valores de cada eje (2.0.0): los organizadores repiten el dominio y `material_type`, con quién los asignó; "
+            "los demás ejes solo están aquí"
+        ),
+    )
 
 
 UnclassifiedReason = Literal["incomplete_artifacts", "below_threshold"]
@@ -939,6 +1005,9 @@ class UnclassifiedDocument(BaseModel):
     description: str | None = Field(default=None, description="Descripción declarada en el original; nunca de la IA")
     keywords: list[str] = Field(default_factory=list, description="Palabras clave declaradas en el original; nunca de la IA")
     language: str | None = Field(default=None, description="Idioma detectado en el texto convertido (ISO 639-1); None sin `.json` o si no es seguro")
+    classification: DocumentClassification = Field(
+        default_factory=DocumentClassification, description="Valores de los ejes que no organizan carpetas (2.0.0); vacío sin texto"
+    )
 
 
 class Domain(BaseModel):
@@ -978,7 +1047,18 @@ class Context(BaseModel):
     Sin `tenant_id` desde 1.0.0 (L-12): un `context.json` antiguo que lo traiga se sigue leyendo y el campo se ignora.
     """
 
+    schema_version: int = Field(
+        default=1,
+        description=(
+            "Versión del formato (2.0.0: 2). Un `context.json` de 1.x (sin el campo) se migra al leerlo: "
+            "`taxonomy_axes` y la `classification` de cada documento salen de su dominio y su tipo de material"
+        ),
+    )
     project_name: str = Field(..., description="Nombre del proyecto propietario de este contexto")
+    taxonomy_axes: "list[TaxonomyAxis]" = Field(
+        default_factory=list,
+        description="Ejes con los que se clasificó (2.0.0), sin `keywords` ni `examples`; sin manifiesto, solo `domains`",
+    )
     output_folder_name: str = Field(default="organizado", description="Nombre de la carpeta de salida reorganizada, relativa a `root_path`")
     ai_classification_enabled: bool = Field(default=False, description="Si la Sub-fase B (IA) está activa para este proyecto — opt-in explícito")
     ai_fallback_threshold: float = Field(default=0.5, description="Score mínimo (Sub-fase A) por debajo del cual se intenta la Sub-fase B")
@@ -1115,6 +1195,77 @@ class Context(BaseModel):
             return validate_output_folder_name(value)
         except InvalidPathError as exc:
             raise ValueError(str(exc)) from exc
+
+    @model_validator(mode="after")
+    def _migrate_v1(self) -> "Context":
+        """Un contexto de 1.x (o creado a mano sin `schema_version`) pasa a 2: ejes y clasificación desde sus campos."""
+        if self.schema_version >= CONTEXT_SCHEMA_VERSION:
+            return self
+        _migrate_context_v1(self)
+        self.schema_version = CONTEXT_SCHEMA_VERSION
+        return self
+
+
+#: Versión de `context.json` que escribe esta versión de doc_organize.
+CONTEXT_SCHEMA_VERSION: Final = 2
+#: Claves de los ejes organizadores de un contexto de 1.x (y del modo sin manifiesto).
+LEGACY_FOLDER_AXIS_KEY: Final = "domains"
+LEGACY_SUBFOLDER_AXIS_KEY: Final = "material_types"
+
+
+def _migrate_context_v1(context: Context) -> None:
+    """Rellena `taxonomy_axes` y la clasificación de los ejes organizadores de un contexto de 1.x.
+
+    De quién vino cada eje solo se sabe a medias en 1.x (`classified_by` era del documento): el dominio es de la IA si
+    ella lo propuso y las reglas no lo habían decidido; el tipo de material, si la IA intervino y el dominio no era
+    suyo. Es una aproximación, solo para contextos antiguos.
+    """
+    folder_entries = [
+        TaxonomyEntry(slug=domain.slug, name=domain.name, description=domain.description)
+        for domain in context.domains
+        if domain.slug != UNCLASSIFIED_SLUG
+    ]
+    material_names: dict[str, str] = {}
+    for domain in context.domains:
+        for document in domain.documents:
+            if document.material_type and document.material_type != UNCLASSIFIED_SLUG:
+                material_names.setdefault(document.material_type, document.material_type_name or document.material_type.replace("-", " ").title())
+    if not context.taxonomy_axes and folder_entries:
+        axes = [TaxonomyAxis(key=LEGACY_FOLDER_AXIS_KEY, name="Dominios", organizes="folder", entries=folder_entries)]
+        if context.taxonomy_manifest_used and material_names:
+            entries = [TaxonomyEntry(slug=slug, name=name) for slug, name in material_names.items()]
+            axes.append(TaxonomyAxis(key=LEGACY_SUBFOLDER_AXIS_KEY, name="Tipos de material", organizes="subfolder", entries=entries))
+        context.taxonomy_axes = axes
+    threshold = context.ai_fallback_threshold
+    for domain in context.domains:
+        for document in domain.documents:
+            if document.classification.axes:
+                continue
+            folder_by_ai = (
+                document.classified_by == "ai"
+                and document.ai_domain == domain.slug
+                and (document.rules_domain != domain.slug or (document.rules_confidence or 0.0) < threshold)
+            )
+            axes_values: dict[str, list[AxisValue]] = {LEGACY_FOLDER_AXIS_KEY: []}
+            if domain.slug != UNCLASSIFIED_SLUG:
+                axes_values[LEGACY_FOLDER_AXIS_KEY] = [
+                    AxisValue(slug=domain.slug, name=domain.name, confidence=document.confidence, classified_by="ai" if folder_by_ai else "rules")
+                ]
+            if context.taxonomy_manifest_used:
+                material = document.material_type
+                axes_values[LEGACY_SUBFOLDER_AXIS_KEY] = (
+                    [
+                        AxisValue(
+                            slug=material,
+                            name=material_names.get(material, material),
+                            confidence=document.material_type_confidence if document.material_type_confidence is not None else document.confidence,
+                            classified_by="ai" if document.classified_by == "ai" and not folder_by_ai else "rules",
+                        )
+                    ]
+                    if material and material != UNCLASSIFIED_SLUG
+                    else []
+                )
+            document.classification = DocumentClassification(axes=axes_values)
 
 
 ContextChangeKind = Literal["added", "removed", "reclassified"]
@@ -1338,6 +1489,9 @@ class TaxonomyManifest(BaseModel):
         return next((axis for axis in self.axes if axis.key == key), None)
 
 
+Context.model_rebuild()  # `taxonomy_axes` usa `TaxonomyAxis`, definido después
+
+
 class TaxonomyFrontMatterReport(BaseModel):
     """Qué se leerá de un front matter de taxonomía, para avisar al autor (`inspect_taxonomy_front_matter`).
 
@@ -1501,8 +1655,13 @@ class LiteLLMEnrichmentConfig(BaseModel):
 
 
 __all__ = [
+    "CONTEXT_SCHEMA_VERSION",
+    "LEGACY_FOLDER_AXIS_KEY",
+    "LEGACY_SUBFOLDER_AXIS_KEY",
     "AiClassificationStopReason",
     "AvStatus",
+    "AxisClassifiedBy",
+    "AxisValue",
     "CacheConfig",
     "CacheEntry",
     "CacheExportSnapshot",
@@ -1522,6 +1681,7 @@ __all__ = [
     "DirectoryTree",
     "DirectoryTreeNode",
     "DoclingConfig",
+    "DocumentClassification",
     "DocumentCredentialFindings",
     "DocumentEnrichmentField",
     "DocumentEnrichmentResult",

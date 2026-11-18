@@ -144,6 +144,8 @@ UNCLASSIFIED_FILE_NAME = "unclassified.json"
 CONTEXT_HISTORY_FOLDER_NAME = "historial_contexto"
 CONTEXT_HISTORY_JSONL_NAME = "CONTEXT_HISTORY.jsonl"
 TAXONOMY_MANIFEST_FILE_NAME = "taxonomy_manifest.md"
+#: Valor provisional de un eje organizador que las reglas (y la IA) no resolvieron: carpeta y sección «Sin Clasificar».
+UNCLASSIFIED_SLUG = "sin-clasificar"
 SITE_FOLDER_NAME = "site"
 SITE_CONFIG_FILE_NAME = "zensical.toml"
 SITE_CACHE_FOLDER_NAME = ".cache"
@@ -193,5 +195,6 @@ __all__ = [
     "SUPPORTED_EXTENSIONS",
     "TAXONOMY_MANIFEST_FILE_NAME",
     "UNCLASSIFIED_FILE_NAME",
+    "UNCLASSIFIED_SLUG",
     "VERSION_SUFFIX_PATTERN",
 ]

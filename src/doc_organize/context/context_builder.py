@@ -11,12 +11,14 @@ from datetime import UTC, datetime
 
 from doc_organize import __version__
 from doc_organize.ai import DocumentEnrichmentClient, DomainClassificationClient, TaxonomyClassificationClient
+from doc_organize.context.axis_rules import TAG_AXIS_TEXT_CHARS, AxisRuleScorer, FoldedText
 from doc_organize.context.context_history import ContextHistoryPolicy, append_context_build, build_record
 from doc_organize.context.context_registry import ContextRegistry
 from doc_organize.context.document_properties import read_document_properties
 from doc_organize.context.domain_classifier import DomainClassifier, MaterialTypeClassifier, read_conversion_json, resolve_title_and_type
 from doc_organize.context.language_detection import detect_language
 from doc_organize.context.reorganizer import assign_organized_paths
+from doc_organize.core.constants import UNCLASSIFIED_SLUG
 from doc_organize.core.exceptions import (
     ContextError,
     ContextNotFoundError,
@@ -31,14 +33,21 @@ from doc_organize.core.exceptions import (
     TaxonomyClassificationError,
 )
 from doc_organize.core.models import (
+    CONTEXT_SCHEMA_VERSION,
+    LEGACY_FOLDER_AXIS_KEY,
     AiClassificationStopReason,
+    AxisClassifiedBy,
+    AxisValue,
     Context,
     ConversionResult,
+    DocumentClassification,
     DocumentCredentialFindings,
     Domain,
     DomainDocument,
     DomainStatus,
     Project,
+    TaxonomyAxis,
+    TaxonomyEntry,
     TaxonomyManifest,
     UnclassifiedDocument,
 )
@@ -53,7 +62,7 @@ _DEFAULT_THRESHOLD = 0.5
 #: una; con 8, apenas mejora y la lectura más lenta se duplica.
 _DEFAULT_PROPERTIES_CONCURRENCY = 4
 
-_UNCLASSIFIED_SLUG = "sin-clasificar"
+_UNCLASSIFIED_SLUG = UNCLASSIFIED_SLUG
 """Slug placeholder para un eje (dominio o tipo de material) que no alcanza `threshold`
 cuando hay un manifiesto de taxonomía activo — el documento se reorganiza igual bajo este
 slug en el eje afectado, en vez de excluirse por completo (`unclassified_documents` sigue
@@ -144,6 +153,34 @@ def _classification_model(
 ) -> str | None:
     """Modelo de la Sub-fase B: el cliente de 2 ejes en modo manifiesto, el de 1 eje si no (1.5.0)."""
     return _model_used(taxonomy_client if manifest is not None else domain_client, run)
+
+
+def _rules_value(slug: str, names: dict[str, str], confidence: float) -> list[AxisValue]:
+    """Valor de un eje organizador asignado por las reglas; vacío si quedó en el marcador «sin clasificar»."""
+    if slug == _UNCLASSIFIED_SLUG:
+        return []
+    return [AxisValue(slug=slug, name=names.get(slug, slug.replace("-", " ").title()), confidence=confidence, classified_by="rules")]
+
+
+def _classify_single_axis(domains: list[Domain]) -> None:
+    """Sin manifiesto hay un solo eje (`domains`): su valor es el dominio del documento, de quien lo clasificó."""
+    for domain in domains:
+        for document in domain.documents:
+            classified_by: AxisClassifiedBy = "ai" if document.classified_by == "ai" else "rules"
+            value = AxisValue(slug=domain.slug, name=domain.name, confidence=document.confidence, classified_by=classified_by)
+            document.classification = DocumentClassification(axes={LEGACY_FOLDER_AXIS_KEY: [value]})
+
+
+def _context_axes(manifest: TaxonomyManifest | None, domains: list[Domain]) -> list[TaxonomyAxis]:
+    """Los ejes que se guardan en el contexto: los del manifiesto sin `keywords` ni `examples` (no hacen falta para
+    leer el resultado y engordarían `context.json`); sin manifiesto, el eje `domains` con los dominios encontrados."""
+    if manifest is not None:
+        return [
+            axis.model_copy(update={"entries": [entry.model_copy(update={"keywords": [], "examples": []}) for entry in axis.entries]})
+            for axis in manifest.axes
+        ]
+    entries = [TaxonomyEntry(slug=domain.slug, name=domain.name, description=domain.description) for domain in domains]
+    return [TaxonomyAxis(key=LEGACY_FOLDER_AXIS_KEY, name="Dominios", organizes="folder", entries=entries)] if entries else []
 
 
 class ContextBuilder:
@@ -388,9 +425,13 @@ class ContextBuilder:
             )
             for slug, domain_documents in classified.items()
         ]
+        if taxonomy_manifest is None:
+            _classify_single_axis(domains)
 
         now = datetime.now(UTC).isoformat()
         context = Context(
+            schema_version=CONTEXT_SCHEMA_VERSION,
+            taxonomy_axes=_context_axes(taxonomy_manifest, domains),
             project_name=project.name,
             output_folder_name=output_folder_name,
             ai_classification_enabled=ai_classification_enabled,
@@ -464,6 +505,10 @@ class ContextBuilder:
         # de usar el nombre declarado (AUDIT_CODE, mismo hallazgo que `Domain.name`/`.description`
         # en `build()`).
         material_names = {DomainClassifier._slugify(entry.slug): entry.name for entry in manifest.subfolder_axis.entries}
+        domain_names = {DomainClassifier._slugify(entry.slug): entry.name for entry in manifest.folder_axis.entries}
+        # 2.0.0 (A2): los ejes que solo etiquetan, con su propio puntuador por palabra completa; los organizadores
+        # siguen con `score_catalog` (mismo resultado que 1.x).
+        tag_scorers = [AxisRuleScorer(axis, threshold) for axis in manifest.tag_axes]
 
         classified: dict[str, list[DomainDocument]] = {}
         unclassified: list[ConversionResult] = []
@@ -485,6 +530,14 @@ class ContextBuilder:
             if material_slug is None:
                 material_slug = _UNCLASSIFIED_SLUG
 
+            axes = {
+                manifest.folder_axis.key: _rules_value(domain_slug, domain_names, domain_score),
+                manifest.subfolder_axis.key: _rules_value(material_slug, material_names, material_score),
+            }
+            if tag_scorers:
+                folded = FoldedText.of(title, chunks_text[:TAG_AXIS_TEXT_CHARS])
+                axes.update({scorer.axis.key: scorer.classify(folded) for scorer in tag_scorers})
+
             resolved_title, document_type = resolve_title_and_type(document, title)
             classified.setdefault(domain_slug, []).append(
                 DomainDocument(
@@ -501,6 +554,7 @@ class ContextBuilder:
                     rules_domain=rules_domain,
                     rules_confidence=domain_score,
                     material_type_confidence=material_score,
+                    classification=DocumentClassification(axes=axes),
                 )
             )
 
@@ -546,7 +600,7 @@ class ContextBuilder:
         for index, (old_domain_slug, document) in enumerate(pending, start=1):
             if run.stopped is None:
                 await self._try_classify_document_with_manifest_ai(
-                    client, document, old_domain_slug, classified, domain_slugs, material_slugs, material_names, run
+                    client, document, old_domain_slug, classified, domain_slugs, material_slugs, material_names, run, manifest
                 )
                 self._log_stop(run, total - index)
             if on_progress is not None:
@@ -566,12 +620,16 @@ class ContextBuilder:
         material_slugs: list[str],
         material_names: dict[str, str],
         run: _AiRun,
+        manifest: TaxonomyManifest,
     ) -> None:
         """Resuelve un único `document` vía `client.classify()` y aplica el resultado a
         `classified` in-place — mueve el documento de bucket si el eje de dominio cambió,
         o lo muta in-place si solo cambió el eje de tipo de material (mismo objeto en la
-        misma lista, sin necesidad de mover nada).
+        misma lista, sin necesidad de mover nada). El eje que cambia queda en
+        `document.classification` con `classified_by="ai"` (2.0.0).
         """
+        folder_key, subfolder_key = manifest.folder_axis.key, manifest.subfolder_axis.key
+        domain_names = {DomainClassifier._slugify(entry.slug): entry.name for entry in manifest.folder_axis.entries}
         chunks_result = await read_conversion_json(document.json_path)
         if chunks_result is None:
             return
@@ -593,15 +651,29 @@ class ContextBuilder:
         document.ai_confidence = result.domain_confidence
         document.ai_reasoning = clean_text(result.reasoning)
         changed = False
+        axes = document.classification.axes
         if old_domain_slug == _UNCLASSIFIED_SLUG and result.domain is not None:
             classified[old_domain_slug] = [candidate for candidate in classified[old_domain_slug] if candidate is not document]
             document.confidence = result.domain_confidence
             classified.setdefault(result.domain, []).append(document)
+            axes[folder_key] = [
+                AxisValue(
+                    slug=result.domain, name=domain_names.get(result.domain, result.domain), confidence=result.domain_confidence, classified_by="ai"
+                )
+            ]
             changed = True
         if document.material_type == _UNCLASSIFIED_SLUG and result.material_type is not None:
             document.material_type = result.material_type
             document.material_type_name = material_names.get(result.material_type)
             document.material_type_confidence = result.material_type_confidence
+            axes[subfolder_key] = [
+                AxisValue(
+                    slug=result.material_type,
+                    name=material_names.get(result.material_type, result.material_type),
+                    confidence=result.material_type_confidence,
+                    classified_by="ai",
+                )
+            ]
             changed = True
         if changed:
             document.classified_by = "ai"
