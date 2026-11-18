@@ -109,6 +109,8 @@ class DomainClassificationClient(AiHttpClientBase):
             transport=transport,
             retries=config.retries,
             backoff_s=config.retry_backoff_s,
+            rate_limit_retries=config.rate_limit_retries,
+            max_retry_wait_s=config.max_retry_wait_s,
         )
 
     async def classify(self, *, chunks_text: str, title: str | None, candidate_domains: list[str]) -> DomainClassificationResult:

@@ -47,6 +47,12 @@ ruptura; la guía de migración completa llega con la versión.
   hoja `Ejes` con los recuentos por valor, con la misma protección contra fórmulas, progreso y cancelación que las demás
   exportaciones.
 
+- **Reintento ante 429/503 (M2, D5)**: todas las `*Config` de `doc_organize.ai` tienen `rate_limit_retries` (por
+  defecto 3) y `max_retry_wait_s` (60 s). Ante una respuesta 429 o 503 el cliente espera lo que pida `Retry-After`
+  (segundos o fecha HTTP) o la espera creciente de `retry_backoff_s`, con tope, y la espera es compartida por todas sus
+  llamadas en vuelo. **Cambio de comportamiento**: en 1.x un 429 fallaba en el acto; `rate_limit_retries=0` lo
+  mantiene.
+
 ### Compatibilidad
 
 - Los manifiestos y plantillas de 1.x se siguen leyendo (se migran en memoria); `save_taxonomy_manifest` guarda el
