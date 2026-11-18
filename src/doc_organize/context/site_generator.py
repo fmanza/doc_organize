@@ -29,6 +29,11 @@ from doc_organize.utils.path_utils import ensure_no_symlinks
 logger = get_logger(__name__)
 
 _INDEX_MD_NAME = "index.md"
+#: Funciones del tema que activa la configuración generada (1.7.1). `navigation.prune` pinta en cada página solo la parte
+#: visible del `nav` (la sección abierta), no el árbol entero: medido con Zensical 0.1.1, el sitio de 2600 documentos en
+#: 20 dominios pasa de 1960 MB a 173 MB (de 744 KB a 57 KB por página) y se construye más rápido. Es solo HTML: no añade
+#: JavaScript ni cambia rutas ni enlaces.
+_THEME_FEATURES: tuple[str, ...] = ("navigation.prune",)
 _CONFIG_HEADER = "# Generado por doc_organize (SiteGenerator): se reescribe en cada reconstrucción del contexto.\n"
 #: Máximo de caracteres de la salida de error de `zensical build` que se incluyen en `SiteBuildError`.
 _STDERR_TAIL = 2000
@@ -69,9 +74,9 @@ class SiteGenerator:
     cada entrada apunta al `.md` ya copiado. `zensical.toml` vive en la raíz del proyecto porque Zensical exige que
     `docs_dir` y `site_dir` cuelguen de la carpeta de su configuración; también crea ahí su caché (`.cache/`).
 
-    La configuración generada solo fija nombre, carpetas, `nav`, idioma y `font = false` (sin peticiones a Google
-    Fonts): ni JavaScript propio, ni `extra_javascript`, ni plugins, ni extensiones Markdown distintas de las que
-    Zensical activa por defecto.
+    La configuración generada solo fija nombre, carpetas, `nav`, idioma, `font = false` (sin peticiones a Google
+    Fonts) y `navigation.prune` (desde 1.7.1, ver `_THEME_FEATURES`): ni JavaScript propio, ni `extra_javascript`, ni
+    plugins, ni extensiones Markdown distintas de las que Zensical activa por defecto.
 
     **Contenido no confiable**: los `.md` salen de documentos de terceros. Zensical (Python-Markdown) deja pasar tal
     cual el HTML incrustado en el Markdown (`<script>`, atributos `on*`, enlaces `javascript:`), igual que MkDocs; esta
@@ -253,7 +258,9 @@ class SiteGenerator:
                 "docs_dir": context.output_folder_name,
                 "site_dir": site_dir,
                 "nav": nav,
-                "theme": {"language": "es", "font": False},
+                # `navigation.prune` (1.7.1): sin él, cada página lleva el `nav` entero y el sitio crece con el cuadrado
+                # del número de documentos (2600 en 20 dominios: ~1,9 GB; con él, ~170 MB). Ver `_THEME_FEATURES`.
+                "theme": {"language": "es", "font": False, "features": list(_THEME_FEATURES)},
             }
         }
 

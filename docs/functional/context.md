@@ -171,6 +171,13 @@ escribe `zensical.toml` y se vuelve a construir `site/`. `context.json` antiguo 
 (sus claves `mkdocs_generated`/`mkdocs_site_built` se leen como `site_generated`/`site_built`; las propiedades
 `Context.mkdocs_generated`/`mkdocs_site_built` se retiraron en 1.0.0).
 
+### Tamaño del sitio (1.7.1)
+
+Desde 1.7.1 la configuración generada activa `navigation.prune`: cada página lleva en el menú solo la sección abierta
+(su dominio), no el árbol entero. Antes, el tamaño del sitio crecía con el cuadrado del número de documentos (2600
+documentos en 20 dominios: ~1,9 GB; con `navigation.prune`, ~170 MB). Con un dominio muy grande, sus páginas siguen
+llevando todos los documentos de ese dominio.
+
 ## Seguridad del sitio
 
 Los `.md` del sitio salen de documentos de terceros: son **contenido no confiable**. Comprobado con Zensical 0.0.74
@@ -180,8 +187,8 @@ Los `.md` del sitio salen de documentos de terceros: son **contenido no confiabl
   enlaces `javascript:` no se filtran. Es el comportamiento por defecto de Zensical (Python-Markdown), igual que con
   MkDocs; doc_organize no lo cambia ni lo empeora.
 - **La configuración generada no añade nada ejecutable**: ni JavaScript propio, ni `extra_javascript`, ni plugins, ni
-  extensiones Markdown distintas de las que Zensical activa por defecto. Solo fija nombre, carpetas, `nav`, idioma y
-  `font = false` (sin peticiones a Google Fonts).
+  extensiones Markdown distintas de las que Zensical activa por defecto. Solo fija nombre, carpetas, `nav`, idioma,
+  `font = false` (sin peticiones a Google Fonts) y `navigation.prune` (1.7.1, solo HTML).
 - **Lo que escribe doc_organize sí se neutraliza**: Zensical inserta sin escapar las etiquetas del `nav` y
   `site_name`, y el tema mete el título de cada página en `<title>` deshaciendo las entidades (`striptags`). Por eso
   los títulos de documento y los nombres de dominio y de proyecto se escriben sin `<`/`>` (pasan a `＜`/`＞`) y con
