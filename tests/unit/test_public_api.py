@@ -66,3 +66,16 @@ def test_output_layout_and_read_only_cache_do_not_load_docling() -> None:
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True, timeout=120)
 
     assert result.stdout.strip() == "[]"
+
+
+def test_every_name_imported_for_type_checking_is_public() -> None:
+    """Lo que `__init__` importa bajo `TYPE_CHECKING` (para los IDE) tiene que estar también en `_EXPORTS`: si no, el IDE
+    lo ofrece pero `from doc_organize import X` falla (pasó en M4.1 con `AiSettings`)."""
+    import ast
+
+    from pathlib import Path
+
+    tree = ast.parse(Path(doc_organize.__file__).read_text(encoding="utf-8"))
+    block = next(node for node in tree.body if isinstance(node, ast.If) and getattr(node.test, "id", None) == "TYPE_CHECKING")
+    imported = {alias.asname or alias.name for node in ast.walk(block) if isinstance(node, ast.ImportFrom) for alias in node.names}
+    assert sorted(imported - set(doc_organize.__all__)) == []
