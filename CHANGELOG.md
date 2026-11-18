@@ -53,6 +53,11 @@ ruptura; la guía de migración completa llega con la versión.
   y el enriquecimiento, con los resultados aplicados en el orden de los documentos (mismo contexto con 1 y con 4); el
   presupuesto se reserva al despachar y nunca se supera.
 
+- **Frescura del contexto (M2, F4)**: `ConversionResult.source_sha256` (el consumidor pasa `CacheEntry.sha256_hash`),
+  que el builder guarda en `DomainDocument.source_sha256` y `UnclassifiedDocument.source_sha256`.
+  `check_context_freshness(project, context, cache_entries, *, site_dir=None, scanned_at=None) -> FreshnessReport`
+  (`changed`, `added`, `removed`, `unknown`, `stale_site`, `scanned_at`, `up_to_date`), sin leer originales ni `.json`.
+
 ### Compatibilidad
 
 - Los manifiestos y plantillas de 1.x se siguen leyendo (se migran en memoria); `save_taxonomy_manifest` guarda el
