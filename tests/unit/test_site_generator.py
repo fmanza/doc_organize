@@ -88,7 +88,8 @@ async def test_generated_config_adds_no_javascript_plugins_nor_extensions(tmp_pa
 
     config = _config(tmp_path)
     assert set(config) == {"site_name", "docs_dir", "site_dir", "nav", "theme"}
-    assert config["theme"] == {"language": "es", "font": False}
+    # navigation.prune (1.7.1): solo la sección visible del nav en cada página; no añade JavaScript ni rutas.
+    assert config["theme"] == {"language": "es", "font": False, "features": ["navigation.prune"]}
 
 
 @pytest.mark.asyncio
@@ -310,6 +311,42 @@ async def test_real_build_produces_site_and_keeps_embedded_html_as_zensical_does
     index = (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
     assert "<script>alert(" not in index  # el título (nav) no llega como HTML a ninguna página
     assert "<script>alert('titulo')" not in page
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+@pytest.mark.skipif(importlib.util.find_spec("zensical") is None, reason="Requiere el extra 'site' (zensical)")
+async def test_real_build_pages_carry_only_their_own_section_of_the_nav(tmp_path):
+    """1.7.1: con `navigation.prune` una página no lleva en el `nav` los documentos de otros dominios (sin él, cada
+    página llevaba el árbol entero y el sitio crecía con el cuadrado del número de documentos)."""
+    project = _make_project(tmp_path)
+    domains = []
+    for slug in ("calidad", "obras"):
+        documents = []
+        for index in range(3):
+            stem = f"{slug}{index}"
+            for suffix in (".pdf", ".json"):
+                (tmp_path / f"{stem}{suffix}").write_bytes(b"{}")
+            (tmp_path / f"{stem}.md").write_text(f"# {stem}\n", encoding="utf-8")
+            documents.append(
+                DomainDocument(
+                    source_path=str(tmp_path / f"{stem}.pdf"),
+                    markdown_path=str(tmp_path / f"{stem}.md"),
+                    json_path=str(tmp_path / f"{stem}.json"),
+                    title=f"Titulo {stem}",
+                    document_type="pdf",
+                    confidence=0.9,
+                )
+            )
+        domains.append(Domain(slug=slug, name=slug.title(), documents=documents))
+    context = _make_context(project, domains)
+    await Reorganizer().reorganize(project, context)
+
+    await SiteGenerator().generate(project, context, timeout=120)
+
+    page = next((tmp_path / "site" / "calidad").rglob("calidad0/index.html")).read_text(encoding="utf-8")
+    assert "Titulo calidad1" in page  # su sección, abierta
+    assert "Titulo obras1" not in page  # la de otro dominio, podada
 
 
 # --- Límite del buscador de Zensical (1.4.0) -------------------------------------------------------------------------

@@ -6,6 +6,19 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-11-18
+
+El sitio del contexto deja de crecer con el cuadrado del número de documentos. Sin cambios en la API ni dependencias
+nuevas.
+
+### Corregido
+
+- **El sitio del contexto ya no crece con el cuadrado del número de documentos**: cada página llevaba el `nav` entero
+  (todos los documentos de todos los dominios). La configuración generada activa `navigation.prune` del tema, que pinta
+  en cada página solo la sección abierta. Medido con Zensical 0.1.1 (spike de M0): 2600 documentos en 20 dominios pasan
+  de **1960 MB a 173 MB** (de 744 KB a 57 KB por página) y el build es algo más rápido. No añade JavaScript ni cambia
+  rutas ni enlaces; se aplica al reconstruir el contexto o el sitio.
+
 ## [1.7.0] - 2026-11-18
 
 Redacción de credenciales (F1 del plan de 2.0.0, M3b): el texto que sale hacia la IA y lo que se publica en el sitio
