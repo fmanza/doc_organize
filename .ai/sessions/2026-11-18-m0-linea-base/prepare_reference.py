@@ -47,11 +47,28 @@ COLUMNS = (
 )
 
 
-def _relative(path: str, root: Path) -> str:
+def _relative(path: str, root: Path, base: str | None = None) -> str:
+    """Ruta para la hoja: relativa a la raíz del proyecto si cuelga de ella; si no, relativa a `base` (el prefijo
+    común de los originales, p. ej. `/mnt/documentation/entrada_vd`), nunca la ruta absoluta del servidor."""
     try:
         return Path(path).resolve().relative_to(root.resolve()).as_posix()
     except ValueError:
-        return Path(path).name  # fuera del proyecto: solo el nombre, nunca la ruta del servidor
+        pass
+    posix = path.replace("\\", "/")
+    if base and posix.startswith(base.rstrip("/") + "/"):
+        return posix[len(base.rstrip("/")) + 1 :]
+    return Path(path).name
+
+
+def _common_base(paths: list[str]) -> str | None:
+    posix = [p.replace("\\", "/") for p in paths]
+    if len(posix) < 2:
+        return None
+    prefix = posix[0].rsplit("/", 1)[0]
+    for other in posix[1:]:
+        while prefix and not other.startswith(prefix + "/"):
+            prefix = prefix.rsplit("/", 1)[0] if "/" in prefix else ""
+    return prefix or None
 
 
 def _excel_safe(value: object) -> object:
@@ -78,11 +95,15 @@ def main() -> None:
     context = asyncio.run(_load(args.project_root))
     rows: list[dict[str, object]] = []
     strata: dict[str, list[dict[str, object]]] = {}
+    base = _common_base(
+        [doc.source_path for domain in context.domains for doc in domain.documents]
+        + [doc.source_path for doc in context.unclassified_details]
+    )
     for domain in context.domains:
         for doc in domain.documents:
             strata.setdefault(domain.slug, []).append(
                 {
-                    "documento": _relative(doc.source_path, args.project_root),
+                    "documento": _relative(doc.source_path, args.project_root, base),
                     "titulo": doc.title,
                     "tipo_fichero": doc.document_type,
                     "dominio_doc_organize": domain.slug,
@@ -94,7 +115,7 @@ def main() -> None:
     for doc in context.unclassified_details:
         strata.setdefault("(sin clasificar)", []).append(
             {
-                "documento": _relative(doc.source_path, args.project_root),
+                "documento": _relative(doc.source_path, args.project_root, base),
                 "titulo": doc.title,
                 "tipo_fichero": doc.document_type,
                 "dominio_doc_organize": None,

@@ -37,26 +37,47 @@ from doc_organize import ContextRegistry, Project
 NONE_LABEL = "ninguno"
 
 
-def _relative(path: str, root: Path) -> str:
+def _relative(path: str, root: Path, base: str | None = None) -> str:
+    """Ruta para la hoja: relativa a la raíz del proyecto si cuelga de ella; si no, relativa a `base` (el prefijo
+    común de los originales, p. ej. `/mnt/documentation/entrada_vd`), nunca la ruta absoluta del servidor."""
     try:
         return Path(path).resolve().relative_to(root.resolve()).as_posix()
     except ValueError:
-        return Path(path).name
+        pass
+    posix = path.replace("\\", "/")
+    if base and posix.startswith(base.rstrip("/") + "/"):
+        return posix[len(base.rstrip("/")) + 1 :]
+    return Path(path).name
+
+
+def _common_base(paths: list[str]) -> str | None:
+    posix = [p.replace("\\", "/") for p in paths]
+    if len(posix) < 2:
+        return None
+    prefix = posix[0].rsplit("/", 1)[0]
+    for other in posix[1:]:
+        while prefix and not other.startswith(prefix + "/"):
+            prefix = prefix.rsplit("/", 1)[0] if "/" in prefix else ""
+    return prefix or None
 
 
 async def _predictions(root: Path) -> dict[str, dict[str, str | None]]:
     project = Project(name=root.name, root_path=str(root), created_at=datetime.now(UTC).isoformat())
     context = await ContextRegistry().load_context(project)
     found: dict[str, dict[str, str | None]] = {}
+    base = _common_base(
+        [doc.source_path for domain in context.domains for doc in domain.documents]
+        + [doc.source_path for doc in context.unclassified_details]
+    )
     for domain in context.domains:
         for doc in domain.documents:
-            found[_relative(doc.source_path, root)] = {
+            found[_relative(doc.source_path, root, base)] = {
                 "domain": domain.slug,
                 "material": doc.material_type,
                 "by": doc.classified_by,
             }
     for doc in context.unclassified_details:
-        found[_relative(doc.source_path, root)] = {"domain": None, "material": None, "by": "unclassified"}
+        found[_relative(doc.source_path, root, base)] = {"domain": None, "material": None, "by": "unclassified"}
     return found
 
 
