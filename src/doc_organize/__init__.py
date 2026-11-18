@@ -46,6 +46,13 @@ _EXPORTS: dict[str, str] = {
     # Manifiesto 2.0 por ejes (A1)
     "migrate_manifest_v1": "doc_organize.context.taxonomy_front_matter",
     "check_context_freshness": "doc_organize.context.freshness",
+    # Evaluación contra una referencia (2.0.0, G3)
+    "evaluate_classification": "doc_organize.context.evaluation",
+    "load_gold_xlsx": "doc_organize.context.evaluation",
+    "GoldStandard": "doc_organize.context.evaluation",
+    "GoldLabel": "doc_organize.context.evaluation",
+    "EvaluationReport": "doc_organize.context.evaluation",
+    "AxisEvaluation": "doc_organize.context.evaluation",
     # Diagnóstico del entorno (2.0.0, F2)
     "check_environment": "doc_organize.diagnostics",
     # Cliente único de IA (2.0.0, G1)
@@ -164,6 +171,14 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
     from doc_organize.cache.cache_manager import CacheManager
     from doc_organize.context.context_builder import ContextBuilder
     from doc_organize.context.context_registry import ContextRegistry
+    from doc_organize.context.evaluation import (
+        AxisEvaluation,
+        EvaluationReport,
+        GoldLabel,
+        GoldStandard,
+        evaluate_classification,
+        load_gold_xlsx,
+    )
     from doc_organize.context.freshness import check_context_freshness
     from doc_organize.context.reorganizer import Reorganizer, resolve_organized_paths
     from doc_organize.context.site_generator import SiteGenerator, SiteResult
