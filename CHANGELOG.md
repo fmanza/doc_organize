@@ -6,6 +6,11 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-11-18
+
+El sitio del contexto deja de crecer con el cuadrado del número de documentos. Sin cambios en la API ni dependencias
+nuevas.
+
 ### Corregido
 
 - **El sitio del contexto ya no crece con el cuadrado del número de documentos**: cada página llevaba el `nav` entero
