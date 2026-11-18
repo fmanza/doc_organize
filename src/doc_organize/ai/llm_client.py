@@ -22,6 +22,7 @@ from typing import Any, Literal, Self
 import httpx
 
 from doc_organize.ai._http_client_base import AiHttpClientBase
+from doc_organize.ai.cache import AiResultCache, cache_key
 from doc_organize.core.exceptions import AiAuthError, AiConnectionError, AiError, AiResponseError
 from doc_organize.core.models import AiSettings, AiTask
 from doc_organize.security.credentials import redact_credentials
@@ -51,6 +52,7 @@ class LlmResult[T]:
         response_format (str): `json_schema` o `json_object` (si el modelo no admite el esquema).
         usage (LlmUsage): Tokens de la llamada.
         redacted (dict[str, int]): Credenciales redactadas por regla en lo enviado (sin valores).
+        cached (bool): Si salió de la caché de resultados (`AiResultCache`), sin llamar al modelo.
     """
 
     value: T
@@ -58,6 +60,7 @@ class LlmResult[T]:
     response_format: ResponseFormat
     usage: LlmUsage = field(default_factory=LlmUsage)
     redacted: dict[str, int] = field(default_factory=dict)
+    cached: bool = False
 
 
 class LlmClient:
@@ -118,6 +121,7 @@ class LlmClient:
         parse: Callable[[Any], T],
         schema_name: str | None = None,
         on_redacted: Callable[[dict[str, int]], None] | None = None,
+        cache: AiResultCache | None = None,
     ) -> LlmResult[T]:
         """Pide una respuesta JSON para `task` y la valida.
 
@@ -128,7 +132,10 @@ class LlmClient:
             parse: Valida y convierte el JSON recibido (lanza `ValueError`/`TypeError`/`KeyError` si no vale).
             schema_name: Nombre del esquema para el proxy (por defecto, la tarea).
             on_redacted: Recibe lo redactado (recuento por regla) **antes** de enviar, aunque la llamada falle después:
-                así quien llama puede anotarlo por documento (`Context.credential_findings`).
+                así quien llama puede anotarlo por documento (`Context.credential_findings`). No se llama si el
+                resultado sale de la caché (no se envía nada).
+            cache: Caché de resultados: si ya tiene esta petición exacta (`cache_key_for`), se devuelve sin llamar
+                (`LlmResult.cached`), validada otra vez; si no, se guarda la respuesta tras validarla.
 
         Returns:
             `LlmResult` con el valor validado, el formato usado, los tokens y lo redactado.
@@ -141,20 +148,52 @@ class LlmClient:
         """
         model = self.model_for(task)
         sent, redacted = self._redact(messages)
+        key = cache_key(task, model, sent, schema, redacted=self.settings.redact_credentials) if cache is not None else None
+        if cache is not None and key is not None:
+            cached = self._from_cache(task, model, cache, key, parse)
+            if cached is not None:
+                return cached
         if redacted and on_redacted is not None:
             on_redacted(redacted)
+        payload, response_format = await self._chat_with_fallback(task, model, sent, schema, schema_name or task)
+        data = self._content(task, payload)
+        value = self._parse(task, data, parse)
+        if cache is not None and key is not None:
+            cache.put(key, data, response_format=response_format)
+        return LlmResult(value=value, model=model, response_format=response_format, usage=_usage(payload), redacted=redacted)
+
+    def _from_cache[T](self, task: AiTask, model: str, cache: AiResultCache, key: str, parse: Callable[[Any], T]) -> LlmResult[T] | None:
+        """El resultado guardado para `key`, validado otra vez; `None` si no está o ya no es válido."""
+        hit = cache.get(key)
+        if hit is None:
+            return None
+        data, stored_format = hit
+        response_format: ResponseFormat = "json_object" if stored_format == "json_object" else "json_schema"
+        try:
+            return LlmResult(value=self._parse(task, data, parse), model=model, response_format=response_format, cached=True)
+        except AiResponseError:
+            logger.warning(f"Una entrada de la caché de IA de '{task}' ya no es válida: se vuelve a preguntar")
+            return None
+
+    async def _chat_with_fallback(
+        self, task: AiTask, model: str, sent: list[Message], schema: dict[str, Any], schema_name: str
+    ) -> tuple[dict[str, Any], ResponseFormat]:
+        """Pide `json_schema` estricto; si el proxy lo rechaza (400), cae **una vez** a `json_object` y lo recuerda."""
         response_format: ResponseFormat = "json_object" if model in self._no_schema else "json_schema"
-        payload = await self._chat(task, model, sent, self._format(response_format, schema, schema_name or task))
-        if payload is None:  # el proxy rechazó el esquema: una sola caída a `json_object`
+        payload = await self._chat(task, model, sent, self._format(response_format, schema, schema_name))
+        if payload is None:
             self._no_schema.add(model)
             logger.warning(f"El modelo '{model}' no admite la salida json_schema estricta: se usa json_object con validación")
             response_format = "json_object"
-            payload = await self._chat(task, model, sent, self._format(response_format, schema, schema_name or task))
+            payload = await self._chat(task, model, sent, self._format(response_format, schema, schema_name))
             if payload is None:
                 raise AiError(f"El LiteLLM Proxy rechazó la petición de '{task}' (HTTP 400)")
-        return LlmResult(
-            value=self._validate(task, payload, parse), model=model, response_format=response_format, usage=_usage(payload), redacted=redacted
-        )
+        return payload, response_format
+
+    def cache_key_for(self, task: AiTask, messages: Sequence[Message], schema: dict[str, Any]) -> str:
+        """La clave de caché que tendría esta petición (con los mensajes ya redactados), sin enviar nada."""
+        sent, _ = self._redact(messages)
+        return cache_key(task, self.model_for(task), sent, schema, redacted=self.settings.redact_credentials)
 
     async def complete_with_tools(self, task: AiTask, messages: Sequence[Message], tools: Sequence[dict[str, Any]]) -> tuple[Message, LlmUsage]:
         """Una vuelta de conversación con herramientas (agentes, M8): el mensaje del asistente, con `tool_calls` si las
@@ -242,12 +281,14 @@ class LlmClient:
             raise AiResponseError(f"La respuesta de '{task}' no es JSON") from exc
 
     @staticmethod
-    def _validate[T](task: AiTask, payload: Any, parse: Callable[[Any], T]) -> T:
+    def _content(task: AiTask, payload: Any) -> Any:
         try:
-            content = payload["choices"][0]["message"]["content"]
-            data = json.loads(content)
+            return json.loads(payload["choices"][0]["message"]["content"])
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             raise AiResponseError(f"La respuesta de '{task}' no es el JSON esperado") from exc
+
+    @staticmethod
+    def _parse[T](task: AiTask, data: Any, parse: Callable[[Any], T]) -> T:
         try:
             return parse(data)
         except (ValueError, TypeError, KeyError, AttributeError) as exc:

@@ -86,6 +86,11 @@ ruptura; la guía de migración completa llega con la versión.
   hace `LlmClient` (`AiSettings.redact_credentials`); lo redactado se anota por documento aunque la llamada falle.
   `check_environment(check_ai=True)` comprueba las tareas de `settings_from_env()` e informa de las variables de 1.x.
   Guía nueva: [De 1.x a 2.0](docs/guides/migracion_2_0.md).
+- **Caché de resultados de IA (M4, tercer paso)**: `AiResultCache` en `<raíz>/.doc_organize/ai_cache/`, con la huella
+  de lo que se enviaría (tarea, modelo, mensajes redactados, esquema y redacción). `ContextBuilder.build(ai_cache=True)`
+  por defecto: **reconstruir sin cambios no llama al modelo**; lo resuelto con la caché cuenta en
+  `AiPhaseStats.cached`, no en `sent`, y no consume `ai_max_documents`. `LlmResult.cached`, `LlmClient.cache_key_for`,
+  `TaskRequest` (`classification_request`, `enrichment_request`) y `prune_ai_cache(project_root, max_age_days=90)`.
 
 ### Retirado (ruptura)
 

@@ -52,6 +52,8 @@ _EXPORTS: dict[str, str] = {
     "LlmClient": "doc_organize.ai.llm_client",
     "PromptRegistry": "doc_organize.ai.prompts",
     "settings_from_env": "doc_organize.ai.settings",
+    "AiResultCache": "doc_organize.ai.cache",
+    "prune_ai_cache": "doc_organize.ai.cache",
     "AiSettings": "doc_organize.core.models",
     "TaskSettings": "doc_organize.core.models",
     "AiEndpoint": "doc_organize.diagnostics",

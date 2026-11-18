@@ -1100,6 +1100,8 @@ class AiPhaseStats(BaseModel):
         completion_tokens (int): Tokens de salida, según el proxy.
         response_format (str | None): `json_schema` o `json_object` (si el modelo no admite el esquema), en la última
             llamada que respondió.
+        cached (int): Documentos resueltos con la caché de resultados (`AiResultCache`), sin llamar al modelo; no
+            cuentan en `sent` ni consumen `ai_max_documents`.
     """
 
     sent: int = Field(default=0, ge=0)
@@ -1109,6 +1111,7 @@ class AiPhaseStats(BaseModel):
     prompt_tokens: int = Field(default=0, ge=0)
     completion_tokens: int = Field(default=0, ge=0)
     response_format: Literal["json_schema", "json_object"] | None = None
+    cached: int = Field(default=0, ge=0, description="Documentos resueltos con la caché de resultados, sin llamar al modelo (2.0.0)")
 
 
 class AiStats(BaseModel):

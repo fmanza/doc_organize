@@ -13,9 +13,10 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from doc_organize.ai.cache import AiResultCache
 from doc_organize.ai.llm_client import LlmClient, LlmResult
 from doc_organize.ai.prompts import PromptRegistry
-from doc_organize.core.models import DocumentEnrichmentResult, TaxonomyEntry, TaxonomyManifestDraftResult
+from doc_organize.core.models import AiTask, DocumentEnrichmentResult, TaxonomyEntry, TaxonomyManifestDraftResult
 from doc_organize.utils.text_clean import clean_text
 
 #: Caracteres del documento que se envían para clasificar y describir (como en 1.x).
@@ -66,23 +67,35 @@ class SampledDocument:
 Redacted = Callable[[dict[str, int]], None]
 
 
-async def classify_document(
-    llm: LlmClient,
-    prompts: PromptRegistry,
-    *,
-    axes: Sequence[AxisRequest],
-    title: str | None,
-    content: str,
-    on_redacted: Redacted | None = None,
-) -> LlmResult[ClassificationAnswer]:
-    """Clasifica un documento en `axes` con una sola llamada (tarea `classify`).
+@dataclass(frozen=True)
+class TaskRequest[T]:
+    """Una petición lista para `LlmClient`: tarea, mensajes, esquema y validación. Permite saber su clave de caché
+    (`LlmClient.cache_key_for`) antes de decidir si se envía."""
 
-    El esquema tiene, por eje, `value` con un `enum` de sus slugs (o `null`) y `confidence`. Un valor fuera del catálogo
-    no pasa la validación aunque el modelo no admita el esquema estricto.
+    task: AiTask
+    messages: list[dict[str, str]]
+    schema: dict[str, Any]
+    parse: Callable[[Any], T]
+    schema_name: str
+
+    def cache_key(self, llm: LlmClient) -> str:
+        """Clave de caché de esta petición con la configuración de `llm`."""
+        return llm.cache_key_for(self.task, self.messages, self.schema)
+
+    async def send(self, llm: LlmClient, *, on_redacted: Redacted | None = None, cache: AiResultCache | None = None) -> LlmResult[T]:
+        """La envía (o la sirve de `cache`)."""
+        return await llm.complete_json(
+            self.task, self.messages, schema=self.schema, parse=self.parse, schema_name=self.schema_name, on_redacted=on_redacted, cache=cache
+        )
+
+
+def classification_request(
+    prompts: PromptRegistry, *, axes: Sequence[AxisRequest], title: str | None, content: str
+) -> TaskRequest[ClassificationAnswer]:
+    """La petición de `classify_document`, sin enviarla.
 
     Raises:
         ValueError: `axes` está vacío.
-        AiError: Ver `LlmClient.complete_json`.
     """
     if not axes:
         raise ValueError("No se puede clasificar sin ningún eje")
@@ -121,17 +134,35 @@ async def classify_document(
         reasoning = data.get("reasoning")
         return ClassificationAnswer(axes=answers, reasoning=clean_text(reasoning) if isinstance(reasoning, str) else None)
 
-    return await llm.complete_json("classify", messages, schema=schema, parse=parse, schema_name="clasificacion", on_redacted=on_redacted)
+    return TaskRequest("classify", messages, schema, parse, "clasificacion")
 
 
-async def enrich_document(
-    llm: LlmClient, prompts: PromptRegistry, *, title: str | None, content: str, on_redacted: Redacted | None = None
-) -> LlmResult[DocumentEnrichmentResult]:
-    """Descripción y palabras clave de un documento (tarea `enrich`).
+async def classify_document(
+    llm: LlmClient,
+    prompts: PromptRegistry,
+    *,
+    axes: Sequence[AxisRequest],
+    title: str | None,
+    content: str,
+    on_redacted: Redacted | None = None,
+    cache: AiResultCache | None = None,
+) -> LlmResult[ClassificationAnswer]:
+    """Clasifica un documento en `axes` con una sola llamada (tarea `classify`).
+
+    El esquema tiene, por eje, `value` con un `enum` de sus slugs (o `null`) y `confidence`. Un valor fuera del catálogo
+    no pasa la validación aunque el modelo no admita el esquema estricto. Con `cache`, una petición idéntica a una ya
+    hecha no llama al modelo.
 
     Raises:
+        ValueError: `axes` está vacío.
         AiError: Ver `LlmClient.complete_json`.
     """
+    request = classification_request(prompts, axes=axes, title=title, content=content)
+    return await request.send(llm, on_redacted=on_redacted, cache=cache)
+
+
+def enrichment_request(prompts: PromptRegistry, *, title: str | None, content: str) -> TaskRequest[DocumentEnrichmentResult]:
+    """La petición de `enrich_document`, sin enviarla."""
     messages = prompts.get("enrich").render(max_keywords=MAX_KEYWORDS, title=title or "(sin título)", content=content[:MAX_CONTENT_CHARS])
     schema = {
         "type": "object",
@@ -153,7 +184,24 @@ async def enrich_document(
             description=text[:_DESCRIPTION_MAX_CHARS] if text else None, keywords=list(dict.fromkeys(cleaned))[:MAX_KEYWORDS]
         )
 
-    return await llm.complete_json("enrich", messages, schema=schema, parse=parse, schema_name="descripcion", on_redacted=on_redacted)
+    return TaskRequest("enrich", messages, schema, parse, "descripcion")
+
+
+async def enrich_document(
+    llm: LlmClient,
+    prompts: PromptRegistry,
+    *,
+    title: str | None,
+    content: str,
+    on_redacted: Redacted | None = None,
+    cache: AiResultCache | None = None,
+) -> LlmResult[DocumentEnrichmentResult]:
+    """Descripción y palabras clave de un documento (tarea `enrich`); con `cache`, como `classify_document`.
+
+    Raises:
+        AiError: Ver `LlmClient.complete_json`.
+    """
+    return await enrichment_request(prompts, title=title, content=content).send(llm, on_redacted=on_redacted, cache=cache)
 
 
 async def draft_taxonomy(llm: LlmClient, prompts: PromptRegistry, documents: Sequence[SampledDocument]) -> LlmResult[TaxonomyManifestDraftResult]:
@@ -240,7 +288,10 @@ __all__ = [
     "AxisRequest",
     "ClassificationAnswer",
     "SampledDocument",
+    "TaskRequest",
+    "classification_request",
     "classify_document",
     "draft_taxonomy",
     "enrich_document",
+    "enrichment_request",
 ]
