@@ -92,6 +92,14 @@ ruptura; la guía de migración completa llega con la versión.
   `AiPhaseStats.cached`, no en `sent`, y no consume `ai_max_documents`. `LlmResult.cached`, `LlmClient.cache_key_for`,
   `TaskRequest` (`classification_request`, `enrichment_request`) y `prune_ai_cache(project_root, max_age_days=90)`.
 
+- **Lo que recibe el modelo (M5, G2, primer paso)**: `read_conversion_document` (`.json` completo, con los títulos de
+  sección de cada fragmento y la huella del original); `build_document_excerpt` (extracto de hasta 6000 caracteres:
+  título, carpeta de dos niveles, metadatos, esquema de títulos, comienzo con texto de verdad y fragmentos con términos del
+  catálogo; `EXCERPT_VERSION`); `ProjectProfile` y `TaxonomyManifest.profile`, leído de las secciones `## Contexto del
+  proyecto`, `## Reglas de desempate`, `## Glosario` y `## Ejemplos` del cuerpo, con el de
+  `<raíz>/.doc_organize/profile.md` añadido detrás (`compose_profile`, D11). Todavía no se envían: lo hará la
+  clasificación del siguiente paso.
+
 ### Retirado (ruptura)
 
 - `DomainClassificationClient`, `TaxonomyClassificationClient`, `DocumentEnrichmentClient`,

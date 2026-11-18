@@ -10,6 +10,7 @@ import re
 
 from pathlib import Path
 
+from doc_organize.context.project_profile import render_profile_sections
 from doc_organize.context.taxonomy_front_matter import manifest_from_text, render_front_matter
 from doc_organize.core.exceptions import TaxonomyTemplateError
 from doc_organize.core.models import TaxonomyManifest, TaxonomyTemplateSummary
@@ -83,6 +84,8 @@ def render_taxonomy_template(manifest: TaxonomyManifest, body: str = "") -> str:
         True
     """
     text = render_front_matter(manifest)
+    if not body and manifest.profile is not None and not manifest.profile.is_empty:
+        body = render_profile_sections(manifest.profile)  # el perfil vive en el cuerpo (2.0.0, G2)
     return f"{text}\n{body}" if body else text
 
 

@@ -39,6 +39,7 @@ import yaml
 
 from pydantic import ValidationError
 
+from doc_organize.context.project_profile import parse_profile
 from doc_organize.core.exceptions import TaxonomyManifestError
 from doc_organize.core.models import TAXONOMY_AXIS_KEY_PATTERN, TaxonomyAxis, TaxonomyFrontMatterReport, TaxonomyManifest
 
@@ -144,13 +145,16 @@ def manifest_from_text(text: str, source: str, error: ErrorFactory) -> TaxonomyM
     Raises:
         Exception: La que construye `error` ante cualquier problema de formato o de schema, con el motivo.
     """
-    payload, _ = load_front_matter_payload(text, source, error)
+    payload, body = load_front_matter_payload(text, source, error)
     if is_legacy_payload(payload, source, error):
         payload, _ = migrate_payload_v1(payload)
     try:
-        return TaxonomyManifest.model_validate({key: payload[key] for key in _V2_KEYS if key in payload})
+        manifest = TaxonomyManifest.model_validate({key: payload[key] for key in _V2_KEYS if key in payload})
     except ValidationError as exc:
         raise error(f"El front matter de '{source}' no cumple el schema de taxonomía: {_describe(exc)}") from exc
+    # El perfil del proyecto (2.0.0, G2) son secciones del cuerpo, no del front matter.
+    profile = parse_profile(body)
+    return manifest.model_copy(update={"profile": profile}) if profile is not None else manifest
 
 
 def migrate_manifest_v1(text: str) -> str:
