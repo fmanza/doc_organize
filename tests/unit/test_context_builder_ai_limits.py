@@ -28,10 +28,11 @@ from doc_organize.core.models import (
     LiteLLMClassificationConfig,
     LiteLLMTaxonomyClassificationConfig,
     Project,
-    TaxonomyCatalogEntry,
+    TaxonomyEntry,
     TaxonomyManifest,
 )
 from doc_organize.core.progress import CancelToken
+from tests.unit.taxonomy_helpers import two_axis_manifest
 
 _SECRET = "sk-super-secret-virtual-key-123"
 
@@ -60,9 +61,9 @@ def _documents(tmp_path, count: int) -> list[ConversionResult]:
 
 
 def _manifest() -> TaxonomyManifest:
-    return TaxonomyManifest(
-        domains=[TaxonomyCatalogEntry(slug="calidad", name="Calidad")],
-        material_types=[TaxonomyCatalogEntry(slug="procedimiento", name="Procedimiento")],
+    return two_axis_manifest(
+        domains=[TaxonomyEntry(slug="calidad", name="Calidad")],
+        material_types=[TaxonomyEntry(slug="procedimiento", name="Procedimiento")],
     )
 
 

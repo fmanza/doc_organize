@@ -43,6 +43,9 @@ _EXPORTS: dict[str, str] = {
     "render_taxonomy_template": "doc_organize.context.taxonomy_templates",
     "list_builtin_templates": "doc_organize.context.taxonomy_templates",
     "load_builtin_template": "doc_organize.context.taxonomy_templates",
+    # Manifiesto 2.0 por ejes (A1)
+    "migrate_manifest_v1": "doc_organize.context.taxonomy_front_matter",
+    "inspect_taxonomy_front_matter": "doc_organize.context.taxonomy_front_matter",
     "ProjectRegistry": "doc_organize.projects.project_registry",
     "ProjectLayout": "doc_organize.projects.layout",
     # Rutas de salida de un documento (sin Docling, G20/G23)
@@ -98,6 +101,9 @@ _EXPORTS: dict[str, str] = {
     "OfficeStatus": "doc_organize.core.models",
     "Context": "doc_organize.core.models",
     "TaxonomyManifest": "doc_organize.core.models",
+    "TaxonomyAxis": "doc_organize.core.models",
+    "TaxonomyEntry": "doc_organize.core.models",
+    "TaxonomyFrontMatterReport": "doc_organize.core.models",
     "DocumentCredentialFindings": "doc_organize.core.models",
     # Credenciales (1.7.0)
     "redact_credentials": "doc_organize.security.credentials",
@@ -142,6 +148,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
     from doc_organize.context.context_registry import ContextRegistry
     from doc_organize.context.reorganizer import Reorganizer, resolve_organized_paths
     from doc_organize.context.site_generator import SiteGenerator, SiteResult
+    from doc_organize.context.taxonomy_front_matter import inspect_taxonomy_front_matter, migrate_manifest_v1
     from doc_organize.context.taxonomy_template_registry import TaxonomyTemplateRegistry
     from doc_organize.context.taxonomy_templates import (
         list_builtin_templates,
@@ -195,6 +202,9 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         ScanOptions,
         ScanResult,
         ScanRunReport,
+        TaxonomyAxis,
+        TaxonomyEntry,
+        TaxonomyFrontMatterReport,
         TaxonomyManifest,
     )
     from doc_organize.core.progress import CancelToken, ProgressEvent

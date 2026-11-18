@@ -288,7 +288,7 @@ class SiteGenerator:
             entries = [{title(document): paths[id(document)]} for document in docs]
             # `material_type_name` (nombre legible del manifiesto) es el mismo para todos los
             # documentos de este grupo -- comparten `material_type`, luego la misma entrada del
-            # catálogo `TaxonomyManifest.material_types`. `None` para el placeholder "sin-clasificar"
+            # eje `subfolder` del `TaxonomyManifest`. `None` para el placeholder "sin-clasificar"
             # (sin entrada en el manifiesto) o en modo sin manifiesto: cae al fallback derivado del slug.
             label = docs[0].material_type_name or material_type.replace("-", " ").title()
             nav.append({_label(label): entries})

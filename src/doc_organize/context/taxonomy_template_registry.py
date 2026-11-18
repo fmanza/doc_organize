@@ -74,7 +74,7 @@ class TaxonomyTemplateRegistry:
         ...     )
         ...     registry = TaxonomyTemplateRegistry(templates_dir)
         ...     manifest = await registry.load_template("calidad")
-        ...     return manifest.domains[0].slug
+        ...     return manifest.folder_axis.entries[0].slug
         >>> asyncio.run(main())
         'calidad'
     """
@@ -147,7 +147,7 @@ class TaxonomyTemplateRegistry:
             name: Slug de la plantilla (sin extensión).
             manifest: Catálogo a guardar (`render_taxonomy_template`) -- `title`/`description`
                 (si se rellenan) se usan para el listado (`list_templates()`);
-                `domains`/`material_types` son el catálogo cerrado en sí.
+                `axes` son el catálogo cerrado en sí (se escribe en formato 2.0).
 
         Raises:
             TaxonomyTemplateError: `name` no es un slug válido.

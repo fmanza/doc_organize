@@ -14,10 +14,11 @@ from doc_organize.core.models import (
     ConversionResult,
     DomainClassificationResult,
     Project,
-    TaxonomyCatalogEntry,
     TaxonomyClassificationResult,
+    TaxonomyEntry,
     TaxonomyManifest,
 )
+from tests.unit.taxonomy_helpers import two_axis_manifest
 
 
 def _make_project(tmp_path) -> Project:
@@ -233,9 +234,9 @@ async def test_ai_fallback_skips_when_no_catalog_available_at_all(tmp_path):
 
 
 def _make_manifest(domain_slugs: list[str], material_slugs: list[str]) -> TaxonomyManifest:
-    return TaxonomyManifest(
-        domains=[TaxonomyCatalogEntry(slug=slug, name=slug.title()) for slug in domain_slugs],
-        material_types=[TaxonomyCatalogEntry(slug=slug, name=slug.title()) for slug in material_slugs],
+    return two_axis_manifest(
+        domains=[TaxonomyEntry(slug=slug, name=slug.title()) for slug in domain_slugs],
+        material_types=[TaxonomyEntry(slug=slug, name=slug.title()) for slug in material_slugs],
     )
 
 
@@ -313,7 +314,7 @@ async def test_build_without_manifest_keeps_material_type_unset(tmp_path):
 
 @pytest.mark.asyncio
 async def test_build_with_manifest_uses_catalog_entry_keywords_for_scoring(tmp_path):
-    """`TaxonomyCatalogEntry.keywords` debe sumar a la puntuación además del propio
+    """`TaxonomyEntry.keywords` debe sumar a la puntuación además del propio
     slug — sin esto, un documento que solo menciona las keywords declaradas (nunca la
     palabra exacta del slug) queda sin clasificar en ese eje (AUDIT_CODE). El texto no
     contiene "ciberseguridad" ni "normativa" (las palabras de los slugs) en absoluto —
@@ -321,9 +322,9 @@ async def test_build_with_manifest_uses_catalog_entry_keywords_for_scoring(tmp_p
     """
     project = _make_project(tmp_path)
     document = _make_document(tmp_path, "varios", "informe", "Informe sobre ENS y controles de acceso")
-    manifest = TaxonomyManifest(
-        domains=[TaxonomyCatalogEntry(slug="ciberseguridad", name="Ciberseguridad", keywords=["ENS"])],
-        material_types=[TaxonomyCatalogEntry(slug="normativa", name="Normativa", keywords=["controles"])],
+    manifest = two_axis_manifest(
+        domains=[TaxonomyEntry(slug="ciberseguridad", name="Ciberseguridad", keywords=["ENS"])],
+        material_types=[TaxonomyEntry(slug="normativa", name="Normativa", keywords=["controles"])],
     )
 
     context = await ContextBuilder().build(project, [document], taxonomy_manifest=manifest, threshold=0.5)
@@ -334,7 +335,7 @@ async def test_build_with_manifest_uses_catalog_entry_keywords_for_scoring(tmp_p
 
 @pytest.mark.asyncio
 async def test_build_with_manifest_uses_catalog_entry_name_and_description_for_domain(tmp_path):
-    """`TaxonomyCatalogEntry.name`/`.description` del manifiesto deben ganar sobre el
+    """`TaxonomyEntry.name`/`.description` del manifiesto deben ganar sobre el
     fallback `slug.replace("-", " ").title()`/`None` — antes de este fix, `Domain.name`
     siempre se derivaba del slug e ignoraba el `name` (obligatorio en el manifiesto) y la
     `description` declarados (AUDIT_CODE, sesión de QA manual de la feature). El slug
@@ -344,9 +345,9 @@ async def test_build_with_manifest_uses_catalog_entry_name_and_description_for_d
     """
     project = _make_project(tmp_path)
     document = _make_document(tmp_path, "varios", "informe", "Gestion de personal y plantilla")
-    manifest = TaxonomyManifest(
-        domains=[TaxonomyCatalogEntry(slug="rrhh", name="Recursos Humanos", description="Gestión de personas", keywords=["personal", "plantilla"])],
-        material_types=[TaxonomyCatalogEntry(slug="normativa", name="Normativa")],
+    manifest = two_axis_manifest(
+        domains=[TaxonomyEntry(slug="rrhh", name="Recursos Humanos", description="Gestión de personas", keywords=["personal", "plantilla"])],
+        material_types=[TaxonomyEntry(slug="normativa", name="Normativa")],
     )
 
     context = await ContextBuilder().build(project, [document], taxonomy_manifest=manifest, threshold=0.5)
@@ -363,9 +364,9 @@ async def test_build_with_manifest_placeholder_domain_keeps_slug_derived_name(tm
     no romperse por el lookup nuevo introducido para el resto de dominios."""
     project = _make_project(tmp_path)
     document = _make_document(tmp_path, "varios", "receta", "Receta de cocina con ingredientes y horno")
-    manifest = TaxonomyManifest(
-        domains=[TaxonomyCatalogEntry(slug="ciberseguridad", name="Ciberseguridad")],
-        material_types=[TaxonomyCatalogEntry(slug="normativa", name="Normativa")],
+    manifest = two_axis_manifest(
+        domains=[TaxonomyEntry(slug="ciberseguridad", name="Ciberseguridad")],
+        material_types=[TaxonomyEntry(slug="normativa", name="Normativa")],
     )
 
     context = await ContextBuilder().build(project, [document], taxonomy_manifest=manifest, threshold=0.5)
@@ -382,9 +383,9 @@ async def test_build_with_manifest_sets_material_type_name_from_catalog_entry(tm
     el llamador lo derive del slug."""
     project = _make_project(tmp_path)
     document = _make_document(tmp_path, "varios", "politica", "Politica de seguridad normativa ISO 27001")
-    manifest = TaxonomyManifest(
-        domains=[TaxonomyCatalogEntry(slug="ciberseguridad", name="Ciberseguridad")],
-        material_types=[TaxonomyCatalogEntry(slug="normativa", name="Normativa Vigente")],
+    manifest = two_axis_manifest(
+        domains=[TaxonomyEntry(slug="ciberseguridad", name="Ciberseguridad")],
+        material_types=[TaxonomyEntry(slug="normativa", name="Normativa Vigente")],
     )
 
     context = await ContextBuilder().build(project, [document], taxonomy_manifest=manifest, threshold=0.1)

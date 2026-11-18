@@ -16,7 +16,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Final, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME
 
@@ -825,13 +825,13 @@ class DomainDocument(BaseModel):
         default=None,
         description=(
             "Slug del tipo de material de origen (segundo eje de clasificación, catálogo de "
-            "`TaxonomyManifest.material_types`), o `None` en modo sin manifiesto de taxonomía"
+            "eje `subfolder` del `TaxonomyManifest`), o `None` en modo sin manifiesto de taxonomía"
         ),
     )
     material_type_name: str | None = Field(
         default=None,
         description=(
-            "Nombre legible de `material_type` (`TaxonomyCatalogEntry.name` del manifiesto), o `None` si "
+            "Nombre legible de `material_type` (`TaxonomyEntry.name` del eje `subfolder` del manifiesto), o `None` si "
             "`material_type` es el placeholder `sin-clasificar` o no hay manifiesto — el llamador (p. ej. "
             "`SiteGenerator`) recurre entonces a derivar una etiqueta a partir del slug"
         ),
@@ -1171,36 +1171,127 @@ class DomainClassificationResult(BaseModel):
     reasoning: str | None = Field(default=None, description="Justificación breve devuelta por el modelo, si la reporta")
 
 
-class TaxonomyCatalogEntry(BaseModel):
-    """Una entrada del catálogo de un `TaxonomyManifest` (un dominio o un tipo de material de origen)."""
+#: Límites de un manifiesto de taxonomía (2.0.0, A1): protegen la construcción, el prompt y la web de un YAML enorme.
+TAXONOMY_MAX_AXES: Final = 10
+TAXONOMY_MAX_ENTRIES_PER_AXIS: Final = 150
+TAXONOMY_MAX_DESCRIPTION_CHARS: Final = 500
+#: Clave de un eje: también es nombre de columna en el Excel y segmento de URL en el sitio.
+TAXONOMY_AXIS_KEY_PATTERN: Final = r"^[a-z][a-z0-9_]{0,40}$"
+
+AxisOrganizes = Literal["folder", "subfolder"]
+
+
+class TaxonomyEntry(BaseModel):
+    """Un valor de un eje de la taxonomía (un dominio, un tipo de material, un marco normativo...).
+
+    Attributes:
+        slug (str): Identificador corto; se sanea a kebab-case antes de usarse como carpeta o clave.
+        name (str): Nombre legible.
+        description (str | None): Qué cubre el valor; en 2.0 se envía al modelo para desempatar.
+        keywords (list[str]): Términos para la clasificación por reglas, además del slug.
+        examples (list[str]): Títulos o frases de ejemplo de documentos de este valor.
+
+    Example:
+        >>> TaxonomyEntry(slug="iso-27001", name="ISO/IEC 27001", keywords=["SGSI"]).keywords
+        ['SGSI']
+    """
 
     slug: str = Field(..., min_length=1, description="Identificador corto (se sanea a kebab-case antes de usarse como segmento de carpeta)")
     name: str = Field(..., min_length=1, description="Nombre legible")
-    description: str | None = Field(default=None, description="Descripción de la entrada, o `None` si no se rellenó")
+    description: str | None = Field(
+        default=None, max_length=TAXONOMY_MAX_DESCRIPTION_CHARS, description="Descripción de la entrada, o `None` si no se rellenó"
+    )
     keywords: list[str] = Field(default_factory=list, description="Palabras clave adicionales para la puntuación por reglas, además de `slug`")
+    examples: list[str] = Field(default_factory=list, description="Ejemplos de documentos de este valor (títulos o frases)")
+
+
+class TaxonomyAxis(BaseModel):
+    """Un eje de la taxonomía: un catálogo cerrado de valores en el que se clasifica cada documento.
+
+    El eje con `organizes="folder"` es el **dominio** (carpeta de la reorganización y sección del sitio) y el de
+    `organizes="subfolder"` el **tipo de material** (subcarpeta). Los demás ejes (marcos normativos, sistema de
+    gestión...) solo etiquetan: no cambian carpetas.
+
+    Attributes:
+        key (str): Identificador del eje (`^[a-z][a-z0-9_]{0,40}$`), único en el manifiesto.
+        name (str): Nombre legible del eje.
+        description (str | None): Qué clasifica el eje.
+        multiple (bool): Si un documento puede tener varios valores (como mucho 5). Los ejes organizadores no.
+        threshold (float | None): Confianza mínima propia del eje; `None` = el umbral de la construcción.
+        rules (bool): `False` si el eje no se clasifica por palabras (solo IA o semántica).
+        organizes (Literal["folder", "subfolder"] | None): Si el eje decide la carpeta o la subcarpeta.
+        entries (list[TaxonomyEntry]): Valores del eje (1-150).
+
+    Example:
+        >>> axis = TaxonomyAxis(
+        ...     key="normative_frameworks",
+        ...     name="Marcos normativos",
+        ...     multiple=True,
+        ...     entries=[TaxonomyEntry(slug="ens", name="ENS")],
+        ... )
+        >>> axis.organizes is None
+        True
+    """
+
+    key: str = Field(..., pattern=TAXONOMY_AXIS_KEY_PATTERN, description="Identificador del eje, único en el manifiesto")
+    name: str = Field(..., min_length=1, description="Nombre legible del eje")
+    description: str | None = Field(default=None, max_length=TAXONOMY_MAX_DESCRIPTION_CHARS, description="Qué clasifica el eje")
+    multiple: bool = Field(default=False, description="Un documento puede tener varios valores del eje (como mucho 5)")
+    threshold: float | None = Field(default=None, ge=0.0, le=1.0, description="Umbral propio del eje; `None` = el de la construcción")
+    rules: bool = Field(default=True, description="`False`: el eje no se clasifica por reglas (solo IA o semántica)")
+    organizes: AxisOrganizes | None = Field(default=None, description="`folder` = dominio, `subfolder` = tipo de material, `None` = solo etiqueta")
+    entries: list[TaxonomyEntry] = Field(..., description="Valores del eje")
+
+    @field_validator("entries")
+    @classmethod
+    def _check_entries(cls, entries: list[TaxonomyEntry]) -> list[TaxonomyEntry]:
+        if not entries:
+            raise ValueError("un eje necesita al menos una entrada")
+        if len(entries) > TAXONOMY_MAX_ENTRIES_PER_AXIS:
+            raise ValueError(f"un eje admite como mucho {TAXONOMY_MAX_ENTRIES_PER_AXIS} entradas (tiene {len(entries)})")
+        return entries
+
+    @model_validator(mode="after")
+    def _check_organizing(self) -> "TaxonomyAxis":
+        if self.organizes is not None and self.multiple:
+            raise ValueError(f"el eje '{self.key}' organiza carpetas ({self.organizes}) y no puede ser de varios valores")
+        if self.organizes is not None and not self.rules:
+            raise ValueError(f"el eje '{self.key}' organiza carpetas ({self.organizes}) y necesita reglas")
+        return self
 
 
 class TaxonomyManifest(BaseModel):
-    """Manifiesto de taxonomía documental de un proyecto: catálogos de dominios y de tipos de material de origen.
+    """Manifiesto de taxonomía de un proyecto o de una plantilla: una lista de **ejes** (2.0.0).
 
-    Se lee del front matter YAML de `<project.root_path>/taxonomy_manifest.md` (ver
-    `doc_organize.context.taxonomy_manifest.load_taxonomy_manifest`) — el cuerpo Markdown
-    del fichero (prosa, tablas, diagramas) es de lectura humana y no se parsea. Cuando un
-    proyecto tiene manifiesto, `ContextBuilder` clasifica cada documento en dos ejes
-    (dominio + tipo de material) en vez del único eje de dominio del modo sin manifiesto.
+    Se lee del front matter YAML de `<project.root_path>/taxonomy_manifest.md` o de una plantilla
+    (`schema: 2` y `axes:`); el cuerpo Markdown es de lectura humana. Un front matter de 1.x (`domains`,
+    `material_types`, `facets:` o ejes implícitos) se migra al leerlo (`migrate_manifest_v1`).
+
+    Debe haber exactamente un eje `organizes="folder"` (dominio) y uno `organizes="subfolder"` (tipo de material): la
+    reorganización y el sitio salen de ellos, como en 1.x. Los demás ejes solo etiquetan.
 
     Attributes:
-        domains (list[TaxonomyCatalogEntry]): Catálogo cerrado de dominios normativos.
-        material_types (list[TaxonomyCatalogEntry]): Catálogo cerrado de tipos de material de origen.
+        schema_version (int): Versión del formato (`schema` en el YAML); siempre 2.
+        title (str | None): Título legible (plantillas compartidas).
+        description (str | None): Descripción breve (plantillas compartidas).
+        axes (list[TaxonomyAxis]): Ejes de la taxonomía (1-10, claves únicas).
 
     Example:
-        >>> TaxonomyManifest(
-        ...     domains=[TaxonomyCatalogEntry(slug="ciberseguridad", name="Ciberseguridad")],
-        ...     material_types=[TaxonomyCatalogEntry(slug="normativa", name="Normativa")],
-        ... ).domains[0].slug
+        >>> manifest = TaxonomyManifest(
+        ...     axes=[
+        ...         TaxonomyAxis(key="domains", name="Dominios", organizes="folder",
+        ...                      entries=[TaxonomyEntry(slug="ciberseguridad", name="Ciberseguridad")]),
+        ...         TaxonomyAxis(key="material_types", name="Tipos de material", organizes="subfolder",
+        ...                      entries=[TaxonomyEntry(slug="normativa", name="Normativa")]),
+        ...     ]
+        ... )
+        >>> manifest.folder_axis.entries[0].slug
         'ciberseguridad'
     """
 
+    model_config = ConfigDict(populate_by_name=True)
+
+    schema_version: Literal[2] = Field(default=2, alias="schema", description="Versión del formato del manifiesto (`schema` en el YAML)")
     title: str | None = Field(
         default=None,
         description="Título legible, solo relevante para una plantilla compartida (ver `TaxonomyTemplateRegistry`); `None` en un manifiesto de proyecto",
@@ -1209,8 +1300,59 @@ class TaxonomyManifest(BaseModel):
         default=None,
         description="Descripción breve, solo relevante para una plantilla compartida (ver `TaxonomyTemplateRegistry`); `None` en un manifiesto de proyecto",
     )
-    domains: list[TaxonomyCatalogEntry] = Field(..., min_length=1, description="Catálogo cerrado de dominios normativos")
-    material_types: list[TaxonomyCatalogEntry] = Field(..., min_length=1, description="Catálogo cerrado de tipos de material de origen")
+    axes: list[TaxonomyAxis] = Field(..., description="Ejes de la taxonomía")
+
+    @field_validator("axes")
+    @classmethod
+    def _check_axes(cls, axes: list[TaxonomyAxis]) -> list[TaxonomyAxis]:
+        if len(axes) > TAXONOMY_MAX_AXES:
+            raise ValueError(f"un manifiesto admite como mucho {TAXONOMY_MAX_AXES} ejes (tiene {len(axes)})")
+        keys = [axis.key for axis in axes]
+        repeated = sorted({key for key in keys if keys.count(key) > 1})
+        if repeated:
+            raise ValueError(f"claves de eje repetidas: {', '.join(repeated)}")
+        for organizes, label in (("folder", "dominio"), ("subfolder", "tipo de material")):
+            found = [axis.key for axis in axes if axis.organizes == organizes]
+            if len(found) != 1:
+                detail = f"hay {len(found)}: {', '.join(found)}" if found else "no hay ninguno"
+                raise ValueError(f"debe haber exactamente un eje con organizes: {organizes} ({label}); {detail}")
+        return axes
+
+    @property
+    def folder_axis(self) -> TaxonomyAxis:
+        """El eje que decide la carpeta (dominio)."""
+        return next(axis for axis in self.axes if axis.organizes == "folder")
+
+    @property
+    def subfolder_axis(self) -> TaxonomyAxis:
+        """El eje que decide la subcarpeta (tipo de material)."""
+        return next(axis for axis in self.axes if axis.organizes == "subfolder")
+
+    @property
+    def tag_axes(self) -> list[TaxonomyAxis]:
+        """Los ejes que solo etiquetan (sin `organizes`), en el orden del manifiesto."""
+        return [axis for axis in self.axes if axis.organizes is None]
+
+    def axis(self, key: str) -> TaxonomyAxis | None:
+        """El eje de clave `key`, o `None`."""
+        return next((axis for axis in self.axes if axis.key == key), None)
+
+
+class TaxonomyFrontMatterReport(BaseModel):
+    """Qué se leerá de un front matter de taxonomía, para avisar al autor (`inspect_taxonomy_front_matter`).
+
+    Attributes:
+        axes (list[str]): Claves de los ejes que se leerán, en orden.
+        implicit_axes (list[str]): Las que salen del formato implícito de 1.x (claves de nivel superior con una lista
+            de entradas `{slug, name}`): conviene declararlas como ejes explícitos.
+        ignored_keys (list[str]): Claves de nivel superior que no se usan.
+        legacy_format (bool): El front matter es de 1.x (sin `schema: 2`) y se migra al leerlo.
+    """
+
+    axes: list[str] = Field(default_factory=list, description="Claves de los ejes que se leerán")
+    implicit_axes: list[str] = Field(default_factory=list, description="Ejes leídos del formato implícito de 1.x")
+    ignored_keys: list[str] = Field(default_factory=list, description="Claves de nivel superior que no se usan")
+    legacy_format: bool = Field(default=False, description="Front matter de 1.x, migrado al leerlo")
 
 
 class TaxonomyTemplateSummary(BaseModel):
@@ -1282,9 +1424,27 @@ class TaxonomyManifestDraftResult(BaseModel):
     usuario lo revisa/edita antes de guardarlo como `taxonomy_manifest.md`.
     """
 
-    domains: list[TaxonomyCatalogEntry] = Field(..., min_length=1, description="Catálogo de dominios propuesto por la IA")
-    material_types: list[TaxonomyCatalogEntry] = Field(..., min_length=1, description="Catálogo de tipos de material propuesto por la IA")
+    domains: list[TaxonomyEntry] = Field(..., min_length=1, description="Catálogo de dominios propuesto por la IA")
+    material_types: list[TaxonomyEntry] = Field(..., min_length=1, description="Catálogo de tipos de material propuesto por la IA")
     reasoning: str | None = Field(default=None, description="Justificación breve devuelta por el modelo, si la reporta")
+
+    def to_manifest(self) -> TaxonomyManifest:
+        """El borrador como manifiesto v2: eje `domains` (carpeta) y eje `material_types` (subcarpeta).
+
+        Example:
+            >>> draft = TaxonomyManifestDraftResult(
+            ...     domains=[TaxonomyEntry(slug="calidad", name="Calidad")],
+            ...     material_types=[TaxonomyEntry(slug="procedimiento", name="Procedimiento")],
+            ... )
+            >>> tuple(axis.key for axis in draft.to_manifest().axes)
+            ('domains', 'material_types')
+        """
+        return TaxonomyManifest(
+            axes=[
+                TaxonomyAxis(key="domains", name="Dominios", organizes="folder", entries=self.domains),
+                TaxonomyAxis(key="material_types", name="Tipos de material", organizes="subfolder", entries=self.material_types),
+            ]
+        )
 
 
 class LiteLLMTaxonomyManifestDraftConfig(BaseModel):
@@ -1391,8 +1551,10 @@ __all__ = [
     "ScanResult",
     "ScanRunReport",
     "ScannedFolder",
-    "TaxonomyCatalogEntry",
+    "TaxonomyAxis",
     "TaxonomyClassificationResult",
+    "TaxonomyEntry",
+    "TaxonomyFrontMatterReport",
     "TaxonomyManifest",
     "UnclassifiedDocument",
     "UnclassifiedReason",

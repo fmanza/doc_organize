@@ -18,10 +18,10 @@ from doc_organize.core.models import (
     DomainClassificationResult,
     DomainDocument,
     Project,
-    TaxonomyCatalogEntry,
     TaxonomyClassificationResult,
-    TaxonomyManifest,
+    TaxonomyEntry,
 )
+from tests.unit.taxonomy_helpers import two_axis_manifest
 
 
 def _document(tmp_path: Path, folder: str, name: str, text: str) -> ConversionResult:
@@ -114,9 +114,9 @@ async def test_rules_and_ai_proposals_are_both_recorded(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_manifest_mode_records_both_axes(tmp_path: Path) -> None:
-    manifest = TaxonomyManifest(
-        domains=[TaxonomyCatalogEntry(slug="calidad", name="Calidad")],
-        material_types=[TaxonomyCatalogEntry(slug="procedimiento", name="Procedimiento"), TaxonomyCatalogEntry(slug="normativa", name="Normativa")],
+    manifest = two_axis_manifest(
+        domains=[TaxonomyEntry(slug="calidad", name="Calidad")],
+        material_types=[TaxonomyEntry(slug="procedimiento", name="Procedimiento"), TaxonomyEntry(slug="normativa", name="Normativa")],
     )
     documents = [_document(tmp_path, "varios", "pr07.pdf", "Este procedimiento describe las auditorías internas.")]
 
@@ -135,9 +135,9 @@ async def test_manifest_mode_records_both_axes(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_manifest_mode_keeps_the_ai_domain_proposal_it_did_not_apply(tmp_path: Path) -> None:
-    manifest = TaxonomyManifest(
-        domains=[TaxonomyCatalogEntry(slug="calidad", name="Calidad"), TaxonomyCatalogEntry(slug="auditoria", name="Auditoría")],
-        material_types=[TaxonomyCatalogEntry(slug="procedimiento", name="Procedimiento"), TaxonomyCatalogEntry(slug="normativa", name="Normativa")],
+    manifest = two_axis_manifest(
+        domains=[TaxonomyEntry(slug="calidad", name="Calidad"), TaxonomyEntry(slug="auditoria", name="Auditoría")],
+        material_types=[TaxonomyEntry(slug="procedimiento", name="Procedimiento"), TaxonomyEntry(slug="normativa", name="Normativa")],
     )
     documents = [_document(tmp_path, "varios", "manual.pdf", "Manual de calidad del laboratorio.")]  # dominio sí, tipo no
 

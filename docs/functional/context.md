@@ -68,22 +68,39 @@ solo para lectura humana, nunca se parsea):
 
 ```yaml
 ---
-domains:
-  - slug: ciberseguridad
-    name: Ciberseguridad
-    description: Normas de seguridad de la información
-    keywords: [iso27001, ens]
-material_types:
-  - slug: normativa
-    name: Normativa
-  - slug: procedimiento
-    name: Procedimiento
+schema: 2
+axes:
+  - key: domains
+    name: Dominios
+    organizes: folder
+    entries:
+      - slug: ciberseguridad
+        name: Ciberseguridad
+        description: Normas de seguridad de la información
+        keywords: [iso27001, ens]
+  - key: material_types
+    name: Tipos de material
+    organizes: subfolder
+    entries:
+      - slug: normativa
+        name: Normativa
+      - slug: procedimiento
+        name: Procedimiento
 ---
 
 # Taxonomía del SGI
 
 Prosa libre — descripción, tablas, diagramas Mermaid, lo que ayude a quien lo mantenga.
 ```
+
+Desde 2.0.0 el manifiesto es una lista de **ejes** (`schema: 2`): el de
+`organizes: folder` es el dominio y el de `organizes: subfolder` el tipo de material.
+Se pueden declarar más ejes que solo etiquetan (marcos normativos, sistema de
+gestión...), con `multiple: true` si un documento puede tener varios valores. Un
+manifiesto de 1.x (`domains:` y `material_types:` en el nivel superior, con o sin
+`facets:` o ejes implícitos) se sigue leyendo: se migra al leerlo, sin tocar el
+fichero (`migrate_manifest_v1` lo reescribe si se quiere). Formato completo en la
+[API del contexto](../api/context.md#taxonomymanifest-manifiesto-de-taxonomia).
 
 Si el fichero existe, `POST .../context` lo carga automáticamente (no hace falta
 activar nada en el formulario) y clasifica cada documento en los dos ejes, por
@@ -277,7 +294,7 @@ deduplicación desde 0.12.1:
   documento afectado queda sin clasificar (en el eje que la IA no llegó a
   resolver); no interrumpe el resto del lote.
 - **`taxonomy_manifest.md` con front matter inválido** (no empieza/cierra con
-  `---`, YAML roto, o catálogo `domains`/`material_types` vacío o ausente):
+  `---`, YAML roto, sin eje de dominio o de tipo de material, o fuera de los límites):
   `POST` devuelve `400` con el motivo exacto, no un error genérico.
 - **`taxonomy_template_name` que no existe, con nombre inválido, o cuya plantilla de
   usuario tiene el front matter roto**: `POST` devuelve `400` con el motivo exacto

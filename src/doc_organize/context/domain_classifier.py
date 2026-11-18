@@ -215,7 +215,7 @@ class DomainClassifier:
 
         Args:
             extra_keywords: Mapa slug saneado -> palabras clave adicionales del manifiesto
-                (`TaxonomyCatalogEntry.keywords`), sumadas a las derivadas del propio slug
+                (`TaxonomyEntry.keywords`), sumadas a las derivadas del propio slug
                 para ese candidato. `None` (default, usado por `classify()` internamente)
                 puntúa solo por las palabras del slug, igual que siempre.
         """
@@ -273,7 +273,7 @@ def score_catalog(
 
     Args:
         extra_keywords: Mapa slug -> palabras clave adicionales (p. ej.
-            `TaxonomyCatalogEntry.keywords` de un manifiesto de taxonomía), sumadas a las
+            `TaxonomyEntry.keywords` de un manifiesto de taxonomía), sumadas a las
             derivadas del propio slug para ese candidato antes de puntuar. `None` (default)
             puntúa solo por las palabras del slug — comportamiento sin cambios para
             `DomainClassifier._best_from_catalog` (AUDIT_CODE, sesión de manifiesto de
@@ -335,7 +335,7 @@ class MaterialTypeClassifier:
 
         Args:
             extra_keywords: Mapa slug saneado -> palabras clave adicionales del manifiesto
-                (`TaxonomyCatalogEntry.keywords`), ver `domain_classifier.score_catalog()`.
+                (`TaxonomyEntry.keywords`), ver `domain_classifier.score_catalog()`.
 
         Returns:
             `(slug, score)` — `slug` es `None` si el mejor score queda por debajo de

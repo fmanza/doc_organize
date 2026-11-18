@@ -11,7 +11,8 @@ from doc_organize.context.taxonomy_manifest import (
     save_taxonomy_manifest,
 )
 from doc_organize.core.exceptions import TaxonomyManifestError
-from doc_organize.core.models import Project, TaxonomyCatalogEntry, TaxonomyManifest
+from doc_organize.core.models import Project, TaxonomyEntry, TaxonomyManifest
+from tests.unit.taxonomy_helpers import two_axis_manifest
 
 _VALID_FRONT_MATTER = """---
 domains:
@@ -53,10 +54,10 @@ async def test_loads_domains_and_material_types_from_front_matter(tmp_path):
     manifest = await load_taxonomy_manifest(project)
 
     assert manifest is not None
-    assert [entry.slug for entry in manifest.domains] == ["ciberseguridad", "calidad"]
-    assert manifest.domains[0].description == "Normas de seguridad de la información"
-    assert manifest.domains[0].keywords == ["iso27001", "ens"]
-    assert [entry.slug for entry in manifest.material_types] == ["normativa", "procedimiento"]
+    assert [entry.slug for entry in manifest.folder_axis.entries] == ["ciberseguridad", "calidad"]
+    assert manifest.folder_axis.entries[0].description == "Normas de seguridad de la información"
+    assert manifest.folder_axis.entries[0].keywords == ["iso27001", "ens"]
+    assert [entry.slug for entry in manifest.subfolder_axis.entries] == ["normativa", "procedimiento"]
 
 
 @pytest.mark.asyncio
@@ -114,12 +115,12 @@ async def test_raises_when_material_types_catalog_is_missing(tmp_path):
 
 
 def _make_manifest() -> TaxonomyManifest:
-    return TaxonomyManifest(
+    return two_axis_manifest(
         domains=[
-            TaxonomyCatalogEntry(slug="ciberseguridad", name="Ciberseguridad", description="Normas de seguridad", keywords=["iso27001"]),
-            TaxonomyCatalogEntry(slug="calidad", name="Calidad"),
+            TaxonomyEntry(slug="ciberseguridad", name="Ciberseguridad", description="Normas de seguridad", keywords=["iso27001"]),
+            TaxonomyEntry(slug="calidad", name="Calidad"),
         ],
-        material_types=[TaxonomyCatalogEntry(slug="normativa", name="Normativa"), TaxonomyCatalogEntry(slug="procedimiento", name="Procedimiento")],
+        material_types=[TaxonomyEntry(slug="normativa", name="Normativa"), TaxonomyEntry(slug="procedimiento", name="Procedimiento")],
     )
 
 
@@ -136,9 +137,9 @@ async def test_render_taxonomy_manifest_markdown_produces_a_loadable_front_matte
     manifest = await load_taxonomy_manifest(project)
 
     assert manifest is not None
-    assert [entry.slug for entry in manifest.domains] == ["ciberseguridad", "calidad"]
-    assert manifest.domains[0].keywords == ["iso27001"]
-    assert [entry.slug for entry in manifest.material_types] == ["normativa", "procedimiento"]
+    assert [entry.slug for entry in manifest.folder_axis.entries] == ["ciberseguridad", "calidad"]
+    assert manifest.folder_axis.entries[0].keywords == ["iso27001"]
+    assert [entry.slug for entry in manifest.subfolder_axis.entries] == ["normativa", "procedimiento"]
 
 
 def test_render_taxonomy_manifest_markdown_includes_sample_coverage_and_reasoning() -> None:
@@ -155,8 +156,8 @@ def test_render_taxonomy_manifest_markdown_includes_sample_coverage_and_reasonin
 def test_render_taxonomy_manifest_markdown_without_reasoning_omits_it_gracefully() -> None:
     text = render_taxonomy_manifest_markdown(_make_manifest(), reasoning=None, sample_document_count=5, total_document_count=20)
 
-    assert text.startswith("---\ndomains:")
-    assert "| Dominio | Ciberseguridad, Calidad |" in text
+    assert text.startswith("---\nschema: 2\naxes:")
+    assert "| Dominios | Ciberseguridad, Calidad |" in text
 
 
 @pytest.mark.asyncio
@@ -165,11 +166,11 @@ async def test_save_taxonomy_manifest_writes_a_loadable_file(tmp_path):
 
     manifest = await save_taxonomy_manifest(project, _VALID_FRONT_MATTER)
 
-    assert [entry.slug for entry in manifest.domains] == ["ciberseguridad", "calidad"]
+    assert [entry.slug for entry in manifest.folder_axis.entries] == ["ciberseguridad", "calidad"]
     assert (tmp_path / MANIFEST_FILE_NAME).read_text(encoding="utf-8") == _VALID_FRONT_MATTER
     reloaded = await load_taxonomy_manifest(project)
     assert reloaded is not None
-    assert [entry.slug for entry in reloaded.domains] == ["ciberseguridad", "calidad"]
+    assert [entry.slug for entry in reloaded.folder_axis.entries] == ["ciberseguridad", "calidad"]
 
 
 @pytest.mark.asyncio
@@ -183,7 +184,7 @@ async def test_save_taxonomy_manifest_overwrites_an_existing_file(tmp_path):
 
     reloaded = await load_taxonomy_manifest(project)
     assert reloaded is not None
-    assert [entry.slug for entry in reloaded.domains] == ["ciberseguridad", "calidad"]
+    assert [entry.slug for entry in reloaded.folder_axis.entries] == ["ciberseguridad", "calidad"]
 
 
 @pytest.mark.asyncio
