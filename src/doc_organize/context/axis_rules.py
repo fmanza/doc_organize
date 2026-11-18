@@ -14,12 +14,11 @@ aparecen en dos o más entradas del eje y da la confianza por **términos distin
 """
 
 import re
-import unicodedata
 
 from collections.abc import Iterable
-from dataclasses import dataclass
 
 from doc_organize.core.models import AxisValue, TaxonomyAxis, TaxonomyEntry
+from doc_organize.utils.folding import FoldedText, fold
 
 #: Valores como mucho por documento en un eje de varios valores.
 MAX_VALUES_PER_AXIS = 5
@@ -29,46 +28,12 @@ MAX_VALUES_PER_AXIS = 5
 TAG_AXIS_TEXT_CHARS = 6000
 #: Confianza según los términos distintos encontrados (1, 2, 3 o más).
 _CONFIDENCE_BY_HITS = (0.0, 0.6, 0.8, 1.0)
-_NON_WORD = re.compile(r"[^0-9a-z]+")
 #: Separadores dentro de un nombre de entrada: «ENS - Esquema Nacional de Seguridad», «LO 3/2018 (LOPDGDD)». La barra
 #: no separa: «2016/679» o «ISO/IEC» son una sola cosa.
 _NAME_PARTS = re.compile(r"\s[-–—]\s|[(),:;]")
 #: Una parte suelta de una sola palabra solo cuenta si es una sigla («ENS», «RGPD», «LOPDGDD»): «Reglamento» o «UE»
 #: sueltos encajan en cualquier texto normativo.
 _ACRONYM = re.compile(r"^[A-ZÁÉÍÓÚÑ]{3,}$")
-
-
-def fold(text: str) -> str:
-    """Minúsculas, sin acentos y con todo lo que no es letra o dígito como un espacio: `«ISO/IEC 27001»` → `iso iec 27001`.
-
-    Example:
-        >>> fold("Administración Pública: ISO/IEC 27001")
-        'administracion publica iso iec 27001'
-    """
-    decomposed = unicodedata.normalize("NFKD", text.casefold())
-    without_marks = "".join(char for char in decomposed if not unicodedata.combining(char))
-    return _NON_WORD.sub(" ", without_marks).strip()
-
-
-@dataclass(frozen=True)
-class FoldedText:
-    """El texto de un documento preparado para buscar términos completos: plegado una vez, con sus palabras."""
-
-    padded: str
-    words: frozenset[str]
-
-    @classmethod
-    def of(cls, *parts: str | None) -> "FoldedText":
-        """Pliega y une `parts` (título, texto...) separados por un espacio."""
-        folded = fold(" ".join(part for part in parts if part))
-        return cls(padded=f" {folded} ", words=frozenset(folded.split()))
-
-    def contains(self, term: str) -> bool:
-        """`True` si `term` (ya plegado) aparece como palabra o frase completa."""
-        words = term.split()
-        if not all(word in self.words for word in words):  # descarte barato antes de buscar la frase
-            return False
-        return len(words) == 1 or f" {term} " in self.padded
 
 
 class AxisRuleScorer:

@@ -16,10 +16,15 @@ Es determinista. Si cambia la forma de construirlo, sube `EXCERPT_VERSION` (form
 de la clave de la caché).
 """
 
-from collections.abc import Iterable, Mapping
+from __future__ import annotations
 
-from doc_organize.context.axis_rules import FoldedText, fold
-from doc_organize.context.conversion_document import ConversionDocument
+from collections.abc import Iterable, Mapping
+from typing import TYPE_CHECKING
+
+from doc_organize.utils.folding import FoldedText, fold
+
+if TYPE_CHECKING:  # solo para los tipos: `context` importa `ai` (evita el ciclo)
+    from doc_organize.context.conversion_document import ConversionDocument
 
 #: Versión de la forma del extracto: cámbiala si cambia `build_document_excerpt`.
 EXCERPT_VERSION = "1"
@@ -63,51 +68,59 @@ def build_document_excerpt(
         Este plan describe la respuesta ante incidentes de seguridad de la información.
     """
     lines = [f"Título: {_clean(document.title) or '(sin título)'}"]
-    if folder:
-        parts = [part for part in folder.replace("\\", "/").split("/") if part and part != "."]
-        if parts:
-            lines.append(f"Carpeta: {'/'.join(parts[-2:])}")
-    for key, value in (metadata or {}).items():
-        if value:
-            lines.append(f"{key}: {_clean(value)}")
+    parts = [part for part in (folder or "").replace("\\", "/").split("/") if part and part != "."]
+    if parts:
+        lines.append(f"Carpeta: {'/'.join(parts[-2:])}")
+    lines.extend(f"{key}: {_clean(value)}" for key, value in (metadata or {}).items() if value)
 
     outline = _outline(document)
     if outline:
         lines.append("Esquema de títulos:")
         lines.extend(f"- {heading}" for heading in outline)
 
-    used: set[int] = set()
-    start = []
-    size = 0
-    for index, chunk in enumerate(document.chunks):
-        text = _clean(chunk.text)
-        if sum(char.isalpha() for char in text) < _MIN_REAL_TEXT_LETTERS:
-            continue
-        piece = text[: _MAX_START_CHARS - size]
-        start.append(piece)
-        used.add(index)
-        size += len(piece)
-        if size >= _MAX_START_CHARS:
-            break
+    start, used = _start(document, real_text_only=True)
+    if not start:  # ningún fragmento largo (una presentación, un formulario): mejor los cortos que nada
+        start, used = _start(document, real_text_only=False)
     if start:
         lines.append("Comienzo:")
         lines.extend(start)
 
-    terms = sorted({fold(term) for term in catalog_terms if fold(term)})
-    if terms:
-        matches = []
-        for index, chunk in enumerate(document.chunks):
-            if index in used:
-                continue
-            text = _clean(chunk.text)
-            folded = FoldedText.of(text)
-            if text and any(folded.contains(term) for term in terms):
-                matches.append(text[:_MAX_FRAGMENT_CHARS])
-        if matches:
-            lines.append("Fragmentos con términos del catálogo:")
-            lines.extend(matches)
+    matches = _catalog_fragments(document, catalog_terms, used)
+    if matches:
+        lines.append("Fragmentos con términos del catálogo:")
+        lines.extend(matches)
 
     return "\n".join(lines)[:max_chars]
+
+
+def _catalog_fragments(document: ConversionDocument, catalog_terms: Iterable[str], used: set[int]) -> list[str]:
+    """Fragmentos (fuera de `used`) que mencionan algún término del catálogo como palabra o frase completa."""
+    terms = sorted({fold(term) for term in catalog_terms if fold(term)})
+    if not terms:
+        return []
+    matches = []
+    for index, chunk in enumerate(document.chunks):
+        text = _clean(chunk.text)
+        if index not in used and text and any(FoldedText.of(text).contains(term) for term in terms):
+            matches.append(text[:_MAX_FRAGMENT_CHARS])
+    return matches
+
+
+def _start(document: ConversionDocument, *, real_text_only: bool) -> tuple[list[str], set[int]]:
+    """Los primeros fragmentos (solo los de texto de verdad si `real_text_only`) hasta `_MAX_START_CHARS`, y cuáles."""
+    start: list[str] = []
+    used: set[int] = set()
+    size = 0
+    for index, chunk in enumerate(document.chunks):
+        text = _clean(chunk.text)
+        if not text or (real_text_only and sum(char.isalpha() for char in text) < _MIN_REAL_TEXT_LETTERS):
+            continue
+        start.append(text[: _MAX_START_CHARS - size])
+        used.add(index)
+        size += len(start[-1])
+        if size >= _MAX_START_CHARS:
+            break
+    return start, used
 
 
 def _outline(document: ConversionDocument) -> list[str]:

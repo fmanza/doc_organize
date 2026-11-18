@@ -8,19 +8,23 @@ from collections import Counter
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from doc_organize import __version__
 from doc_organize.ai.cache import AiResultCache
+from doc_organize.ai.excerpt import build_document_excerpt
 from doc_organize.ai.llm_client import LlmClient, LlmResult, ResponseFormat
 from doc_organize.ai.prompts import PromptRegistry
-from doc_organize.ai.services import AxisRequest, ClassificationAnswer, TaskRequest, classification_request, enrichment_request
+from doc_organize.ai.services import AxisChoice, AxisRequest, ClassificationAnswer, TaskRequest, classification_request, enrichment_request
 from doc_organize.context.axis_rules import TAG_AXIS_TEXT_CHARS, AxisRuleScorer, FoldedText
 from doc_organize.context.context_history import ContextHistoryPolicy, append_context_build, build_record
 from doc_organize.context.context_registry import ContextRegistry
+from doc_organize.context.conversion_document import ConversionDocument, read_conversion_document
 from doc_organize.context.document_properties import read_document_properties
 from doc_organize.context.domain_classifier import DomainClassifier, MaterialTypeClassifier, read_conversion_json, resolve_title_and_type
 from doc_organize.context.language_detection import detect_language
+from doc_organize.context.project_profile import compose_profile, profile_prompt_text
 from doc_organize.context.reorganizer import assign_organized_paths
 from doc_organize.core.constants import UNCLASSIFIED_SLUG
 from doc_organize.core.exceptions import AiAuthError, AiConnectionError, AiError, ContextError, ContextNotFoundError
@@ -43,6 +47,7 @@ from doc_organize.core.models import (
     DomainDocument,
     DomainStatus,
     Project,
+    ProjectProfile,
     PromptProvenance,
     TaxonomyAxis,
     TaxonomyEntry,
@@ -174,6 +179,22 @@ def _provenance(llm: LlmClient | None, prompts: PromptRegistry, runs: Sequence[t
     return [prompts.get(task).provenance(llm.model_for(task)) for task, run in runs if run.sent > 0 or run.cached > 0]
 
 
+def _ai_value(choice: AxisChoice, axis: TaxonomyAxis, threshold: float, *, slugify: Callable[[str], str] = str) -> AxisValue:
+    """Un valor elegido por la IA como `AxisValue`, con su cita. Si la cita no aparece en lo enviado, la confianza queda
+    por debajo del umbral del eje (D10): el valor se conserva, pero para revisarlo."""
+    names = {slugify(entry.slug): entry.name for entry in axis.entries}
+    axis_threshold = axis.threshold if axis.threshold is not None else threshold
+    confidence = choice.confidence if choice.evidence_verified is not False else min(choice.confidence, max(0.0, axis_threshold - 0.01))
+    return AxisValue(
+        slug=choice.slug,
+        name=names.get(choice.slug, choice.slug),
+        confidence=confidence,
+        classified_by="ai",
+        evidence=choice.evidence,
+        evidence_verified=choice.evidence_verified,
+    )
+
+
 def _rules_value(slug: str, names: dict[str, str], confidence: float) -> list[AxisValue]:
     """Valor de un eje organizador asignado por las reglas; vacío si quedó en el marcador «sin clasificar»."""
     if slug == _UNCLASSIFIED_SLUG:
@@ -298,6 +319,7 @@ class ContextBuilder:
         enrich: bool = False,
         prompts: PromptRegistry | None = None,
         ai_cache: bool | AiResultCache = True,
+        profile: ProjectProfile | None = None,
         on_progress: ProgressCallback | None = None,
         cancel_token: CancelToken | None = None,
         ai_max_failures: int | None = None,
@@ -323,8 +345,10 @@ class ContextBuilder:
             output_folder_name: Carpeta de salida reorganizada, relativa a `root_path`; solo tiene efecto en la primera
                 construcción (el consumidor reutiliza la persistida).
             llm: Cliente de IA (`LlmClient`). Sin él no se llama a ninguna IA.
-            ai_scope: `"off"` (por defecto) o `"unclassified"`: clasificar con IA los documentos que las reglas dejaron
-                sin clasificar en algún eje organizador. Se guarda en `Context.ai_stats.scope`.
+            ai_scope: Qué documentos clasifica la IA (se guarda en `Context.ai_stats.scope`): `"off"` (por defecto),
+                ninguno; `"unclassified"`, los que las reglas dejaron sin clasificar en algún eje organizador;
+                `"missing_axes"` (con manifiesto), además los que tienen vacío algún eje que solo etiqueta. La IA solo
+                rellena ejes vacíos: nunca cambia lo que decidieron las reglas.
             enrich: Describir con IA (tarea `enrich`) los documentos clasificados que no declaran descripción o palabras
                 clave; solo se rellena lo que falta (`DomainDocument.ai_filled`). El autor nunca sale de la IA.
             prompts: Prompts de cada tarea; por defecto, los del proyecto (`<raíz>/.doc_organize/prompts/`) o los
@@ -333,6 +357,8 @@ class ContextBuilder:
                 (`<raíz>/.doc_organize/ai_cache/`), `False` no usa ninguna, o una `AiResultCache` concreta. Con ella,
                 reconstruir sin cambios (mismo documento, prompt, modelo, catálogo y redacción) no llama al modelo: el
                 resultado se vuelve a validar y cuenta en `AiPhaseStats.cached`, no en `sent`.
+            profile: Perfil del proyecto que va en el prompt de clasificación (2.0.0, G2). `None` (por defecto): el de
+                `taxonomy_manifest` con el de `<raíz>/.doc_organize/profile.md` añadido detrás (`compose_profile`).
             on_progress: Recibe un `ProgressEvent` (`operation="context_build"`, fase `classification` o `enrichment`)
                 tras cada documento de una fase de IA (L-2). Un fallo del callback se registra y no para la construcción.
             cancel_token: Si se cancela, la construcción para entre documentos con `OperationCancelledError`, **sin**
@@ -361,6 +387,9 @@ class ContextBuilder:
         checkpoint(cancel_token)
         prompts = prompts if prompts is not None else PromptRegistry(project.root_path)
         cache = ai_cache if isinstance(ai_cache, AiResultCache) else (AiResultCache(project.root_path) if ai_cache and llm is not None else None)
+        if profile is None:
+            profile = compose_profile(taxonomy_manifest.profile if taxonomy_manifest is not None else None, project.root_path)
+        profile_text = profile_prompt_text(profile)
         credential_ledger: dict[str, Counter[str]] = {}
         ai_run = _AiRun(max_failures=ai_max_failures, max_documents=ai_max_documents, credential_ledger=credential_ledger)
         enrichment_run = _AiRun(max_failures=ai_max_failures, max_documents=ai_max_documents, credential_ledger=credential_ledger)
@@ -384,16 +413,25 @@ class ContextBuilder:
             classified, unclassified = await self._classify_with_manifest(
                 documents, taxonomy_manifest, threshold, reads=reads, cancel_token=cancel_token
             )
-            if llm is not None and ai_scope == "unclassified":
+            if llm is not None and ai_scope != "off":
                 classified = await self._classify_with_manifest_ai(
-                    llm, prompts, classified, taxonomy_manifest, on_progress=_ai_progress, run=ai_run, cache=cache
+                    llm,
+                    prompts,
+                    classified,
+                    taxonomy_manifest,
+                    on_progress=_ai_progress,
+                    run=ai_run,
+                    cache=cache,
+                    scope=ai_scope,
+                    threshold=threshold,
+                    profile=profile_text,
                 )
         else:
             classifier = DomainClassifier(candidate_domains=candidate_domains, threshold=threshold)
             classified, unclassified = await self._classify_by_rules(documents, classifier, reads, cancel_token)
-            if llm is not None and ai_scope == "unclassified" and unclassified:
+            if llm is not None and ai_scope != "off" and unclassified:
                 classified, unclassified = await self._classify_with_ai(
-                    llm, prompts, classified, unclassified, classifier, on_progress=_ai_progress, run=ai_run, cache=cache
+                    llm, prompts, classified, unclassified, classifier, on_progress=_ai_progress, run=ai_run, cache=cache, profile=profile_text
                 )
 
         unclassified_details = self._describe_unclassified(unclassified, reads)
@@ -667,44 +705,74 @@ class ContextBuilder:
         on_progress: Callable[[int, int, str], Awaitable[None]] | None = None,
         run: _AiRun | None = None,
         cache: AiResultCache | None = None,
+        *,
+        scope: AiScope = "unclassified",
+        threshold: float = _DEFAULT_THRESHOLD,
+        profile: str = "",
     ) -> dict[str, list[DomainDocument]]:
-        """Clasificación con IA en modo manifiesto (`ai_scope="unclassified"`): para cada documento que las reglas
-        dejaron con el placeholder `_UNCLASSIFIED_SLUG` en el eje de dominio y/o en el de tipo de material, pide ambos
-        ejes en una sola llamada (`classify_document`). Solo se aplica la respuesta al eje que seguía en el placeholder;
-        un eje que las reglas ya clasificaron nunca se sobreescribe.
+        """Clasificación con IA en modo manifiesto (2.0.0, G1.4).
+
+        - `scope="unclassified"`: documentos que las reglas dejaron con el placeholder `_UNCLASSIFIED_SLUG` en el eje de
+          dominio y/o en el de tipo de material (la Sub-fase B de 1.x).
+        - `scope="missing_axes"`: además, los que tienen **vacío** algún eje que solo etiqueta (también los de
+          `rules: false`).
+
+        Una llamada por documento con los ejes que le faltan (los dos organizadores si falta alguno, para conservar la
+        propuesta de la IA en `ai_domain`). Solo se aplica a lo que estaba vacío: nunca sustituye lo que decidieron las
+        reglas (E1-E5). En los ejes que etiquetan, los valores de la IA pasan por el umbral del eje (E4). Una cita que no
+        aparece en lo enviado deja la confianza por debajo del umbral (D10); el valor se conserva para revisarlo.
 
         `DomainDocument.classified_by` pasa a `"ai"` si la IA cambió al menos un eje. Las llamadas pueden ir varias a la
         vez (`ai_concurrency`); los resultados se aplican en el orden de los documentos.
         """
-        axes = [
-            AxisRequest(axis.key, list(dict.fromkeys(slug for slug in (DomainClassifier._slugify(entry.slug) for entry in axis.entries) if slug)))
-            for axis in (manifest.folder_axis, manifest.subfolder_axis)
-        ]
+        folder, subfolder = manifest.folder_axis, manifest.subfolder_axis
+        requests_by_key = {axis.key: AxisRequest.from_axis(axis, DomainClassifier._slugify if axis.organizes else str) for axis in manifest.axes}
+        terms_by_key = {axis.key: [term for entry in axis.entries for term in (entry.name, *entry.keywords)] for axis in manifest.axes}
+
+        def missing(domain_slug: str, document: DomainDocument) -> list[str]:
+            keys = []
+            if domain_slug == _UNCLASSIFIED_SLUG or document.material_type == _UNCLASSIFIED_SLUG:
+                keys += [folder.key, subfolder.key]
+            if scope == "missing_axes":
+                keys += [axis.key for axis in manifest.tag_axes if not document.classification.axes.get(axis.key)]
+            return keys
+
         pending = [
-            (domain_slug, document)
+            (domain_slug, document, keys)
             for domain_slug, documents in classified.items()
             for document in documents
-            if domain_slug == _UNCLASSIFIED_SLUG or document.material_type == _UNCLASSIFIED_SLUG
+            if (keys := missing(domain_slug, document))
         ]
         if not pending:
             return classified
 
         ai_run = run if run is not None else _AiRun()
 
-        def request(chunks_text: str, title: str | None) -> TaskRequest[ClassificationAnswer]:
-            return classification_request(prompts, axes=axes, title=title, content=chunks_text)
+        def request_for(keys: list[str]) -> Callable[[ConversionDocument, str], TaskRequest[ClassificationAnswer]]:
+            def request(conversion: ConversionDocument, source_path: str) -> TaskRequest[ClassificationAnswer]:
+                excerpt = build_document_excerpt(
+                    conversion,
+                    folder=str(Path(source_path).parent),
+                    metadata={"Tipo de fichero": Path(source_path).suffix.lstrip(".").lower() or None},
+                    catalog_terms=[term for key in keys for term in terms_by_key[key]],
+                )
+                return classification_request(
+                    prompts, axes=[requests_by_key[key] for key in keys], title=conversion.title, content=excerpt, profile=profile
+                )
 
-        hits = await self._cache_hits(llm, cache, [document.json_path for _, document in pending], request)
+            return request
 
-        async def call(item: tuple[tuple[str, DomainDocument], bool]) -> ClassificationAnswer | None:
-            (_, document), cached = item
-            asked = await self._ask_ai(llm, ai_run, cache, document, request, cached=cached, failure="Falló la clasificación por IA de")
+        hits = await self._cache_hits(llm, cache, [(document.json_path, document.source_path, request_for(keys)) for _, document, keys in pending])
+
+        async def call(item: tuple[tuple[str, DomainDocument, list[str]], bool]) -> ClassificationAnswer | None:
+            (_, document, keys), cached = item
+            asked = await self._ask_ai(llm, ai_run, cache, document, request_for(keys), cached=cached, failure="Falló la clasificación por IA de")
             return asked[0] if asked is not None else None
 
         results = await self._run_ai_phase(list(zip(pending, hits, strict=True)), call, ai_run, on_progress, lambda item: item[0][1].source_path)
-        for (old_domain_slug, document), answer in zip(pending, results, strict=True):
+        for (old_domain_slug, document, _keys), answer in zip(pending, results, strict=True):
             if answer is not None:
-                self._apply_manifest_ai(document, old_domain_slug, answer, classified, manifest, ai_run)
+                self._apply_manifest_ai(document, old_domain_slug, answer, classified, manifest, ai_run, threshold)
 
         # Poda buckets que quedaron vacíos (p.ej. todo "sin-clasificar" se resolvió a otros
         # dominios) — sin esto, `build()` crearía un `Domain` fantasma sin documentos.
@@ -714,25 +782,25 @@ class ContextBuilder:
         self,
         llm: LlmClient,
         cache: AiResultCache | None,
-        json_paths: Sequence[str | None],
-        make_request: Callable[[str, str | None], TaskRequest[T]],
+        items: Sequence[tuple[str | None, str, Callable[[ConversionDocument, str], TaskRequest[T]]]],
     ) -> list[bool]:
-        """Qué documentos tienen ya su respuesta en la caché (2.0.0, G1), sin enviar nada.
+        """Qué documentos tienen ya su respuesta en la caché (2.0.0, G1), sin enviar nada. `items`: por documento, su
+        `.json`, su original y cómo se arma su petición.
 
         Se mira **antes** de la fase de IA para que los aciertos no consuman presupuesto y el reparto del presupuesto entre
         los demás siga en el orden de los documentos.
         """
-        hits = [False] * len(json_paths)
+        hits = [False] * len(items)
         if cache is None:
             return hits
 
-        async def check(item: tuple[int, str | None]) -> None:
-            index, json_path = item
-            conversion = await read_conversion_json(json_path) if json_path else None
+        async def check(item: tuple[int, tuple[str | None, str, Callable[[ConversionDocument, str], TaskRequest[T]]]]) -> None:
+            index, (json_path, source_path, make_request) = item
+            conversion = await read_conversion_document(json_path) if json_path else None
             if conversion is not None:
-                hits[index] = cache.has(make_request(*conversion).cache_key(llm))
+                hits[index] = cache.has(make_request(conversion, source_path).cache_key(llm))
 
-        await self._for_each_bounded(list(enumerate(json_paths)), check, None)
+        await self._for_each_bounded(list(enumerate(items)), check, None)
         return hits
 
     async def _ask_ai[T](
@@ -741,25 +809,24 @@ class ContextBuilder:
         run: _AiRun,
         cache: AiResultCache | None,
         document: ConversionResult | DomainDocument,
-        make_request: Callable[[str, str | None], TaskRequest[T]],
+        make_request: Callable[[ConversionDocument, str], TaskRequest[T]],
         *,
         cached: bool,
         failure: str,
-    ) -> tuple[T, str, str | None] | None:
-        """Una petición de una fase de IA para `document`: la respuesta validada, el texto y el título; `None` si no hubo
+    ) -> tuple[T, ConversionDocument] | None:
+        """Una petición de una fase de IA para `document`: la respuesta validada y el `.json` leído; `None` si no hubo
         presupuesto, el `.json` no se pudo leer o la llamada falló (anotado en `run`).
 
         Un documento ya en caché (`cached`) no reserva presupuesto ni llama al modelo; los demás reservan antes de leer
         (`_reserve_and_read`) y su respuesta se guarda en la caché.
         """
-        conversion = await read_conversion_json(document.json_path) if cached and document.json_path else None
+        conversion = await read_conversion_document(document.json_path) if cached and document.json_path else None
         if not cached:
             conversion = await self._reserve_and_read(document.json_path, run)
         if conversion is None:
             return None
-        chunks_text, title = conversion
         try:
-            result = await make_request(chunks_text, title).send(llm, on_redacted=run.redaction_note(document.source_path), cache=cache)
+            result = await make_request(conversion, document.source_path).send(llm, on_redacted=run.redaction_note(document.source_path), cache=cache)
         except AiError as exc:
             if cached:
                 run.sent += 1  # la entrada desapareció entre la comprobación y la llamada: fue una llamada de verdad
@@ -774,17 +841,17 @@ class ContextBuilder:
             if cached:
                 run.sent += 1  # la entrada desapareció entre la comprobación y la llamada
             run.record_response(result)
-        return result.value, chunks_text, title
+        return result.value, conversion
 
-    async def _reserve_and_read(self, json_path: str | None, run: _AiRun) -> tuple[str, str | None] | None:
-        """Texto y título de un documento para enviarlo a la IA, si hay presupuesto; `None` si no.
+    async def _reserve_and_read(self, json_path: str | None, run: _AiRun) -> ConversionDocument | None:
+        """El `.json` de un documento para enviarlo a la IA, si hay presupuesto; `None` si no.
 
         El envío se reserva **antes** de leer (`may_send`), para que con varias llamadas a la vez el presupuesto se
         reparta en el orden de los documentos y no en el de las lecturas; si el `.json` no se puede leer, se devuelve.
         """
         if not json_path or not run.may_send():
             return None
-        conversion = await read_conversion_json(json_path)
+        conversion = await read_conversion_document(json_path)
         if conversion is None:
             run.release()
         return conversion
@@ -797,37 +864,43 @@ class ContextBuilder:
         classified: dict[str, list[DomainDocument]],
         manifest: TaxonomyManifest,
         run: _AiRun,
+        threshold: float = _DEFAULT_THRESHOLD,
     ) -> None:
-        """Aplica la respuesta de la IA a `document` y a `classified`: mueve el documento de bucket si el eje de
-        dominio cambió, o lo muta in-place si solo cambió el de tipo de material. El eje que cambia queda en
-        `document.classification` con `classified_by="ai"`."""
+        """Aplica la respuesta de la IA a `document` y a `classified`, solo en los ejes que estaban vacíos: mueve el
+        documento de bucket si el eje de dominio cambió, o lo muta in-place si cambió otro. Lo que cambia queda en
+        `document.classification` con `classified_by="ai"` y su cita."""
         folder, subfolder = manifest.folder_axis, manifest.subfolder_axis
-        domain_names = {DomainClassifier._slugify(entry.slug): entry.name for entry in folder.entries}
-        material_names = {DomainClassifier._slugify(entry.slug): entry.name for entry in subfolder.entries}
-        domain, material = answer.axes[folder.key], answer.axes[subfolder.key]
-        document.ai_domain = domain.slug
-        document.ai_confidence = domain.confidence
-        document.ai_reasoning = answer.reasoning
-        changed = False
         axes = document.classification.axes
-        if old_domain_slug == _UNCLASSIFIED_SLUG and domain.slug is not None:
-            classified[old_domain_slug] = [candidate for candidate in classified[old_domain_slug] if candidate is not document]
-            document.confidence = domain.confidence
-            classified.setdefault(domain.slug, []).append(document)
-            axes[folder.key] = [
-                AxisValue(slug=domain.slug, name=domain_names.get(domain.slug, domain.slug), confidence=domain.confidence, classified_by="ai")
-            ]
+        changed = False
+        domain = answer.axes.get(folder.key)
+        if domain is not None:
+            document.ai_domain = domain.slug
+            document.ai_confidence = domain.confidence
+            document.ai_reasoning = answer.reasoning
+            if old_domain_slug == _UNCLASSIFIED_SLUG and domain.choices:
+                value = _ai_value(domain.choices[0], folder, threshold, slugify=DomainClassifier._slugify)
+                classified[old_domain_slug] = [candidate for candidate in classified[old_domain_slug] if candidate is not document]
+                document.confidence = value.confidence
+                classified.setdefault(value.slug, []).append(document)
+                axes[folder.key] = [value]
+                changed = True
+        material = answer.axes.get(subfolder.key)
+        if material is not None and document.material_type == _UNCLASSIFIED_SLUG and material.choices:
+            value = _ai_value(material.choices[0], subfolder, threshold, slugify=DomainClassifier._slugify)
+            document.material_type = value.slug
+            document.material_type_name = value.name if value.name != value.slug else None
+            document.material_type_confidence = value.confidence
+            axes[subfolder.key] = [value]
             changed = True
-        if document.material_type == _UNCLASSIFIED_SLUG and material.slug is not None:
-            document.material_type = material.slug
-            document.material_type_name = material_names.get(material.slug)
-            document.material_type_confidence = material.confidence
-            axes[subfolder.key] = [
-                AxisValue(
-                    slug=material.slug, name=material_names.get(material.slug, material.slug), confidence=material.confidence, classified_by="ai"
-                )
-            ]
-            changed = True
+        for axis in manifest.tag_axes:
+            tag = answer.axes.get(axis.key)
+            if tag is None or axes.get(axis.key):
+                continue  # no se pidió, o ya tiene valores: nunca se sustituyen
+            axis_threshold = axis.threshold if axis.threshold is not None else threshold
+            values = [_ai_value(choice, axis, threshold) for choice in tag.choices if choice.confidence >= axis_threshold]
+            if values:
+                axes[axis.key] = values
+                changed = True
         if changed:
             document.classified_by = "ai"
             run.classified += 1
@@ -842,6 +915,8 @@ class ContextBuilder:
         on_progress: Callable[[int, int, str], Awaitable[None]] | None = None,
         run: _AiRun | None = None,
         cache: AiResultCache | None = None,
+        *,
+        profile: str = "",
     ) -> tuple[dict[str, list[DomainDocument]], list[ConversionResult]]:
         """Clasificación con IA sin manifiesto (`ai_scope="unclassified"`): lo que las reglas dejaron sin clasificar,
         eligiendo solo entre el catálogo ya confirmado (el predefinido, o los dominios que las reglas descubrieron),
@@ -857,11 +932,20 @@ class ContextBuilder:
 
         ai_run = run if run is not None else _AiRun()
 
-        def request(chunks_text: str, title: str | None) -> TaskRequest[ClassificationAnswer]:
-            return classification_request(prompts, axes=[AxisRequest(LEGACY_FOLDER_AXIS_KEY, catalog)], title=title, content=chunks_text)
+        def request(conversion: ConversionDocument, source_path: str) -> TaskRequest[ClassificationAnswer]:
+            excerpt = build_document_excerpt(conversion, folder=str(Path(source_path).parent), catalog_terms=catalog)
+            return classification_request(
+                prompts, axes=[AxisRequest.from_slugs(LEGACY_FOLDER_AXIS_KEY, catalog)], title=conversion.title, content=excerpt, profile=profile
+            )
 
-        complete = [document.json_path if document.success and document.markdown_path else None for document in unclassified]
-        hits = await self._cache_hits(llm, cache, complete, request)
+        hits = await self._cache_hits(
+            llm,
+            cache,
+            [
+                (document.json_path if document.success and document.markdown_path else None, document.source_path, request)
+                for document in unclassified
+            ],
+        )
 
         async def call(item: tuple[ConversionResult, bool]) -> tuple[str, DomainDocument] | None:
             document, cached = item
@@ -880,7 +964,7 @@ class ContextBuilder:
     async def _try_classify_document_with_ai(
         self,
         llm: LlmClient,
-        request: Callable[[str, str | None], TaskRequest[ClassificationAnswer]],
+        request: Callable[[ConversionDocument, str], TaskRequest[ClassificationAnswer]],
         document: ConversionResult,
         rules: DomainClassifier,
         run: _AiRun,
@@ -893,7 +977,8 @@ class ContextBuilder:
         asked = await self._ask_ai(llm, run, cache, document, request, cached=cached, failure="Falló la clasificación por IA de")
         if asked is None:
             return None
-        value, chunks_text, title = asked
+        value, conversion = asked
+        chunks_text, title = conversion.text, conversion.title
         answer = value.axes[LEGACY_FOLDER_AXIS_KEY]
         if answer.slug is None:
             return None
@@ -1065,10 +1150,10 @@ class ContextBuilder:
         """
         pending = [document for documents in classified.values() for document in documents if document.description is None or not document.keywords]
 
-        def request(chunks_text: str, title: str | None) -> TaskRequest[DocumentEnrichmentResult]:
-            return enrichment_request(prompts, title=title, content=chunks_text)
+        def request(conversion: ConversionDocument, _source_path: str) -> TaskRequest[DocumentEnrichmentResult]:
+            return enrichment_request(prompts, title=conversion.title, content=conversion.text)
 
-        hits = await self._cache_hits(llm, cache, [document.json_path for document in pending], request)
+        hits = await self._cache_hits(llm, cache, [(document.json_path, document.source_path, request) for document in pending])
 
         async def call(item: tuple[DomainDocument, bool]) -> None:
             document, cached = item

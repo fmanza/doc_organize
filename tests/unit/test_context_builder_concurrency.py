@@ -19,7 +19,7 @@ from doc_organize.context.context_builder import ContextBuilder
 from doc_organize.core.exceptions import OperationCancelledError
 from doc_organize.core.models import AiSettings, ConversionResult, Project, TaxonomyAxis, TaxonomyEntry
 from doc_organize.core.progress import CancelToken, ProgressEvent
-from tests.unit.fake_llm import FakeRequest
+from tests.unit.fake_llm import FakeRequest, _classification
 from tests.unit.taxonomy_helpers import two_axis_manifest
 
 
@@ -111,11 +111,10 @@ def _slow_llm(seed: int) -> tuple[LlmClient, SimpleNamespace]:
         number = int(fake.title.split()[-1])
         if task == "classify":
             folder, subfolder = fake.axes[:2]
-            answer: dict = {
-                "reasoning": None,
-                folder: {"value": ("calidad", "seguridad", None)[number % 3], "confidence": 0.7},
-                subfolder: {"value": ("politica", "manual")[number % 2], "confidence": 0.6},
-            }
+            answer: dict = _classification(
+                fake,
+                {folder: (("calidad", "seguridad", None)[number % 3], 0.7), subfolder: (("politica", "manual")[number % 2], 0.6), "reasoning": None},
+            )
         else:
             answer = {"description": f"Sobre {fake.title}", "keywords": ["uno", str(number)]}
         return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(answer)}}]})
@@ -171,7 +170,7 @@ def _counting_domain_llm() -> tuple[LlmClient, list[str]]:
         fake = FakeRequest(task="classify", body=json.loads(request.content))
         titles.append(fake.title)
         await asyncio.sleep(0.005 * (5 - len(titles) % 5))
-        answer = {"reasoning": None, fake.axes[0]: {"value": "calidad", "confidence": 0.9}}
+        answer = _classification(fake, {fake.axes[0]: ("calidad", 0.9)})
         return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(answer)}}]})
 
     settings = AiSettings(base_url="https://proxy.test", virtual_key="sk-test", rate_limit_retries=0)

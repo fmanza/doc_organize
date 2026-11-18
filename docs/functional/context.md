@@ -115,7 +115,9 @@ el placeholder `sin-clasificar` en algún eje se reintenta por IA — `classify_
 resuelve dominio + tipo de material **en una sola llamada combinada**, pero solo se
 aplica al eje que seguía sin clasificar; un eje que las reglas ya resolvieron con
 confianza nunca se sobreescribe, aunque la IA sugiera algo distinto para ese eje en
-la misma respuesta.
+la misma respuesta. Con `ai_scope="missing_axes"`, la IA también rellena los ejes que solo etiquetan (marcos
+normativos, temas...) que quedaron vacíos, con la misma regla: nunca cambia lo que ya tiene valor. Cada valor de la IA
+lleva su cita; si la cita no está en el documento, el valor queda por debajo del umbral para revisarlo.
 
 Si no existe `taxonomy_manifest.md`, todo el comportamiento (clasificación de un
 eje, `<tipo>`=extensión, nav plano por dominio) queda exactamente igual que antes.
