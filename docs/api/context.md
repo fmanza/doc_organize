@@ -466,6 +466,33 @@ el delimitador de front matter, el YAML no es válido, declara un `schema` disti
 
 ---
 
+## check_context_freshness (frescura del contexto, 2.0.0)
+
+```python
+from doc_organize import check_context_freshness
+from doc_organize.export import load_cache_entries
+
+entries = await load_cache_entries([cache_db])
+report = check_context_freshness(project, context, entries, scanned_at=ultimo_escaneo)
+if not report.up_to_date:
+    print(f"{len(report.changed)} cambiados, {len(report.added)} nuevos, {len(report.removed)} eliminados")
+```
+
+Compara el contexto con la caché del último escaneo, **antes** de reconstruir (`diff_contexts` compara dos contextos
+ya construidos). No lee originales ni `.json`, así que se puede llamar en cada carga de una página.
+
+- Para que funcione, el consumidor pasa la huella de cada original al construir:
+  `ConversionResult(..., source_sha256=entry.sha256_hash)`. El builder la guarda en `DomainDocument.source_sha256` y
+  `UnclassifiedDocument.source_sha256`.
+- `FreshnessReport`: `changed` (huella distinta), `added` (convertidos que el contexto no tiene), `removed` (del
+  contexto y ya no convertidos: borrados, movidos o que ahora fallan), `unknown` (sin huella: contextos anteriores a
+  2.0; reconstruir una vez lo activa), `stale_site` (el `index.html` del sitio es anterior a `Context.updated_at`),
+  `scanned_at` (lo que pase quien llama: el informe es tan reciente como la caché) y la propiedad `up_to_date`.
+- Un original cuenta como convertido si su entrada tiene la conversión terminada con éxito y no está marcada como
+  borrada.
+
+---
+
 ## TaxonomyTemplateRegistry (biblioteca de plantillas de manifiesto)
 
 ```python
@@ -942,6 +969,8 @@ class LiteLLMClassificationConfig(BaseModel):
     timeout_s: float
     retries: int            # 0.14.0, default 0 — ver «Reintentos» en ai_usage_monitoring.md
     retry_backoff_s: float  # 0.14.0, default 0.5
+    rate_limit_retries: int  # 2.0.0, default 3: reintentos ante 429/503
+    max_retry_wait_s: float  # 2.0.0, default 60
 
 class TaxonomyClassificationResult(BaseModel):
     domain: str | None
@@ -957,6 +986,8 @@ class LiteLLMTaxonomyClassificationConfig(BaseModel):
     timeout_s: float
     retries: int            # 0.14.0, default 0
     retry_backoff_s: float  # 0.14.0, default 0.5
+    rate_limit_retries: int  # 2.0.0, default 3: reintentos ante 429/503
+    max_retry_wait_s: float  # 2.0.0, default 60
 
 class TaxonomyManifestDraftResult(BaseModel):
     domains: list[TaxonomyEntry]        # min 1
@@ -971,6 +1002,8 @@ class LiteLLMTaxonomyManifestDraftConfig(BaseModel):
     timeout_s: float  # default 60.0 (prompt más grande, varios documentos a la vez)
     retries: int            # 0.14.0, default 0
     retry_backoff_s: float  # 0.14.0, default 0.5
+    rate_limit_retries: int  # 2.0.0, default 3: reintentos ante 429/503
+    max_retry_wait_s: float  # 2.0.0, default 60
 
 class DocumentEnrichmentResult(BaseModel):  # 1.5.0
     description: str | None
@@ -983,6 +1016,8 @@ class LiteLLMEnrichmentConfig(BaseModel):  # 1.5.0
     timeout_s: float  # default 30.0
     retries: int            # default 0
     retry_backoff_s: float  # default 0.5
+    rate_limit_retries: int  # 2.0.0, default 3
+    max_retry_wait_s: float  # 2.0.0, default 60
 
 class TaxonomyEntry(BaseModel):              # 2.0.0 (antes TaxonomyCatalogEntry)
     slug: str

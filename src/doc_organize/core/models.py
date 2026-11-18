@@ -231,6 +231,13 @@ class ConversionResult(BaseModel):
     json_path: str | None = Field(default=None, description="Ruta al fichero .json de metadatos de salida")
     success: bool = Field(..., description="Si la conversión tuvo éxito")
     error: str | None = Field(default=None, description="Mensaje de error si falló")
+    source_sha256: str | None = Field(
+        default=None,
+        description=(
+            "SHA-256 del original según la caché (`CacheEntry.sha256_hash`, 2.0.0): el consumidor lo pasa al construir el "
+            "contexto para poder comprobar después si está al día (`check_context_freshness`); None si no se conoce"
+        ),
+    )
     ocr_required: bool = Field(default=False, description="Si se necesitó OCR (y quedó diferido)")
     duration_seconds: float = Field(default=0.0, description="Tiempo empleado en convertir (segundos)")
     images_dir: str | None = Field(
@@ -639,9 +646,15 @@ class Project(BaseModel):
 
 _HTTP_TIMEOUT_DESC = "Timeout de las peticiones HTTP, en segundos"
 _HTTP_RETRIES_DESC = (
-    "Reintentos ante timeout o error de red/transporte (nunca ante una respuesta HTTP, ni 4xx ni 5xx); 0 (por defecto) "
-    "no reintenta. Ojo: reintentar un POST que hizo timeout puede cobrarse dos veces si el proxy sí lo recibió (L-3b)"
+    "Reintentos ante timeout o error de red/transporte; 0 (por defecto) no reintenta. Las respuestas HTTP no se "
+    "reintentan, salvo 429/503 (`rate_limit_retries`). Ojo: reintentar un POST que hizo timeout puede cobrarse dos veces "
+    "si el proxy sí lo recibió (L-3b)"
 )
+_HTTP_RATE_LIMIT_RETRIES_DESC = (
+    "Reintentos ante una respuesta 429 o 503 (D5, 2.0.0), esperando lo que pida `Retry-After` o, si no lo trae, "
+    "`retry_backoff_s` doblado en cada intento; la espera es compartida por todas las llamadas del cliente. 0 no reintenta"
+)
+_HTTP_MAX_RETRY_WAIT_DESC = "Tope de cada espera ante 429/503, en segundos (aunque `Retry-After` pida más)"
 _HTTP_RETRY_BACKOFF_DESC = "Espera base entre reintentos, en segundos: se duplica en cada intento (0.5, 1, 2...) (L-3b)"
 
 
@@ -819,6 +832,8 @@ class LiteLLMUsageConfig(BaseModel):
     timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
     retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
     retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
+    rate_limit_retries: int = Field(default=3, ge=0, description=_HTTP_RATE_LIMIT_RETRIES_DESC)
+    max_retry_wait_s: float = Field(default=60.0, ge=0.0, description=_HTTP_MAX_RETRY_WAIT_DESC)
 
 
 class GitHubCopilotUsageConfig(BaseModel):
@@ -836,6 +851,8 @@ class GitHubCopilotUsageConfig(BaseModel):
     timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
     retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
     retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
+    rate_limit_retries: int = Field(default=3, ge=0, description=_HTTP_RATE_LIMIT_RETRIES_DESC)
+    max_retry_wait_s: float = Field(default=60.0, ge=0.0, description=_HTTP_MAX_RETRY_WAIT_DESC)
 
 
 # ===== Modelos de contexto y dominios (organización documental, `doc_organize.context`) =====
@@ -992,6 +1009,9 @@ class DomainDocument(BaseModel):
     ai_filled: list[DocumentEnrichmentField] = Field(
         default_factory=list, description="Campos que rellenó la IA porque el documento no los declaraba (1.5.0); vacío si ninguno"
     )
+    source_sha256: str | None = Field(
+        default=None, description="SHA-256 del original al construir el contexto (2.0.0, F4); None si no se conocía o el contexto es anterior"
+    )
     classification: DocumentClassification = Field(
         default_factory=DocumentClassification,
         description=(
@@ -1044,6 +1064,7 @@ class UnclassifiedDocument(BaseModel):
     classification: DocumentClassification = Field(
         default_factory=DocumentClassification, description="Valores de los ejes que no organizan carpetas (2.0.0); vacío sin texto"
     )
+    source_sha256: str | None = Field(default=None, description="SHA-256 del original al construir el contexto (2.0.0, F4); None si no se conocía")
 
 
 class Domain(BaseModel):
@@ -1528,6 +1549,36 @@ class TaxonomyManifest(BaseModel):
 Context.model_rebuild()  # `taxonomy_axes` usa `TaxonomyAxis`, definido después
 
 
+class FreshnessReport(BaseModel):
+    """Si el contexto de un proyecto sigue al día respecto a la caché del último escaneo (2.0.0, F4).
+
+    Lo calcula `check_context_freshness` sin leer originales ni `.json`. Las rutas son `source_path`, ordenadas.
+
+    Attributes:
+        changed (list[str]): Originales cuya huella en la caché ya no es la del contexto.
+        added (list[str]): Originales convertidos que el contexto no tiene.
+        removed (list[str]): Documentos del contexto que ya no están convertidos en la caché (borrados, movidos o
+            que ahora fallan).
+        unknown (list[str]): Documentos del contexto sin huella (construido antes de 2.0 o sin `source_sha256`):
+            no se puede saber si cambiaron; reconstruir una vez lo activa.
+        stale_site (bool): El sitio se generó antes de la última construcción del contexto.
+        scanned_at (str | None): Cuándo se escaneó por última vez, si lo dio quien llama: el informe solo es tan
+            reciente como la caché.
+    """
+
+    changed: list[str] = Field(default_factory=list)
+    added: list[str] = Field(default_factory=list)
+    removed: list[str] = Field(default_factory=list)
+    unknown: list[str] = Field(default_factory=list)
+    stale_site: bool = False
+    scanned_at: str | None = None
+
+    @property
+    def up_to_date(self) -> bool:
+        """Sin cambios, altas, bajas ni sitio desfasado (los `unknown` no cuentan: no se sabe)."""
+        return not (self.changed or self.added or self.removed or self.stale_site)
+
+
 class TaxonomyFrontMatterReport(BaseModel):
     """Qué se leerá de un front matter de taxonomía, para avisar al autor (`inspect_taxonomy_front_matter`).
 
@@ -1570,6 +1621,8 @@ class LiteLLMClassificationConfig(BaseModel):
     timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
     retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
     retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
+    rate_limit_retries: int = Field(default=3, ge=0, description=_HTTP_RATE_LIMIT_RETRIES_DESC)
+    max_retry_wait_s: float = Field(default=60.0, ge=0.0, description=_HTTP_MAX_RETRY_WAIT_DESC)
 
 
 class TaxonomyClassificationResult(BaseModel):
@@ -1603,6 +1656,8 @@ class LiteLLMTaxonomyClassificationConfig(BaseModel):
     timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
     retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
     retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
+    rate_limit_retries: int = Field(default=3, ge=0, description=_HTTP_RATE_LIMIT_RETRIES_DESC)
+    max_retry_wait_s: float = Field(default=60.0, ge=0.0, description=_HTTP_MAX_RETRY_WAIT_DESC)
 
 
 class TaxonomyManifestDraftResult(BaseModel):
@@ -1655,6 +1710,8 @@ class LiteLLMTaxonomyManifestDraftConfig(BaseModel):
     )
     retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
     retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
+    rate_limit_retries: int = Field(default=3, ge=0, description=_HTTP_RATE_LIMIT_RETRIES_DESC)
+    max_retry_wait_s: float = Field(default=60.0, ge=0.0, description=_HTTP_MAX_RETRY_WAIT_DESC)
     redact_credentials: bool = Field(
         default=True,
         description=(
@@ -1688,6 +1745,8 @@ class LiteLLMEnrichmentConfig(BaseModel):
     timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
     retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
     retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
+    rate_limit_retries: int = Field(default=3, ge=0, description=_HTTP_RATE_LIMIT_RETRIES_DESC)
+    max_retry_wait_s: float = Field(default=60.0, ge=0.0, description=_HTTP_MAX_RETRY_WAIT_DESC)
 
 
 __all__ = [
@@ -1732,6 +1791,7 @@ __all__ = [
     "EnvironmentCheck",
     "EnvironmentCheckStatus",
     "EnvironmentReport",
+    "FreshnessReport",
     "GitHubCopilotUsageConfig",
     "GpuStatus",
     "LiteLLMClassificationConfig",
