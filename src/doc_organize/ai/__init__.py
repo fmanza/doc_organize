@@ -1,5 +1,6 @@
 """Monitorización de uso/coste de IA multi-fuente y cliente único de IA (2.0.0): configuración, prompts y servicios."""
 
+from doc_organize.ai.cache import AiResultCache, prune_ai_cache
 from doc_organize.ai.github_copilot_usage_client import (
     GitHubCopilotUsageClient,
     github_copilot_usage_config_from_env,
@@ -20,6 +21,7 @@ from doc_organize.ai.settings import legacy_variables, settings_from_env
 from doc_organize.ai.usage_source import UsageSource
 
 __all__ = [
+    "AiResultCache",
     "AxisAnswer",
     "AxisRequest",
     "ClassificationAnswer",
@@ -38,5 +40,6 @@ __all__ = [
     "github_copilot_usage_config_from_env",
     "legacy_variables",
     "litellm_usage_config_from_env",
+    "prune_ai_cache",
     "settings_from_env",
 ]

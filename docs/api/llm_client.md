@@ -59,6 +59,23 @@ anotar lo redactado por documento. `ContextBuilder.build(llm=..., ai_scope="uncl
 dentro. En este paso envían lo mismo que 1.x (slugs y los primeros 4000 caracteres); en M5 se añaden descripciones,
 perfil del proyecto y extracto.
 
+## Caché de resultados
+
+`AiResultCache(project_root)` guarda cada respuesta en `<raíz>/.doc_organize/ai_cache/`, bajo la huella de **lo que se
+enviaría**: tarea, modelo, mensajes ya redactados (prompt, catálogo y documento), esquema y si se redactó. Con
+`complete_json(..., cache=cache)` (o `classify_document(..., cache=)`/`enrich_document(..., cache=)`), una petición
+idéntica a una ya hecha no llama al modelo: el resultado se vuelve a validar y sale con `LlmResult.cached=True`. Cambiar
+el documento, el prompt (o su versión), el modelo, el catálogo o la redacción cambia la huella y se vuelve a preguntar.
+Una entrada ilegible o que ya no pasa la validación se ignora.
+
+`ContextBuilder.build(ai_cache=True)` (por defecto) la usa: **reconstruir un contexto sin cambios no hace ninguna
+llamada**. Los documentos resueltos con la caché cuentan en `AiPhaseStats.cached`, no en `sent`, y no consumen
+`ai_max_documents`. `ai_cache=False` la desactiva. `prune_ai_cache(project_root, max_age_days=90)` borra las entradas
+que llevan ese tiempo sin usarse (leer una entrada renueva su fecha).
+
+La caché guarda respuestas derivadas del contenido (justificaciones, descripciones), del texto ya redactado, nunca las
+claves: trátala como `Conversión/`.
+
 ## Prompts
 
 `PromptRegistry` da el prompt de cada tarea: un `.md` empaquetado con front matter (`id`, `version`) y las secciones
