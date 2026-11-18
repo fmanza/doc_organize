@@ -59,6 +59,21 @@ anotar lo redactado por documento. `ContextBuilder.build(llm=..., ai_scope="uncl
 dentro. En este paso envían lo mismo que 1.x (slugs y los primeros 4000 caracteres); en M5 se añaden descripciones,
 perfil del proyecto y extracto.
 
+## Lo que recibe el modelo (2.0.0, M5)
+
+Para que el modelo clasifique como lo haría alguien del proyecto, M5 cambia lo que se le envía. Estas piezas ya existen;
+la clasificación las usa a partir del siguiente paso de M5:
+
+- **`.json` completo** (`read_conversion_document`): título, fragmentos con su ruta de títulos de sección y huella del
+  original (hasta 1.7 se descartaban los títulos).
+- **Extracto** (`doc_organize.ai.excerpt.build_document_excerpt`, hasta 6000 caracteres): título, carpeta (dos niveles
+  como mucho), metadatos, esquema de títulos, el comienzo con texto de verdad (sin portadas ni índices) y los fragmentos
+  que mencionan términos del catálogo, aunque estén al final. Determinista; `EXCERPT_VERSION` identifica su forma.
+- **Perfil del proyecto** (`ProjectProfile`, `TaxonomyManifest.profile`): las secciones `## Contexto del proyecto`,
+  `## Reglas de desempate`, `## Glosario` y `## Ejemplos` del cuerpo del manifiesto o la plantilla, más las de
+  `<raíz>/.doc_organize/profile.md`, que se añaden detrás (D11). Como mucho 8000 caracteres y 20 ejemplos, sin
+  caracteres de control.
+
 ## Prompts
 
 `PromptRegistry` da el prompt de cada tarea: un `.md` empaquetado con front matter (`id`, `version`) y las secciones

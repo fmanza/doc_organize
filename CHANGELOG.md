@@ -87,6 +87,14 @@ ruptura; la guía de migración completa llega con la versión.
   `check_environment(check_ai=True)` comprueba las tareas de `settings_from_env()` e informa de las variables de 1.x.
   Guía nueva: [De 1.x a 2.0](docs/guides/migracion_2_0.md).
 
+- **Lo que recibe el modelo (M5, G2, primer paso)**: `read_conversion_document` (`.json` completo, con los títulos de
+  sección de cada fragmento y la huella del original); `build_document_excerpt` (extracto de hasta 6000 caracteres:
+  título, carpeta de dos niveles, metadatos, esquema de títulos, comienzo con texto de verdad y fragmentos con términos del
+  catálogo; `EXCERPT_VERSION`); `ProjectProfile` y `TaxonomyManifest.profile`, leído de las secciones `## Contexto del
+  proyecto`, `## Reglas de desempate`, `## Glosario` y `## Ejemplos` del cuerpo, con el de
+  `<raíz>/.doc_organize/profile.md` añadido detrás (`compose_profile`, D11). Todavía no se envían: lo hará la
+  clasificación del siguiente paso.
+
 ### Retirado (ruptura)
 
 - `DomainClassificationClient`, `TaxonomyClassificationClient`, `DocumentEnrichmentClient`,

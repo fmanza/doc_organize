@@ -1526,6 +1526,56 @@ class TaxonomyAxis(BaseModel):
         return self
 
 
+PROFILE_MAX_CHARS: Final = 8000
+PROFILE_MAX_EXAMPLES: Final = 20
+
+
+class ProjectProfile(BaseModel):
+    """Lo que el modelo necesita saber del proyecto para clasificar como lo haría una persona de dentro (2.0.0, G2).
+
+    Sale de cuatro secciones del cuerpo del manifiesto o la plantilla (`## Contexto del proyecto`, `## Reglas de
+    desempate`, `## Glosario` y `## Ejemplos`) y, si existe, de `<raíz>/.doc_organize/profile.md` del proyecto, que
+    **añade** a lo de la plantilla (D11). Va en el prompt, así que tiene un tope: `PROFILE_MAX_CHARS` caracteres en total
+    y `PROFILE_MAX_EXAMPLES` ejemplos.
+
+    Attributes:
+        context (str | None): Qué es el proyecto y qué documentos tiene.
+        tie_breakers (str | None): Cómo decidir entre dos valores parecidos («una norma publicada por ISO es referencial
+            normativo aunque hable de procedimientos»).
+        glossary (str | None): Siglas y términos propios.
+        examples (list[str]): Ejemplos de documentos y su clasificación, uno por línea.
+
+    Example:
+        >>> ProjectProfile(context="SGSI de una empresa", examples=["Política de seguridad → gobernanza"]).is_empty
+        False
+    """
+
+    context: str | None = None
+    tie_breakers: str | None = None
+    glossary: str | None = None
+    examples: list[str] = Field(default_factory=list)
+
+    @property
+    def is_empty(self) -> bool:
+        """Sin nada que decir al modelo."""
+        return not (self.context or self.tie_breakers or self.glossary or self.examples)
+
+    def merged(self, other: "ProjectProfile | None") -> "ProjectProfile":
+        """Este perfil con lo de `other` añadido detrás (D11: el del proyecto añade al de la plantilla)."""
+        if other is None:
+            return self
+
+        def join(first: str | None, second: str | None) -> str | None:
+            return "\n\n".join(part for part in (first, second) if part) or None
+
+        return ProjectProfile(
+            context=join(self.context, other.context),
+            tie_breakers=join(self.tie_breakers, other.tie_breakers),
+            glossary=join(self.glossary, other.glossary),
+            examples=[*self.examples, *other.examples][:PROFILE_MAX_EXAMPLES],
+        )
+
+
 class TaxonomyManifest(BaseModel):
     """Manifiesto de taxonomía de un proyecto o de una plantilla: una lista de **ejes** (2.0.0).
 
@@ -1567,6 +1617,9 @@ class TaxonomyManifest(BaseModel):
         description="Descripción breve, solo relevante para una plantilla compartida (ver `TaxonomyTemplateRegistry`); `None` en un manifiesto de proyecto",
     )
     axes: list[TaxonomyAxis] = Field(..., description="Ejes de la taxonomía")
+    profile: ProjectProfile | None = Field(
+        default=None, description="Perfil del proyecto, de las secciones del cuerpo (2.0.0, G2); `None` si no tiene"
+    )
 
     @field_validator("axes")
     @classmethod
@@ -1850,6 +1903,7 @@ __all__ = [
     "OfficeStatus",
     "Project",
     "ProjectNameValidation",
+    "ProjectProfile",
     "PromptProvenance",
     "ScanErrorEntry",
     "ScanErrorReport",
