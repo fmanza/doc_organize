@@ -115,6 +115,7 @@ class AiHttpClientBase:
         connection_message: str,
         auth_message: str,
         error_message: str,
+        allow_statuses: frozenset[int] = frozenset(),
         **kwargs: Any,
     ) -> httpx.Response:
         """Envía la petición y traduce fallos de transporte/HTTP a las excepciones de la subclase.
@@ -128,6 +129,8 @@ class AiHttpClientBase:
                 Puede usar el placeholder `{status_code}`.
             error_message: Plantilla del mensaje de `generic_error_cls` ante cualquier otro HTTP de
                 error. Puede usar el placeholder `{status_code}`.
+            allow_statuses: Códigos de error que se devuelven en vez de lanzar (p. ej. 400, para que `LlmClient` pruebe sin
+                `json_schema`); 401/403 lanzan siempre.
             **kwargs: Argumentos adicionales de `httpx.AsyncClient.request` (`json`, `params`, `headers`...).
 
         Un fallo de transporte (timeout incluido) se reintenta hasta `retries` veces con espera creciente; una
@@ -150,7 +153,7 @@ class AiHttpClientBase:
 
         if response.status_code in (401, 403):
             raise self._auth_error_cls(auth_message.format(status_code=response.status_code))
-        if response.is_error:
+        if response.is_error and response.status_code not in allow_statuses:
             raise self._generic_error_cls(error_message.format(status_code=response.status_code))
 
         return response

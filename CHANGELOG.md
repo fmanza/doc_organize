@@ -64,6 +64,16 @@ ruptura; la guía de migración completa llega con la versión.
   `check_context_freshness(project, context, cache_entries, *, site_dir=None, scanned_at=None) -> FreshnessReport`
   (`changed`, `added`, `removed`, `unknown`, `stale_site`, `scanned_at`, `up_to_date`), sin leer originales ni `.json`.
 
+- **Cliente único de IA (M4, G1, primer paso)**: `doc_organize.ai.LlmClient(AiSettings)` con `complete_json`,
+  `complete_with_tools` y `embed`; modelo y clave por tarea (`classify`, `enrich`, `taxonomy_design`, `agent`, `embed`;
+  `TaskSettings`); redacción de credenciales en el único punto de salida; `json_schema` estricto con caída una vez a
+  `json_object` y validación siempre; `metadata.tags`. `settings_from_env()` lee `DOC_ORGANIZE_LITELLM_BASE_URL`,
+  `_VIRTUAL_KEY`, `_MODEL_<TAREA>` y `_VIRTUAL_KEY_<TAREA>`, y lanza `AiConfigurationError` con la equivalencia si
+  encuentra variables de 1.x. `PromptRegistry`: prompts empaquetados por tarea (`ai/prompts/<tarea>.md`, con `id` y
+  `version`), sustituibles en `<raíz>/.doc_organize/prompts/`, y `PromptProvenance`. Excepciones `AiError`,
+  `AiAuthError`, `AiConnectionError`, `AiResponseError` y `AiConfigurationError`. Los clientes de 1.x siguen hasta el
+  siguiente paso.
+
 ### Compatibilidad
 
 - Los manifiestos y plantillas de 1.x se siguen leyendo (se migran en memoria); `save_taxonomy_manifest` guarda el

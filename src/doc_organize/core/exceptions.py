@@ -218,7 +218,36 @@ class TaxonomyManifestDraftConnectionError(TaxonomyManifestDraftError):
     """Error de red o timeout consultando el LiteLLM Proxy para proponer un manifiesto de taxonomia."""
 
 
+class AiError(DocOrganizeError):
+    """Error base del cliente único de IA (`doc_organize.ai.LlmClient`, 2.0.0): el proxy respondió con un error."""
+
+
+class AiAuthError(AiError):
+    """El LiteLLM Proxy rechazó la virtual key de la tarea (HTTP 401/403): no tiene sentido seguir llamando."""
+
+
+class AiConnectionError(AiError):
+    """Error de red o timeout con el LiteLLM Proxy (tras los reintentos de transporte)."""
+
+
+class AiResponseError(AiError):
+    """La respuesta no es el JSON esperado o no cumple su esquema (también tras la caída a `json_object`)."""
+
+
+class AiConfigurationError(DocOrganizeError):
+    """La configuración de la IA no es válida o usa variables de entorno de 1.x, que 2.0 ya no lee (D15).
+
+    El mensaje dice qué variable nueva usar en lugar de cada antigua, para que actualizar sin reconfigurar falle de forma
+    visible y no con la IA desactivada en silencio (U17).
+    """
+
+
 __all__ = [
+    "AiAuthError",
+    "AiConfigurationError",
+    "AiConnectionError",
+    "AiError",
+    "AiResponseError",
     "CacheError",
     "CacheNotFoundError",
     "ContextError",

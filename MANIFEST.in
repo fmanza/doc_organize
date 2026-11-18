@@ -5,3 +5,4 @@ recursive-include src/doc_organize/context/taxonomy_templates_builtin *.md
 include src/doc_organize/py.typed
 include README.md
 include LICENSE
+recursive-include src/doc_organize/ai/prompts *.md
