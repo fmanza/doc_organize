@@ -231,12 +231,36 @@ def _rules_value(slug: str, names: dict[str, str], confidence: float) -> list[Ax
 
 
 def _classify_single_axis(domains: list[Domain]) -> None:
-    """Sin manifiesto hay un solo eje (`domains`): su valor es el dominio del documento, de quien lo clasificó."""
+    """Sin manifiesto hay un solo eje (`domains`): su valor es el dominio del documento, de quien lo clasificó. Si lo
+    clasificó la IA, se conserva su cita y si se verificó (2.0.0)."""
     for domain in domains:
         for document in domain.documents:
             classified_by: AxisClassifiedBy = "ai" if document.classified_by == "ai" else "rules"
             value = AxisValue(slug=domain.slug, name=domain.name, confidence=document.confidence, classified_by=classified_by)
+            previous = next(
+                (
+                    old
+                    for old in document.classification.axes.get(LEGACY_FOLDER_AXIS_KEY, [])
+                    if old.slug == domain.slug and old.classified_by == "ai"
+                ),
+                None,
+            )
+            if classified_by == "ai" and previous is not None:
+                value = previous.model_copy(update={"name": domain.name})
             document.classification = DocumentClassification(axes={LEGACY_FOLDER_AXIS_KEY: [value]})
+
+
+def _single_axis_ai_value(choice: AxisChoice, threshold: float) -> AxisValue:
+    """El valor de la IA en el eje `domains` sin manifiesto, con su cita; si no se verificó, por debajo del umbral (D10)."""
+    confidence = choice.confidence if choice.evidence_verified is not False else min(choice.confidence, max(0.0, threshold - 0.01))
+    return AxisValue(
+        slug=choice.slug,
+        name=choice.slug,
+        confidence=confidence,
+        classified_by="ai",
+        evidence=choice.evidence,
+        evidence_verified=choice.evidence_verified,
+    )
 
 
 def _context_axes(manifest: TaxonomyManifest | None, domains: list[Domain]) -> list[TaxonomyAxis]:
@@ -1173,6 +1197,7 @@ class ContextBuilder:
             ai_domain=answer.slug,
             ai_confidence=answer.confidence,
             ai_reasoning=value.reasoning,
+            classification=DocumentClassification(axes={LEGACY_FOLDER_AXIS_KEY: [_single_axis_ai_value(answer.choices[0], rules.threshold)]}),
         )
 
     async def _save_and_record(self, project: Project, context: Context) -> None:
