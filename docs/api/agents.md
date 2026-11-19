@@ -129,12 +129,16 @@ Sus herramientas no escriben nada (el borrador vive en memoria) y no llaman a ni
 | `read_document` | El comienzo del texto de un documento (hasta 2000 caracteres) |
 | `edit_draft` | Aplica cambios al borrador (`add`, `update` con `keywords`, `add_keywords` o `remove_keywords`, `remove`); si uno no es válido, no aplica ninguno. Devuelve el informe y si mejora el de partida |
 | `undo_edit` | Deshace la última edición |
+| `restore_best` | Vuelve al mejor borrador comprobado que mejoraba el de partida |
 | `set_draft` | Sustituye el borrador por un manifiesto completo (para empezar sin manifiesto de partida) |
 
 La propuesta **conserva los ejes** del de partida (mismas claves, `organizes` y `multiple`) y su título, descripción y
 perfil. **Nunca se guarda sola**: si el agente no termina (tope, cancelación o respuesta no válida),
 `proposal.manifest` es `None` y `proposal.run.stop_reason` dice por qué; `proposal.draft` conserva el último borrador
-para no perder lo avanzado. El prompt es `taxonomy_agent` de la tarea `agent`, sustituible en
+para no perder lo avanzado. `proposal.best` es el mejor borrador comprobado que mejoraba el de partida (más cobertura
+menos conflictos), aunque el agente terminara con otro: un modelo pequeño puede empeorar al final. Por eso, si el
+agente llama a `finish` con un borrador que no mejora habiendo tenido uno que sí, se le pide una vez que lo recupere
+(`restore_best`) o corrija el actual. El prompt es `taxonomy_agent` de la tarea `agent`, sustituible en
 `<raíz>/.doc_organize/prompts/taxonomy_agent.md`.
 
 ## Comprobar un manifiesto por reglas
@@ -147,7 +151,10 @@ reglas de `ContextBuilder.build` (mismos puntuadores, umbral y texto), sin guard
   (`CONFLICT_MARGIN`), y las reglas eligen casi por azar;
 - **entradas vacías** y **términos compartidos** entre entradas;
 - **palabras clave sin uso** (`unused_keywords`): las que no aparecen en ningún documento (en los ejes que organizan,
-  además, bajan la puntuación de su entrada).
+  además, bajan la puntuación de su entrada);
+- de algunos documentos en conflicto, **qué términos encajan** en cada entrada empatada (`conflict_terms`), y de
+  algunos sin cubrir, la entrada que **más se acercó** al umbral con los términos que encajan y los que faltan
+  (`near_misses`).
 
 `RulesCorpus.load(documents)` lee los textos una vez, para comprobar muchas variantes. `report.improves_on(base)` es
 `True` si ningún eje pierde cobertura ni gana conflictos y alguno mejora.
@@ -172,6 +179,7 @@ print(check_taxonomy_rules(manifest, corpus).to_markdown())
         - RulesCorpus
         - TaxonomyRulesReport
         - AxisRulesReport
+        - NearMiss
 
 ## Referencia del runner
 

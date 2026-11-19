@@ -68,6 +68,7 @@ async def test_edits_the_draft_proposes_it_and_writes_nothing(tmp_path) -> None:
 
     assert _snapshot(tmp_path) == before  # solo lectura: no escribe nada en el proyecto
     assert proposal.run.finished and proposal.manifest is not None and proposal.improves is True and proposal.edits == 1
+    assert proposal.best == proposal.manifest and proposal.best_report == proposal.report
     assert proposal.rationale == "Separo gobierno y desempato auditorías"
     domains = proposal.manifest.folder_axis
     assert [entry.slug for entry in domains.entries] == ["calidad", "seguridad", "gobierno"]
@@ -79,8 +80,14 @@ async def test_edits_the_draft_proposes_it_and_writes_nothing(tmp_path) -> None:
     assert "gobierno" in (proposal.markdown() or "")
     overview, edited = results
     assert overview["documents"] == 5 and {"folder": "Calidad", "documents": 1} in overview["folders"]
-    assert overview["report"]["axes"]["domains"]["conflicts"] == 1 and overview["draft"]["axes"][0]["key"] == "domains"
-    assert edited["improves_on_base"] is True and edited["axes"]["domains"]["covered"] == 5 and edited["edits"] == 1
+    assert overview["report"]["now"]["domains"]["conflicts"] == 1 and overview["draft"]["axes"][0]["key"] == "domains"
+    assert list(edited)[:2] == ["improves_on_base", "now"]  # el resumen va primero: un resultado cortado no lo pierde
+    assert (
+        edited["improves_on_base"] is True
+        and edited["now"]["domains"]["covered"] == 5
+        and edited["before_this_edit"]["domains"]["covered"] == 4
+        and edited["edits"] == 1
+    )
     first = llm.proxy.calls("agent")[0].body  # type: ignore[attr-defined]
     assert "Cómo puntúan las reglas" in first["messages"][0]["content"] and "Separa el gobierno" in first["messages"][1]["content"]
     assert {tool["function"]["name"] for tool in first["tools"]} == {
@@ -89,6 +96,7 @@ async def test_edits_the_draft_proposes_it_and_writes_nothing(tmp_path) -> None:
         "read_document",
         "edit_draft",
         "undo_edit",
+        "restore_best",
         "set_draft",
         FINISH_TOOL,
     }
@@ -112,6 +120,7 @@ async def test_invalid_edits_change_nothing_and_undo_restores(tmp_path) -> None:
         _recording(results, call_tools(("undo_edit", {}))),
         _recording(results, call_tools(("undo_edit", {}))),
         _recording(results, call_tools((FINISH_TOOL, {"rationale": "sin cambios"}))),
+        _recording(results, call_tools((FINISH_TOOL, {"rationale": "sin cambios, insisto"}))),  # avisado una vez: se acepta
     ]
     llm = fake_llm(agent=agent_script(*script))
 
@@ -121,9 +130,10 @@ async def test_invalid_edits_change_nothing_and_undo_restores(tmp_path) -> None:
     assert "no existe; los ejes son" in errors[0] and "ya existe" in errors[1] and "no válido" in errors[2]
     assert "sus entradas son" in errors[3] and "acción 'rename'" in errors[4] and "cambio 2" in errors[5]
     added, undone, nothing = results[6:9]
-    assert added["axes"]["domains"]["entry_counts"]["gobierno"] == 1 and undone["edits"] == 0
-    assert "deshacer" in nothing["error"]
+    assert added["details"]["domains"]["entry_counts"]["gobierno"] == 1 and undone["edits"] == 0
+    assert "deshacer" in nothing["error"] and "restore_best" in results[9]["error"]
     assert proposal.manifest is not None and proposal.manifest.axes == _base().axes and proposal.improves is False
+    assert proposal.best is not None and len(proposal.best.folder_axis.entries) == 3  # el que mejoraba, aunque se deshizo
 
 
 @pytest.mark.asyncio
@@ -218,3 +228,24 @@ async def test_cancelled(tmp_path) -> None:
 async def test_needs_readable_documents() -> None:
     with pytest.raises(ValueError, match="legible"):
         await TaxonomyDesignAgent(fake_llm()).propose([])
+
+
+@pytest.mark.asyncio
+async def test_finish_without_improving_is_sent_back_to_restore_the_best(tmp_path) -> None:
+    results: list[Any] = []
+    worse = [{"axis": "domains", "action": "update", "slug": "gobierno", "add_keywords": ["junta", "consejo"]}]  # el acta deja de llegar
+    llm = fake_llm(
+        agent=agent_script(
+            call_tools(("edit_draft", {"changes": [BETTER[2]]})),  # mejora
+            call_tools(("edit_draft", {"changes": worse})),
+            call_tools((FINISH_TOOL, {"rationale": "primero"})),
+            _recording(results, call_tools(("restore_best", {}))),
+            _recording(results, call_tools((FINISH_TOOL, {"rationale": "recupero el mejor"}))),
+        )
+    )
+
+    proposal = await TaxonomyDesignAgent(llm).propose(make_documents(tmp_path), base=_base())
+
+    assert "restore_best" in results[0]["error"] and results[1]["improves_on_base"] is True
+    assert proposal.improves is True and proposal.manifest == proposal.best and proposal.rationale == "recupero el mejor"
+    assert [entry.slug for entry in proposal.manifest.folder_axis.entries] == ["calidad", "seguridad", "gobierno"]  # type: ignore[union-attr]

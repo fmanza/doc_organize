@@ -52,12 +52,15 @@ from doc_organize.utils.folding import FoldedText, fold
 
 #: Topes por defecto del diseñador: cada comprobación es barata, pero un modelo local tarda en cada paso; solo los tres
 #: últimos resultados van enteros (el informe del borrador ya resume lo anterior).
-DEFAULT_DESIGN_LIMITS = AgentLimits(max_steps=24, max_tokens=200_000, max_tool_calls=40, answer_retries=2, keep_tool_results=3)
+DEFAULT_DESIGN_LIMITS = AgentLimits(
+    max_steps=30, max_tokens=400_000, max_tool_calls=40, max_tool_result_chars=12_000, answer_retries=2, keep_tool_results=3
+)
 #: Documentos por página en `search_documents` y caracteres como mucho de `read_document`.
 SEARCH_PAGE = 20
 READ_MAX_CHARS = 2000
-#: Carpetas que muestra `overview` (las de más documentos).
-OVERVIEW_FOLDERS = 40
+#: Carpetas que muestra `overview` (las de más documentos) y ejemplos por eje en cada informe.
+OVERVIEW_FOLDERS = 25
+DETAIL_EXAMPLES = 5
 #: Cambios como mucho en un `edit_draft`.
 MAX_CHANGES_PER_EDIT = 30
 
@@ -116,6 +119,10 @@ class TaxonomyDesignProposal:
         draft (TaxonomyManifest | None): El último borrador válido, también si el agente no terminó (para no perder lo
             avanzado; no es una propuesta: el agente no la dio por buena).
         edits (int): Ediciones del borrador que quedaron (tras deshacer).
+        best (TaxonomyManifest | None): El mejor borrador comprobado que mejoraba el de partida (más cobertura menos
+            conflictos, sumados en todos los ejes), aunque el agente terminara con otro; `None` si ninguno lo mejoró o
+            no hay manifiesto de partida. Para que una persona no pierda lo bueno si el agente empeora al final.
+        best_report (TaxonomyRulesReport | None): Su informe por reglas.
     """
 
     manifest: TaxonomyManifest | None
@@ -125,6 +132,8 @@ class TaxonomyDesignProposal:
     run: AgentRun
     draft: TaxonomyManifest | None = None
     edits: int = 0
+    best: TaxonomyManifest | None = None
+    best_report: TaxonomyRulesReport | None = None
 
     @property
     def improves(self) -> bool | None:
@@ -196,7 +205,7 @@ class TaxonomyDesignAgent:
         edits = len(tools.history)
         if not run.finished:
             return TaxonomyDesignProposal(
-                manifest=None, rationale=None, report=None, base_report=base_report, run=run, draft=tools.draft, edits=edits
+                manifest=None, rationale=None, report=None, base_report=base_report, run=run, draft=tools.draft, edits=edits, **tools.best_fields()
             )
         manifest, rationale = run.answer
         return TaxonomyDesignProposal(
@@ -207,6 +216,7 @@ class TaxonomyDesignAgent:
             run=run,
             draft=manifest,
             edits=edits,
+            **tools.best_fields(),
         )
 
 
@@ -226,6 +236,8 @@ class _Tools:
 
     def __post_init__(self) -> None:
         self.draft = self.base
+        self.best: tuple[float, TaxonomyManifest, TaxonomyRulesReport] | None = None
+        self._finish_warned = False
         self.by_key = {item.key: item for item in self.corpus.documents}
         self._folded: dict[str, FoldedText] = {}
 
@@ -259,6 +271,13 @@ class _Tools:
             ),
             AgentTool("undo_edit", "Deshace la última edición del borrador y devuelve su informe.", empty, self.undo_edit, idempotent=False),
             AgentTool(
+                "restore_best",
+                "Vuelve al mejor borrador comprobado que mejoraba el de partida (más cobertura menos conflictos) y devuelve su informe.",
+                empty,
+                self.restore_best,
+                idempotent=False,
+            ),
+            AgentTool(
                 "set_draft",
                 "Sustituye el borrador por un manifiesto completo (para empezar sin manifiesto de partida) y devuelve su informe.",
                 {"type": "object", "properties": {"manifest": MANIFEST_SCHEMA}, "required": ["manifest"]},
@@ -273,9 +292,9 @@ class _Tools:
         folders = Counter(_top_folder(item) for item in self.corpus.documents)
         return {
             "documents": len(self.corpus.documents),
-            "folders": [{"folder": folder or "(raíz)", "documents": count} for folder, count in folders.most_common(OVERVIEW_FOLDERS)],
-            "draft": _manifest_json(self.draft) if self.draft is not None else None,
             "report": self._report(self.draft) if self.draft is not None else None,
+            "draft": _manifest_json(self.draft) if self.draft is not None else None,
+            "folders": [{"folder": folder or "(raíz)", "documents": count} for folder, count in folders.most_common(OVERVIEW_FOLDERS)],
         }
 
     def search_documents(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -313,16 +332,20 @@ class _Tools:
             except (ValueError, TypeError, KeyError) as exc:
                 raise ValueError(f"cambio {index}: {exc}; no se aplicó ningún cambio") from exc
         self._push(draft)
-        result = self._report(draft)
-        before = check_taxonomy_rules(previous, self.corpus, threshold=self.threshold)
-        result["before_this_edit"] = {axis.axis: _axis_summary(axis) for axis in before.axes}
-        return result
+        return self._report(draft, previous)
 
     def undo_edit(self, arguments: dict[str, Any]) -> dict[str, Any]:
         if not self.history:
             raise ValueError("no hay ninguna edición que deshacer")
         self.draft = self.history.pop()
         return self._report(self.draft) if self.draft is not None else {"draft": None}
+
+    def restore_best(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        if self.best is None:
+            raise ValueError("ningún borrador ha mejorado todavía el de partida")
+        previous = self.draft
+        self._push(self.best[1])
+        return self._report(self.best[1], previous)
 
     def set_draft(self, arguments: dict[str, Any]) -> dict[str, Any]:
         manifest = self.validate(arguments.get("manifest"))
@@ -356,17 +379,45 @@ class _Tools:
     def parse_answer(self, data: dict[str, Any]) -> tuple[TaxonomyManifest, str]:
         if self.draft is None:
             raise ValueError("no hay borrador: créalo con set_draft antes de terminar")
+        if self.best is not None and not self._finish_warned and not self._improves(self.draft):
+            self._finish_warned = True  # una vez: si insiste, su borrador es la propuesta (`best` queda aparte)
+            raise ValueError(
+                "el borrador actual no mejora el de partida, pero uno anterior sí: usa `restore_best` y vuelve a llamar a finish, o corrige el actual"
+            )
         rationale = data.get("rationale")
         return self.draft, rationale.strip() if isinstance(rationale, str) else ""
 
-    def _report(self, manifest: TaxonomyManifest) -> dict[str, Any]:
+    def _report(self, manifest: TaxonomyManifest, previous: TaxonomyManifest | None = None) -> dict[str, Any]:
+        """El informe para el modelo: primero el resumen (si mejora, cifras ahora, antes de la edición y de partida) y
+        después el detalle, para que un resultado cortado no pierda lo importante."""
         report = check_taxonomy_rules(manifest, self.corpus, threshold=self.threshold)
-        result = _report_json(report, self.corpus)
+        result: dict[str, Any] = {}
         if self.base_report is not None:
             result["improves_on_base"] = report.improves_on(self.base_report)
+            if result["improves_on_base"]:
+                self._keep_best(manifest, report)
+        result["now"] = {axis.axis: _axis_summary(axis) for axis in report.axes}
+        if previous is not None:
+            before = check_taxonomy_rules(previous, self.corpus, threshold=self.threshold)
+            result["before_this_edit"] = {axis.axis: _axis_summary(axis) for axis in before.axes}
+        if self.base_report is not None:
             result["base"] = {axis.axis: _axis_summary(axis) for axis in self.base_report.axes}
         result["edits"] = len(self.history)
+        result["details"] = _details_json(report, self.corpus)
         return result
+
+    def _improves(self, manifest: TaxonomyManifest) -> bool:
+        if self.base_report is None:
+            return True
+        return check_taxonomy_rules(manifest, self.corpus, threshold=self.threshold).improves_on(self.base_report)
+
+    def _keep_best(self, manifest: TaxonomyManifest, report: TaxonomyRulesReport) -> None:
+        score = sum(axis.covered - axis.conflicts for axis in report.axes)
+        if self.best is None or score > self.best[0]:
+            self.best = (score, manifest, report)
+
+    def best_fields(self) -> dict[str, Any]:
+        return {"best": self.best[1], "best_report": self.best[2]} if self.best is not None else {}
 
     def _text(self, item: CorpusDocument) -> FoldedText:
         if item.key not in self._folded:
@@ -479,20 +530,25 @@ def _axis_summary(axis: AxisRulesReport) -> dict[str, Any]:
     return {"coverage": round(axis.coverage, 3), "covered": axis.covered, "documents": axis.documents, "conflicts": axis.conflicts}
 
 
-def _report_json(report: TaxonomyRulesReport, corpus: RulesCorpus) -> dict[str, Any]:
+def _details_json(report: TaxonomyRulesReport, corpus: RulesCorpus) -> dict[str, Any]:
     titles = {item.key: item.display_title for item in corpus.documents}
     axes = {}
     for axis in report.axes:
         axes[axis.axis] = {
-            **_axis_summary(axis),
             "entry_counts": axis.entry_counts,
             "empty_entries": axis.empty_entries,
-            "shared_terms": dict(list(axis.shared_terms.items())[:10]),
             "unused_keywords": axis.unused_keywords,
-            "uncovered_examples": [{"key": key, "title": titles.get(key, key)} for key in axis.uncovered_examples],
-            "conflict_examples": [{"key": key, "title": titles.get(key, key), "tied": tied} for key, tied in axis.conflict_examples.items()],
+            "shared_terms": dict(list(axis.shared_terms.items())[:DETAIL_EXAMPLES]),
+            "conflict_examples": [
+                {"key": key, "title": titles.get(key, key), "matched_terms": axis.conflict_terms.get(key, {slug: [] for slug in tied})}
+                for key, tied in list(axis.conflict_examples.items())[:DETAIL_EXAMPLES]
+            ],
+            "uncovered_examples": [
+                {"key": key, "title": titles.get(key, key), **({"near_miss": axis.near_misses[key].model_dump()} if key in axis.near_misses else {})}
+                for key in axis.uncovered_examples[:DETAIL_EXAMPLES]
+            ],
         }
-    return {"axes": axes}
+    return axes
 
 
 def _instructions(text: str) -> str:

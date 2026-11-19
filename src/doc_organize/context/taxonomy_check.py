@@ -112,6 +112,23 @@ class RulesCorpus:
         return corpus
 
 
+class NearMiss(BaseModel):
+    """La entrada que más se acercó al umbral en un documento sin valor.
+
+    Attributes:
+        slug (str): Entrada.
+        score (float): Su puntuación (por debajo del umbral).
+        matched (list[str]): Términos de la entrada que aparecen en el documento.
+        missing (list[str]): Los que no: en un eje que organiza, quitarlos (o cambiarlos por otros que aparezcan) sube
+            la puntuación.
+    """
+
+    slug: str
+    score: float
+    matched: list[str] = Field(default_factory=list)
+    missing: list[str] = Field(default_factory=list)
+
+
 class AxisRulesReport(BaseModel):
     """Cómo clasifican las reglas un eje.
 
@@ -128,6 +145,10 @@ class AxisRulesReport(BaseModel):
             ejes que organizan, además, bajan la puntuación de la entrada).
         uncovered_examples (list[str]): Algunos documentos sin valor (clave).
         conflict_examples (dict[str, list[str]]): Algunos documentos en conflicto → entradas empatadas.
+        conflict_terms (dict[str, dict[str, list[str]]]): De esos documentos, los términos que encajan en cada entrada
+            empatada (lo que hay que cambiar para desempatar).
+        near_misses (dict[str, NearMiss]): De los documentos sin valor de un eje que organiza, la entrada que más se
+            acercó al umbral, con los términos que encajan y los que faltan.
     """
 
     axis: str
@@ -141,6 +162,8 @@ class AxisRulesReport(BaseModel):
     unused_keywords: dict[str, list[str]] = Field(default_factory=dict)
     uncovered_examples: list[str] = Field(default_factory=list)
     conflict_examples: dict[str, list[str]] = Field(default_factory=dict)
+    conflict_terms: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
+    near_misses: dict[str, NearMiss] = Field(default_factory=dict)
 
     @property
     def coverage(self) -> float:
@@ -211,20 +234,28 @@ def check_taxonomy_rules(manifest: TaxonomyManifest, corpus: RulesCorpus, *, thr
 
 def _check_axis(manifest: TaxonomyManifest, axis: TaxonomyAxis, corpus: RulesCorpus, threshold: float) -> AxisRulesReport:
     report = AxisRulesReport(axis=axis.key, organizes=axis.organizes, documents=len(corpus.documents))
-    score = _scorer(manifest, axis, threshold)
+    score = _scorer(axis, threshold)
+    terms = _terms_by_entry(axis, threshold)
     counts: Counter[str] = Counter()
     for item in corpus.documents:
-        ranked = score(item)  # (slug, puntuación) que llegan al umbral, de mayor a menor
+        scores = score(item)  # (slug, puntuación) de cada entrada, en el orden del catálogo
+        ranked = _ranked(scores, threshold)
         if not ranked:
             if len(report.uncovered_examples) < REPORT_EXAMPLES:
                 report.uncovered_examples.append(item.key)
+                near = max(scores, key=lambda pair: pair[1], default=None)
+                if near is not None and near[1] > 0 and axis.organizes is not None:
+                    matched, missing = _split_terms(axis, terms[near[0]], item)
+                    report.near_misses[item.key] = NearMiss(slug=near[0], score=round(near[1], 3), matched=matched, missing=missing)
             continue
         report.covered += 1
         counts.update(slug for slug, _ in (ranked if axis.multiple else ranked[:1]))
         if not axis.multiple and len(ranked) > 1 and ranked[0][1] - ranked[1][1] < CONFLICT_MARGIN:
             report.conflicts += 1
             if len(report.conflict_examples) < REPORT_EXAMPLES:
-                report.conflict_examples[item.key] = [slug for slug, value in ranked if ranked[0][1] - value < CONFLICT_MARGIN]
+                tied = [slug for slug, value in ranked if ranked[0][1] - value < CONFLICT_MARGIN]
+                report.conflict_examples[item.key] = tied
+                report.conflict_terms[item.key] = {slug: _split_terms(axis, terms[slug], item)[0] for slug in tied}
     slugs = _slugs(axis)
     report.entry_counts = {slug: counts.get(slug, 0) for slug in slugs}
     report.empty_entries = [slug for slug in slugs if not counts.get(slug)]
@@ -233,30 +264,36 @@ def _check_axis(manifest: TaxonomyManifest, axis: TaxonomyAxis, corpus: RulesCor
     return report
 
 
-def _scorer(manifest: TaxonomyManifest, axis: TaxonomyAxis, threshold: float) -> Scorer:
-    """Función documento → `[(slug, puntuación)]` que llegan al umbral, de mayor a menor (estable), como en `build`."""
+def _scorer(axis: TaxonomyAxis, threshold: float) -> Scorer:
+    """Función documento → `[(slug, puntuación)]` de cada entrada, con los puntuadores de `build`. En los ejes que
+    organizan, todas las entradas; en los que etiquetan, las que llegan al umbral."""
     keywords = {DomainClassifier._slugify(entry.slug): entry.keywords for entry in axis.entries if entry.keywords}
     if axis.organizes == "folder":
         domains = DomainClassifier(candidate_domains=[entry.slug for entry in axis.entries], threshold=threshold)
-
-        def score_domain(item: CorpusDocument) -> list[tuple[str, float]]:
-            scores = domains.score_candidates(item.document, item.chunks_text, item.title, extra_keywords=keywords)
-            return _ranked(scores, threshold)
-
-        return score_domain
+        return lambda item: domains.score_candidates(item.document, item.chunks_text, item.title, extra_keywords=keywords)
     if axis.organizes == "subfolder":
         materials = MaterialTypeClassifier([entry.slug for entry in axis.entries], threshold=threshold)
-
-        def score_material(item: CorpusDocument) -> list[tuple[str, float]]:
-            return _ranked(materials.score_candidates(title=item.title, chunks_text=item.chunks_text, extra_keywords=keywords), threshold)
-
-        return score_material
+        return lambda item: materials.score_candidates(title=item.title, chunks_text=item.chunks_text, extra_keywords=keywords)
     tags = AxisRuleScorer(axis, threshold)
+    return lambda item: [(value.slug, value.confidence) for value in tags.scores(item.tag_text)]
 
-    def score_tags(item: CorpusDocument) -> list[tuple[str, float]]:
-        return [(value.slug, value.confidence) for value in tags.scores(item.tag_text)]
 
-    return score_tags
+def _terms_by_entry(axis: TaxonomyAxis, threshold: float) -> dict[str, list[str]]:
+    """Los términos con los que puntúan las reglas cada entrada (por el slug con el que aparece en el informe)."""
+    if axis.organizes is None:
+        scorer = AxisRuleScorer(axis, threshold)
+        return {entry.slug: list(scorer.terms(entry.slug)) for entry in axis.entries}
+    terms = {}
+    for entry in axis.entries:
+        slug = DomainClassifier._slugify(entry.slug)
+        terms[slug] = [fold_accents(term) for term in [*slug.replace("-", " ").split(), *entry.keywords] if term]
+    return terms
+
+
+def _split_terms(axis: TaxonomyAxis, terms: list[str], item: CorpusDocument) -> tuple[list[str], list[str]]:
+    """Los términos que aparecen en el documento y los que no, con el criterio de las reglas del eje."""
+    found = [term for term in terms if (item.tag_text.contains(term) if axis.organizes is None else term in item.haystack)]
+    return found, [term for term in terms if term not in found]
 
 
 def _ranked(scores: list[tuple[str, float]], threshold: float) -> list[tuple[str, float]]:
@@ -302,6 +339,7 @@ __all__ = [
     "CONFLICT_MARGIN",
     "AxisRulesReport",
     "CorpusDocument",
+    "NearMiss",
     "RulesCorpus",
     "TaxonomyRulesReport",
     "check_taxonomy_rules",

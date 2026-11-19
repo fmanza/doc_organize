@@ -154,3 +154,28 @@ async def test_unused_keywords(tmp_path) -> None:
     assert report.axis("domains").unused_keywords == {"calidad": ["gestion-calidad"]}  # type: ignore[union-attr]
     assert report.axis("frameworks").unused_keywords == {"ens": ["esquema nacional"]}  # type: ignore[union-attr]
     assert check_taxonomy_rules(base_manifest(), await RulesCorpus.load(make_documents(tmp_path))).axis("domains").unused_keywords == {}  # type: ignore[union-attr]
+
+
+@pytest.mark.asyncio
+async def test_conflict_terms_and_near_misses(tmp_path) -> None:
+    documents = make_documents(
+        tmp_path,
+        {
+            "Varios/auditoria.pdf": ("Auditoría", "Auditoría interna de calidad y seguridad."),
+            "Varios/revision.pdf": ("Revisión", "Revisión por auditoría externa."),
+        },
+    )
+    manifest = two_axis_manifest(
+        [
+            TaxonomyEntry(slug="calidad", name="Calidad", keywords=["auditoría", "excelencia", "iso 9001"]),
+            TaxonomyEntry(slug="seguridad", name="Seguridad", keywords=["ens"]),
+        ],
+        [TaxonomyEntry(slug="informe", name="Informe")],
+    )
+
+    domains = check_taxonomy_rules(manifest, await RulesCorpus.load(documents)).axis("domains")
+
+    assert domains is not None and domains.conflicts == 1
+    assert domains.conflict_terms == {"auditoria.pdf": {"calidad": ["calidad", "auditoria"], "seguridad": ["seguridad"]}}
+    near = domains.near_misses["revision.pdf"]
+    assert (near.slug, near.score, near.matched, near.missing) == ("calidad", 0.25, ["auditoria"], ["calidad", "excelencia", "iso 9001"])

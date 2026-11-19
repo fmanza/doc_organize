@@ -17,13 +17,16 @@ releases publicados antes de esa versión).
 
 - **Diseñador de la taxonomía (M8, G5)**: `TaxonomyDesignAgent(llm).propose(documents, *, base=, instructions=)` mejora
   un manifiesto (o diseña uno) editando un borrador en memoria con cambios pequeños (`edit_draft`, `undo_edit`,
-  `set_draft`) que se comprueban con las reglas contra todos los documentos, tras explorarlos (`overview`,
+  `restore_best`, `set_draft`) que se comprueban con las reglas contra todos los documentos, tras explorarlos (`overview`,
   `search_documents`, `read_document`). Herramientas sin escritura y sin IA dentro. La propuesta
   (`TaxonomyDesignProposal`) conserva los ejes, el título y el perfil del de partida, trae el informe por reglas de las
-  dos y nunca se guarda sola. Prompt `taxonomy_agent` de la tarea `agent`.
+  dos y nunca se guarda sola; `best` guarda el mejor borrador comprobado que mejoraba el de partida, aunque el agente
+  terminara con otro. Prompt `taxonomy_agent` de la tarea `agent`.
 - **Comprobación por reglas (M8)**: `check_taxonomy_rules(manifest, RulesCorpus)` da por eje la cobertura, los
   conflictos (las dos mejores entradas a menos de 0,1 en un eje de un valor), las entradas vacías, los términos
-  compartidos y las palabras clave que no aparecen en ningún documento, igual que la fase de reglas de `build` y sin guardar nada; `TaxonomyRulesReport.improves_on(base)`.
+  compartidos, las palabras clave que no aparecen en ningún documento y, de algunos documentos, los términos que
+  encajan en cada entrada empatada (`conflict_terms`) y la entrada que más se acercó al umbral (`near_misses`), igual
+  que la fase de reglas de `build` y sin guardar nada; `TaxonomyRulesReport.improves_on(base)`.
 - `AgentRunner` reconoce las llamadas a herramientas que algunos modelos locales escriben como JSON en el texto (solo
   si todas son de herramientas que existen; `AgentStep.calls_in_text`).
 - `AgentRunner`: una llamada idéntica a la anterior a una herramienta `idempotent` (por defecto) no se ejecuta y vuelve

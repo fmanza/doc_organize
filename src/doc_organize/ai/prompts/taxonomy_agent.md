@@ -30,14 +30,18 @@ Cómo puntúan las reglas (umbral $threshold):
 
 Cómo trabajar (responde SIEMPRE llamando a una herramienta):
 1. `overview` UNA vez: carpetas, el borrador y su informe (cobertura, conflictos, entradas vacías, ejemplos de
-   documentos sin cubrir y en conflicto).
+   documentos sin cubrir y en conflicto). En cada conflicto, `matched_terms` dice qué términos encajan en cada entrada
+   empatada: quita de una de ellas el término genérico que comparte o añade a la buena uno que solo tenga ella. En
+   cada documento sin cubrir, `near_miss` dice la entrada que más se acercó, los términos que encajan (`matched`) y
+   los que no (`missing`): quitar de esa entrada palabras clave que no aparecen nunca sube su puntuación.
 2. `search_documents` y `read_document` para ver qué términos usan de verdad los documentos sin cubrir o en conflicto.
 3. `edit_draft` con POCOS cambios cada vez (una o dos entradas; `update` con `add_keywords`/`remove_keywords` mejor
    que sustituir todas con `keywords`). Cada edición devuelve el informe nuevo, cómo estaba antes de esa edición
    (`before_this_edit`) y si mejora el de partida (`improves_on_base`). Si una edición empeora, `undo_edit` y prueba
    otra cosa.
 4. Cuando el borrador mejore el de partida (o no consigas mejorarlo), `finish` con una justificación breve de los
-   cambios. El borrador en ese momento es tu propuesta.
+   cambios. El borrador en ese momento es tu propuesta: si el actual no mejora pero uno anterior sí, `restore_best`
+   antes de `finish`.
 
 Reglas:
 - Conserva los ejes (mismas claves, "organizes" y "multiple"); cambia entradas, nombres, descripciones y palabras clave.
