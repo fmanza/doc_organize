@@ -9,6 +9,7 @@ construcción.
 | `set_axis` | Fija los valores de un eje | Un eje: `{"domains": ["seguridad"]}` |
 | `confirm` | Da por buena la clasificación del documento | Todos sus ejes, con los valores confirmados |
 | `exclude` | Saca el documento del contexto (ni dominios, ni sitio, ni reorganización) | Ninguno |
+| `set_current_version` | Marca el documento como la versión vigente de su grupo ([versiones](versions.md)); se aplica también sin manifiesto | Ninguno |
 
 En un eje que organiza (carpeta o subcarpeta) va exactamente un valor. En un eje que solo etiqueta, una lista vacía
 significa «ninguno» y la IA ya no lo rellena.
@@ -75,6 +76,7 @@ explicación, ordenado por prioridad:
 | 2 | `rules_ai_disagreement` | La IA propuso otro dominio que el que quedó |
 | 3 | `unverified_evidence` | La cita de la IA no aparece en el documento (su confianza quedó bajo el umbral) |
 | 4 | `low_confidence` | Un valor por debajo del umbral de su eje |
+| 5 | `unconfirmed_version` | Un grupo de versiones cuya vigente no ha confirmado nadie |
 
 Lo que decidió una persona (`classified_by="human"`) no vuelve a la cola. Al resolver un elemento con una decisión
 (`ClassificationDecisionStore.add`), desaparece en la siguiente construcción.

@@ -1013,6 +1013,9 @@ class DomainDocument(BaseModel):
     source_sha256: str | None = Field(
         default=None, description="SHA-256 del original al construir el contexto (2.0.0, F4); None si no se conocía o el contexto es anterior"
     )
+    version: str | None = Field(default=None, description="Versión del documento en su grupo (`1.2`, 2.0.0 F5); None si no tiene")
+    version_group: str | None = Field(default=None, description="Clave de su grupo de versiones (`DocumentVersionGroup.key`)")
+    is_current: bool | None = Field(default=None, description="Si es la versión vigente de su grupo; None si no tiene grupo")
     classification: DocumentClassification = Field(
         default_factory=DocumentClassification,
         description=(
@@ -1066,6 +1069,9 @@ class UnclassifiedDocument(BaseModel):
         default_factory=DocumentClassification, description="Valores de los ejes que no organizan carpetas (2.0.0); vacío sin texto"
     )
     source_sha256: str | None = Field(default=None, description="SHA-256 del original al construir el contexto (2.0.0, F4); None si no se conocía")
+    version: str | None = Field(default=None, description="Versión del documento en su grupo (`1.2`, 2.0.0 F5); None si no tiene")
+    version_group: str | None = Field(default=None, description="Clave de su grupo de versiones (`DocumentVersionGroup.key`)")
+    is_current: bool | None = Field(default=None, description="Si es la versión vigente de su grupo; None si no tiene grupo")
 
 
 class Domain(BaseModel):
@@ -1144,11 +1150,12 @@ class DocumentCredentialFindings(BaseModel):
     rules: dict[str, int] = Field(default_factory=dict)
 
 
-DecisionAction = Literal["confirm", "set_axis", "exclude"]
+DecisionAction = Literal["confirm", "set_axis", "exclude", "set_current_version"]
 """Qué decide una persona sobre un documento (2.0.0, F6): confirmar su clasificación (los valores de todos sus ejes en
-`ClassificationDecision.axes`), fijar los valores de un eje, o sacarlo del contexto."""
+`ClassificationDecision.axes`), fijar los valores de un eje, sacarlo del contexto, o marcarlo como la versión vigente
+de su grupo de versiones (F5)."""
 
-DecisionIssueReason = Literal["source_changed", "unknown_axis", "unknown_value", "missing_document", "no_manifest"]
+DecisionIssueReason = Literal["source_changed", "unknown_axis", "unknown_value", "missing_document", "no_manifest", "not_versioned"]
 
 
 class ClassificationDecision(BaseModel):
@@ -1196,8 +1203,8 @@ class ClassificationDecision(BaseModel):
             raise ValueError("set_axis decide exactamente un eje")
         if self.action == "confirm" and not self.axes:
             raise ValueError("confirm necesita los valores de los ejes que se confirman")
-        if self.action == "exclude" and self.axes:
-            raise ValueError("exclude no lleva valores")
+        if self.action in ("exclude", "set_current_version") and self.axes:
+            raise ValueError(f"{self.action} no lleva valores")
         return self
 
     @property
@@ -1210,14 +1217,39 @@ class DecisionIssue(BaseModel):
     """Una decisión que no se aplicó en una construcción, y por qué (2.0.0, F6).
 
     `reason`: `source_changed` (el original cambió desde la decisión), `unknown_axis`/`unknown_value` (el eje o el
-    valor ya no están en el catálogo), `missing_document` (el documento no está en la construcción) o `no_manifest`
-    (sin manifiesto no se aplican decisiones).
+    valor ya no están en el catálogo), `missing_document` (el documento no está en la construcción), `no_manifest`
+    (sin manifiesto no se aplican decisiones) o `not_versioned` (`set_current_version` de un documento que no está en
+    ningún grupo de versiones).
     """
 
     decision_id: str
     document_key: str
     reason: DecisionIssueReason
     detail: str | None = None
+
+
+VersionsMode = Literal["all", "mark", "current_only"]
+"""Qué hace la construcción con las versiones de un mismo documento (2.0.0, F5): `all` (como 1.x: cada fichero es un
+documento), `mark` (todas se clasifican y llevan su versión y si son la vigente) o `current_only` (solo la vigente se
+clasifica, se publica y va a la IA; las demás quedan en `Context.superseded_documents`)."""
+
+
+class DocumentVersionGroup(BaseModel):
+    """Un grupo de versiones de un mismo documento en el contexto (2.0.0, F5).
+
+    Attributes:
+        key (str): Carpeta y nombre sin el marcador de versión, normalizados.
+        members (list[str]): Originales, de la versión más baja a la más alta.
+        versions (list[str]): Versión de cada uno (`1.2`), en el mismo orden.
+        current (str): Original vigente: la versión más alta o la que decidió una persona.
+        confirmed (bool): Si la vigente la confirmó una persona (`set_current_version`).
+    """
+
+    key: str
+    members: list[str]
+    versions: list[str]
+    current: str
+    confirmed: bool = False
 
 
 class Context(BaseModel):
@@ -1311,6 +1343,13 @@ class Context(BaseModel):
         default_factory=list, description="Decisiones de documentos que no están en esta construcción (2.0.0, F6)"
     )
     excluded_documents: list[str] = Field(default_factory=list, description="Originales que una persona sacó del contexto (`exclude`, 2.0.0 F6)")
+    versions_mode: VersionsMode = Field(default="all", description="Qué se hizo con las versiones de un documento (2.0.0, F5)")
+    version_groups: list[DocumentVersionGroup] = Field(
+        default_factory=list, description="Grupos de versiones detectados (con `versions` `mark` o `current_only`, 2.0.0 F5)"
+    )
+    superseded_documents: list[str] = Field(
+        default_factory=list, description='Versiones antiguas que no entraron en el contexto (`versions="current_only"`)'
+    )
     ai_provenance: "list[PromptProvenance]" = Field(
         default_factory=list, description="Prompt y modelo de cada tarea de IA que llegó a enviar algo (2.0.0, G1)"
     )
@@ -1480,8 +1519,10 @@ def _migrate_context_v1(context: Context) -> None:
             document.classification = DocumentClassification(axes=axes_values)
 
 
-ContextChangeKind = Literal["added", "removed", "reclassified"]
-"""Tipo de cambio de un documento entre dos construcciones del contexto (`ContextChange.change`, 1.5.0)."""
+ContextChangeKind = Literal["added", "removed", "reclassified", "superseded", "excluded"]
+"""Tipo de cambio de un documento entre dos construcciones del contexto (`ContextChange.change`, 1.5.0). Desde 2.0.0, un
+documento que sale porque hay una versión más nueva es `superseded` y uno que excluyó una persona, `excluded` (no
+`removed`)."""
 
 
 class ContextChange(BaseModel):
@@ -1493,7 +1534,7 @@ class ContextChange(BaseModel):
     """
 
     source_path: str = Field(..., description="Ruta del documento original")
-    change: ContextChangeKind = Field(..., description="`added`, `removed` o `reclassified`")
+    change: ContextChangeKind = Field(..., description="`added`, `removed`, `reclassified`, `superseded` o `excluded`")
     previous_domain: str | None = Field(default=None, description="Dominio en la construcción anterior; None si sin clasificar o `added`")
     domain: str | None = Field(default=None, description="Dominio en esta construcción; None si sin clasificar o `removed`")
     previous_material_type: str | None = Field(default=None, description="Tipo de material en la construcción anterior")
@@ -2003,6 +2044,7 @@ __all__ = [
     "DocumentEnrichmentResult",
     "DocumentMetadata",
     "DocumentStatus",
+    "DocumentVersionGroup",
     "Domain",
     "DomainDocument",
     "DomainStatus",
@@ -2039,4 +2081,5 @@ __all__ = [
     "UsageSnapshot",
     "UsageSourceName",
     "ValidationResult",
+    "VersionsMode",
 ]

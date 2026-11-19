@@ -6,6 +6,23 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+### Añadido
+
+- **Versiones de un documento (M7, F5)**: `detect_document_versions(source_paths, *, across_extensions=False)` agrupa
+  las versiones de un mismo documento solo por marcadores explícitos en el nombre (`v1.2`, `ver 3`, `rev2`,
+  `versión 1.4`, `ed. 2`; las fechas y los números con forma de año no cuentan), en la misma carpeta, con la misma
+  extensión y el resto del nombre idéntico; la vigente propuesta es la versión más alta. `ContextBuilder.build(versions=
+  "all" | "mark" | "current_only")`: `mark` añade `version`, `version_group` e `is_current` a cada documento;
+  `current_only` deja las antiguas en `Context.superseded_documents`. `Context.version_groups`
+  (`DocumentVersionGroup`) y `versions_mode`. Decisión `set_current_version` (también sin manifiesto; `not_versioned`
+  si el documento no tiene grupo) y motivo `unconfirmed_version` en la cola de revisión. En CALIDAD_VD: un grupo y
+  ningún falso positivo en 213 nombres.
+
+### Cambiado
+
+- El historial del contexto distingue los documentos que salen por ser una versión antigua (`superseded`) o porque los
+  excluyó una persona (`excluded`) de los que desaparecen (`removed`); el Excel del historial los rotula aparte.
+
 ## [2.0.0a1] - 2026-11-19
 
 Primera prerrelease de 2.0.0 (plan único de 2.0.0, `.ai/sessions/2026-11-17-ai-2.0/PLAN.md`), desde la rama

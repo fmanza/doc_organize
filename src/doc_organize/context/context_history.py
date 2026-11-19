@@ -20,7 +20,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from doc_organize.core.models import Context, ContextBuildRecord, ContextChange
+from doc_organize.core.models import Context, ContextBuildRecord, ContextChange, ContextChangeKind
 from doc_organize.projects.layout import context_history_files, rotated_context_history_path
 from doc_organize.utils.file_lock import exclusive_lock
 from doc_organize.utils.logging import get_logger
@@ -81,6 +81,9 @@ def _placements(context: Context) -> dict[str, _Placement]:
 def diff_contexts(previous: Context | None, current: Context) -> list[ContextChange]:
     """Documentos que entraron, salieron o cambiaron de dominio o tipo de material entre `previous` y `current`.
 
+    Uno que sale porque hay una versión más nueva (`current.superseded_documents`) es `superseded`, y uno que excluyó una
+    persona (`current.excluded_documents`), `excluded`: no son `removed` (2.0.0, U8).
+
     Un documento que solo cambia de quién lo clasificó (reglas o IA) sin cambiar de sitio no cuenta como cambio. Con
     `previous=None`, todos los documentos de `current` son `added`. Ordenados por `source_path`.
 
@@ -96,13 +99,15 @@ def diff_contexts(previous: Context | None, current: Context) -> list[ContextCha
     """
     before = _placements(previous) if previous is not None else {}
     after = _placements(current)
+    superseded, excluded = set(current.superseded_documents), set(current.excluded_documents)
     changes: list[ContextChange] = []
     for source_path in sorted(before.keys() | after.keys()):
         old, new = before.get(source_path), after.get(source_path)
         if old is None and new is not None:
             changes.append(ContextChange(source_path=source_path, change="added", domain=new[0], material_type=new[1], classified_by=new[2]))
         elif new is None and old is not None:
-            changes.append(ContextChange(source_path=source_path, change="removed", previous_domain=old[0], previous_material_type=old[1]))
+            kind: ContextChangeKind = "superseded" if source_path in superseded else "excluded" if source_path in excluded else "removed"
+            changes.append(ContextChange(source_path=source_path, change=kind, previous_domain=old[0], previous_material_type=old[1]))
         elif old is not None and new is not None and old[:2] != new[:2]:
             changes.append(
                 ContextChange(

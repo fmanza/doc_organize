@@ -11,6 +11,7 @@ decidió (`classified_by="human"`) no vuelve a la cola, salvo que su decisión h
 | `rules_ai_disagreement` | La IA propuso otro dominio que las reglas |
 | `unverified_evidence` | La cita de la IA no aparece en el documento (D10) |
 | `low_confidence` | Un valor por debajo del umbral de su eje |
+| `unconfirmed_version` | Un grupo de versiones cuya vigente no ha confirmado nadie (F5) |
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from pydantic import BaseModel, Field
 from doc_organize.context.evaluation import document_keys
 from doc_organize.core.models import AxisValue, Context, DomainDocument, TaxonomyAxis
 
-ReviewReason = Literal["stale_decision", "unclassified", "rules_ai_disagreement", "unverified_evidence", "low_confidence"]
+ReviewReason = Literal["stale_decision", "unclassified", "rules_ai_disagreement", "unverified_evidence", "low_confidence", "unconfirmed_version"]
 
 #: Orden de la cola: lo primero, lo que más urge.
 REVIEW_PRIORITY: dict[ReviewReason, int] = {
@@ -32,6 +33,7 @@ REVIEW_PRIORITY: dict[ReviewReason, int] = {
     "rules_ai_disagreement": 2,
     "unverified_evidence": 3,
     "low_confidence": 4,
+    "unconfirmed_version": 5,
 }
 
 
@@ -91,6 +93,17 @@ def review_queue(context: Context, *, roots: Sequence[str] | None = None) -> lis
         )
         for issue in context.stale_decisions
     ]
+    for group in context.version_groups:
+        if not group.confirmed:
+            versions = ", ".join(f"{version}" for version in group.versions)
+            items.append(
+                _item(
+                    "unconfirmed_version",
+                    keys.get(group.current, group.current),
+                    group.current,
+                    detail=f"Versiones {versions}; vigente propuesta: la más alta",
+                )
+            )
     for detail in context.unclassified_details:
         items.append(_item("unclassified", keys[detail.source_path], detail.source_path, axis=folder.key if folder else None, detail=detail.reason))
     for domain_slug, document in documents:
