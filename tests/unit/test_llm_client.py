@@ -6,8 +6,8 @@ import httpx
 import pytest
 
 from doc_organize.ai import LlmClient, PromptRegistry, _http_client_base, legacy_variables, settings_from_env
-from doc_organize.core.exceptions import AiAuthError, AiConfigurationError, AiError, AiResponseError
-from doc_organize.core.models import DEFAULT_MAX_TOKENS, AiSettings, TaskSettings
+from doc_organize.core.exceptions import AiAuthError, AiConfigurationError, AiConnectionError, AiError, AiResponseError
+from doc_organize.core.models import DEFAULT_MAX_TOKENS, AiSettings, TaskSettings, default_model_alias
 
 SECRET = "Xq7#Secreto-9931"
 SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"], "additionalProperties": False}
@@ -284,3 +284,37 @@ def test_missing_placeholder_and_unknown_task() -> None:
         PromptRegistry().get("agent", "../classify")
     with pytest.raises(AiConfigurationError, match="desconocida"):
         PromptRegistry().get("otra")  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_timeout_and_retries_per_task() -> None:
+    """2.0.0: una tarea lenta (borrador, agente) puede tener su propio timeout y sus reintentos."""
+    seen: list[float] = []
+
+    def offline(request: httpx.Request) -> httpx.Response:
+        seen.append(request.extensions["timeout"]["read"])
+        raise httpx.ConnectError("sin red")
+
+    settings = AiSettings(
+        base_url="https://proxy.test",
+        virtual_key="sk-general",
+        timeout_s=30,
+        retries=0,
+        retry_backoff_s=0,
+        rate_limit_retries=0,
+        tasks={"taxonomy_design": TaskSettings(model="lento", timeout_s=600, retries=2)},
+    )
+    with pytest.raises(AiConnectionError):
+        await _ask(LlmClient(settings, transport=httpx.MockTransport(offline)), task="taxonomy_design")
+    assert seen == [600, 600, 600]  # un intento y dos reintentos, con su timeout
+
+    seen.clear()
+    with pytest.raises(AiConnectionError):
+        await _ask(LlmClient(settings, transport=httpx.MockTransport(offline)), task="classify")
+    assert seen == [30]  # las demás tareas, con lo general
+    assert (settings.timeout_for("enrich"), settings.retries_for("enrich"), settings.max_documents_for("enrich")) == (30, 0, None)
+
+
+def test_default_model_alias() -> None:
+    assert [default_model_alias(task) for task in ("classify", "taxonomy_design")] == ["doc-organize-classify", "doc-organize-taxonomy-design"]
+    assert AiSettings(base_url="https://proxy.test", virtual_key="sk").model_for("agent") == default_model_alias("agent")

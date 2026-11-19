@@ -216,6 +216,13 @@ def _excerpt_metadata(source_path: str) -> dict[str, str | None]:
     return {"Tipo de fichero": Path(source_path).suffix.lstrip(".").lower() or None}
 
 
+def _budget(limit: int | None, llm: LlmClient | None, task: AiTask) -> int | None:
+    """El tope de documentos de una fase de IA: el menor de `ai_max_documents` y el de la tarea (`None` si ninguno)."""
+    own = llm.settings.max_documents_for(task) if llm is not None else None
+    limits = [value for value in (limit, own) if value is not None]
+    return min(limits) if limits else None
+
+
 def _rules_value(slug: str, names: dict[str, str], confidence: float) -> list[AxisValue]:
     """Valor de un eje organizador asignado por las reglas; vacío si quedó en el marcador «sin clasificar»."""
     if slug == _UNCLASSIFIED_SLUG:
@@ -413,7 +420,8 @@ class ContextBuilder:
                 persistir un contexto a medias (L-2).
             ai_max_failures: Una fase de IA se detiene tras este número de errores de conexión **seguidos**
                 (`AiPhaseStats.stopped = "connection"`, L-3a); un 401/403 la detiene siempre en el acto (`"auth"`).
-            ai_max_documents: Tope de documentos enviados en cada fase de IA (L-3b); al alcanzarlo, `"budget"`.
+            ai_max_documents: Tope de documentos enviados en cada fase de IA (L-3b); al alcanzarlo, `"budget"`. Si la
+                tarea de la fase tiene su propio tope (`TaskSettings.max_documents`, 2.0.0), manda el menor.
             persist: `False` devuelve el contexto sin guardarlo ni tocar el histórico (2.0.0, G3: `dry_run_classify`).
 
             Al detenerse una fase, los documentos pendientes no se envían y la construcción termina con normalidad. Los
@@ -448,8 +456,10 @@ class ContextBuilder:
             profile = compose_profile(taxonomy_manifest.profile if taxonomy_manifest is not None else None, project.root_path)
         profile_text = profile_prompt_text(profile)
         credential_ledger: dict[str, Counter[str]] = {}
-        ai_run = _AiRun(max_failures=ai_max_failures, max_documents=ai_max_documents, credential_ledger=credential_ledger)
-        enrichment_run = _AiRun(max_failures=ai_max_failures, max_documents=ai_max_documents, credential_ledger=credential_ledger)
+        ai_run = _AiRun(max_failures=ai_max_failures, max_documents=_budget(ai_max_documents, llm, "classify"), credential_ledger=credential_ledger)
+        enrichment_run = _AiRun(
+            max_failures=ai_max_failures, max_documents=_budget(ai_max_documents, llm, "enrich"), credential_ledger=credential_ledger
+        )
 
         def _report(phase: Phase, index: int, total: int, source_path: str) -> None:
             if on_progress is not None:

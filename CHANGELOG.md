@@ -8,6 +8,10 @@ releases publicados antes de esa versión).
 
 ### Añadido
 
+- **Ajustes por tarea (M10, peticiones de la web)**: `TaskSettings.timeout_s`, `retries` y `max_documents`
+  (`AiSettings.timeout_for`, `retries_for`, `max_documents_for`). El tope de documentos de la tarea se combina con
+  `build(ai_max_documents=)` (manda el menor), así que clasificar y describir pueden tener presupuestos distintos.
+  `default_model_alias(task)`: el alias por defecto de cada tarea (`doc-organize-<tarea>`).
 - **Paquete para IA (M9, F7)**: `write_ai_context_bundle(destination, project, context, *, include_text=True,
   current_only=True, redact=True, max_file_chars=None, max_full_chars=None)` escribe un ZIP para subir a un chat o
   agente: `llms.txt` (llmstxt.org), `documentos/…/*.md` con front matter (título, dominio, tipo, ejes, versión, ruta
