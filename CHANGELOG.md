@@ -28,6 +28,11 @@ releases publicados antes de esa versión).
 - **`check_site_offline(site_dir)`**: ningún recurso de terceros en las páginas, enlaces internos a ficheros que
   existen, índice de búsqueda en JavaScript y nada activo (`javascript:`, `on*`); `OfflineSiteReport.ok` y
   `problems()`. Las URLs de terceros del JavaScript del tema (bajo demanda) se listan aparte, como información.
+- **`write_site_zip(destination, site_dir, *, project_name=)` (M9, F3)**: ZIP reproducible del sitio sin conexión
+  (orden, fecha y permisos fijos: el mismo `site/` da el mismo SHA-256, también entre dos construcciones del mismo
+  contexto) con `sitio/`, `start_server.py` (servidor local solo en `127.0.0.1`) y `VER_SITIO.md`; en *streaming*, con
+  progreso y cancelación. Rechaza un sitio que no pase `check_site_offline` (`OfflineSiteError` con `problems`).
+  `SiteZipResult` con `sha256`.
 - Test de aceptación de D6 con un build real: un documento con `<script>`, `<img onerror>`, `<iframe>`, `javascript:`,
   `{onclick=…}` y una imagen remota no deja nada activo ni en el HTML ni en el índice de búsqueda.
 

@@ -188,6 +188,18 @@ class AiConfigurationError(DocOrganizeError):
     """
 
 
+class OfflineSiteError(DocOrganizeError):
+    """El sitio no se puede entregar sin conexión (2.0.0, F3): `check_site_offline` encontró problemas.
+
+    Attributes:
+        problems (list[str]): Los problemas, en texto (`OfflineSiteReport.problems()`).
+    """
+
+    def __init__(self, message: str, *, problems: list[str] | None = None) -> None:
+        super().__init__(message)
+        self.problems = problems or []
+
+
 __all__ = [
     "AiAuthError",
     "AiConfigurationError",
@@ -206,6 +218,7 @@ __all__ = [
     "InvalidPathError",
     "MissingDependencyError",
     "ModelsNotAvailableError",
+    "OfflineSiteError",
     "OperationCancelledError",
     "ProjectAlreadyExistsError",
     "ProjectError",
