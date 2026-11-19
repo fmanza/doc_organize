@@ -246,6 +246,7 @@ def test_tool_names_must_be_unique_and_not_reserved() -> None:
         '{"name": "count", "arguments": {"folder": "a"}}',
         '```json\n{"function": {"name": "count", "arguments": "{\\"folder\\": \\"a\\"}"}}\n```',
         '{"tool_calls": [{"type": "function", "function": {"name": "count", "parameters": {"folder": "a"}}}]}',
+        '{"tool_calls": [{"id": "c1", "type": "function_call", "function_name": "count", "arguments": {"folder": "a"}}]}',
     ],
 )
 async def test_tool_calls_written_as_text_are_run(content: str) -> None:

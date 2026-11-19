@@ -54,3 +54,21 @@ encuentra a veces, pero no las mantiene.
 
 - Volver a medir con un modelo más capaz (decisión del mantenedor: no se cambia la configuración del proxy desde aquí).
 - Si sigue sin cumplir, valorar una herramienta que sugiera palabras clave a partir de los documentos (opción 2).
+
+## M8.3: revisor y auditor sobre CALIDAD_VD (contexto guardado, solo lectura)
+
+Plantilla: el manifiesto del proyecto (2 ejes). Cola de revisión: 7 documentos (4 sin clasificar, 3 con desacuerdo
+reglas/IA).
+
+- **Auditor** (sin IA): dominios con valor en el 98,1 %, tipos de material en el 99,5 %, sin confianza baja ni citas
+  sin verificar; 3 propuestas `rules_ai_confusion` (pares de dominios que la IA corrige a menudo).
+- **Revisor** (`qwen3.5:9b`, 32k): 3 propuestas `set_axis` válidas, todas con cita, de 7 documentos; 21 pasos,
+  ~85 000 tokens de entrada, 9 minutos. Terminó en `invalid_answer` porque el modelo escribió las llamadas como texto
+  con `function_name` en lugar de `name`: el runner ya reconoce esa forma. Sin referencia etiquetada disponible, la
+  calidad de las propuestas no se ha medido (la revisa una persona: D14).
+
+## Nota sobre la plantilla de la puerta
+
+La medición del diseñador de arriba usa el **manifiesto del proyecto** (2 ejes). La plantilla de las mediciones M0/M5
+(5 ejes: dominios, tipos de material, sistema de gestión, marcos normativos y evidencias) es la «plantilla original»
+del plan: hay que repetir la medición del diseñador con ella cuando se vuelva a medir con un modelo más capaz.

@@ -77,6 +77,7 @@ explicación, ordenado por prioridad:
 | 3 | `unverified_evidence` | La cita de la IA no aparece en el documento (su confianza quedó bajo el umbral) |
 | 4 | `low_confidence` | Un valor por debajo del umbral de su eje |
 | 5 | `unconfirmed_version` | Un grupo de versiones cuya vigente no ha confirmado nadie |
+| 6 | `reviewer_proposal` | Una propuesta del revisor (`review_queue(context, proposals=review.proposals)`; ver [Agentes](agents.md#revisor-de-la-clasificacion)) |
 
 Lo que decidió una persona (`classified_by="human"`) no vuelve a la cola. Al resolver un elemento con una decisión
 (`ClassificationDecisionStore.add`), desaparece en la siguiente construcción.

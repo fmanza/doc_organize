@@ -141,6 +141,48 @@ agente llama a `finish` con un borrador que no mejora habiendo tenido uno que s�
 (`restore_best`) o corrija el actual. El prompt es `taxonomy_agent` de la tarea `agent`, sustituible en
 `<raíz>/.doc_organize/prompts/taxonomy_agent.md`.
 
+## Revisor de la clasificación
+
+`ReviewAgent` recorre la cola de revisión (`review_queue`) y, para cada documento, **propone** una decisión:
+confirmar la clasificación, cambiar un eje, excluir el documento o confirmar la versión vigente, con su justificación y
+una cita del texto. **Nunca la aplica** (D14): una persona la acepta convirtiéndola en decisión y guardándola.
+
+```python
+from doc_organize import ClassificationDecisionStore, ReviewAgent, RulesCorpus, review_queue
+
+review = await ReviewAgent(llm).propose(context, corpus=await RulesCorpus.load(documents), max_items=20)
+for proposal in review.proposals:
+    print(proposal.document_key, proposal.action, proposal.axes, proposal.rationale, proposal.evidence)
+
+queue = review_queue(context, proposals=review.proposals)  # las propuestas, en la cola como `reviewer_proposal`
+decision = review.proposals[0].to_decision(author="ana")  # si la persona la acepta
+await ClassificationDecisionStore(project.root_path).add(decision)
+```
+
+Sus herramientas: `list_queue` (su parte de la cola, con los motivos), `get_document` (clasificación actual, con
+quién, confianza y cita, y el comienzo del texto) y `propose_decision`. Cada propuesta se valida antes de aceptarla:
+el documento tiene que estar en su parte de la cola, los valores en el catálogo (uno solo en los ejes que organizan y
+en los de un valor) y la acción ser una decisión válida. Las propuestas valen aunque el agente no termine. El prompt es
+`review_agent` de la tarea `agent`.
+
+## Auditor de la taxonomía
+
+`audit_taxonomy(context)` resume, **sin IA**, cómo ha quedado clasificado un contexto: por eje, documentos con valor,
+recuento por valor, quién clasificó, valores de confianza baja y citas sin verificar. Y propone qué revisar en el
+catálogo, de más a menos documentos afectados:
+
+| Propuesta | Cuándo |
+|---|---|
+| `empty_entry` | Una entrada sin documentos: ¿sobra, o le faltan palabras clave que usen los documentos? |
+| `dominant_entry` | Una entrada con la mitad o más de los documentos de su eje: ¿demasiado general? |
+| `rules_ai_confusion` | La IA corrigió a menudo un dominio de las reglas por otro: sus descripciones se confunden |
+| `low_confidence`, `unverified_evidence` | Muchos valores dudosos en un eje (ver la cola) |
+| `unclassified` | Documentos sin clasificar |
+
+```python
+print(audit_taxonomy(context).to_markdown())
+```
+
 ## Comprobar un manifiesto por reglas
 
 `check_taxonomy_rules(manifest, corpus)` clasifica los documentos con un manifiesto candidato igual que la fase de
@@ -180,6 +222,17 @@ print(check_taxonomy_rules(manifest, corpus).to_markdown())
         - TaxonomyRulesReport
         - AxisRulesReport
         - NearMiss
+
+::: doc_organize.context.review_agent
+    options:
+      show_root_heading: false
+      members:
+        - ReviewAgent
+        - ReviewProposal
+        - ReviewResult
+        - audit_taxonomy
+        - TaxonomyAudit
+        - AuditFinding
 
 ## Referencia del runner
 

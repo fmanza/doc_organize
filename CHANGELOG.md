@@ -22,6 +22,15 @@ releases publicados antes de esa versión).
   (`TaxonomyDesignProposal`) conserva los ejes, el título y el perfil del de partida, trae el informe por reglas de las
   dos y nunca se guarda sola; `best` guarda el mejor borrador comprobado que mejoraba el de partida, aunque el agente
   terminara con otro. Prompt `taxonomy_agent` de la tarea `agent`.
+- **Revisor de la clasificación (M8, G6)**: `ReviewAgent(llm).propose(context, *, corpus=, max_items=20)` recorre la
+  cola de revisión y propone una decisión por documento (`ReviewProposal`: `confirm`, `set_axis`, `exclude` o
+  `set_current_version`, con justificación y cita), validada contra el catálogo; nunca la aplica (D14):
+  `ReviewProposal.to_decision(author=)` y `ClassificationDecisionStore.add` si una persona la acepta.
+  `review_queue(context, proposals=)` añade las propuestas a la cola con el motivo `reviewer_proposal`. Prompt
+  `review_agent` de la tarea `agent`.
+- **Auditor de la taxonomía (M8, G6)**: `audit_taxonomy(context)`, sin IA: estadísticas por eje (valores, quién
+  clasificó, confianza baja, citas sin verificar) y propuestas (`empty_entry`, `dominant_entry`, `rules_ai_confusion`,
+  `low_confidence`, `unverified_evidence`, `unclassified`); `TaxonomyAudit.to_markdown()`.
 - **Comprobación por reglas (M8)**: `check_taxonomy_rules(manifest, RulesCorpus)` da por eje la cobertura, los
   conflictos (las dos mejores entradas a menos de 0,1 en un eje de un valor), las entradas vacías, los términos
   compartidos, las palabras clave que no aparecen en ningún documento y, de algunos documentos, los términos que
