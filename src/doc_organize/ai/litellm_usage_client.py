@@ -84,6 +84,8 @@ class LiteLLMUsageClient(AiHttpClientBase):
             transport=transport,
             retries=config.retries,
             backoff_s=config.retry_backoff_s,
+            rate_limit_retries=config.rate_limit_retries,
+            max_retry_wait_s=config.max_retry_wait_s,
         )
 
     async def get_usage(self, *, key: str | None = None) -> UsageSnapshot:

@@ -6,6 +6,316 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [2.0.0rc1] - 2026-11-19
+
+Primera versión candidata de 2.0.0: hitos M8 (agentes), M9 (sitio sin conexión y paquete para IA) y M10 (guía de
+migración, matriz de combinaciones, peticiones de la web y medición final). La API no debería cambiar hasta 2.0.0.
+Medición final contra la línea base de 1.6.0 con el mismo modelo (`qwen2.5-coder:14b`, CALIDAD_VD, 150 documentos
+etiquetados): exactitud de dominio 0,23 → 0,247 (en los documentos que van a la IA, 0,33 → 0,39) y de tipo de material
+0,22 → 0,227; 38 de 38 documentos clasificados por la IA sin fallos; coste de entrada 1,64× (referencia 1,5×, aceptado
+como en M5). **Puerta del diseñador de la taxonomía (M8.2) no cumplida**: con los modelos locales disponibles su
+propuesta no mejora a la vez cobertura y conflictos de la plantilla original en todos los ejes; se publica como
+herramienta de apoyo (la propuesta la revisa una persona y conserva el mejor borrador comprobado), por decisión del
+mantenedor. Nueva dependencia empaquetada: Mermaid 12.2.0 e `iframe-worker` 1.0.4 (MIT) para el sitio sin conexión;
+la rueda pasa a unos 2 MB.
+
+### Añadido
+
+- **Peticiones de la web en W3 (M10)**: sin manifiesto (dominios descubiertos o catálogo propio), el valor que asigna la
+  IA en el eje `domains` guarda también su **cita** y si se verificó, con la confianza limitada por debajo del umbral
+  si no aparece (D10), como con manifiesto; así llega a la cola de revisión. `compose_profile_text(template,
+  project_text)`: el perfil compuesto (D11) a partir del texto de `profile.md` que se está editando, para la vista
+  previa sin guardar.
+
+- **Guía «De 1.x a 2.0» completa (M10)**: pasos para actualizar, todo lo que se retira y su sustituto, lo que cambia
+  de comportamiento sin cambiar la API (citas verificadas, extracto y perfil, caché de IA, redacción por defecto,
+  decisiones, historial) y un índice de lo nuevo, que es todo opcional.
+- **Matriz de combinaciones (M10, U7)**: tests con invariantes (valores del catálogo, un valor en los ejes que
+  organizan, la carpeta es el valor del dominio) sin IA, con `ai_scope="unclassified"` y con `missing_axes` +
+  semántica + decisiones + `versions="current_only"` a la vez (los cuatro mecanismos en una construcción), seguida del
+  sitio sin conexión con `llms.txt`, el paquete para IA y una reconstrucción sin ninguna llamada.
+
+- **Ajustes por tarea (M10, peticiones de la web)**: `TaskSettings.timeout_s`, `retries` y `max_documents`
+  (`AiSettings.timeout_for`, `retries_for`, `max_documents_for`). El tope de documentos de la tarea se combina con
+  `build(ai_max_documents=)` (manda el menor), así que clasificar y describir pueden tener presupuestos distintos.
+  `default_model_alias(task)`: el alias por defecto de cada tarea (`doc-organize-<tarea>`).
+- **Paquete para IA (M9, F7)**: `write_ai_context_bundle(destination, project, context, *, include_text=True,
+  current_only=True, redact=True, max_file_chars=None, max_full_chars=None)` escribe un ZIP para subir a un chat o
+  agente: `llms.txt` (llmstxt.org), `documentos/…/*.md` con front matter (título, dominio, tipo, ejes, versión, ruta
+  relativa del original, huella, quién clasificó), `context.json` reducido sin rutas absolutas y, con tope,
+  `llms-full.txt`. Redactado y solo vigentes por defecto; reproducible, en *streaming*, con progreso y cancelación.
+  `AiBundleStats`. Puerta de M9: ningún valor redactado llega al paquete.
+- `SiteGenerator.generate(llms_txt=True)`: el mismo `llms.txt` en la raíz del sitio, con enlaces a sus páginas;
+  `render_llms_txt` para cualquier destino.
+
+- **Sitio sin conexión (M9, F3)**: `SiteGenerator.generate(offline=True)` construye un sitio para abrirse desde el disco
+  y sin nada de terceros: plugin `offline` de Zensical (enlaces a ficheros, búsqueda en `search.js`), Mermaid
+  `12.2.0` y el shim `iframe-worker` `1.0.4` empaquetados (MIT, en `context/site_assets/`), y siempre la
+  neutralización de las páginas de los documentos. `SiteResult.offline`, `neutralized` y `neutralized_counts`.
+- **`neutralize_untrusted_markdown(text)` (D6 a)**: HTML escapado fuera del código (comentarios conservados), enlaces
+  `javascript:`/`vbscript:`/`data:` a texto (también disfrazados con entidades o espacios), imágenes remotas y por
+  referencia a enlaces y listas de atributos con `on*`, `href`, `src` o `style` escapadas; idempotente.
+  `NeutralizeResult` con recuentos por tipo.
+- **`check_site_offline(site_dir)`**: ningún recurso de terceros en las páginas, enlaces internos a ficheros que
+  existen, índice de búsqueda en JavaScript y nada activo (`javascript:`, `on*`); `OfflineSiteReport.ok` y
+  `problems()`. Las URLs de terceros del JavaScript del tema (bajo demanda) se listan aparte, como información.
+- **`write_site_zip(destination, site_dir, *, project_name=)` (M9, F3)**: ZIP reproducible del sitio sin conexión
+  (orden, fecha y permisos fijos: el mismo `site/` da el mismo SHA-256, también entre dos construcciones del mismo
+  contexto) con `sitio/`, `start_server.py` (servidor local solo en `127.0.0.1`) y `VER_SITIO.md`; en *streaming*, con
+  progreso y cancelación. Rechaza un sitio que no pase `check_site_offline` (`OfflineSiteError` con `problems`).
+  `SiteZipResult` con `sha256`.
+- Test de aceptación de D6 con un build real: un documento con `<script>`, `<img onerror>`, `<iframe>`, `javascript:`,
+  `{onclick=…}` y una imagen remota no deja nada activo ni en el HTML ni en el índice de búsqueda.
+
+- **Agentes (M8, G5)**: `AgentRunner(llm, tools, *, limits=, answer_schema=, parse_answer=)` ejecuta un agente con
+  herramientas sobre la tarea `agent`. Solo ejecuta las `AgentTool` que se le dan (un nombre desconocido o unos
+  argumentos que no son JSON vuelven al modelo como error); topes de pasos, tokens acumulados, herramientas y tamaño de
+  cada resultado (`AgentLimits`); cancelación con el `CancelToken` de `build` (también desde otro hilo); respuesta estructurada con la
+  herramienta `finish` y un reintento si no cumple el esquema. Al llegar a un tope o cancelar, para con
+  `AgentRun.stop_reason` sin lanzar. Los resultados de las herramientas se redactan como el resto de lo que sale.
+
+- **Diseñador de la taxonomía (M8, G5)**: `TaxonomyDesignAgent(llm).propose(documents, *, base=, instructions=)` mejora
+  un manifiesto (o diseña uno) editando un borrador en memoria con cambios pequeños (`edit_draft`, `undo_edit`,
+  `restore_best`, `set_draft`) que se comprueban con las reglas contra todos los documentos, tras explorarlos (`overview`,
+  `search_documents`, `read_document`). Herramientas sin escritura y sin IA dentro. La propuesta
+  (`TaxonomyDesignProposal`) conserva los ejes, el título y el perfil del de partida, trae el informe por reglas de las
+  dos y nunca se guarda sola; `best` guarda el mejor borrador comprobado que mejoraba el de partida, aunque el agente
+  terminara con otro. Prompt `taxonomy_agent` de la tarea `agent`.
+- **Revisor de la clasificación (M8, G6)**: `ReviewAgent(llm).propose(context, *, corpus=, max_items=20)` recorre la
+  cola de revisión y propone una decisión por documento (`ReviewProposal`: `confirm`, `set_axis`, `exclude` o
+  `set_current_version`, con justificación y cita), validada contra el catálogo; nunca la aplica (D14):
+  `ReviewProposal.to_decision(author=)` y `ClassificationDecisionStore.add` si una persona la acepta.
+  `review_queue(context, proposals=)` añade las propuestas a la cola con el motivo `reviewer_proposal`. Prompt
+  `review_agent` de la tarea `agent`.
+- **Auditor de la taxonomía (M8, G6)**: `audit_taxonomy(context)`, sin IA: estadísticas por eje (valores, quién
+  clasificó, confianza baja, citas sin verificar) y propuestas (`empty_entry`, `dominant_entry`, `rules_ai_confusion`,
+  `low_confidence`, `unverified_evidence`, `unclassified`); `TaxonomyAudit.to_markdown()`.
+- **Comprobación por reglas (M8)**: `check_taxonomy_rules(manifest, RulesCorpus)` da por eje la cobertura, los
+  conflictos (las dos mejores entradas a menos de 0,1 en un eje de un valor), las entradas vacías, los términos
+  compartidos, las palabras clave que no aparecen en ningún documento y, de algunos documentos, los términos que
+  encajan en cada entrada empatada (`conflict_terms`) y la entrada que más se acercó al umbral (`near_misses`), igual
+  que la fase de reglas de `build` y sin guardar nada; `TaxonomyRulesReport.improves_on(base)`.
+- `AgentRunner` reconoce las llamadas a herramientas que algunos modelos locales escriben como JSON en el texto (solo
+  si todas son de herramientas que existen; `AgentStep.calls_in_text`).
+- `AgentRunner`: una llamada idéntica a la anterior a una herramienta `idempotent` (por defecto) no se ejecuta y vuelve
+  como error (bucles de modelos pequeños); con `answer_schema`, aviso al modelo dos pasos antes del tope para que
+  responda con `finish`.
+- `AgentLimits.keep_tool_results`: reenvía enteros solo los últimos resultados de herramientas (los anteriores, un
+  aviso), para que cada llamada no crezca sin límite; `AgentRun.messages` los guarda enteros. La guía de agentes avisa
+  de que Ollama recorta por defecto el contexto a 4096 tokens sin error (subir `num_ctx`).
+- `PromptRegistry.get(task, name=None)`: una tarea puede tener varios prompts con nombre (los agentes).
+- `catalog_scores` y `score_candidates` de los clasificadores por reglas, y `AxisRuleScorer.scores`: todas las
+  puntuaciones, no solo la mejor (el resultado de la clasificación no cambia).
+
+### Cambiado
+
+- La CSP en `<meta>` del sitio sin conexión (D6 b) **no se incluye**: el tema necesita `'unsafe-inline'` y no se ha
+  podido comprobar en los tres navegadores con `file://`; la protección es la neutralización.
+- La rueda pesa unos 1,5 MB más por Mermaid empaquetado (solo se copia al sitio con `offline=True`).
+
+- `LlmClient.complete_with_tools` envía `max_tokens` como `complete_json`; la tarea `agent` tiene 4096 por defecto
+  (`DEFAULT_MAX_TOKENS`).
+
+## [2.0.0a2] - 2026-11-19
+
+Segunda prerrelease de 2.0.0, desde `feature/2.0`: hito M7 (versiones de un documento y embeddings). La API puede
+cambiar hasta la 2.0.0. Mismas dependencias que 2.0.0a1: los embeddings se guardan con el módulo `array` (sin numpy)
+y la sub-fase semántica es opcional (`semantic=False` por defecto). Puertas de M7: ningún falso positivo de versiones
+en los 213 nombres de CALIDAD_VD y ejemplos de la IA sin fugas (ni el propio documento, ni sus duplicados, ni la
+referencia al evaluar). La sub-fase semántica está probada con embeddings simulados; falta medirla con un modelo de
+embeddings real.
+
+### Añadido
+
+- **Versiones de un documento (M7, F5)**: `detect_document_versions(source_paths, *, across_extensions=False)` agrupa
+  las versiones de un mismo documento solo por marcadores explícitos en el nombre (`v1.2`, `ver 3`, `rev2`,
+  `versión 1.4`, `ed. 2`; las fechas y los números con forma de año no cuentan), en la misma carpeta, con la misma
+  extensión y el resto del nombre idéntico; la vigente propuesta es la versión más alta. `ContextBuilder.build(versions=
+  "all" | "mark" | "current_only")`: `mark` añade `version`, `version_group` e `is_current` a cada documento;
+  `current_only` deja las antiguas en `Context.superseded_documents`. `Context.version_groups`
+  (`DocumentVersionGroup`) y `versions_mode`. Decisión `set_current_version` (también sin manifiesto; `not_versioned`
+  si el documento no tiene grupo) y motivo `unconfirmed_version` en la cola de revisión. En CALIDAD_VD: un grupo y
+  ningún falso positivo en 213 nombres.
+
+- **Clasificación semántica (M7, G4)**: `EmbeddingIndex` (vectores en `<raíz>/.doc_organize/embeddings/`, `array` sin
+  numpy, clave por modelo, redacción y texto) y `ContextBuilder.build(semantic=False, semantic_threshold=0.75)`: con
+  `semantic=True`, tras las reglas y las decisiones y antes de la IA, rellena los ejes vacíos comparando el extracto de
+  cada documento con «nombre, descripción y palabras clave» de cada valor (en un eje de un valor, solo si le saca 0,03
+  al segundo); `classified_by="semantic"`. `AiStats.semantic` y `semantic_classification`. Un fallo del modelo de
+  embeddings no para la construcción.
+- **Ejemplos y preselección para la IA (M7, G4)**: con `semantic=True`, cada documento que va a la IA recibe los
+  `ai_examples` (3) documentos más parecidos ya clasificados con fiabilidad (decisión de una persona o confianza ≥ 0,9
+  en un eje que organiza), en el mensaje `user` (prompt `classify` versión 4: el prefijo `system` no cambia); nunca el
+  propio documento, sus duplicados (mismo `source_sha256`) ni `example_exclusions` (`dry_run_classify` excluye la
+  referencia sola, B16). En ejes de más de 25 valores, al modelo solo van los 15 más parecidos.
+  `classification_request(..., examples=)`.
+
+### Cambiado
+
+- El historial del contexto distingue los documentos que salen por ser una versión antigua (`superseded`) o porque los
+  excluyó una persona (`excluded`) de los que desaparecen (`removed`); el Excel del historial los rotula aparte.
+
+## [2.0.0a1] - 2026-11-19
+
+Primera prerrelease de 2.0.0 (plan único de 2.0.0, `.ai/sessions/2026-11-17-ai-2.0/PLAN.md`), desde la rama
+`feature/2.0`: hitos M1 a M6 (taxonomía por ejes, rendimiento, redacción de credenciales, cliente único de IA y caché,
+clasificación con catálogo descrito, perfil, extracto y cita verificada, evaluación, decisiones de personas, cola de
+revisión y clasificación de prueba). MAJOR con ruptura; la API puede cambiar hasta la 2.0.0. La guía de migración
+completa llega con la versión. Mismas dependencias que 1.7.1.
+
+Medida contra la línea base (M0, CALIDAD_VD): ningún eje empeora, el dominio sube 2 puntos (0,233 → 0,253; en los
+documentos que clasifica la IA, 0,333 → 0,435) y el coste por documento enviado a la IA es 1,62× en tokens de entrada
+y 1,70× en total (`.ai/sessions/2026-11-17-ai-2.0/MEDICION_M5.md`).
+
+### Cambiado (ruptura)
+
+- **Taxonomía por ejes (M1, A1)**: `TaxonomyManifest` es una lista de ejes (`axes: list[TaxonomyAxis]`, `schema: 2`).
+  El dominio es el eje con `organizes: folder` y el tipo de material el de `organizes: subfolder` (exactamente uno de
+  cada); los demás ejes (marcos normativos, sistema de gestión...) solo etiquetan. Se retiran
+  `TaxonomyManifest.domains`/`material_types` (usar `manifest.folder_axis.entries`/`manifest.subfolder_axis.entries`)
+  y `TaxonomyCatalogEntry` (ahora `TaxonomyEntry`, con `examples`). `render_taxonomy_template` y
+  `render_taxonomy_manifest_markdown` escriben el formato 2.0.
+- Límites del manifiesto con mensaje claro: 10 ejes, 150 entradas por eje, descripciones de 500 caracteres, claves
+  `^[a-z][a-z0-9_]{0,40}$`.
+
+### Añadido
+
+- `migrate_manifest_v1(text)`: reescribe un manifiesto o plantilla de 1.x en formato 2.0 conservando el cuerpo, los
+  campos extra de las entradas y las claves que no se usan. `domains` y `material_types` pasan a ejes organizadores,
+  el bloque `facets:` y las claves de nivel superior con una lista de entradas `{slug, name}` (formato implícito, como
+  la plantilla de normas y gobernanza) pasan a ejes de varios valores.
+- `inspect_taxonomy_front_matter(text) -> TaxonomyFrontMatterReport` (`axes`, `implicit_axes`, `ignored_keys`,
+  `legacy_format`): para avisar al autor de qué se leerá y qué se ignora.
+- `TaxonomyManifestDraftResult.to_manifest()`.
+- **Clasificación por ejes (M1, A2 y A3)**: cada `DomainDocument` lleva `classification: DocumentClassification`, con
+  una lista de `AxisValue` (`slug`, `name`, `confidence`, `classified_by`: `rules`, `semantic`, `ai` o `human`) por cada
+  eje del manifiesto; lista vacía = evaluado sin valor (en un eje organizador, «Sin Clasificar»). Los ejes que solo
+  etiquetan se clasifican por reglas con `AxisRuleScorer`, en el título y los primeros 6000 caracteres del texto:
+  palabra o frase completa sin acentos ni mayúsculas, sin los
+  términos que comparten varias entradas, y confianza por términos distintos encontrados (1 → 0,6; 2 → 0,8; 3+ → 1,0);
+  como mucho 5 valores en un eje `multiple` y el mejor en los demás; `threshold` propio del eje y `rules: false`. Los
+  ejes organizadores siguen con las reglas de 1.x. La Sub-fase B marca con `ai` solo el eje que decide.
+- `context.json` v2: `Context.schema_version = 2` y `Context.taxonomy_axes` (los ejes usados, sin `keywords` ni
+  `examples`; sin manifiesto, el eje `domains`). `index.json` no escribe `evidence`/`evidence_verified` cuando no hay
+  cita.
+
+- **Salidas por ejes (M1, A4)**: el sitio tiene una página `eje-<clave>.md` por cada eje que solo etiqueta (tabla de
+  valores con su recuento y enlaces a los documentos de cada valor), en el `nav` («Ejes de clasificación») y en
+  `index.md`. `write_context_documents_xlsx(destination, context)` (D4): hoja `Documentos` con una columna por eje y
+  hoja `Ejes` con los recuentos por valor, con la misma protección contra fórmulas, progreso y cancelación que las demás
+  exportaciones.
+
+- **Rendimiento de la construcción (M2, B)**: sin IA, cada `.json` de conversión se lee una sola vez (clasificación,
+  ejes, idioma y propuesta de los sin clasificar), con `properties_concurrency` lecturas a la vez; con 213 documentos y
+  20 ms por lectura, de 13,1 s a 3,5 s. `ContextBuilder(ai_concurrency=1)`: llamadas a la IA a la vez en la Sub-fase B
+  y el enriquecimiento, con los resultados aplicados en el orden de los documentos (mismo contexto con 1 y con 4); el
+  presupuesto se reserva al despachar y nunca se supera.
+
+- **Reintento ante 429/503 (M2, D5)**: todas las `*Config` de `doc_organize.ai` tienen `rate_limit_retries` (por
+  defecto 3) y `max_retry_wait_s` (60 s). Ante una respuesta 429 o 503 el cliente espera lo que pida `Retry-After`
+  (segundos o fecha HTTP) o la espera creciente de `retry_backoff_s`, con tope, y la espera es compartida por todas sus
+  llamadas en vuelo. **Cambio de comportamiento**: en 1.x un 429 fallaba en el acto; `rate_limit_retries=0` lo
+  mantiene.
+
+- **Frescura del contexto (M2, F4)**: `ConversionResult.source_sha256` (el consumidor pasa `CacheEntry.sha256_hash`),
+  que el builder guarda en `DomainDocument.source_sha256` y `UnclassifiedDocument.source_sha256`.
+  `check_context_freshness(project, context, cache_entries, *, site_dir=None, scanned_at=None) -> FreshnessReport`
+  (`changed`, `added`, `removed`, `unknown`, `stale_site`, `scanned_at`, `up_to_date`), sin leer originales ni `.json`.
+
+- **Diagnóstico del entorno (M3, F2)**: `check_environment(*, check_ai=False, ai_endpoints=None, artifacts_path=None,
+  build_site=True) -> EnvironmentReport` comprueba Python, docling y sus modelos, los extras (`export`, `site` con un
+  build de prueba y el rango probado de Zensical, `ocr-gpu`, `av`) y LibreOffice; con `check_ai=True`, que cada modelo de
+  IA configurado responde y si admite `json_schema` estricto, con texto sintético. Sin rutas ni claves en el informe.
+- **Puerta de la redacción (M3, F1)**: test de extremo a extremo de que el valor de una credencial del texto no sale
+  hacia la IA ni aparece en `context.json`, los `index.json`, `unclassified.json`, el historial, los logs ni el Excel.
+
+- **Cliente único de IA (M4, G1, primer paso)**: `doc_organize.ai.LlmClient(AiSettings)` con `complete_json`,
+  `complete_with_tools` y `embed`; modelo y clave por tarea (`classify`, `enrich`, `taxonomy_design`, `agent`, `embed`;
+  `TaskSettings`); redacción de credenciales en el único punto de salida; `json_schema` estricto con caída una vez a
+  `json_object` y validación siempre; `metadata.tags`. `settings_from_env()` lee `DOC_ORGANIZE_LITELLM_BASE_URL`,
+  `_VIRTUAL_KEY`, `_MODEL_<TAREA>` y `_VIRTUAL_KEY_<TAREA>`, y lanza `AiConfigurationError` con la equivalencia si
+  encuentra variables de 1.x. `PromptRegistry`: prompts empaquetados por tarea (`ai/prompts/<tarea>.md`, con `id` y
+  `version`), sustituibles en `<raíz>/.doc_organize/prompts/`, y `PromptProvenance`. Excepciones `AiError`,
+  `AiAuthError`, `AiConnectionError`, `AiResponseError` y `AiConfigurationError`.
+- **Servicios por tarea y builder sobre el cliente único (M4, segundo paso)**: `classify_document`, `enrich_document`
+  y `draft_taxonomy` (`doc_organize.ai`). `ContextBuilder.build(project, documents, *, ..., llm=None, ai_scope="off",
+  enrich=False, prompts=None, ...)`: todo tras `documents` solo por nombre. `Context.ai_stats` (alcance, recuentos y
+  tokens por fase) y `Context.ai_provenance` (prompt y modelo por tarea; `context.model_for_task(...)`). La redacción la
+  hace `LlmClient` (`AiSettings.redact_credentials`); lo redactado se anota por documento aunque la llamada falle.
+  `check_environment(check_ai=True)` comprueba las tareas de `settings_from_env()` e informa de las variables de 1.x.
+  Guía nueva: [De 1.x a 2.0](docs/guides/migracion_2_0.md).
+- **Caché de resultados de IA (M4, tercer paso)**: `AiResultCache` en `<raíz>/.doc_organize/ai_cache/`, con la huella
+  de lo que se enviaría (tarea, modelo, mensajes redactados, esquema y redacción). `ContextBuilder.build(ai_cache=True)`
+  por defecto: **reconstruir sin cambios no llama al modelo**; lo resuelto con la caché cuenta en
+  `AiPhaseStats.cached`, no en `sent`, y no consume `ai_max_documents`. `LlmResult.cached`, `LlmClient.cache_key_for`,
+  `TaskRequest` (`classification_request`, `enrichment_request`) y `prune_ai_cache(project_root, max_age_days=90)`.
+
+- **Lo que recibe el modelo (M5, G2, primer paso)**: `read_conversion_document` (`.json` completo, con los títulos de
+  sección de cada fragmento y la huella del original); `build_document_excerpt` (extracto de hasta 4500 caracteres:
+  título, carpeta de dos niveles, metadatos, esquema de títulos, comienzo con texto de verdad y fragmentos con términos del
+  catálogo; `EXCERPT_VERSION`); `ProjectProfile` y `TaxonomyManifest.profile`, leído de las secciones `## Contexto del
+  proyecto`, `## Reglas de desempate`, `## Glosario` y `## Ejemplos` del cuerpo, con el de
+  `<raíz>/.doc_organize/profile.md` añadido detrás (`compose_profile`, D11).
+- **Clasificación con IA de 2.0 (M5, G1.4 y G2)**: el prompt `classify` (versión 3) envía el catálogo con nombres y
+  descripciones (`render_catalog`), el perfil del proyecto y el extracto del documento entre `<<<DOCUMENTO` y
+  `DOCUMENTO>>>`. La respuesta es, por eje, una lista `values` de `{value, confidence, evidence}` (uno como mucho, o 5
+  en un eje múltiple); la cita (de 3 a 15 palabras copiadas tal cual) se comprueba contra lo enviado, trozo a trozo si
+  lleva puntos suspensivos, y, si no aparece, la confianza queda por debajo del umbral del eje (D10). `AxisRequest` pasa a llevar `AxisOption` (`from_axis`, `from_slugs`), `AxisAnswer.choices` con
+  `AxisChoice` (`evidence`, `evidence_verified`), `classify_document(..., profile=)`, `render_prompt_preview(manifest)`
+  (los mensajes, sin llamar a nadie) y `ContextBuilder.build(profile=)`.
+- `ai_scope="missing_axes"`: la IA clasifica también los documentos con algún eje que solo etiqueta vacío (incluidos los
+  de `rules: false`), con una llamada por documento y solo los ejes que le faltan. La IA solo rellena ejes vacíos; los
+  valores de los ejes que etiquetan pasan por su umbral. `AxisValue.evidence`/`evidence_verified` guardan la cita.
+- **Enriquecimiento y borrador sobre la entrada nueva (M5)**: `enrich` (prompt versión 2) describe a partir del extracto
+  del documento (hasta `MAX_CONTENT_CHARS`, 4000, como en 1.x) entre delimitadores, con el perfil del proyecto
+  (`enrich_document(..., profile=)`). `taxonomy_design` (versión 2) pide descripciones que digan qué entra en cada
+  entrada y qué no, y un **perfil inicial** (`TaxonomyManifestDraftResult.profile`: contexto, reglas de desempate y
+  glosario); `to_manifest()` lo lleva al manifiesto y `render_taxonomy_manifest_markdown` lo escribe en las secciones
+  que se vuelven a leer al cargarlo.
+- `TaskSettings.max_tokens` y `AiSettings.max_tokens_for(task)`: tope de tokens de la respuesta por tarea
+  (`DEFAULT_MAX_TOKENS`: 1024 en `classify`, 512 en `enrich`, 4096 en `taxonomy_design`), que se envía como
+  `max_tokens`. Medido en CALIDAD_VD (M5): la respuesta media de `classify` pasa de 519 a 284 tokens y la máxima de 4964
+  a 693.
+- **Evaluación contra una referencia (M6, G3)**: `evaluate_classification(context, gold) -> EvaluationReport`, con
+  exactitud, cobertura, precisión y *recall* por eje, exactitud según quién clasificó y confusiones más frecuentes
+  (`to_markdown()`); `load_gold_xlsx` lee la hoja de la línea base (`dominio_ok`, `tipo_ok`, o las columnas que se
+  indiquen; `ninguno` = eje vacío correcto), `GoldStandard`/`GoldLabel` para construirla a mano. Los documentos se
+  identifican por su ruta relativa a la raíz de escaneo (`document_key`, `document_keys`).
+- **Clasificación de prueba (M6, G3)**: `dry_run_classify(project, documents, *, gold=None, only_gold=True, ...)`
+  construye el contexto sin guardarlo (`ContextBuilder.build(persist=False)`), sin caché de IA por defecto y, con una
+  referencia, solo con sus documentos; devuelve `DryRunResult` (`context`, `evaluation`, `documents`) para comparar
+  reglas, prompts, perfiles o modelos.
+- **Decisiones de personas (M6, F6)**: `ClassificationDecision` (`confirm`, `set_axis`, `exclude`, con autor, fecha,
+  motivo y huella del original) y `ClassificationDecisionStore` (`<raíz>/.doc_organize/decisions.json`, escritura atómica
+  y bloqueo; una decisión nueva sustituye a la que decidía lo mismo, que pasa al historial; `revoke`).
+  `ContextBuilder.build(decisions=True, scan_roots=None)` las aplica tras las reglas y antes de la IA, con manifiesto:
+  lo decidido queda con `classified_by="human"` y la IA no lo pregunta. `Context.decisions_applied`,
+  `stale_decisions` (original cambiado, eje o valor fuera del catálogo, sin manifiesto), `orphan_decisions` (documento
+  ausente) y `excluded_documents`. `gold_from_decisions` convierte las decisiones en una referencia para la evaluación.
+- **Cola de revisión (M6, F6)**: `review_queue(context, *, roots=None) -> list[ReviewItem]`, lo que una persona debería
+  mirar y por qué, por prioridad: decisiones desfasadas, sin clasificar, discrepancia reglas/IA en el dominio, cita de
+  la IA no verificada y confianza por debajo del umbral del eje. Lo decidido por una persona no vuelve a la cola.
+
+### Retirado (ruptura)
+
+- `DomainClassificationClient`, `TaxonomyClassificationClient`, `DocumentEnrichmentClient`,
+  `TaxonomyManifestDraftClient`, sus `LiteLLM*Config`, sus `*_config_from_env()` y sus excepciones; `DomainClassificationResult`
+  y `TaxonomyClassificationResult`. Las variables `DOC_ORGANIZE_LITELLM_<CLIENTE>_*` ya no se leen (su presencia da error
+  con la equivalente, D15).
+- `ContextBuilder.build(ai_classification_enabled=, ai_classification_client=, taxonomy_classification_client=,
+  ai_enrichment_enabled=, ai_enrichment_client=, on_ai_progress=)` y `ContextBuilder(ai_redact_credentials=)`.
+- `Context.ai_classification_enabled`, `ai_classification_model`, `ai_enrichment_model`, `ai_classification_stopped`,
+  `ai_documents_*` y `ai_enrichment_*` (pasan a `ai_stats` y `ai_provenance`; un `context.json` de 1.x se migra al leerlo).
+
+### Compatibilidad
+
+- Los manifiestos y plantillas de 1.x se siguen leyendo (se migran en memoria); `save_taxonomy_manifest` guarda el
+  texto tal cual. Un `context.json` de 1.x se migra al leerlo: `taxonomy_axes` y la clasificación de los ejes
+  organizadores salen del dominio y del tipo de material de cada documento (quién decidió cada eje es una aproximación
+  en los contextos de 1.x, que solo guardaban `classified_by` por documento). `material_type`, `classified_by` y el
+  dominio de cada documento se siguen guardando como en 1.x. Las plantillas empaquetadas están en formato 2.0. Sin IA, la clasificación de dominio y tipo de
+  material es la de 1.7 (comprobado con el corpus de los tests y con CALIDAD_VD).
+
 ## [1.7.1] - 2026-11-18
 
 El sitio del contexto deja de crecer con el cuadrado del número de documentos. Sin cambios en la API ni dependencias

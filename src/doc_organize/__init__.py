@@ -43,6 +43,59 @@ _EXPORTS: dict[str, str] = {
     "render_taxonomy_template": "doc_organize.context.taxonomy_templates",
     "list_builtin_templates": "doc_organize.context.taxonomy_templates",
     "load_builtin_template": "doc_organize.context.taxonomy_templates",
+    # Manifiesto 2.0 por ejes (A1)
+    "migrate_manifest_v1": "doc_organize.context.taxonomy_front_matter",
+    "check_context_freshness": "doc_organize.context.freshness",
+    # Evaluación contra una referencia (2.0.0, G3)
+    "evaluate_classification": "doc_organize.context.evaluation",
+    "load_gold_xlsx": "doc_organize.context.evaluation",
+    "GoldStandard": "doc_organize.context.evaluation",
+    "GoldLabel": "doc_organize.context.evaluation",
+    "EvaluationReport": "doc_organize.context.evaluation",
+    "AxisEvaluation": "doc_organize.context.evaluation",
+    "dry_run_classify": "doc_organize.context.dry_run",
+    "DryRunResult": "doc_organize.context.dry_run",
+    # Decisiones de personas (2.0.0, F6)
+    "ClassificationDecision": "doc_organize.core.models",
+    "ClassificationDecisionStore": "doc_organize.context.decisions",
+    "DecisionIssue": "doc_organize.core.models",
+    "gold_from_decisions": "doc_organize.context.decisions",
+    # Cola de revisión (2.0.0, F6)
+    "review_queue": "doc_organize.context.review_queue",
+    "ReviewItem": "doc_organize.context.review_queue",
+    # Versiones de un documento (2.0.0, F5)
+    "detect_document_versions": "doc_organize.context.versions",
+    "DocumentVersionGroup": "doc_organize.core.models",
+    # Diagnóstico del entorno (2.0.0, F2)
+    "check_environment": "doc_organize.diagnostics",
+    # Cliente único de IA (2.0.0, G1)
+    "LlmClient": "doc_organize.ai.llm_client",
+    # Agentes (2.0.0, G5)
+    "AgentRunner": "doc_organize.ai.agents",
+    "AgentTool": "doc_organize.ai.agents",
+    "AgentLimits": "doc_organize.ai.agents",
+    "AgentRun": "doc_organize.ai.agents",
+    "TaxonomyDesignAgent": "doc_organize.context.taxonomy_agent",
+    "TaxonomyDesignProposal": "doc_organize.context.taxonomy_agent",
+    "check_taxonomy_rules": "doc_organize.context.taxonomy_check",
+    "RulesCorpus": "doc_organize.context.taxonomy_check",
+    "TaxonomyRulesReport": "doc_organize.context.taxonomy_check",
+    "ReviewAgent": "doc_organize.context.review_agent",
+    "ReviewProposal": "doc_organize.context.review_agent",
+    "ReviewResult": "doc_organize.context.review_agent",
+    "audit_taxonomy": "doc_organize.context.review_agent",
+    "TaxonomyAudit": "doc_organize.context.review_agent",
+    "PromptRegistry": "doc_organize.ai.prompts",
+    "settings_from_env": "doc_organize.ai.settings",
+    "AiResultCache": "doc_organize.ai.cache",
+    "prune_ai_cache": "doc_organize.ai.cache",
+    "AiSettings": "doc_organize.core.models",
+    "TaskSettings": "doc_organize.core.models",
+    "default_model_alias": "doc_organize.core.models",
+    "AiEndpoint": "doc_organize.diagnostics",
+    "EnvironmentCheck": "doc_organize.core.models",
+    "EnvironmentReport": "doc_organize.core.models",
+    "inspect_taxonomy_front_matter": "doc_organize.context.taxonomy_front_matter",
     "ProjectRegistry": "doc_organize.projects.project_registry",
     "ProjectLayout": "doc_organize.projects.layout",
     # Rutas de salida de un documento (sin Docling, G20/G23)
@@ -59,8 +112,12 @@ _EXPORTS: dict[str, str] = {
     "ExportStats": "doc_organize.export.zip_export",
     "preview_project_zip": "doc_organize.export.zip_export",
     "write_project_zip": "doc_organize.export.zip_export",
+    "write_ai_context_bundle": "doc_organize.export.ai_bundle",
+    "render_llms_txt": "doc_organize.context.llms_txt",
+    "AiBundleStats": "doc_organize.export.ai_bundle",
     "write_cache_xlsx": "doc_organize.export.xlsx_export",
     "write_scan_errors_xlsx": "doc_organize.export.xlsx_export",
+    "write_context_documents_xlsx": "doc_organize.export.xlsx_export",
     "load_cache_entries": "doc_organize.export.sources",
     "load_scan_error_history": "doc_organize.export.sources",
     "ProjectValidator": "doc_organize.validators.project_validator",
@@ -98,9 +155,21 @@ _EXPORTS: dict[str, str] = {
     "OfficeStatus": "doc_organize.core.models",
     "Context": "doc_organize.core.models",
     "TaxonomyManifest": "doc_organize.core.models",
+    "TaxonomyAxis": "doc_organize.core.models",
+    "TaxonomyEntry": "doc_organize.core.models",
+    "TaxonomyFrontMatterReport": "doc_organize.core.models",
+    "FreshnessReport": "doc_organize.core.models",
+    "AxisValue": "doc_organize.core.models",
+    "DocumentClassification": "doc_organize.core.models",
     "DocumentCredentialFindings": "doc_organize.core.models",
     # Credenciales (1.7.0)
     "redact_credentials": "doc_organize.security.credentials",
+    "neutralize_untrusted_markdown": "doc_organize.security.untrusted_markdown",
+    "NeutralizeResult": "doc_organize.security.untrusted_markdown",
+    "check_site_offline": "doc_organize.context.offline_site",
+    "OfflineSiteReport": "doc_organize.context.offline_site",
+    "write_site_zip": "doc_organize.context.offline_site",
+    "SiteZipResult": "doc_organize.context.offline_site",
     "scan_credentials": "doc_organize.security.credentials",
     "RedactionResult": "doc_organize.security.credentials",
     "CredentialFinding": "doc_organize.security.credentials",
@@ -117,6 +186,7 @@ _EXPORTS: dict[str, str] = {
     "ProjectNotFoundError": "doc_organize.core.exceptions",
     "ContextError": "doc_organize.core.exceptions",
     "SiteBuildError": "doc_organize.core.exceptions",
+    "OfflineSiteError": "doc_organize.core.exceptions",
 }
 
 __all__ = ["__version__", *sorted(_EXPORTS)]  # noqa: PLE0604 - las claves de _EXPORTS son cadenas
@@ -140,8 +210,21 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
     from doc_organize.cache.cache_manager import CacheManager
     from doc_organize.context.context_builder import ContextBuilder
     from doc_organize.context.context_registry import ContextRegistry
+    from doc_organize.context.decisions import ClassificationDecisionStore, gold_from_decisions
+    from doc_organize.context.dry_run import DryRunResult, dry_run_classify
+    from doc_organize.context.evaluation import (
+        AxisEvaluation,
+        EvaluationReport,
+        GoldLabel,
+        GoldStandard,
+        evaluate_classification,
+        load_gold_xlsx,
+    )
+    from doc_organize.context.freshness import check_context_freshness
     from doc_organize.context.reorganizer import Reorganizer, resolve_organized_paths
+    from doc_organize.context.review_queue import ReviewItem, review_queue
     from doc_organize.context.site_generator import SiteGenerator, SiteResult
+    from doc_organize.context.taxonomy_front_matter import inspect_taxonomy_front_matter, migrate_manifest_v1
     from doc_organize.context.taxonomy_template_registry import TaxonomyTemplateRegistry
     from doc_organize.context.taxonomy_templates import (
         list_builtin_templates,
@@ -149,6 +232,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         parse_taxonomy_template,
         render_taxonomy_template,
     )
+    from doc_organize.context.versions import detect_document_versions
     from doc_organize.converter.converter import DocumentConverter
     from doc_organize.converter.ocr_scheduler import OCRScheduler
     from doc_organize.core.exceptions import (
@@ -166,8 +250,11 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         SiteBuildError,
     )
     from doc_organize.core.models import (
+        AiSettings,
         AvStatus,
+        AxisValue,
         CacheEntry,
+        ClassificationDecision,
         Context,
         ContextBuildEvent,
         ContextBuildEventType,
@@ -175,15 +262,20 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         ContextDeleteEventType,
         ConversionResult,
         ConversionStatus,
+        DecisionIssue,
         DedupEvent,
         DedupEventType,
         DeduplicationReport,
         DedupMode,
+        DocumentClassification,
         DocumentCredentialFindings,
         DocumentMetadata,
         DocumentStatus,
+        DocumentVersionGroup,
         DuplicateGroup,
         DuplicateReason,
+        EnvironmentCheck,
+        EnvironmentReport,
         GpuStatus,
         OfficeStatus,
         Project,
@@ -195,12 +287,17 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         ScanOptions,
         ScanResult,
         ScanRunReport,
+        TaskSettings,
+        TaxonomyAxis,
+        TaxonomyEntry,
+        TaxonomyFrontMatterReport,
         TaxonomyManifest,
     )
     from doc_organize.core.progress import CancelToken, ProgressEvent
     from doc_organize.dedup.deduplication import DeduplicationManager
+    from doc_organize.diagnostics import AiEndpoint, check_environment
     from doc_organize.export.sources import load_cache_entries, load_scan_error_history
-    from doc_organize.export.xlsx_export import write_cache_xlsx, write_scan_errors_xlsx
+    from doc_organize.export.xlsx_export import write_cache_xlsx, write_context_documents_xlsx, write_scan_errors_xlsx
     from doc_organize.export.zip_export import ExportStats, preview_project_zip, write_project_zip
     from doc_organize.projects.layout import (
         RESERVED_OUTPUT_FOLDER_NAMES,

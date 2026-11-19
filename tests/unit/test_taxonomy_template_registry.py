@@ -4,7 +4,8 @@ import pytest
 
 from doc_organize.context.taxonomy_template_registry import TaxonomyTemplateRegistry
 from doc_organize.core.exceptions import TaxonomyTemplateError
-from doc_organize.core.models import TaxonomyCatalogEntry, TaxonomyManifest
+from doc_organize.core.models import TaxonomyEntry, TaxonomyManifest
+from tests.unit.taxonomy_helpers import two_axis_manifest
 
 _USER_TEMPLATE = """---
 title: Plantilla de Usuario
@@ -98,8 +99,8 @@ async def test_load_template_returns_builtin_manifest(tmp_path):
     manifest = await registry.load_template("sgi-iso27001")
 
     assert manifest.title == "SGI ISO 27001"
-    assert "gobierno-seguridad" in [entry.slug for entry in manifest.domains]
-    assert "politica" in [entry.slug for entry in manifest.material_types]
+    assert "gobierno-seguridad" in [entry.slug for entry in manifest.folder_axis.entries]
+    assert "politica" in [entry.slug for entry in manifest.subfolder_axis.entries]
 
 
 @pytest.mark.asyncio
@@ -109,7 +110,7 @@ async def test_load_template_returns_sgi_integrado_manifest(tmp_path):
     manifest = await registry.load_template("sgi-integrado")
 
     assert manifest.title == "SGI Integrado"
-    domain_slugs = [entry.slug for entry in manifest.domains]
+    domain_slugs = [entry.slug for entry in manifest.folder_axis.entries]
     assert domain_slugs == [
         "gobernanza",
         "riesgos",
@@ -119,7 +120,7 @@ async def test_load_template_returns_sgi_integrado_manifest(tmp_path):
         "tecnologia",
         "compromiso-mejora-continua",
     ]
-    material_type_slugs = [entry.slug for entry in manifest.material_types]
+    material_type_slugs = [entry.slug for entry in manifest.subfolder_axis.entries]
     assert material_type_slugs == [
         "normativa-legal",
         "politica",
@@ -131,8 +132,8 @@ async def test_load_template_returns_sgi_integrado_manifest(tmp_path):
         "informe-auditoria",
         "certificado",
     ]
-    assert all(entry.description and entry.keywords for entry in manifest.domains)
-    assert all(entry.description and entry.keywords for entry in manifest.material_types)
+    assert all(entry.description and entry.keywords for entry in manifest.folder_axis.entries)
+    assert all(entry.description and entry.keywords for entry in manifest.subfolder_axis.entries)
 
 
 @pytest.mark.asyncio
@@ -143,7 +144,7 @@ async def test_load_template_user_override_takes_priority_over_builtin(tmp_path)
     manifest = await registry.load_template("calidad")
 
     assert manifest.title == "Plantilla de Usuario"
-    assert [entry.slug for entry in manifest.domains] == ["dominio-usuario"]
+    assert [entry.slug for entry in manifest.folder_axis.entries] == ["dominio-usuario"]
 
 
 @pytest.mark.asyncio
@@ -172,10 +173,10 @@ async def test_load_template_rejects_malformed_front_matter(tmp_path):
 
 
 def _manifest(title: str | None = None) -> TaxonomyManifest:
-    return TaxonomyManifest(
+    return two_axis_manifest(
         title=title,
-        domains=[TaxonomyCatalogEntry(slug="dominio-nuevo", name="Dominio Nuevo")],
-        material_types=[TaxonomyCatalogEntry(slug="registro", name="Registro")],
+        domains=[TaxonomyEntry(slug="dominio-nuevo", name="Dominio Nuevo")],
+        material_types=[TaxonomyEntry(slug="registro", name="Registro")],
     )
 
 
@@ -187,7 +188,7 @@ async def test_save_template_creates_a_new_user_template(tmp_path):
 
     manifest = await registry.load_template("plantilla-nueva")
     assert manifest.title == "Nueva"
-    assert [entry.slug for entry in manifest.domains] == ["dominio-nuevo"]
+    assert [entry.slug for entry in manifest.folder_axis.entries] == ["dominio-nuevo"]
     assert (tmp_path / "plantilla-nueva.md").is_file()
 
 

@@ -3,6 +3,7 @@ Sitio de contexto de un proyecto con Zensical (L-8, G10; sustituye a MkDocs desd
 """
 
 import asyncio
+import functools
 import html
 import importlib.util
 import math
@@ -12,16 +13,19 @@ import shutil
 import subprocess
 import sys
 
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from doc_organize.context.llms_txt import render_llms_txt
 from doc_organize.context.reorganizer import Reorganizer, _remove_dir_or_link, resolve_organized_paths
 from doc_organize.core.constants import SITE_FOLDER_NAME
 from doc_organize.core.exceptions import InvalidPathError, SiteBuildError
-from doc_organize.core.models import Context, Domain, DomainDocument, Project
+from doc_organize.core.models import Context, Domain, DomainDocument, Project, TaxonomyAxis
 from doc_organize.projects.layout import RESERVED_OUTPUT_FOLDER_NAMES, ProjectLayout, _folder_key, validate_output_folder_name
 from doc_organize.security import credentials
+from doc_organize.security.untrusted_markdown import neutralize_untrusted_markdown
 from doc_organize.utils.atomic_write import write_text_atomic
 from doc_organize.utils.logging import get_logger
 from doc_organize.utils.path_utils import ensure_no_symlinks
@@ -34,6 +38,10 @@ _INDEX_MD_NAME = "index.md"
 #: 20 dominios pasa de 1960 MB a 173 MB (de 744 KB a 57 KB por página) y se construye más rápido. Es solo HTML: no añade
 #: JavaScript ni cambia rutas ni enlaces.
 _THEME_FEATURES: tuple[str, ...] = ("navigation.prune",)
+#: Carpeta (dentro de la reorganizada, `docs_dir`) con los recursos del sitio sin conexión; ningún dominio empieza por `_`.
+_OFFLINE_ASSETS_DIR = "_offline"
+_LLMS_TXT_NAME = "llms.txt"
+_VENDOR_DIR = Path(__file__).parent / "site_assets" / "vendor"
 _CONFIG_HEADER = "# Generado por doc_organize (SiteGenerator): se reescribe en cada reconstrucción del contexto.\n"
 #: Máximo de caracteres de la salida de error de `zensical build` que se incluyen en `SiteBuildError`.
 _STDERR_TAIL = 2000
@@ -52,6 +60,10 @@ class SiteResult:
         search_excluded (tuple[str, ...]): Páginas que se sacaron del buscador del sitio porque una de sus secciones
             supera el límite del índice de Zensical (ver `SiteGenerator`), como rutas relativas a la carpeta
             reorganizada (las del `nav`, `DomainDocument.organized_path`). Se siguen pudiendo navegar. Desde 1.4.0.
+        offline (bool): Si se generó para verse sin conexión (`generate(offline=True)`, 2.0.0).
+        neutralized (tuple[str, ...]): Con `offline`, páginas en las que se neutralizó contenido activo
+            (`neutralize_untrusted_markdown`), relativas a la carpeta reorganizada.
+        neutralized_counts (dict[str, int]): Con `offline`, lo neutralizado en total, por tipo.
         credentials_redacted (tuple[str, ...]): Páginas de la carpeta reorganizada en las que se redactaron credenciales
             antes de publicar el sitio (`generate(redact_credentials=True)`), como rutas relativas a esa carpeta. Desde
             1.7.0.
@@ -63,6 +75,9 @@ class SiteResult:
     site_built: bool
     search_excluded: tuple[str, ...] = ()
     credentials_redacted: tuple[str, ...] = ()
+    offline: bool = False
+    neutralized: tuple[str, ...] = ()
+    neutralized_counts: dict[str, int] = field(default_factory=dict)
 
 
 class SiteGenerator:
@@ -84,7 +99,9 @@ class SiteGenerator:
     `Content-Security-Policy` restrictiva, p. ej. `sandbox`). Lo que esta clase escribe sí se escapa: Zensical inserta
     sin escapar las etiquetas del `nav` y `site_name` (títulos de documento, nombres de dominio y de proyecto), así que
     se escriben ya escapadas, igual que los nombres de dominio de `index.md`. Además, el tema por defecto carga Mermaid
-    desde unpkg.com si una página tiene un bloque ```` ```mermaid ````. Ver `docs/functional/context.md`.
+    desde unpkg.com si una página tiene un bloque ```` ```mermaid ````. Ver `docs/functional/context.md`. Con
+    `generate(offline=True)` (2.0.0, F3) las páginas de los documentos se neutralizan y Mermaid va empaquetado: es el
+    sitio para entregar fuera de la web (`docs/api/offline_site.md`).
 
     **Límite del buscador** (desde 1.4.0): Zensical falla el build entero si una sección indexada (el texto entre dos
     títulos) tiene más posiciones de token de las que admite su índice, y ese máximo baja cuantas más secciones tiene
@@ -123,6 +140,8 @@ class SiteGenerator:
         site_dir: Path | None = None,
         timeout: float | None = None,
         redact_credentials: bool = True,
+        offline: bool = False,
+        llms_txt: bool = False,
     ) -> SiteResult:
         """Escribe `zensical.toml` (raíz del proyecto) + `<output_folder_name>/index.md` y, con `build=True`, ejecuta
         `zensical build` hacia `site_dir`.
@@ -144,6 +163,14 @@ class SiteGenerator:
                 reorganizada por `«REDACTADO»` (`doc_organize.security.redact_credentials`, 1.7.0). Por defecto activado.
                 Solo cambia esa copia: `Conversión/` y los originales no se tocan. Las páginas tocadas se devuelven en
                 `SiteResult.credentials_redacted`.
+            offline: Sitio para verse sin conexión y fuera de la web (2.0.0, F3): plugin `offline` de Zensical (URLs a
+                ficheros e índice de búsqueda en JavaScript, para `file://`), Mermaid y el shim `iframe-worker`
+                empaquetados (ningún recurso de terceros) y, **siempre**, la neutralización de las páginas de los
+                documentos (`neutralize_untrusted_markdown`, D6): sin la CSP `sandbox` de la web, el HTML de terceros
+                no puede quedar activo. Como la redacción, solo cambia la copia de la carpeta reorganizada. Para
+                entregarlo: `check_site_offline` y `write_site_zip`.
+            llms_txt: Añade `llms.txt` en la raíz del sitio (2.0.0, F7): el índice del contexto para un chat o agente
+                de IA, con enlaces a las páginas (`render_llms_txt`; sin credenciales si `redact_credentials`).
 
         Returns:
             `SiteResult` con las rutas escritas y si se construyó el sitio.
@@ -160,12 +187,30 @@ class SiteGenerator:
         await asyncio.to_thread(output_root.mkdir, parents=True, exist_ok=True)
         index_path = output_root / _INDEX_MD_NAME
         await asyncio.to_thread(write_text_atomic, index_path, _render_index(context))
-        pages = [_INDEX_MD_NAME] + [path for domain in context.domains for path in resolve_organized_paths(domain, project.root_path)]
-        credentials_redacted = await asyncio.to_thread(_redact_pages, output_root, pages[1:]) if redact_credentials else ()
+        document_pages = [path for domain in context.domains for path in resolve_organized_paths(domain, project.root_path)]
+        credentials_redacted = await asyncio.to_thread(_redact_pages, output_root, document_pages) if redact_credentials else ()
+        neutralized: tuple[str, ...] = ()
+        neutralized_counts: dict[str, int] = {}
+        if offline:
+            neutralized, neutralized_counts = await asyncio.to_thread(_neutralize_pages, output_root, document_pages)
+        await asyncio.to_thread(_sync_offline_assets, output_root, offline)
+        llms_path = output_root / _LLMS_TXT_NAME
+        if llms_txt:
+            text = render_llms_txt(
+                project.name, context, functools.partial(_page_url, offline=offline), project_root=project.root_path, redact=redact_credentials
+            )
+            await asyncio.to_thread(write_text_atomic, llms_path, text)
+        else:
+            await asyncio.to_thread(llms_path.unlink, missing_ok=True)
+        axis_pages = _render_axis_pages(context, project.root_path, redact=redact_credentials)
+        for name, text in axis_pages.items():
+            await asyncio.to_thread(write_text_atomic, output_root / name, text)
+        await asyncio.to_thread(_remove_stale_axis_pages, output_root, set(axis_pages))
+        pages = [_INDEX_MD_NAME, *axis_pages, *document_pages]
         search_excluded = await asyncio.to_thread(_exclude_oversized_from_search, output_root, pages)
 
         relative_site_dir = target_site_dir.relative_to(os.path.abspath(layout.output_root)).as_posix()
-        config = self._build_config(project, context, relative_site_dir, redact=redact_credentials)
+        config = self._build_config(project, context, relative_site_dir, redact=redact_credentials, offline=offline)
         await asyncio.to_thread(write_text_atomic, layout.site_config_file, _CONFIG_HEADER + _render_toml(config))
         await asyncio.to_thread(layout.legacy_mkdocs_config_file.unlink, missing_ok=True)
 
@@ -178,6 +223,9 @@ class SiteGenerator:
             site_built=build,
             search_excluded=search_excluded,
             credentials_redacted=credentials_redacted,
+            offline=offline,
+            neutralized=neutralized,
+            neutralized_counts=neutralized_counts,
         )
 
     async def build_site(self, project: Project, *, timeout: float | None = None) -> None:
@@ -246,13 +294,16 @@ class SiteGenerator:
         for directory in (target_site_dir, layout.site_cache_dir):
             await asyncio.to_thread(_remove_dir_or_link, directory)
 
-    def _build_config(self, project: Project, context: Context, site_dir: str, *, redact: bool = True) -> dict[str, Any]:
+    def _build_config(self, project: Project, context: Context, site_dir: str, *, redact: bool = True, offline: bool = False) -> dict[str, Any]:
         nav: list[Any] = [{"Inicio": _INDEX_MD_NAME}]
         for domain in context.domains:
             domain_nav = self._build_domain_nav(domain, context.taxonomy_manifest_used, project.root_path, redact=redact)
             if domain_nav:
                 nav.append({_label(domain.name): domain_nav})
-        return {
+        axes_nav = [{_label(axis.name): _axis_page_name(axis.key)} for axis in _tag_axes(context)]
+        if axes_nav:
+            nav.append({"Ejes de clasificación": axes_nav})
+        config: dict[str, Any] = {
             "project": {
                 "site_name": _label(f"{project.name} — Documentación organizada"),
                 "docs_dir": context.output_folder_name,
@@ -263,6 +314,14 @@ class SiteGenerator:
                 "theme": {"language": "es", "font": False, "features": list(_THEME_FEATURES)},
             }
         }
+        if offline:
+            # Spike de M0: el plugin fuerza `use_directory_urls = false` y escribe el índice de búsqueda en JS; con un
+            # polyfill local cuya ruta contiene `iframe-worker` no añade el de unpkg.com, y el tema usa `window.mermaid`
+            # si existe en lugar de descargarlo.
+            config["project"]["extra_javascript"] = [f"{_OFFLINE_ASSETS_DIR}/mermaid/mermaid.min.js"]
+            config["project"]["extra"] = {"polyfills": [f"{_OFFLINE_ASSETS_DIR}/iframe-worker/shim.js"]}
+            config["project"]["plugins"] = {"offline": {"enabled": True}}
+        return config
 
     def _build_domain_nav(self, domain: Domain, taxonomy_manifest_used: bool, project_root: str, *, redact: bool = True) -> list[Any]:
         """Nav de un dominio: lista plana de documentos (modo sin manifiesto), o agrupada
@@ -288,7 +347,7 @@ class SiteGenerator:
             entries = [{title(document): paths[id(document)]} for document in docs]
             # `material_type_name` (nombre legible del manifiesto) es el mismo para todos los
             # documentos de este grupo -- comparten `material_type`, luego la misma entrada del
-            # catálogo `TaxonomyManifest.material_types`. `None` para el placeholder "sin-clasificar"
+            # eje `subfolder` del `TaxonomyManifest`. `None` para el placeholder "sin-clasificar"
             # (sin entrada en el manifiesto) o en modo sin manifiesto: cae al fallback derivado del slug.
             label = docs[0].material_type_name or material_type.replace("-", " ").title()
             nav.append({_label(label): entries})
@@ -328,7 +387,68 @@ def _render_index(context: Context) -> str:
         lines.append("*No aplica: todavía no hay dominios clasificados.*")
     else:
         lines.extend(f"- **{_escape_markdown(domain.name)}** ({len(domain.documents)} documento(s))" for domain in context.domains)
+    tag_axes = _tag_axes(context)
+    if tag_axes:
+        lines.extend(["", "## Ejes de clasificación", ""])
+        for axis in tag_axes:
+            tagged = sum(1 for domain in context.domains for document in domain.documents if document.classification.axes.get(axis.key))
+            lines.append(f"- [{_link_text(axis.name)}]({_axis_page_name(axis.key)}) ({tagged} documento(s) con algún valor)")
     return "\n".join(lines) + "\n"
+
+
+# --- Páginas de los ejes que solo etiquetan (2.0.0, A4) ---------------------------------------------------------------
+# Una página por eje, no por valor (U13: 10 ejes × 150 valores serían 1500 páginas más). Se llaman `eje-<clave>.md` y
+# están en la raíz de la carpeta reorganizada, junto a `index.md`: los dominios son carpetas, así que no chocan.
+
+_AXIS_PAGE_PREFIX = "eje-"
+
+
+def _tag_axes(context: Context) -> list[TaxonomyAxis]:
+    return [axis for axis in context.taxonomy_axes if axis.organizes is None]
+
+
+def _axis_page_name(key: str) -> str:
+    return f"{_AXIS_PAGE_PREFIX}{key}.md"
+
+
+def _link_text(text: str) -> str:
+    """Texto de un enlace Markdown: escapado como una etiqueta y sin corchetes ni barras verticales que lo rompan."""
+    return _escape_markdown(text).replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]").replace("|", "\\|")
+
+
+def _render_axis_pages(context: Context, project_root: str, *, redact: bool) -> dict[str, str]:
+    """`eje-<clave>.md` de cada eje que solo etiqueta: tabla de valores con su recuento y, por valor con documentos, la
+    lista de enlaces a sus páginas. Los títulos de los documentos salen sin credenciales si `redact`."""
+    tag_axes = _tag_axes(context)
+    if not tag_axes:
+        return {}
+    links: dict[tuple[str, str], list[str]] = {}
+    for domain in context.domains:
+        for document, path in zip(domain.documents, resolve_organized_paths(domain, project_root), strict=True):
+            title = credentials.redact_credentials(document.title).text if redact else document.title
+            for key, values in document.classification.axes.items():
+                for value in values:
+                    links.setdefault((key, value.slug), []).append(f"- [{_link_text(title)}](<{path}>)")
+    pages = {}
+    for axis in tag_axes:
+        lines = [f"# {_escape_markdown(axis.name)}", ""]
+        if axis.description:
+            lines.extend([_escape_markdown(axis.description), ""])
+        lines.extend(["| Valor | Documentos |", "|---|---|"])
+        lines.extend(f"| {_link_text(entry.name)} | {len(links.get((axis.key, entry.slug), []))} |" for entry in axis.entries)
+        for entry in axis.entries:
+            entry_links = links.get((axis.key, entry.slug), [])
+            if entry_links:
+                lines.extend(["", f"## {_escape_markdown(entry.name)} ({len(entry_links)})", "", *entry_links])
+        pages[_axis_page_name(axis.key)] = "\n".join(lines) + "\n"
+    return pages
+
+
+def _remove_stale_axis_pages(output_root: Path, current: set[str]) -> None:
+    """Borra las `eje-*.md` de un eje que ya no está (nunca a través de un enlace)."""
+    for page in output_root.glob(f"{_AXIS_PAGE_PREFIX}*.md"):
+        if page.name not in current and page.is_file() and not page.is_symlink():
+            page.unlink(missing_ok=True)
 
 
 def _escape_markdown(text: str) -> str:
@@ -388,6 +508,49 @@ def _exclude_oversized_from_search(output_root: Path, pages: list[str]) -> tuple
             logger.info(f"'{page}' sale del buscador del sitio: una sección de ~{biggest} palabras supera el límite ({max_positions})")
             excluded.append(page)
     return tuple(excluded)
+
+
+def _page_url(organized: str, *, offline: bool) -> str:
+    """URL de la página de un `.md` de la carpeta reorganizada en el sitio: `x.html` con `offline` (sin `directory_urls`),
+    `x/` si no."""
+    stem = organized.removesuffix(".md")
+    return f"{stem}.html" if offline else f"{stem}/"
+
+
+def _neutralize_pages(output_root: Path, pages: list[str]) -> tuple[tuple[str, ...], dict[str, int]]:
+    """Neutraliza el contenido activo de las `pages` (D6); devuelve las que cambiaron y el total por tipo. Mismo
+    criterio de escritura que `_redact_pages`, pero un fallo **sí** para la generación: una página sin neutralizar no
+    puede ir a un sitio sin conexión."""
+    changed: list[str] = []
+    totals: Counter[str] = Counter()
+    for page in dict.fromkeys(pages):
+        text = _read_page(output_root, page)
+        if text is None:
+            continue
+        result = neutralize_untrusted_markdown(text)
+        if not result.changed:
+            continue
+        path = output_root.joinpath(*PurePosixPath(page).parts)
+        ensure_no_symlinks(path.parent)
+        write_text_atomic(path, result.text, newline="")
+        totals.update(result.counts)
+        changed.append(page)
+    if changed:
+        logger.info(f"Sitio sin conexión: contenido activo neutralizado en {len(changed)} página(s): {dict(totals)}")
+    return tuple(changed), dict(sorted(totals.items()))
+
+
+def _sync_offline_assets(output_root: Path, offline: bool) -> None:
+    """Copia los recursos empaquetados (Mermaid, `iframe-worker`) a `<carpeta>/_offline/` con `offline`, o los borra
+    sin él (un sitio normal no los necesita)."""
+    target = output_root / _OFFLINE_ASSETS_DIR
+    ensure_no_symlinks(output_root)
+    if target.is_symlink():
+        raise InvalidPathError(f"'{target}' es un enlace simbólico: no se escribe a través de él")
+    if target.exists():
+        shutil.rmtree(target)
+    if offline:
+        shutil.copytree(_VENDOR_DIR, target, ignore=shutil.ignore_patterns("README.md"))
 
 
 def _redact_pages(output_root: Path, pages: list[str]) -> tuple[str, ...]:

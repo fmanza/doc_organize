@@ -1,37 +1,52 @@
-"""Monitorización de uso/coste de IA multi-fuente + clasificación de dominios/manifiesto por IA (Sub-fase B)."""
+"""Monitorización de uso/coste de IA multi-fuente y cliente único de IA (2.0.0): configuración, prompts y servicios."""
 
-from doc_organize.ai.document_enrichment_client import DocumentEnrichmentClient, litellm_enrichment_config_from_env
-from doc_organize.ai.domain_classification_client import (
-    DomainClassificationClient,
-    litellm_classification_config_from_env,
-)
+from doc_organize.ai.agents import AgentLimits, AgentRun, AgentRunner, AgentTool
+from doc_organize.ai.cache import AiResultCache, prune_ai_cache
+from doc_organize.ai.embeddings import EmbeddingIndex
 from doc_organize.ai.github_copilot_usage_client import (
     GitHubCopilotUsageClient,
     github_copilot_usage_config_from_env,
 )
 from doc_organize.ai.litellm_usage_client import LiteLLMUsageClient, litellm_usage_config_from_env
-from doc_organize.ai.taxonomy_classification_client import (
-    TaxonomyClassificationClient,
-    litellm_taxonomy_classification_config_from_env,
+from doc_organize.ai.llm_client import LlmClient, LlmResult, LlmUsage
+from doc_organize.ai.prompts import PromptRegistry, PromptTemplate
+from doc_organize.ai.services import (
+    AxisAnswer,
+    AxisRequest,
+    ClassificationAnswer,
+    SampledDocument,
+    classify_document,
+    draft_taxonomy,
+    enrich_document,
 )
-from doc_organize.ai.taxonomy_manifest_draft_client import (
-    TaxonomyManifestDraftClient,
-    litellm_taxonomy_manifest_draft_config_from_env,
-)
+from doc_organize.ai.settings import legacy_variables, settings_from_env
 from doc_organize.ai.usage_source import UsageSource
 
 __all__ = [
-    "DocumentEnrichmentClient",
-    "DomainClassificationClient",
+    "AgentLimits",
+    "AgentRun",
+    "AgentRunner",
+    "AgentTool",
+    "AiResultCache",
+    "AxisAnswer",
+    "AxisRequest",
+    "ClassificationAnswer",
+    "EmbeddingIndex",
     "GitHubCopilotUsageClient",
     "LiteLLMUsageClient",
-    "TaxonomyClassificationClient",
-    "TaxonomyManifestDraftClient",
+    "LlmClient",
+    "LlmResult",
+    "LlmUsage",
+    "PromptRegistry",
+    "PromptTemplate",
+    "SampledDocument",
     "UsageSource",
+    "classify_document",
+    "draft_taxonomy",
+    "enrich_document",
     "github_copilot_usage_config_from_env",
-    "litellm_classification_config_from_env",
-    "litellm_enrichment_config_from_env",
-    "litellm_taxonomy_classification_config_from_env",
-    "litellm_taxonomy_manifest_draft_config_from_env",
+    "legacy_variables",
     "litellm_usage_config_from_env",
+    "prune_ai_cache",
+    "settings_from_env",
 ]

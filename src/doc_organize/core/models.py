@@ -12,13 +12,14 @@ Modelos Pydantic v2 usados en todos los módulos:
 - ScanRunReport: duración de una ejecución de escaneo (histórico de tiempos)
 """
 
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Final, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler, field_validator, model_serializer, model_validator
 
-from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME
+from doc_organize.core.constants import DEFAULT_CACHE_DB_NAME, UNCLASSIFIED_SLUG
 
 # ===== Enumeraciones =====
 
@@ -231,6 +232,13 @@ class ConversionResult(BaseModel):
     json_path: str | None = Field(default=None, description="Ruta al fichero .json de metadatos de salida")
     success: bool = Field(..., description="Si la conversión tuvo éxito")
     error: str | None = Field(default=None, description="Mensaje de error si falló")
+    source_sha256: str | None = Field(
+        default=None,
+        description=(
+            "SHA-256 del original según la caché (`CacheEntry.sha256_hash`, 2.0.0): el consumidor lo pasa al construir el "
+            "contexto para poder comprobar después si está al día (`check_context_freshness`); None si no se conoce"
+        ),
+    )
     ocr_required: bool = Field(default=False, description="Si se necesitó OCR (y quedó diferido)")
     duration_seconds: float = Field(default=0.0, description="Tiempo empleado en convertir (segundos)")
     images_dir: str | None = Field(
@@ -639,9 +647,15 @@ class Project(BaseModel):
 
 _HTTP_TIMEOUT_DESC = "Timeout de las peticiones HTTP, en segundos"
 _HTTP_RETRIES_DESC = (
-    "Reintentos ante timeout o error de red/transporte (nunca ante una respuesta HTTP, ni 4xx ni 5xx); 0 (por defecto) "
-    "no reintenta. Ojo: reintentar un POST que hizo timeout puede cobrarse dos veces si el proxy sí lo recibió (L-3b)"
+    "Reintentos ante timeout o error de red/transporte; 0 (por defecto) no reintenta. Las respuestas HTTP no se "
+    "reintentan, salvo 429/503 (`rate_limit_retries`). Ojo: reintentar un POST que hizo timeout puede cobrarse dos veces "
+    "si el proxy sí lo recibió (L-3b)"
 )
+_HTTP_RATE_LIMIT_RETRIES_DESC = (
+    "Reintentos ante una respuesta 429 o 503 (D5, 2.0.0), esperando lo que pida `Retry-After` o, si no lo trae, "
+    "`retry_backoff_s` doblado en cada intento; la espera es compartida por todas las llamadas del cliente. 0 no reintenta"
+)
+_HTTP_MAX_RETRY_WAIT_DESC = "Tope de cada espera ante 429/503, en segundos (aunque `Retry-After` pida más)"
 _HTTP_RETRY_BACKOFF_DESC = "Espera base entre reintentos, en segundos: se duplica en cada intento (0.5, 1, 2...) (L-3b)"
 
 
@@ -722,6 +736,42 @@ class AvStatus(BaseModel):
     )
 
 
+EnvironmentCheckStatus = Literal["ok", "warning", "error"]
+
+
+class EnvironmentCheck(BaseModel):
+    """Una comprobación del entorno (`check_environment`, 2.0.0, F2).
+
+    Attributes:
+        name (str): Qué se comprueba (`python`, `docling`, `extra:site`, `ai:<nombre>`...).
+        status (str): `ok`, `warning` (funciona con limitaciones) o `error` (algo no funcionará).
+        detail (str): Qué se encontró (versiones, sin rutas ni claves).
+        remedy (str | None): Qué hacer si no es `ok`.
+    """
+
+    name: str
+    status: EnvironmentCheckStatus
+    detail: str
+    remedy: str | None = None
+
+
+class EnvironmentReport(BaseModel):
+    """Resultado de `check_environment` (2.0.0, F2): una entrada por comprobación.
+
+    Attributes:
+        checks (list[EnvironmentCheck]): Comprobaciones en orden.
+        checked_at (str): Cuándo se hizo (ISO 8601, UTC).
+    """
+
+    checks: list[EnvironmentCheck] = Field(default_factory=list)
+    checked_at: str
+
+    @property
+    def ok(self) -> bool:
+        """Sin errores (los avisos no cuentan)."""
+        return all(check.status != "error" for check in self.checks)
+
+
 class OfficeStatus(BaseModel):
     """Estado de soporte de LibreOffice del entorno donde corre el servidor (menú Escaneo).
 
@@ -783,6 +833,8 @@ class LiteLLMUsageConfig(BaseModel):
     timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
     retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
     retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
+    rate_limit_retries: int = Field(default=3, ge=0, description=_HTTP_RATE_LIMIT_RETRIES_DESC)
+    max_retry_wait_s: float = Field(default=60.0, ge=0.0, description=_HTTP_MAX_RETRY_WAIT_DESC)
 
 
 class GitHubCopilotUsageConfig(BaseModel):
@@ -800,6 +852,8 @@ class GitHubCopilotUsageConfig(BaseModel):
     timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
     retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
     retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
+    rate_limit_retries: int = Field(default=3, ge=0, description=_HTTP_RATE_LIMIT_RETRIES_DESC)
+    max_retry_wait_s: float = Field(default=60.0, ge=0.0, description=_HTTP_MAX_RETRY_WAIT_DESC)
 
 
 # ===== Modelos de contexto y dominios (organización documental, `doc_organize.context`) =====
@@ -807,6 +861,65 @@ class GitHubCopilotUsageConfig(BaseModel):
 
 DocumentEnrichmentField = Literal["description", "keywords"]
 """Campos de `DomainDocument` que la IA puede rellenar (`DomainDocument.ai_filled`, 1.5.0)."""
+
+
+AxisClassifiedBy = Literal["rules", "semantic", "ai", "human"]
+"""Quién asignó un valor de un eje (`AxisValue.classified_by`, 2.0.0): reglas, semántica (embeddings), IA o una persona."""
+
+
+class AxisValue(BaseModel):
+    """Un valor de un eje asignado a un documento (2.0.0, A3).
+
+    Attributes:
+        slug (str): Valor del catálogo del eje (saneado).
+        name (str): Nombre legible del valor.
+        confidence (float): Confianza 0-1 de quien lo asignó.
+        classified_by (str): `rules`, `semantic`, `ai` o `human`.
+        evidence (str | None): Cita literal del documento que lo justifica (IA, 2.0.0 M5); `None` si no hay.
+        evidence_verified (bool | None): Si la cita aparece en el texto enviado; `None` sin cita.
+
+    Example:
+        >>> AxisValue(slug="ens", name="ENS", confidence=0.6, classified_by="rules").evidence is None
+        True
+    """
+
+    slug: str = Field(..., min_length=1, description="Valor del catálogo del eje")
+    name: str = Field(..., description="Nombre legible del valor")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Confianza 0-1")
+    classified_by: AxisClassifiedBy = Field(..., description="Quién lo asignó")
+    evidence: str | None = Field(default=None, description="Cita literal que justifica el valor, si la hay")
+    evidence_verified: bool | None = Field(default=None, description="Si la cita aparece en el texto del documento; `None` sin cita")
+
+    @model_serializer(mode="wrap")
+    def _omit_missing_evidence(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Sin cita, `evidence` y `evidence_verified` no se escriben: hay un valor por eje y documento, y en un corpus
+        grande esos dos `null` pesaban casi un tercio de la clasificación en `index.json`."""
+        data: dict[str, Any] = handler(self)
+        for key in ("evidence", "evidence_verified"):
+            if data.get(key) is None:
+                data.pop(key, None)
+        return data
+
+
+class DocumentClassification(BaseModel):
+    """Clasificación de un documento en todos los ejes de la taxonomía (2.0.0, A3).
+
+    `axes` tiene una clave por eje del contexto (`Context.taxonomy_axes`): una lista vacía significa que el eje se
+    evaluó y no se asignó ningún valor (en un eje organizador, el documento queda en «Sin Clasificar»).
+
+    Example:
+        >>> classification = DocumentClassification(
+        ...     axes={"normative_frameworks": [AxisValue(slug="ens", name="ENS", confidence=0.6, classified_by="rules")]}
+        ... )
+        >>> classification.slugs("normative_frameworks"), classification.slugs("evidence")
+        (['ens'], [])
+    """
+
+    axes: dict[str, list[AxisValue]] = Field(default_factory=dict, description="Valores asignados por clave de eje")
+
+    def slugs(self, key: str) -> list[str]:
+        """Los slugs asignados en el eje `key` (vacío si ninguno o si el eje no existe)."""
+        return [value.slug for value in self.axes.get(key, [])]
 
 
 class DomainDocument(BaseModel):
@@ -825,13 +938,13 @@ class DomainDocument(BaseModel):
         default=None,
         description=(
             "Slug del tipo de material de origen (segundo eje de clasificación, catálogo de "
-            "`TaxonomyManifest.material_types`), o `None` en modo sin manifiesto de taxonomía"
+            "eje `subfolder` del `TaxonomyManifest`), o `None` en modo sin manifiesto de taxonomía"
         ),
     )
     material_type_name: str | None = Field(
         default=None,
         description=(
-            "Nombre legible de `material_type` (`TaxonomyCatalogEntry.name` del manifiesto), o `None` si "
+            "Nombre legible de `material_type` (`TaxonomyEntry.name` del eje `subfolder` del manifiesto), o `None` si "
             "`material_type` es el placeholder `sin-clasificar` o no hay manifiesto — el llamador (p. ej. "
             "`SiteGenerator`) recurre entonces a derivar una etiqueta a partir del slug"
         ),
@@ -897,6 +1010,19 @@ class DomainDocument(BaseModel):
     ai_filled: list[DocumentEnrichmentField] = Field(
         default_factory=list, description="Campos que rellenó la IA porque el documento no los declaraba (1.5.0); vacío si ninguno"
     )
+    source_sha256: str | None = Field(
+        default=None, description="SHA-256 del original al construir el contexto (2.0.0, F4); None si no se conocía o el contexto es anterior"
+    )
+    version: str | None = Field(default=None, description="Versión del documento en su grupo (`1.2`, 2.0.0 F5); None si no tiene")
+    version_group: str | None = Field(default=None, description="Clave de su grupo de versiones (`DocumentVersionGroup.key`)")
+    is_current: bool | None = Field(default=None, description="Si es la versión vigente de su grupo; None si no tiene grupo")
+    classification: DocumentClassification = Field(
+        default_factory=DocumentClassification,
+        description=(
+            "Valores de cada eje (2.0.0): los organizadores repiten el dominio y `material_type`, con quién los asignó; "
+            "los demás ejes solo están aquí"
+        ),
+    )
 
 
 UnclassifiedReason = Literal["incomplete_artifacts", "below_threshold"]
@@ -939,6 +1065,13 @@ class UnclassifiedDocument(BaseModel):
     description: str | None = Field(default=None, description="Descripción declarada en el original; nunca de la IA")
     keywords: list[str] = Field(default_factory=list, description="Palabras clave declaradas en el original; nunca de la IA")
     language: str | None = Field(default=None, description="Idioma detectado en el texto convertido (ISO 639-1); None sin `.json` o si no es seguro")
+    classification: DocumentClassification = Field(
+        default_factory=DocumentClassification, description="Valores de los ejes que no organizan carpetas (2.0.0); vacío sin texto"
+    )
+    source_sha256: str | None = Field(default=None, description="SHA-256 del original al construir el contexto (2.0.0, F4); None si no se conocía")
+    version: str | None = Field(default=None, description="Versión del documento en su grupo (`1.2`, 2.0.0 F5); None si no tiene")
+    version_group: str | None = Field(default=None, description="Clave de su grupo de versiones (`DocumentVersionGroup.key`)")
+    is_current: bool | None = Field(default=None, description="Si es la versión vigente de su grupo; None si no tiene grupo")
 
 
 class Domain(BaseModel):
@@ -953,7 +1086,61 @@ class Domain(BaseModel):
 
 
 AiClassificationStopReason = Literal["auth", "connection", "budget"]
-"""Motivo por el que `ContextBuilder.build()` detuvo la Sub-fase B (`Context.ai_classification_stopped`, L-3a/L-3b)."""
+"""Motivo por el que `ContextBuilder.build()` detuvo una fase de IA (`AiPhaseStats.stopped`, L-3a/L-3b)."""
+
+AiScope = Literal["off", "unclassified", "missing_axes"]
+"""Qué documentos van a la IA para clasificarse (`ContextBuilder.build(ai_scope=)`, 2.0.0): ninguno; los que las reglas
+dejaron sin clasificar en algún eje organizador (`unclassified`, la Sub-fase B de 1.x); o además los que tienen vacío
+algún eje que solo etiqueta (`missing_axes`, opt-in: más documentos van a la IA)."""
+
+
+class AiPhaseStats(BaseModel):
+    """Recuentos de una fase de IA de una construcción (2.0.0; antes campos sueltos `ai_documents_*` y `ai_enrichment_*`).
+
+    `sent == assigned + failed + enviados sin asignación` siempre.
+
+    Attributes:
+        sent (int): Documentos enviados (una llamada por documento).
+        assigned (int): Enviados en los que la IA asignó algo (un eje, o un campo al describir).
+        failed (int): Enviados cuya llamada falló.
+        stopped (str | None): Por qué paró antes de terminar (`auth`, `connection`, `budget`), o `None`.
+        prompt_tokens (int): Tokens de entrada, según el proxy.
+        completion_tokens (int): Tokens de salida, según el proxy.
+        response_format (str | None): `json_schema` o `json_object` (si el modelo no admite el esquema), en la última
+            llamada que respondió.
+        cached (int): Documentos resueltos con la caché de resultados (`AiResultCache`), sin llamar al modelo; no
+            cuentan en `sent` ni consumen `ai_max_documents`.
+    """
+
+    sent: int = Field(default=0, ge=0)
+    assigned: int = Field(default=0, ge=0)
+    failed: int = Field(default=0, ge=0)
+    stopped: AiClassificationStopReason | None = None
+    prompt_tokens: int = Field(default=0, ge=0)
+    completion_tokens: int = Field(default=0, ge=0)
+    response_format: Literal["json_schema", "json_object"] | None = None
+    cached: int = Field(default=0, ge=0, description="Documentos resueltos con la caché de resultados, sin llamar al modelo (2.0.0)")
+
+
+class AiStats(BaseModel):
+    """Qué hizo la IA en una construcción (2.0.0, `Context.ai_stats`).
+
+    Attributes:
+        scope (AiScope): Alcance de la clasificación con IA.
+        enrich (bool): Si se pidió describir los documentos que no declaran descripción o palabras clave.
+        classification (AiPhaseStats): Clasificación (tarea `classify`).
+        enrichment (AiPhaseStats): Descripción (tarea `enrich`).
+    """
+
+    scope: AiScope = "off"
+    enrich: bool = False
+    classification: AiPhaseStats = Field(default_factory=AiPhaseStats)
+    enrichment: AiPhaseStats = Field(default_factory=AiPhaseStats)
+    semantic: bool = Field(default=False, description="Si se usó la sub-fase semántica (2.0.0, G4)")
+    semantic_classification: AiPhaseStats = Field(
+        default_factory=AiPhaseStats,
+        description="Sub-fase semántica: `sent` = textos embebidos, `cached` = sacados del índice, `assigned` = documentos con algún eje asignado",
+    )
 
 
 class DocumentCredentialFindings(BaseModel):
@@ -968,6 +1155,108 @@ class DocumentCredentialFindings(BaseModel):
     rules: dict[str, int] = Field(default_factory=dict)
 
 
+DecisionAction = Literal["confirm", "set_axis", "exclude", "set_current_version"]
+"""Qué decide una persona sobre un documento (2.0.0, F6): confirmar su clasificación (los valores de todos sus ejes en
+`ClassificationDecision.axes`), fijar los valores de un eje, sacarlo del contexto, o marcarlo como la versión vigente
+de su grupo de versiones (F5)."""
+
+DecisionIssueReason = Literal["source_changed", "unknown_axis", "unknown_value", "missing_document", "no_manifest", "not_versioned"]
+
+
+class ClassificationDecision(BaseModel):
+    """Una decisión de una persona sobre la clasificación de un documento (2.0.0, F6).
+
+    Se aplica en cada construcción **después de las reglas y antes de la IA**: los ejes decididos quedan con
+    `classified_by="human"` y ni las reglas ni la IA los cambian. Si el original cambió desde la decisión
+    (`source_sha256` distinto), deja de aplicarse y aparece en `Context.stale_decisions` para revisarla.
+
+    Attributes:
+        id (str): Identificador único (lo pone `ClassificationDecisionStore.add` si falta).
+        document_key (str): Ruta del original relativa a la raíz de escaneo (`document_key`).
+        source_sha256 (str | None): Huella del original cuando se decidió; `None` = vale para cualquier versión.
+        action (DecisionAction): `confirm`, `set_axis` o `exclude`.
+        axes (dict[str, list[str]]): Valores por eje: uno solo en `set_axis`, todos los del documento en `confirm`,
+            vacío en `exclude`. En un eje que organiza (carpeta, subcarpeta) va exactamente un valor.
+        author (str | None): Quién decidió.
+        decided_at (str): Cuándo (ISO 8601).
+        reason (str | None): Por qué, si se dijo.
+        revoked_at (str | None): Cuándo se revocó o sustituyó (solo en el historial).
+        revoked_by (str | None): Quién la revocó.
+        revoke_reason (str | None): Por qué (`"replaced"` si la sustituyó otra).
+
+    Example:
+        >>> decision = ClassificationDecision(document_key="ENS/plan.pdf", action="set_axis", axes={"domains": ["seguridad"]})
+        >>> decision.axis
+        'domains'
+    """
+
+    id: str = Field(default="", description="Identificador único")
+    document_key: str = Field(..., min_length=1, description="Ruta del original relativa a la raíz de escaneo")
+    source_sha256: str | None = Field(default=None, description="Huella del original al decidir; None = cualquier versión")
+    action: DecisionAction = Field(..., description="confirm, set_axis o exclude")
+    axes: dict[str, list[str]] = Field(default_factory=dict, description="Valores decididos por eje")
+    author: str | None = Field(default=None, description="Quién decidió")
+    decided_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"), description="Cuándo (ISO 8601)")
+    reason: str | None = Field(default=None, description="Por qué")
+    revoked_at: str | None = Field(default=None, description="Cuándo se revocó (historial)")
+    revoked_by: str | None = Field(default=None, description="Quién la revocó")
+    revoke_reason: str | None = Field(default=None, description="Por qué se revocó; 'replaced' si la sustituyó otra")
+
+    @model_validator(mode="after")
+    def _check_axes(self) -> "ClassificationDecision":
+        if self.action == "set_axis" and len(self.axes) != 1:
+            raise ValueError("set_axis decide exactamente un eje")
+        if self.action == "confirm" and not self.axes:
+            raise ValueError("confirm necesita los valores de los ejes que se confirman")
+        if self.action in ("exclude", "set_current_version") and self.axes:
+            raise ValueError(f"{self.action} no lleva valores")
+        return self
+
+    @property
+    def axis(self) -> str | None:
+        """El eje de un `set_axis`; `None` en las demás acciones."""
+        return next(iter(self.axes)) if self.action == "set_axis" else None
+
+
+class DecisionIssue(BaseModel):
+    """Una decisión que no se aplicó en una construcción, y por qué (2.0.0, F6).
+
+    `reason`: `source_changed` (el original cambió desde la decisión), `unknown_axis`/`unknown_value` (el eje o el
+    valor ya no están en el catálogo), `missing_document` (el documento no está en la construcción), `no_manifest`
+    (sin manifiesto no se aplican decisiones) o `not_versioned` (`set_current_version` de un documento que no está en
+    ningún grupo de versiones).
+    """
+
+    decision_id: str
+    document_key: str
+    reason: DecisionIssueReason
+    detail: str | None = None
+
+
+VersionsMode = Literal["all", "mark", "current_only"]
+"""Qué hace la construcción con las versiones de un mismo documento (2.0.0, F5): `all` (como 1.x: cada fichero es un
+documento), `mark` (todas se clasifican y llevan su versión y si son la vigente) o `current_only` (solo la vigente se
+clasifica, se publica y va a la IA; las demás quedan en `Context.superseded_documents`)."""
+
+
+class DocumentVersionGroup(BaseModel):
+    """Un grupo de versiones de un mismo documento en el contexto (2.0.0, F5).
+
+    Attributes:
+        key (str): Carpeta y nombre sin el marcador de versión, normalizados.
+        members (list[str]): Originales, de la versión más baja a la más alta.
+        versions (list[str]): Versión de cada uno (`1.2`), en el mismo orden.
+        current (str): Original vigente: la versión más alta o la que decidió una persona.
+        confirmed (bool): Si la vigente la confirmó una persona (`set_current_version`).
+    """
+
+    key: str
+    members: list[str]
+    versions: list[str]
+    current: str
+    confirmed: bool = False
+
+
 class Context(BaseModel):
     """Contexto de organización documental de un proyecto: configuración de clasificación + dominios.
 
@@ -978,19 +1267,20 @@ class Context(BaseModel):
     Sin `tenant_id` desde 1.0.0 (L-12): un `context.json` antiguo que lo traiga se sigue leyendo y el campo se ignora.
     """
 
-    project_name: str = Field(..., description="Nombre del proyecto propietario de este contexto")
-    output_folder_name: str = Field(default="organizado", description="Nombre de la carpeta de salida reorganizada, relativa a `root_path`")
-    ai_classification_enabled: bool = Field(default=False, description="Si la Sub-fase B (IA) está activa para este proyecto — opt-in explícito")
-    ai_fallback_threshold: float = Field(default=0.5, description="Score mínimo (Sub-fase A) por debajo del cual se intenta la Sub-fase B")
-    ai_classification_model: str | None = Field(
-        default=None,
+    schema_version: int = Field(
+        default=1,
         description=(
-            "Alias de modelo del LiteLLM Proxy con el que se ejecutó la Sub-fase B (lo rellena `ContextBuilder` desde 1.5.0); `None` si no se ejecutó"
+            "Versión del formato (2.0.0: 2). Un `context.json` de 1.x (sin el campo) se migra al leerlo: "
+            "`taxonomy_axes` y la `classification` de cada documento salen de su dominio y su tipo de material"
         ),
     )
-    ai_enrichment_model: str | None = Field(
-        default=None, description="Alias de modelo con el que se ejecutó el enriquecimiento por IA (1.5.0); `None` si no se ejecutó"
+    project_name: str = Field(..., description="Nombre del proyecto propietario de este contexto")
+    taxonomy_axes: "list[TaxonomyAxis]" = Field(
+        default_factory=list,
+        description="Ejes con los que se clasificó (2.0.0), sin `keywords` ni `examples`; sin manifiesto, solo `domains`",
     )
+    output_folder_name: str = Field(default="organizado", description="Nombre de la carpeta de salida reorganizada, relativa a `root_path`")
+    ai_fallback_threshold: float = Field(default=0.5, description="Score mínimo de las reglas para clasificar un eje sin IA")
     built_with_version: str | None = Field(
         default=None,
         description=(
@@ -1049,40 +1339,29 @@ class Context(BaseModel):
             "elección en cada `POST`, igual que `candidate_domains`)"
         ),
     )
-    ai_classification_stopped: AiClassificationStopReason | None = Field(
-        default=None,
-        description=(
-            "Por qué se detuvo la Sub-fase B antes de terminar (L-3a/L-3b): `auth` (clave rechazada, 401/403), "
-            "`connection` (`ai_max_failures` errores de conexión seguidos) o `budget` (se alcanzó `ai_max_documents`); "
-            "`None` si terminó o no se ejecutó. Los documentos que no llegaron a enviarse quedan sin clasificar"
-        ),
+    ai_stats: AiStats = Field(default_factory=AiStats, description="Qué hizo la IA en esta construcción (2.0.0): alcance, recuentos y tokens")
+    decisions_applied: int = Field(default=0, description="Decisiones de personas aplicadas en esta construcción (2.0.0, F6)")
+    stale_decisions: list[DecisionIssue] = Field(
+        default_factory=list, description="Decisiones que no se aplicaron porque el original o el catálogo cambiaron (2.0.0, F6)"
     )
-    ai_documents_sent: int = Field(default=0, ge=0, description="Documentos enviados a la IA en la Sub-fase B (una llamada por documento, L-3c)")
-    ai_documents_classified: int = Field(
-        default=0, ge=0, description="Documentos enviados a los que la IA asignó al menos un eje del catálogo (L-3c)"
+    orphan_decisions: list[DecisionIssue] = Field(
+        default_factory=list, description="Decisiones de documentos que no están en esta construcción (2.0.0, F6)"
     )
-    ai_documents_failed: int = Field(
-        default=0,
-        ge=0,
-        description=(
-            "Documentos enviados cuya llamada falló (auth, conexión u otro error, L-3c); `sent = classified + failed + enviados sin asignación`"
-        ),
+    excluded_documents: list[str] = Field(default_factory=list, description="Originales que una persona sacó del contexto (`exclude`, 2.0.0 F6)")
+    versions_mode: VersionsMode = Field(default="all", description="Qué se hizo con las versiones de un documento (2.0.0, F5)")
+    version_groups: list[DocumentVersionGroup] = Field(
+        default_factory=list, description="Grupos de versiones detectados (con `versions` `mark` o `current_only`, 2.0.0 F5)"
     )
-    ai_enrichment_enabled: bool = Field(
-        default=False,
-        description="Si la IA rellenó la descripción y las palabras clave que los documentos no declaraban (1.5.0) — opt-in explícito",
+    superseded_documents: list[str] = Field(
+        default_factory=list, description='Versiones antiguas que no entraron en el contexto (`versions="current_only"`)'
     )
-    ai_enrichment_stopped: AiClassificationStopReason | None = Field(
-        default=None,
-        description="Por qué se detuvo el enriquecimiento por IA, con los mismos motivos y límites que `ai_classification_stopped` (1.5.0)",
+    ai_provenance: "list[PromptProvenance]" = Field(
+        default_factory=list, description="Prompt y modelo de cada tarea de IA que llegó a enviar algo (2.0.0, G1)"
     )
-    ai_enrichment_sent: int = Field(default=0, ge=0, description="Documentos enviados a la IA para enriquecer (una llamada por documento, 1.5.0)")
-    ai_enrichment_applied: int = Field(default=0, ge=0, description="Documentos enviados en los que la IA rellenó al menos un campo (1.5.0)")
-    ai_enrichment_failed: int = Field(default=0, ge=0, description="Documentos enviados a enriquecer cuya llamada falló (1.5.0)")
     ai_redact_credentials: bool = Field(
         default=False,
         description=(
-            "Si el texto enviado a la IA se redactó antes (`ContextBuilder(ai_redact_credentials=True)`, 1.7.0). `False` en "
+            "Si el texto enviado a la IA se redactó antes (`AiSettings.redact_credentials`; en 1.7, `ContextBuilder(ai_redact_credentials=True)`). `False` en "
             "contextos anteriores a la 1.7.0"
         ),
     )
@@ -1116,9 +1395,139 @@ class Context(BaseModel):
         except InvalidPathError as exc:
             raise ValueError(str(exc)) from exc
 
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_v1_ai_fields(cls, data: Any) -> Any:
+        """Los recuentos de IA de 1.x (`ai_documents_*`, `ai_enrichment_*`...) pasan a `ai_stats` (2.0.0)."""
+        if not isinstance(data, dict) or "ai_stats" in data:
+            return data
+        data = dict(data)
+        legacy = {key: data.pop(key) for key in list(data) if key in _LEGACY_AI_FIELDS}
+        if legacy:
+            data["ai_stats"] = {
+                "scope": "unclassified" if legacy.get("ai_classification_enabled") else "off",
+                "enrich": bool(legacy.get("ai_enrichment_enabled")),
+                "classification": {
+                    "sent": legacy.get("ai_documents_sent") or 0,
+                    "assigned": legacy.get("ai_documents_classified") or 0,
+                    "failed": legacy.get("ai_documents_failed") or 0,
+                    "stopped": legacy.get("ai_classification_stopped"),
+                },
+                "enrichment": {
+                    "sent": legacy.get("ai_enrichment_sent") or 0,
+                    "assigned": legacy.get("ai_enrichment_applied") or 0,
+                    "failed": legacy.get("ai_enrichment_failed") or 0,
+                    "stopped": legacy.get("ai_enrichment_stopped"),
+                },
+            }
+            # El modelo de cada fase, con el prompt marcado como de 1.x (no se guardaba cuál).
+            data.setdefault(
+                "ai_provenance",
+                [
+                    {"task": task, "prompt_id": "1.x", "version": "1.x", "source": "builtin", "sha256": "", "model": legacy[key]}
+                    for task, key in (("classify", "ai_classification_model"), ("enrich", "ai_enrichment_model"))
+                    if legacy.get(key)
+                ],
+            )
+        return data
 
-ContextChangeKind = Literal["added", "removed", "reclassified"]
-"""Tipo de cambio de un documento entre dos construcciones del contexto (`ContextChange.change`, 1.5.0)."""
+    def model_for_task(self, task: "AiTask") -> str | None:
+        """Modelo con el que se hizo `task` en esta construcción (de `ai_provenance`), o `None`."""
+        return next((item.model for item in self.ai_provenance if item.task == task), None)
+
+    @model_validator(mode="after")
+    def _migrate_v1(self) -> "Context":
+        """Un contexto de 1.x (o creado a mano sin `schema_version`) pasa a 2: ejes y clasificación desde sus campos."""
+        if self.schema_version >= CONTEXT_SCHEMA_VERSION:
+            return self
+        _migrate_context_v1(self)
+        self.schema_version = CONTEXT_SCHEMA_VERSION
+        return self
+
+
+#: Campos de IA de un `context.json` de 1.x que pasan a `Context.ai_stats`.
+_LEGACY_AI_FIELDS = frozenset(
+    {
+        "ai_classification_enabled",
+        "ai_classification_model",
+        "ai_enrichment_model",
+        "ai_classification_stopped",
+        "ai_documents_sent",
+        "ai_documents_classified",
+        "ai_documents_failed",
+        "ai_enrichment_enabled",
+        "ai_enrichment_stopped",
+        "ai_enrichment_sent",
+        "ai_enrichment_applied",
+        "ai_enrichment_failed",
+    }
+)
+#: Versión de `context.json` que escribe esta versión de doc_organize.
+CONTEXT_SCHEMA_VERSION: Final = 2
+#: Claves de los ejes organizadores de un contexto de 1.x (y del modo sin manifiesto).
+LEGACY_FOLDER_AXIS_KEY: Final = "domains"
+LEGACY_SUBFOLDER_AXIS_KEY: Final = "material_types"
+
+
+def _migrate_context_v1(context: Context) -> None:
+    """Rellena `taxonomy_axes` y la clasificación de los ejes organizadores de un contexto de 1.x.
+
+    De quién vino cada eje solo se sabe a medias en 1.x (`classified_by` era del documento): el dominio es de la IA si
+    ella lo propuso y las reglas no lo habían decidido; el tipo de material, si la IA intervino y el dominio no era
+    suyo. Es una aproximación, solo para contextos antiguos.
+    """
+    folder_entries = [
+        TaxonomyEntry(slug=domain.slug, name=domain.name, description=domain.description)
+        for domain in context.domains
+        if domain.slug != UNCLASSIFIED_SLUG
+    ]
+    material_names: dict[str, str] = {}
+    for domain in context.domains:
+        for document in domain.documents:
+            if document.material_type and document.material_type != UNCLASSIFIED_SLUG:
+                material_names.setdefault(document.material_type, document.material_type_name or document.material_type.replace("-", " ").title())
+    if not context.taxonomy_axes and folder_entries:
+        axes = [TaxonomyAxis(key=LEGACY_FOLDER_AXIS_KEY, name="Dominios", organizes="folder", entries=folder_entries)]
+        if context.taxonomy_manifest_used and material_names:
+            entries = [TaxonomyEntry(slug=slug, name=name) for slug, name in material_names.items()]
+            axes.append(TaxonomyAxis(key=LEGACY_SUBFOLDER_AXIS_KEY, name="Tipos de material", organizes="subfolder", entries=entries))
+        context.taxonomy_axes = axes
+    threshold = context.ai_fallback_threshold
+    for domain in context.domains:
+        for document in domain.documents:
+            if document.classification.axes:
+                continue
+            folder_by_ai = (
+                document.classified_by == "ai"
+                and document.ai_domain == domain.slug
+                and (document.rules_domain != domain.slug or (document.rules_confidence or 0.0) < threshold)
+            )
+            axes_values: dict[str, list[AxisValue]] = {LEGACY_FOLDER_AXIS_KEY: []}
+            if domain.slug != UNCLASSIFIED_SLUG:
+                axes_values[LEGACY_FOLDER_AXIS_KEY] = [
+                    AxisValue(slug=domain.slug, name=domain.name, confidence=document.confidence, classified_by="ai" if folder_by_ai else "rules")
+                ]
+            if context.taxonomy_manifest_used:
+                material = document.material_type
+                axes_values[LEGACY_SUBFOLDER_AXIS_KEY] = (
+                    [
+                        AxisValue(
+                            slug=material,
+                            name=material_names.get(material, material),
+                            confidence=document.material_type_confidence if document.material_type_confidence is not None else document.confidence,
+                            classified_by="ai" if document.classified_by == "ai" and not folder_by_ai else "rules",
+                        )
+                    ]
+                    if material and material != UNCLASSIFIED_SLUG
+                    else []
+                )
+            document.classification = DocumentClassification(axes=axes_values)
+
+
+ContextChangeKind = Literal["added", "removed", "reclassified", "superseded", "excluded"]
+"""Tipo de cambio de un documento entre dos construcciones del contexto (`ContextChange.change`, 1.5.0). Desde 2.0.0, un
+documento que sale porque hay una versión más nueva es `superseded` y uno que excluyó una persona, `excluded` (no
+`removed`)."""
 
 
 class ContextChange(BaseModel):
@@ -1130,7 +1539,7 @@ class ContextChange(BaseModel):
     """
 
     source_path: str = Field(..., description="Ruta del documento original")
-    change: ContextChangeKind = Field(..., description="`added`, `removed` o `reclassified`")
+    change: ContextChangeKind = Field(..., description="`added`, `removed`, `reclassified`, `superseded` o `excluded`")
     previous_domain: str | None = Field(default=None, description="Dominio en la construcción anterior; None si sin clasificar o `added`")
     domain: str | None = Field(default=None, description="Dominio en esta construcción; None si sin clasificar o `removed`")
     previous_material_type: str | None = Field(default=None, description="Tipo de material en la construcción anterior")
@@ -1163,44 +1572,177 @@ class ContextBuildRecord(BaseModel):
     changes: list[ContextChange] = Field(default_factory=list, description="Documentos que entraron, salieron o cambiaron de sitio")
 
 
-class DomainClassificationResult(BaseModel):
-    """Resultado de clasificar un documento por IA (Sub-fase B, `DomainClassificationClient`)."""
+#: Límites de un manifiesto de taxonomía (2.0.0, A1): protegen la construcción, el prompt y la web de un YAML enorme.
+TAXONOMY_MAX_AXES: Final = 10
+TAXONOMY_MAX_ENTRIES_PER_AXIS: Final = 150
+TAXONOMY_MAX_DESCRIPTION_CHARS: Final = 500
+#: Clave de un eje: también es nombre de columna en el Excel y segmento de URL en el sitio.
+TAXONOMY_AXIS_KEY_PATTERN: Final = r"^[a-z][a-z0-9_]{0,40}$"
 
-    domain: str | None = Field(default=None, description="Slug del dominio elegido del catálogo, o `None` si no encaja en ninguno")
-    confidence: float = Field(..., ge=0.0, le=1.0, description="Confianza reportada por el modelo, 0-1")
-    reasoning: str | None = Field(default=None, description="Justificación breve devuelta por el modelo, si la reporta")
+AxisOrganizes = Literal["folder", "subfolder"]
 
 
-class TaxonomyCatalogEntry(BaseModel):
-    """Una entrada del catálogo de un `TaxonomyManifest` (un dominio o un tipo de material de origen)."""
+class TaxonomyEntry(BaseModel):
+    """Un valor de un eje de la taxonomía (un dominio, un tipo de material, un marco normativo...).
+
+    Attributes:
+        slug (str): Identificador corto; se sanea a kebab-case antes de usarse como carpeta o clave.
+        name (str): Nombre legible.
+        description (str | None): Qué cubre el valor; en 2.0 se envía al modelo para desempatar.
+        keywords (list[str]): Términos para la clasificación por reglas, además del slug.
+        examples (list[str]): Títulos o frases de ejemplo de documentos de este valor.
+
+    Example:
+        >>> TaxonomyEntry(slug="iso-27001", name="ISO/IEC 27001", keywords=["SGSI"]).keywords
+        ['SGSI']
+    """
 
     slug: str = Field(..., min_length=1, description="Identificador corto (se sanea a kebab-case antes de usarse como segmento de carpeta)")
     name: str = Field(..., min_length=1, description="Nombre legible")
-    description: str | None = Field(default=None, description="Descripción de la entrada, o `None` si no se rellenó")
+    description: str | None = Field(
+        default=None, max_length=TAXONOMY_MAX_DESCRIPTION_CHARS, description="Descripción de la entrada, o `None` si no se rellenó"
+    )
     keywords: list[str] = Field(default_factory=list, description="Palabras clave adicionales para la puntuación por reglas, además de `slug`")
+    examples: list[str] = Field(default_factory=list, description="Ejemplos de documentos de este valor (títulos o frases)")
+
+
+class TaxonomyAxis(BaseModel):
+    """Un eje de la taxonomía: un catálogo cerrado de valores en el que se clasifica cada documento.
+
+    El eje con `organizes="folder"` es el **dominio** (carpeta de la reorganización y sección del sitio) y el de
+    `organizes="subfolder"` el **tipo de material** (subcarpeta). Los demás ejes (marcos normativos, sistema de
+    gestión...) solo etiquetan: no cambian carpetas.
+
+    Attributes:
+        key (str): Identificador del eje (`^[a-z][a-z0-9_]{0,40}$`), único en el manifiesto.
+        name (str): Nombre legible del eje.
+        description (str | None): Qué clasifica el eje.
+        multiple (bool): Si un documento puede tener varios valores (como mucho 5). Los ejes organizadores no.
+        threshold (float | None): Confianza mínima propia del eje; `None` = el umbral de la construcción.
+        rules (bool): `False` si el eje no se clasifica por palabras (solo IA o semántica).
+        organizes (Literal["folder", "subfolder"] | None): Si el eje decide la carpeta o la subcarpeta.
+        entries (list[TaxonomyEntry]): Valores del eje (1-150).
+
+    Example:
+        >>> axis = TaxonomyAxis(
+        ...     key="normative_frameworks",
+        ...     name="Marcos normativos",
+        ...     multiple=True,
+        ...     entries=[TaxonomyEntry(slug="ens", name="ENS")],
+        ... )
+        >>> axis.organizes is None
+        True
+    """
+
+    key: str = Field(..., pattern=TAXONOMY_AXIS_KEY_PATTERN, description="Identificador del eje, único en el manifiesto")
+    name: str = Field(..., min_length=1, description="Nombre legible del eje")
+    description: str | None = Field(default=None, max_length=TAXONOMY_MAX_DESCRIPTION_CHARS, description="Qué clasifica el eje")
+    multiple: bool = Field(default=False, description="Un documento puede tener varios valores del eje (como mucho 5)")
+    threshold: float | None = Field(default=None, ge=0.0, le=1.0, description="Umbral propio del eje; `None` = el de la construcción")
+    rules: bool = Field(default=True, description="`False`: el eje no se clasifica por reglas (solo IA o semántica)")
+    organizes: AxisOrganizes | None = Field(default=None, description="`folder` = dominio, `subfolder` = tipo de material, `None` = solo etiqueta")
+    entries: list[TaxonomyEntry] = Field(..., description="Valores del eje")
+
+    @field_validator("entries")
+    @classmethod
+    def _check_entries(cls, entries: list[TaxonomyEntry]) -> list[TaxonomyEntry]:
+        if not entries:
+            raise ValueError("un eje necesita al menos una entrada")
+        if len(entries) > TAXONOMY_MAX_ENTRIES_PER_AXIS:
+            raise ValueError(f"un eje admite como mucho {TAXONOMY_MAX_ENTRIES_PER_AXIS} entradas (tiene {len(entries)})")
+        return entries
+
+    @model_validator(mode="after")
+    def _check_organizing(self) -> "TaxonomyAxis":
+        if self.organizes is not None and self.multiple:
+            raise ValueError(f"el eje '{self.key}' organiza carpetas ({self.organizes}) y no puede ser de varios valores")
+        if self.organizes is not None and not self.rules:
+            raise ValueError(f"el eje '{self.key}' organiza carpetas ({self.organizes}) y necesita reglas")
+        return self
+
+
+PROFILE_MAX_CHARS: Final = 8000
+PROFILE_MAX_EXAMPLES: Final = 20
+
+
+class ProjectProfile(BaseModel):
+    """Lo que el modelo necesita saber del proyecto para clasificar como lo haría una persona de dentro (2.0.0, G2).
+
+    Sale de cuatro secciones del cuerpo del manifiesto o la plantilla (`## Contexto del proyecto`, `## Reglas de
+    desempate`, `## Glosario` y `## Ejemplos`) y, si existe, de `<raíz>/.doc_organize/profile.md` del proyecto, que
+    **añade** a lo de la plantilla (D11). Va en el prompt, así que tiene un tope: `PROFILE_MAX_CHARS` caracteres en total
+    y `PROFILE_MAX_EXAMPLES` ejemplos.
+
+    Attributes:
+        context (str | None): Qué es el proyecto y qué documentos tiene.
+        tie_breakers (str | None): Cómo decidir entre dos valores parecidos («una norma publicada por ISO es referencial
+            normativo aunque hable de procedimientos»).
+        glossary (str | None): Siglas y términos propios.
+        examples (list[str]): Ejemplos de documentos y su clasificación, uno por línea.
+
+    Example:
+        >>> ProjectProfile(context="SGSI de una empresa", examples=["Política de seguridad → gobernanza"]).is_empty
+        False
+    """
+
+    context: str | None = None
+    tie_breakers: str | None = None
+    glossary: str | None = None
+    examples: list[str] = Field(default_factory=list)
+
+    @property
+    def is_empty(self) -> bool:
+        """Sin nada que decir al modelo."""
+        return not (self.context or self.tie_breakers or self.glossary or self.examples)
+
+    def merged(self, other: "ProjectProfile | None") -> "ProjectProfile":
+        """Este perfil con lo de `other` añadido detrás (D11: el del proyecto añade al de la plantilla)."""
+        if other is None:
+            return self
+
+        def join(first: str | None, second: str | None) -> str | None:
+            return "\n\n".join(part for part in (first, second) if part) or None
+
+        return ProjectProfile(
+            context=join(self.context, other.context),
+            tie_breakers=join(self.tie_breakers, other.tie_breakers),
+            glossary=join(self.glossary, other.glossary),
+            examples=[*self.examples, *other.examples][:PROFILE_MAX_EXAMPLES],
+        )
 
 
 class TaxonomyManifest(BaseModel):
-    """Manifiesto de taxonomía documental de un proyecto: catálogos de dominios y de tipos de material de origen.
+    """Manifiesto de taxonomía de un proyecto o de una plantilla: una lista de **ejes** (2.0.0).
 
-    Se lee del front matter YAML de `<project.root_path>/taxonomy_manifest.md` (ver
-    `doc_organize.context.taxonomy_manifest.load_taxonomy_manifest`) — el cuerpo Markdown
-    del fichero (prosa, tablas, diagramas) es de lectura humana y no se parsea. Cuando un
-    proyecto tiene manifiesto, `ContextBuilder` clasifica cada documento en dos ejes
-    (dominio + tipo de material) en vez del único eje de dominio del modo sin manifiesto.
+    Se lee del front matter YAML de `<project.root_path>/taxonomy_manifest.md` o de una plantilla
+    (`schema: 2` y `axes:`); el cuerpo Markdown es de lectura humana. Un front matter de 1.x (`domains`,
+    `material_types`, `facets:` o ejes implícitos) se migra al leerlo (`migrate_manifest_v1`).
+
+    Debe haber exactamente un eje `organizes="folder"` (dominio) y uno `organizes="subfolder"` (tipo de material): la
+    reorganización y el sitio salen de ellos, como en 1.x. Los demás ejes solo etiquetan.
 
     Attributes:
-        domains (list[TaxonomyCatalogEntry]): Catálogo cerrado de dominios normativos.
-        material_types (list[TaxonomyCatalogEntry]): Catálogo cerrado de tipos de material de origen.
+        schema_version (int): Versión del formato (`schema` en el YAML); siempre 2.
+        title (str | None): Título legible (plantillas compartidas).
+        description (str | None): Descripción breve (plantillas compartidas).
+        axes (list[TaxonomyAxis]): Ejes de la taxonomía (1-10, claves únicas).
 
     Example:
-        >>> TaxonomyManifest(
-        ...     domains=[TaxonomyCatalogEntry(slug="ciberseguridad", name="Ciberseguridad")],
-        ...     material_types=[TaxonomyCatalogEntry(slug="normativa", name="Normativa")],
-        ... ).domains[0].slug
+        >>> manifest = TaxonomyManifest(
+        ...     axes=[
+        ...         TaxonomyAxis(key="domains", name="Dominios", organizes="folder",
+        ...                      entries=[TaxonomyEntry(slug="ciberseguridad", name="Ciberseguridad")]),
+        ...         TaxonomyAxis(key="material_types", name="Tipos de material", organizes="subfolder",
+        ...                      entries=[TaxonomyEntry(slug="normativa", name="Normativa")]),
+        ...     ]
+        ... )
+        >>> manifest.folder_axis.entries[0].slug
         'ciberseguridad'
     """
 
+    model_config = ConfigDict(populate_by_name=True)
+
+    schema_version: Literal[2] = Field(default=2, alias="schema", description="Versión del formato del manifiesto (`schema` en el YAML)")
     title: str | None = Field(
         default=None,
         description="Título legible, solo relevante para una plantilla compartida (ver `TaxonomyTemplateRegistry`); `None` en un manifiesto de proyecto",
@@ -1209,8 +1751,92 @@ class TaxonomyManifest(BaseModel):
         default=None,
         description="Descripción breve, solo relevante para una plantilla compartida (ver `TaxonomyTemplateRegistry`); `None` en un manifiesto de proyecto",
     )
-    domains: list[TaxonomyCatalogEntry] = Field(..., min_length=1, description="Catálogo cerrado de dominios normativos")
-    material_types: list[TaxonomyCatalogEntry] = Field(..., min_length=1, description="Catálogo cerrado de tipos de material de origen")
+    axes: list[TaxonomyAxis] = Field(..., description="Ejes de la taxonomía")
+    profile: ProjectProfile | None = Field(
+        default=None, description="Perfil del proyecto, de las secciones del cuerpo (2.0.0, G2); `None` si no tiene"
+    )
+
+    @field_validator("axes")
+    @classmethod
+    def _check_axes(cls, axes: list[TaxonomyAxis]) -> list[TaxonomyAxis]:
+        if len(axes) > TAXONOMY_MAX_AXES:
+            raise ValueError(f"un manifiesto admite como mucho {TAXONOMY_MAX_AXES} ejes (tiene {len(axes)})")
+        keys = [axis.key for axis in axes]
+        repeated = sorted({key for key in keys if keys.count(key) > 1})
+        if repeated:
+            raise ValueError(f"claves de eje repetidas: {', '.join(repeated)}")
+        for organizes, label in (("folder", "dominio"), ("subfolder", "tipo de material")):
+            found = [axis.key for axis in axes if axis.organizes == organizes]
+            if len(found) != 1:
+                detail = f"hay {len(found)}: {', '.join(found)}" if found else "no hay ninguno"
+                raise ValueError(f"debe haber exactamente un eje con organizes: {organizes} ({label}); {detail}")
+        return axes
+
+    @property
+    def folder_axis(self) -> TaxonomyAxis:
+        """El eje que decide la carpeta (dominio)."""
+        return next(axis for axis in self.axes if axis.organizes == "folder")
+
+    @property
+    def subfolder_axis(self) -> TaxonomyAxis:
+        """El eje que decide la subcarpeta (tipo de material)."""
+        return next(axis for axis in self.axes if axis.organizes == "subfolder")
+
+    @property
+    def tag_axes(self) -> list[TaxonomyAxis]:
+        """Los ejes que solo etiquetan (sin `organizes`), en el orden del manifiesto."""
+        return [axis for axis in self.axes if axis.organizes is None]
+
+    def axis(self, key: str) -> TaxonomyAxis | None:
+        """El eje de clave `key`, o `None`."""
+        return next((axis for axis in self.axes if axis.key == key), None)
+
+
+class FreshnessReport(BaseModel):
+    """Si el contexto de un proyecto sigue al día respecto a la caché del último escaneo (2.0.0, F4).
+
+    Lo calcula `check_context_freshness` sin leer originales ni `.json`. Las rutas son `source_path`, ordenadas.
+
+    Attributes:
+        changed (list[str]): Originales cuya huella en la caché ya no es la del contexto.
+        added (list[str]): Originales convertidos que el contexto no tiene.
+        removed (list[str]): Documentos del contexto que ya no están convertidos en la caché (borrados, movidos o
+            que ahora fallan).
+        unknown (list[str]): Documentos del contexto sin huella (construido antes de 2.0 o sin `source_sha256`):
+            no se puede saber si cambiaron; reconstruir una vez lo activa.
+        stale_site (bool): El sitio se generó antes de la última construcción del contexto.
+        scanned_at (str | None): Cuándo se escaneó por última vez, si lo dio quien llama: el informe solo es tan
+            reciente como la caché.
+    """
+
+    changed: list[str] = Field(default_factory=list)
+    added: list[str] = Field(default_factory=list)
+    removed: list[str] = Field(default_factory=list)
+    unknown: list[str] = Field(default_factory=list)
+    stale_site: bool = False
+    scanned_at: str | None = None
+
+    @property
+    def up_to_date(self) -> bool:
+        """Sin cambios, altas, bajas ni sitio desfasado (los `unknown` no cuentan: no se sabe)."""
+        return not (self.changed or self.added or self.removed or self.stale_site)
+
+
+class TaxonomyFrontMatterReport(BaseModel):
+    """Qué se leerá de un front matter de taxonomía, para avisar al autor (`inspect_taxonomy_front_matter`).
+
+    Attributes:
+        axes (list[str]): Claves de los ejes que se leerán, en orden.
+        implicit_axes (list[str]): Las que salen del formato implícito de 1.x (claves de nivel superior con una lista
+            de entradas `{slug, name}`): conviene declararlas como ejes explícitos.
+        ignored_keys (list[str]): Claves de nivel superior que no se usan.
+        legacy_format (bool): El front matter es de 1.x (sin `schema: 2`) y se migra al leerlo.
+    """
+
+    axes: list[str] = Field(default_factory=list, description="Claves de los ejes que se leerán")
+    implicit_axes: list[str] = Field(default_factory=list, description="Ejes leídos del formato implícito de 1.x")
+    ignored_keys: list[str] = Field(default_factory=list, description="Claves de nivel superior que no se usan")
+    legacy_format: bool = Field(default=False, description="Front matter de 1.x, migrado al leerlo")
 
 
 class TaxonomyTemplateSummary(BaseModel):
@@ -1225,97 +1851,184 @@ class TaxonomyTemplateSummary(BaseModel):
     )
 
 
-class LiteLLMClassificationConfig(BaseModel):
-    """Configuración de acceso al LiteLLM Proxy para `DomainClassificationClient` (Sub-fase B).
+AiTask = Literal["classify", "enrich", "taxonomy_design", "agent", "embed"]
+"""Tareas del cliente único de IA (2.0.0, G1): clasificar ejes, enriquecer, diseñar la taxonomía, agentes y embeddings."""
 
-    Config propia, no comparte campos ni credenciales con `LiteLLMUsageConfig` (ISP —
-    ver §2.5 de `00_REQUEST.md`) aunque en despliegue pueda apuntar a la misma URL de proxy.
+AI_TASKS: Final[tuple[AiTask, ...]] = ("classify", "enrich", "taxonomy_design", "agent", "embed")
+
+
+#: Tope de tokens de la respuesta de cada tarea si no se configura otro (`TaskSettings.max_tokens`). Holgado para la
+#: respuesta normal (en CALIDAD_VD, `classify` da ~350 de mediana) y suficiente para cortar las que se desbocan.
+DEFAULT_MAX_TOKENS: dict[str, int] = {"classify": 1024, "enrich": 512, "taxonomy_design": 4096, "agent": 4096}
+
+
+def default_model_alias(task: AiTask) -> str:
+    """El alias del modelo de `task` en el LiteLLM Proxy si no se configura otro: `doc-organize-<tarea>` (recomendado,
+    no obligatorio: U10).
+
+    Example:
+        >>> default_model_alias("taxonomy_design")
+        'doc-organize-taxonomy-design'
+    """
+    return f"doc-organize-{task.replace('_', '-')}"
+
+
+class TaskSettings(BaseModel):
+    """Modelo y, si se quiere, clave propia de una tarea de IA (2.0.0, G1; claves por tarea opcionales, D12).
+
+    Attributes:
+        model (str): Alias del modelo en el LiteLLM Proxy (o el nombre real del modelo: los alias se recomiendan, no se
+            exigen, U10).
+        virtual_key (str | None): Clave propia de la tarea (presupuesto y límites aparte en el proxy); `None` = la de
+            `AiSettings`.
+        max_tokens (int | None): Tope de tokens de la respuesta; `None` = el de la tarea (`DEFAULT_MAX_TOKENS`). Corta
+            las respuestas que se desbocan (una respuesta cortada no pasa la validación y cuenta como fallo).
+        timeout_s (float | None): Timeout de cada llamada de la tarea; `None` = el de `AiSettings` (un borrador de
+            taxonomía o un agente con un modelo local tardan más que una clasificación).
+        retries (int | None): Reintentos de transporte de la tarea; `None` = los de `AiSettings`.
+        max_documents (int | None): Documentos como mucho por construcción en la fase de la tarea (`classify`,
+            `enrich`); se combina con `ContextBuilder.build(ai_max_documents=)` (manda el menor). `None` = sin tope
+            propio.
     """
 
-    base_url: str = Field(..., description="URL base del LiteLLM Proxy")
-    virtual_key: str = Field(..., description="Virtual key con permiso de `chat/completions` para clasificación")
-    model: str = Field(default="claude-classifier", description="Alias de modelo configurado en el proxy para clasificar")
-    timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
-    retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
-    retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
+    model_config = ConfigDict(frozen=True)
+
+    model: str = Field(..., min_length=1, description="Alias del modelo en el proxy para esta tarea")
+    virtual_key: str | None = Field(default=None, repr=False, description="Clave propia de la tarea; None = la general")
+    max_tokens: int | None = Field(default=None, gt=0, description="Tope de tokens de la respuesta; None = el de la tarea")
+    timeout_s: float | None = Field(default=None, gt=0, description="Timeout de la tarea, en segundos; None = el general")
+    retries: int | None = Field(default=None, ge=0, description="Reintentos de transporte de la tarea; None = los generales")
+    max_documents: int | None = Field(default=None, ge=0, description="Documentos como mucho en la fase de la tarea; None = sin tope propio")
 
 
-class TaxonomyClassificationResult(BaseModel):
-    """Resultado de clasificar un documento por IA en los 2 ejes de un manifiesto de taxonomía
-    (Sub-fase B combinada, `TaxonomyClassificationClient`) — una sola llamada para dominio y
-    tipo de material de origen, en vez de dos llamadas independientes (decisión de la sesión que
-    añadió este cliente)."""
+class PromptProvenance(BaseModel):
+    """Con qué prompt y qué modelo se hizo una tarea de IA en una construcción (2.0.0, G1; `Context.ai_provenance`).
 
-    domain: str | None = Field(default=None, description="Slug del dominio elegido del catálogo, o `None` si no encaja en ninguno")
-    domain_confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="Confianza reportada por el modelo para el eje de dominio, 0-1")
-    material_type: str | None = Field(default=None, description="Slug del tipo de material elegido del catálogo, o `None` si no encaja en ninguno")
-    material_type_confidence: float = Field(
-        default=0.0, ge=0.0, le=1.0, description="Confianza reportada por el modelo para el eje de tipo de material, 0-1"
-    )
-    reasoning: str | None = Field(default=None, description="Justificación breve devuelta por el modelo, si la reporta")
-
-
-class LiteLLMTaxonomyClassificationConfig(BaseModel):
-    """Configuración de acceso al LiteLLM Proxy para `TaxonomyClassificationClient` (Sub-fase B,
-    manifiesto de taxonomía).
-
-    Config propia, no comparte campos ni credenciales con `LiteLLMClassificationConfig` (ISP —
-    mismo criterio que ya separa esa de `LiteLLMUsageConfig`): la clasificación combinada de 2 ejes
-    es una carga de trabajo distinta de la clasificación de dominio de 1 eje, aunque en despliegue
-    ambas puedan apuntar al mismo LiteLLM Proxy.
+    Attributes:
+        task (AiTask): Tarea.
+        prompt_id (str): `id` del prompt.
+        version (str): `version` del prompt.
+        source (str): `builtin` (empaquetado) o `project` (`<raíz>/.doc_organize/prompts/`).
+        sha256 (str): Huella del texto del prompt: distingue dos prompts de proyecto con el mismo `id` y `version`.
+        model (str): Modelo usado.
     """
 
-    base_url: str = Field(..., description="URL base del LiteLLM Proxy")
-    virtual_key: str = Field(..., description="Virtual key con permiso de `chat/completions` para clasificación por manifiesto")
-    model: str = Field(default="claude-classifier", description="Alias de modelo configurado en el proxy para clasificar por manifiesto")
-    timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
+    task: AiTask
+    prompt_id: str
+    version: str
+    source: Literal["builtin", "project"]
+    sha256: str
+    model: str
+
+
+class AiSettings(BaseModel):
+    """Configuración del cliente único de IA (`LlmClient`, 2.0.0): un proxy, una clave y un modelo por tarea.
+
+    Sustituye a las cuatro `LiteLLM*Config` de 1.x (clasificación, clasificación por manifiesto, enriquecimiento y
+    borrador). Una tarea sin entrada en `tasks` usa el alias recomendado `doc-organize-<tarea>`.
+
+    Attributes:
+        base_url (str): URL del LiteLLM Proxy.
+        virtual_key (str): Clave general (las tareas pueden tener la suya).
+        tasks (dict[AiTask, TaskSettings]): Modelo (y clave) por tarea.
+        timeout_s (float): Timeout de cada llamada; un modelo local en frío puede tardar (M0: 47 s).
+        retries, retry_backoff_s, rate_limit_retries, max_retry_wait_s: Reintentos (ver `AiHttpClientBase`).
+        redact_credentials (bool): Redactar credenciales de todo lo que sale (D7); por defecto activado.
+        tags (list[str]): Etiquetas para el proxy (`metadata.tags`), además de `doc_organize` y `task:<tarea>`.
+
+    Example:
+        >>> settings = AiSettings(base_url="http://localhost:4000", virtual_key="sk-x", tasks={"classify": TaskSettings(model="qwen")})
+        >>> settings.model_for("classify"), settings.model_for("enrich")
+        ('qwen', 'doc-organize-enrich')
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    base_url: str = Field(..., min_length=1, description="URL del LiteLLM Proxy")
+    virtual_key: str = Field(..., min_length=1, repr=False, description="Clave general del proxy")
+    tasks: dict[AiTask, TaskSettings] = Field(default_factory=dict, description="Modelo y clave por tarea")
+    timeout_s: float = Field(default=120.0, gt=0, description="Timeout de cada llamada, en segundos")
     retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
     retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
+    rate_limit_retries: int = Field(default=3, ge=0, description=_HTTP_RATE_LIMIT_RETRIES_DESC)
+    max_retry_wait_s: float = Field(default=60.0, ge=0.0, description=_HTTP_MAX_RETRY_WAIT_DESC)
+    redact_credentials: bool = Field(default=True, description="Redactar credenciales de todo lo que sale hacia la IA (D7)")
+    tags: list[str] = Field(default_factory=list, description="Etiquetas para el proxy (`metadata.tags`)")
+
+    def model_for(self, task: AiTask) -> str:
+        """El modelo de `task`: el configurado o el alias recomendado (`default_model_alias`)."""
+        configured = self.tasks.get(task)
+        return configured.model if configured is not None else default_model_alias(task)
+
+    def timeout_for(self, task: AiTask) -> float:
+        """El timeout de `task`: el suyo o el general."""
+        configured = self.tasks.get(task)
+        return configured.timeout_s if configured is not None and configured.timeout_s is not None else self.timeout_s
+
+    def retries_for(self, task: AiTask) -> int:
+        """Los reintentos de transporte de `task`: los suyos o los generales."""
+        configured = self.tasks.get(task)
+        return configured.retries if configured is not None and configured.retries is not None else self.retries
+
+    def max_documents_for(self, task: AiTask) -> int | None:
+        """El tope de documentos propio de la fase de `task`, o `None`."""
+        configured = self.tasks.get(task)
+        return configured.max_documents if configured is not None else None
+
+    def key_for(self, task: AiTask) -> str:
+        """La clave de `task`: la suya si la tiene, si no la general."""
+        configured = self.tasks.get(task)
+        return configured.virtual_key if configured is not None and configured.virtual_key else self.virtual_key
+
+    def max_tokens_for(self, task: AiTask) -> int | None:
+        """El tope de tokens de la respuesta de `task`: el configurado o el de la tarea (`DEFAULT_MAX_TOKENS`).
+
+        Example:
+            >>> AiSettings(base_url="http://proxy", virtual_key="sk").max_tokens_for("classify")
+            1024
+        """
+        configured = self.tasks.get(task)
+        if configured is not None and configured.max_tokens is not None:
+            return configured.max_tokens
+        return DEFAULT_MAX_TOKENS.get(task)
 
 
 class TaxonomyManifestDraftResult(BaseModel):
     """Resultado de pedir a la IA un borrador de manifiesto de taxonomía (dominios + tipos de
-    material) a partir de una muestra de documentos ya convertidos (`TaxonomyManifestDraftClient`).
+    material) a partir de una muestra de documentos ya convertidos (`doc_organize.ai.draft_taxonomy`).
 
-    A diferencia de `TaxonomyClassificationResult` (Sub-fase B, elige DENTRO de un catálogo ya
+    A diferencia de la clasificación (`classify_document`, elige DENTRO de un catálogo ya
     confirmado), aquí el catálogo mismo es la propuesta — nunca se aplica directamente, el
     usuario lo revisa/edita antes de guardarlo como `taxonomy_manifest.md`.
     """
 
-    domains: list[TaxonomyCatalogEntry] = Field(..., min_length=1, description="Catálogo de dominios propuesto por la IA")
-    material_types: list[TaxonomyCatalogEntry] = Field(..., min_length=1, description="Catálogo de tipos de material propuesto por la IA")
+    domains: list[TaxonomyEntry] = Field(..., min_length=1, description="Catálogo de dominios propuesto por la IA")
+    material_types: list[TaxonomyEntry] = Field(..., min_length=1, description="Catálogo de tipos de material propuesto por la IA")
+    profile: ProjectProfile | None = Field(default=None, description="Perfil inicial del proyecto propuesto por la IA (2.0.0)")
     reasoning: str | None = Field(default=None, description="Justificación breve devuelta por el modelo, si la reporta")
 
+    def to_manifest(self) -> TaxonomyManifest:
+        """El borrador como manifiesto v2: eje `domains` (carpeta), eje `material_types` (subcarpeta) y su perfil.
 
-class LiteLLMTaxonomyManifestDraftConfig(BaseModel):
-    """Configuración de acceso al LiteLLM Proxy para `TaxonomyManifestDraftClient`.
-
-    Config propia (ISP, mismo criterio que separa `LiteLLMClassificationConfig` de
-    `LiteLLMTaxonomyClassificationConfig`): proponer un catálogo nuevo es una carga de trabajo
-    distinta de clasificar dentro de uno ya cerrado, aunque en despliegue las tres puedan apuntar
-    al mismo LiteLLM Proxy.
-    """
-
-    base_url: str = Field(..., description="URL base del LiteLLM Proxy")
-    virtual_key: str = Field(..., description="Virtual key con permiso de `chat/completions` para proponer manifiestos de taxonomía")
-    model: str = Field(default="claude-classifier", description="Alias de modelo configurado en el proxy para proponer manifiestos")
-    timeout_s: float = Field(
-        default=60.0,
-        description="Timeout de las peticiones HTTP, en segundos (más alto que el resto: el prompt incluye varios documentos a la vez, no uno solo)",
-    )
-    retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
-    retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
-    redact_credentials: bool = Field(
-        default=True,
-        description=(
-            "Redacta las credenciales (`doc_organize.security.redact_credentials`) del título y el extracto de cada documento "
-            "de la muestra antes de enviarlos (1.7.0)"
-        ),
-    )
+        Example:
+            >>> draft = TaxonomyManifestDraftResult(
+            ...     domains=[TaxonomyEntry(slug="calidad", name="Calidad")],
+            ...     material_types=[TaxonomyEntry(slug="procedimiento", name="Procedimiento")],
+            ... )
+            >>> tuple(axis.key for axis in draft.to_manifest().axes)
+            ('domains', 'material_types')
+        """
+        return TaxonomyManifest(
+            axes=[
+                TaxonomyAxis(key="domains", name="Dominios", organizes="folder", entries=self.domains),
+                TaxonomyAxis(key="material_types", name="Tipos de material", organizes="subfolder", entries=self.material_types),
+            ],
+            profile=self.profile,
+        )
 
 
 class DocumentEnrichmentResult(BaseModel):
-    """Descripción y palabras clave que propone la IA para un documento (`DocumentEnrichmentClient`, 1.5.0).
+    """Descripción y palabras clave que propone la IA para un documento (`doc_organize.ai.enrich_document`).
 
     Ya saneadas por el cliente: una línea, longitud acotada y sin repetidos; `None`/lista vacía si el modelo no dio
     un valor utilizable.
@@ -1325,27 +2038,27 @@ class DocumentEnrichmentResult(BaseModel):
     keywords: list[str] = Field(default_factory=list, description="Palabras clave, o lista vacía")
 
 
-class LiteLLMEnrichmentConfig(BaseModel):
-    """Configuración de acceso al LiteLLM Proxy para `DocumentEnrichmentClient` (1.5.0).
-
-    Config propia (ISP, mismo criterio que el resto de clientes de `ai/`): describir un documento es una carga de
-    trabajo distinta de clasificarlo, aunque en despliegue apunten al mismo proxy.
-    """
-
-    base_url: str = Field(..., description="URL base del LiteLLM Proxy")
-    virtual_key: str = Field(..., description="Virtual key con permiso de `chat/completions` para describir documentos")
-    model: str = Field(default="claude-classifier", description="Alias de modelo configurado en el proxy para describir documentos")
-    timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
-    retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
-    retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
-
+Context.model_rebuild()  # `taxonomy_axes` y `ai_provenance` usan modelos definidos después
 
 __all__ = [
+    "AI_TASKS",
+    "CONTEXT_SCHEMA_VERSION",
+    "DEFAULT_MAX_TOKENS",
+    "LEGACY_FOLDER_AXIS_KEY",
+    "LEGACY_SUBFOLDER_AXIS_KEY",
     "AiClassificationStopReason",
+    "AiPhaseStats",
+    "AiScope",
+    "AiSettings",
+    "AiStats",
+    "AiTask",
     "AvStatus",
+    "AxisClassifiedBy",
+    "AxisValue",
     "CacheConfig",
     "CacheEntry",
     "CacheExportSnapshot",
+    "ClassificationDecision",
     "Context",
     "ContextBuildEvent",
     "ContextBuildEventType",
@@ -1356,34 +2069,40 @@ __all__ = [
     "ContextDeleteEventType",
     "ConversionResult",
     "ConversionStatus",
+    "DecisionAction",
+    "DecisionIssue",
+    "DecisionIssueReason",
     "DedupEvent",
     "DedupEventType",
     "DeduplicationReport",
     "DirectoryTree",
     "DirectoryTreeNode",
     "DoclingConfig",
+    "DocumentClassification",
     "DocumentCredentialFindings",
     "DocumentEnrichmentField",
     "DocumentEnrichmentResult",
     "DocumentMetadata",
     "DocumentStatus",
+    "DocumentVersionGroup",
     "Domain",
-    "DomainClassificationResult",
     "DomainDocument",
     "DomainStatus",
     "DuplicateGroup",
     "DuplicateReason",
+    "EnvironmentCheck",
+    "EnvironmentCheckStatus",
+    "EnvironmentReport",
+    "FreshnessReport",
     "GitHubCopilotUsageConfig",
     "GpuStatus",
-    "LiteLLMClassificationConfig",
-    "LiteLLMEnrichmentConfig",
-    "LiteLLMTaxonomyClassificationConfig",
-    "LiteLLMTaxonomyManifestDraftConfig",
     "LiteLLMUsageConfig",
     "OcrMode",
     "OfficeStatus",
     "Project",
     "ProjectNameValidation",
+    "ProjectProfile",
+    "PromptProvenance",
     "ScanErrorEntry",
     "ScanErrorReport",
     "ScanEvent",
@@ -1391,8 +2110,10 @@ __all__ = [
     "ScanResult",
     "ScanRunReport",
     "ScannedFolder",
-    "TaxonomyCatalogEntry",
-    "TaxonomyClassificationResult",
+    "TaskSettings",
+    "TaxonomyAxis",
+    "TaxonomyEntry",
+    "TaxonomyFrontMatterReport",
     "TaxonomyManifest",
     "UnclassifiedDocument",
     "UnclassifiedReason",
@@ -1400,4 +2121,5 @@ __all__ = [
     "UsageSnapshot",
     "UsageSourceName",
     "ValidationResult",
+    "VersionsMode",
 ]

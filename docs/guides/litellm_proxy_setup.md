@@ -2,15 +2,14 @@
 
 La organización documental por dominios (`doc_organize.context`) clasifica cada
 documento por reglas primero (Sub-fase A). Si activas la clasificación asistida por
-IA (`ContextBuilder.build(ai_classification_enabled=True, ...)`), los documentos que las
+IA (`ContextBuilder.build(llm=LlmClient(...), ai_scope="unclassified")`), los documentos que las
 reglas dejan sin clasificar pasan por un **LiteLLM Proxy** (Sub-fase B) — nunca se
 llama a un proveedor de IA directamente. Esta guía explica cómo levantar ese proxy
 en local con Docker.
 
-Un proyecto con `taxonomy_manifest.md` (clasificación de 2 ejes: dominio + tipo de
-material) usa el mismo proxy pero un cliente y unas variables de entorno propias
-(`TaxonomyClassificationClient`, §4) — la misma opción activa una llamada
-combinada que resuelve ambos ejes a la vez, en vez de la llamada de 1 eje.
+Desde 2.0.0 un solo cliente (`LlmClient`, §4) hace todas las tareas de IA contra ese proxy: clasificar (con o sin
+`taxonomy_manifest.md`; con manifiesto, una sola llamada resuelve todos los ejes pendientes), describir documentos y
+proponer una taxonomía.
 
 No necesitas esta guía si no vas a usar la Sub-fase B: la clasificación por reglas
 funciona sin ningún proxy ni credencial de IA.
@@ -125,53 +124,43 @@ La respuesta incluye `"key": "sk-..."` — esa es la virtual key.
 
 ## 4. Configurar doc_organize
 
-Desde 1.0.0 la librería solo lee estas variables del entorno (`*_config_from_env()`), o
-recibe los `*Config` ya construidos por el consumidor: el panel `/admin/configuracion-ia`
-de la web integrada se retiró con ella (ver el [histórico](../historico/web-ai_settings.md));
-doc_organize_web tiene su propia configuración de IA.
+Desde 2.0.0 hay **un solo cliente de IA** (`LlmClient`) para todas las tareas, con un modelo (y si quieres una virtual
+key propia) por tarea. La librería lo configura desde estas variables con `settings_from_env()` (`doc_organize.ai`), o
+recibe el `AiSettings` ya construido por el consumidor; doc_organize_web tiene su propia configuración de IA.
 
-En el entorno donde corre `doc_organize` (o en tu `.env` de la raíz del proyecto, ver
-`.env.example`), para las funciones `*_config_from_env()` de `doc_organize.ai`:
+En el entorno donde corre `doc_organize` (o en tu `.env` de la raíz del proyecto, ver `.env.example`):
 
 ```bash
-DOC_ORGANIZE_LITELLM_CLASSIFICATION_BASE_URL=http://localhost:4000
-DOC_ORGANIZE_LITELLM_CLASSIFICATION_VIRTUAL_KEY=sk-...   # la virtual key del paso 3
-DOC_ORGANIZE_LITELLM_CLASSIFICATION_MODEL=claude-classifier   # opcional, es el valor por defecto
+DOC_ORGANIZE_LITELLM_BASE_URL=http://localhost:4000
+DOC_ORGANIZE_LITELLM_VIRTUAL_KEY=sk-...                        # la virtual key del paso 3
+DOC_ORGANIZE_LITELLM_MODEL_CLASSIFY=claude-classifier          # clasificar ejes
+DOC_ORGANIZE_LITELLM_MODEL_ENRICH=claude-classifier            # describir documentos
+DOC_ORGANIZE_LITELLM_MODEL_TAXONOMY_DESIGN=claude-classifier   # proponer una taxonomía
+# Opcional: una virtual key propia por tarea, para atribuir presupuesto y límites aparte en el proxy
+DOC_ORGANIZE_LITELLM_VIRTUAL_KEY_CLASSIFY=sk-...
 ```
 
-Estas variables se leen explícitamente vía
-`litellm_classification_config_from_env()` (`doc_organize.ai`) — nunca de forma
-implícita. Sin ellas, `litellm_classification_config_from_env()` lanza `ValueError`
-con un mensaje explícito en vez de un error críptico.
+Una tarea sin `MODEL_<TAREA>` usa el alias recomendado `doc-organize-<tarea>` (`doc-organize-classify`,
+`doc-organize-enrich`, `doc-organize-taxonomy-design`): puedes crear esos alias en el `config.yaml` del proxy o dar el
+modelo real en la variable. Sin `BASE_URL`, `settings_from_env()` devuelve `None` (sin IA); con `BASE_URL` y sin
+`VIRTUAL_KEY`, `AiConfigurationError`.
 
-**Si el proyecto tiene `taxonomy_manifest.md`** (modo de 2 ejes), configura en su
-lugar las variables de `TaxonomyClassificationClient` — son una config separada
-(ISP: una virtual key por carga de trabajo, para poder atribuir presupuesto/rate-limit
-por separado), aunque apunten al mismo proxy que acabas de levantar:
+Las variables de 1.x (`DOC_ORGANIZE_LITELLM_CLASSIFICATION_*`, `_TAXONOMY_CLASSIFICATION_*`, `_ENRICHMENT_*`,
+`_TAXONOMY_MANIFEST_DRAFT_*`) ya no se leen: si alguna está definida, `settings_from_env()` lanza
+`AiConfigurationError` con su equivalente (ver [De 1.x a 2.0](migracion_2_0.md)).
 
-```bash
-DOC_ORGANIZE_LITELLM_TAXONOMY_CLASSIFICATION_BASE_URL=http://localhost:4000
-DOC_ORGANIZE_LITELLM_TAXONOMY_CLASSIFICATION_VIRTUAL_KEY=sk-...   # genera otra virtual key en el paso 3
-DOC_ORGANIZE_LITELLM_TAXONOMY_CLASSIFICATION_MODEL=claude-classifier   # opcional, es el valor por defecto
+Para comprobar que todo responde, sin enviar nada de ningún documento:
+
+```python
+import asyncio
+from doc_organize import check_environment
+
+report = asyncio.run(check_environment(check_ai=True))
+print([(check.name, check.status, check.detail) for check in report.checks if check.name.startswith("ai")])
 ```
 
-Un proyecto sin manifiesto solo necesita las variables de 1 eje; uno con
-manifiesto solo necesita las de 2 ejes — no hace falta definir ambos juegos a la
-vez salvo que el mismo despliegue de doc_organize sirva proyectos de los dos tipos.
-
-El borrador de manifiesto por IA (`TaxonomyManifestDraftClient`, para proponer un
-`taxonomy_manifest.md` nuevo) usa sus propias variables. Config propia (ISP, mismo criterio que
-separa las dos configs de arriba):
-
-```bash
-DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_BASE_URL=http://localhost:4000
-DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_VIRTUAL_KEY=sk-...   # genera otra virtual key en el paso 3
-DOC_ORGANIZE_LITELLM_TAXONOMY_MANIFEST_DRAFT_MODEL=claude-classifier   # opcional, es el valor por defecto
-```
-
-Requiere el extra `doc_organize[context]` instalado (`pip install
-doc_organize[context]`) para `pyyaml` (manifiestos y plantillas de taxonomía) — el cliente
-de clasificación en sí solo usa `httpx`, ya incluido en el extra `ai`.
+Requiere el extra `doc_organize[context]` instalado (`pip install doc_organize[context]`) para `pyyaml` (manifiestos,
+plantillas y prompts); el cliente en sí solo usa `httpx`, ya incluido en el extra `ai`.
 
 ## Parar el proxy
 

@@ -1,15 +1,14 @@
 """
-Manifiesto de taxonomía documental por proyecto: dominios + tipos de material de origen.
+Manifiesto de taxonomía documental por proyecto: una lista de ejes (2.0.0), con dominio y tipo de material como ejes
+organizadores.
 """
 
 import asyncio
 
 from pathlib import Path
 
-import yaml
-
-from pydantic import ValidationError
-
+from doc_organize.context.project_profile import render_profile_sections
+from doc_organize.context.taxonomy_front_matter import manifest_from_text, render_front_matter
 from doc_organize.core.constants import TAXONOMY_MANIFEST_FILE_NAME
 from doc_organize.core.exceptions import TaxonomyManifestError
 from doc_organize.core.models import Project, TaxonomyManifest
@@ -19,7 +18,6 @@ from doc_organize.utils.logging import get_logger
 logger = get_logger(__name__)
 
 MANIFEST_FILE_NAME = TAXONOMY_MANIFEST_FILE_NAME
-_FRONT_MATTER_DELIMITER = "---"
 
 
 async def load_taxonomy_manifest(project: Project) -> TaxonomyManifest | None:
@@ -60,11 +58,8 @@ async def load_taxonomy_manifest(project: Project) -> TaxonomyManifest | None:
         return None
 
     raw = await asyncio.to_thread(manifest_path.read_text, encoding="utf-8")
-    front_matter = _extract_front_matter(raw, manifest_path)
-    manifest = _parse_front_matter(front_matter, manifest_path)
-    logger.info(
-        f"Manifiesto de taxonomía cargado de '{manifest_path}': {len(manifest.domains)} dominio(s), {len(manifest.material_types)} tipo(s) de material"
-    )
+    manifest = manifest_from_text(raw, str(manifest_path), TaxonomyManifestError)
+    logger.info(f"Manifiesto de taxonomía cargado de '{manifest_path}': {_describe_axes(manifest)}")
     return manifest
 
 
@@ -74,9 +69,10 @@ async def save_taxonomy_manifest(project: Project, raw_markdown: str) -> Taxonom
     Pensado para persistir el
     borrador que el usuario revisó/editó (`draft_taxonomy_manifest` genera el texto vía
     `render_taxonomy_manifest_markdown`, pero nunca lo escribía a disco -- ver el docstring de
-    esa función). Valida ANTES de escribir, con los mismos `_extract_front_matter`/
-    `_parse_front_matter` que usa `load_taxonomy_manifest()`, para no dejar nunca en disco un
-    fichero que la propia app no podría releer.
+    esa función). Valida ANTES de escribir, con la misma lectura que usa `load_taxonomy_manifest()`
+    (formato 2.0 o 1.x migrado en memoria), para no dejar nunca en disco un fichero que la propia
+    app no podría releer. Guarda el texto tal cual: un manifiesto de 1.x sigue siendo 1.x en disco
+    hasta que el consumidor lo migre (`migrate_manifest_v1`).
 
     Escritura atómica (`utils.atomic_write.write_text_atomic`, L-8e): una construcción de contexto concurrente que esté leyendo el fichero
     (`_load_taxonomy_manifest_or_400`) nunca ve un `taxonomy_manifest.md` a medio escribir.
@@ -97,39 +93,16 @@ async def save_taxonomy_manifest(project: Project, raw_markdown: str) -> Taxonom
             `TaxonomyManifest`.
     """
     manifest_path = Path(project.root_path) / MANIFEST_FILE_NAME
-    front_matter = _extract_front_matter(raw_markdown, manifest_path)
-    manifest = _parse_front_matter(front_matter, manifest_path)
+    manifest = manifest_from_text(raw_markdown, str(manifest_path), TaxonomyManifestError)
 
     # L-8e (G31): temporal con nombre aleatorio y creado en exclusiva, nunca `taxonomy_manifest.tmp` de nombre fijo.
     await asyncio.to_thread(write_text_atomic, manifest_path, raw_markdown)
-    logger.info(
-        f"Manifiesto de taxonomía guardado en '{manifest_path}': {len(manifest.domains)} dominio(s), {len(manifest.material_types)} tipo(s) de material"
-    )
+    logger.info(f"Manifiesto de taxonomía guardado en '{manifest_path}': {_describe_axes(manifest)}")
     return manifest
 
 
-def _extract_front_matter(raw: str, manifest_path: Path) -> str:
-    lines = raw.splitlines()
-    if not lines or lines[0].strip() != _FRONT_MATTER_DELIMITER:
-        raise TaxonomyManifestError(f"'{manifest_path}' debe empezar con el delimitador de front matter YAML ('---').")
-    try:
-        closing_index = lines.index(_FRONT_MATTER_DELIMITER, 1)
-    except ValueError as exc:
-        raise TaxonomyManifestError(f"'{manifest_path}' no cierra el front matter YAML (falta un segundo '---').") from exc
-    return "\n".join(lines[1:closing_index])
-
-
-def _parse_front_matter(front_matter: str, manifest_path: Path) -> TaxonomyManifest:
-    try:
-        payload = yaml.safe_load(front_matter)
-    except yaml.YAMLError as exc:
-        raise TaxonomyManifestError(f"El front matter YAML de '{manifest_path}' no es válido: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise TaxonomyManifestError(f"El front matter de '{manifest_path}' debe ser un mapeo YAML con 'domains'/'material_types'.")
-    try:
-        return TaxonomyManifest.model_validate(payload)
-    except ValidationError as exc:
-        raise TaxonomyManifestError(f"El front matter de '{manifest_path}' no cumple el schema de taxonomía: {exc}") from exc
+def _describe_axes(manifest: TaxonomyManifest) -> str:
+    return ", ".join(f"{axis.key} ({len(axis.entries)})" for axis in manifest.axes)
 
 
 def render_taxonomy_manifest_markdown(
@@ -141,14 +114,14 @@ def render_taxonomy_manifest_markdown(
     nueva de `TaxonomyTemplateRegistry`).
 
     Pensado para componer la respuesta de un
-    borrador propuesto por IA (`ai.TaxonomyManifestDraftClient`) — nunca escribe nada en disco por
+    borrador propuesto por IA (`ai.draft_taxonomy`) — nunca escribe nada en disco por
     sí mismo; no existe hoy ningún endpoint que persista `taxonomy_manifest.md` por el usuario, así
     que "confirmar" el borrador es siempre una acción manual fuera de esta función.
 
     Args:
-        manifest: Catálogo propuesto (`domains`/`material_types`). `title`/`description` del
-            propio `manifest` se ignoran — solo relevantes para una plantilla compartida (ver
-            `TaxonomyManifest`), no para un manifiesto de proyecto.
+        manifest: Catálogo propuesto (`TaxonomyManifestDraftResult.to_manifest()`). `title`/`description` del
+            propio `manifest` se ignoran — solo relevantes para una plantilla compartida (ver `TaxonomyManifest`), no
+            para un manifiesto de proyecto.
         reasoning: Justificación devuelta por la IA (`TaxonomyManifestDraftResult.reasoning`), o
             `None` si no la reportó.
         sample_document_count: Documentos realmente enviados a la IA.
@@ -156,31 +129,25 @@ def render_taxonomy_manifest_markdown(
             el borrador.
 
     Returns:
-        Texto completo del fichero, empezando por el front matter YAML.
+        Texto completo del fichero (formato 2.0), empezando por el front matter YAML.
 
     Example:
-        >>> from doc_organize.core.models import TaxonomyCatalogEntry
-        >>> manifest = TaxonomyManifest(
-        ...     domains=[TaxonomyCatalogEntry(slug="calidad", name="Calidad")],
-        ...     material_types=[TaxonomyCatalogEntry(slug="procedimiento", name="Procedimiento")],
-        ... )
+        >>> from doc_organize.core.models import TaxonomyEntry, TaxonomyManifestDraftResult
+        >>> manifest = TaxonomyManifestDraftResult(
+        ...     domains=[TaxonomyEntry(slug="calidad", name="Calidad")],
+        ...     material_types=[TaxonomyEntry(slug="procedimiento", name="Procedimiento")],
+        ... ).to_manifest()
         >>> text = render_taxonomy_manifest_markdown(manifest, reasoning=None, sample_document_count=5, total_document_count=20)
-        >>> text.startswith("---\\ndomains:")
+        >>> text.startswith("---\\nschema: 2\\naxes:")
         True
     """
-    front_matter = yaml.safe_dump(
-        {
-            "domains": [entry.model_dump(exclude_none=True) for entry in manifest.domains],
-            "material_types": [entry.model_dump(exclude_none=True) for entry in manifest.material_types],
-        },
-        allow_unicode=True,
-        sort_keys=False,
-    )
-    domain_names = ", ".join(entry.name for entry in manifest.domains)
-    material_type_names = ", ".join(entry.name for entry in manifest.material_types)
+    front_matter = render_front_matter(manifest.model_copy(update={"title": None, "description": None}))
+    rows = "".join(f"| {axis.name} | {', '.join(entry.name for entry in axis.entries)} |\n" for axis in manifest.axes)
     reasoning_paragraph = f"\n{reasoning}\n" if reasoning else ""
+    # El perfil propuesto, en las secciones que se vuelven a leer al cargar el manifiesto (G2).
+    profile = f"\n{render_profile_sections(manifest.profile)}" if manifest.profile and not manifest.profile.is_empty else ""
     return (
-        f"---\n{front_matter}---\n\n"
+        f"{front_matter}\n"
         "# Borrador de taxonomía (generado por IA)\n\n"
         f"> Borrador generado automáticamente a partir de una muestra de {sample_document_count} de "
         f"{total_document_count} documentos convertidos. Revísalo y edítalo antes de guardarlo como "
@@ -188,8 +155,8 @@ def render_taxonomy_manifest_markdown(
         f"{reasoning_paragraph}\n"
         "| Eje | Propuestas |\n"
         "|---|---|\n"
-        f"| Dominio | {domain_names} |\n"
-        f"| Tipo de material | {material_type_names} |\n"
+        f"{rows}"
+        f"{profile}"
     )
 
 

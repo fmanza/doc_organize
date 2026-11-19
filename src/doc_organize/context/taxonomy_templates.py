@@ -10,10 +10,8 @@ import re
 
 from pathlib import Path
 
-import yaml
-
-from pydantic import ValidationError
-
+from doc_organize.context.project_profile import render_profile_sections
+from doc_organize.context.taxonomy_front_matter import manifest_from_text, render_front_matter
 from doc_organize.core.exceptions import TaxonomyTemplateError
 from doc_organize.core.models import TaxonomyManifest, TaxonomyTemplateSummary
 from doc_organize.utils.logging import get_logger
@@ -21,7 +19,6 @@ from doc_organize.utils.logging import get_logger
 logger = get_logger(__name__)
 
 TEMPLATE_FILE_EXTENSION = ".md"
-_FRONT_MATTER_DELIMITER = "---"
 
 #: Plantillas de ejemplo distribuidas con el propio paquete (ver `MANIFEST.in`) — de solo lectura, nunca escritas por
 #: la aplicación.
@@ -37,7 +34,8 @@ _TEMPLATE_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 def parse_taxonomy_template(text: str, *, source: str = "<texto>") -> TaxonomyManifest:
     """Valida el front matter YAML de `text` (formato de fichero de una plantilla) como `TaxonomyManifest`.
 
-    El cuerpo tras el front matter es prosa libre y no se parsea.
+    Lee el formato 2.0 (`schema: 2`, `axes:`) y el de 1.x, que migra en memoria (`migrate_manifest_v1`). El cuerpo
+    tras el front matter es prosa libre y no se parsea.
 
     Args:
         text: Contenido completo de la plantilla.
@@ -45,22 +43,21 @@ def parse_taxonomy_template(text: str, *, source: str = "<texto>") -> TaxonomyMa
 
     Raises:
         TaxonomyTemplateError: Falta el delimitador de front matter o no se cierra, el YAML no es válido o no cumple
-            el schema de `TaxonomyManifest` — los mismos errores que al cargar una plantilla de fichero.
+            el schema de `TaxonomyManifest` (con el motivo: límites, ejes organizadores...).
 
     Example:
         >>> manifest = parse_taxonomy_template(
         ...     "---\\ndomains:\\n  - slug: calidad\\n    name: Calidad\\n"
         ...     "material_types:\\n  - slug: procedimiento\\n    name: Procedimiento\\n---\\n# Notas\\n"
         ... )
-        >>> manifest.domains[0].slug
+        >>> manifest.folder_axis.entries[0].slug
         'calidad'
     """
-    front_matter = _extract_front_matter(text, source)
-    return _parse_front_matter(front_matter, source)
+    return manifest_from_text(text, source, TaxonomyTemplateError)
 
 
 def render_taxonomy_template(manifest: TaxonomyManifest, body: str = "") -> str:
-    """Escribe `manifest` en el formato de fichero de una plantilla: front matter YAML entre `---` y, detrás, `body`.
+    """Escribe `manifest` en el formato de fichero de una plantilla (2.0): front matter YAML entre `---` y `body`.
 
     Ida y vuelta estable: `parse_taxonomy_template(render_taxonomy_template(m)) == m` para cualquier `TaxonomyManifest`
     (incluidos `title`/`description` vacíos y textos con saltos de línea o `---`).
@@ -70,30 +67,25 @@ def render_taxonomy_template(manifest: TaxonomyManifest, body: str = "") -> str:
         body: Prosa libre (Markdown) tras el front matter; vacío por defecto.
 
     Example:
-        >>> from doc_organize.core.models import TaxonomyCatalogEntry
+        >>> from doc_organize.core.models import TaxonomyAxis, TaxonomyEntry
         >>> manifest = TaxonomyManifest(
         ...     title="Calidad",
-        ...     domains=[TaxonomyCatalogEntry(slug="calidad", name="Calidad")],
-        ...     material_types=[TaxonomyCatalogEntry(slug="procedimiento", name="Procedimiento")],
+        ...     axes=[
+        ...         TaxonomyAxis(key="domains", name="Dominios", organizes="folder",
+        ...                      entries=[TaxonomyEntry(slug="calidad", name="Calidad")]),
+        ...         TaxonomyAxis(key="material_types", name="Tipos", organizes="subfolder",
+        ...                      entries=[TaxonomyEntry(slug="procedimiento", name="Procedimiento")]),
+        ...     ],
         ... )
         >>> text = render_taxonomy_template(manifest, "# Notas\\n")
-        >>> text.splitlines()[:2]
-        ['---', 'title: Calidad']
+        >>> text.splitlines()[:3]
+        ['---', 'schema: 2', 'title: Calidad']
         >>> parse_taxonomy_template(text) == manifest
         True
     """
-    payload: dict[str, object] = {}
-    if manifest.title is not None:
-        payload["title"] = manifest.title
-    if manifest.description is not None:
-        payload["description"] = manifest.description
-    payload["domains"] = [entry.model_dump(exclude_none=True) for entry in manifest.domains]
-    payload["material_types"] = [entry.model_dump(exclude_none=True) for entry in manifest.material_types]
-    # `width` infinito: sin plegar líneas largas. Los saltos de línea dentro de un valor salen escapados (`\n`) en una
-    # cadena entre comillas dobles (`_TemplateDumper`), así que ninguna línea del front matter puede ser un `---` que
-    # lo cierre antes ni partirse distinto al releerla con `splitlines()`.
-    front_matter = yaml.dump(payload, Dumper=_TemplateDumper, allow_unicode=True, sort_keys=False, width=float("inf"))
-    text = f"{_FRONT_MATTER_DELIMITER}\n{front_matter}{_FRONT_MATTER_DELIMITER}\n"
+    text = render_front_matter(manifest)
+    if not body and manifest.profile is not None and not manifest.profile.is_empty:
+        body = render_profile_sections(manifest.profile)  # el perfil vive en el cuerpo (2.0.0, G2)
     return f"{text}\n{body}" if body else text
 
 
@@ -122,7 +114,7 @@ def load_builtin_template(name: str) -> TaxonomyManifest:
         TaxonomyTemplateError: `name` no es un slug válido, no existe esa plantilla o su front matter no es válido.
 
     Example:
-        >>> load_builtin_template("calidad").domains[0].slug  # catálogo de la plantilla empaquetada "calidad"
+        >>> load_builtin_template("calidad").folder_axis.entries[0].slug  # catálogo de la plantilla empaquetada "calidad"
         'procesos'
     """
     template_path = template_file(_BUILTIN_TEMPLATES_DIR, name)
@@ -149,46 +141,6 @@ def list_template_names(directory: Path) -> list[str]:
     # Mismo patrón que `template_file()`: un fichero cuyo nombre NO es un slug válido (mayúsculas, espacios...) se
     # omite del listado en vez de mostrarse y luego rechazarse al intentar cargarlo por ese mismo nombre (AUDIT_CODE).
     return sorted(path.stem for path in directory.glob(f"*{TEMPLATE_FILE_EXTENSION}") if path.is_file() and _TEMPLATE_NAME_PATTERN.match(path.stem))
-
-
-#: Todo lo que `str.splitlines()` (usado al parsear) trata como salto de línea.
-_LINE_BREAKS = frozenset("\n\r\x0b\x0c\x1c\x1d\x1e\x85  ")
-
-
-class _TemplateDumper(yaml.SafeDumper):
-    """`SafeDumper` que escribe entre comillas dobles (con escapes) toda cadena con un salto de línea."""
-
-
-def _represent_str(dumper: yaml.SafeDumper, data: str) -> yaml.ScalarNode:
-    style = '"' if any(char in _LINE_BREAKS for char in data) else None
-    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style=style)
-
-
-_TemplateDumper.add_representer(str, _represent_str)
-
-
-def _extract_front_matter(raw: str, source: str) -> str:
-    lines = raw.splitlines()
-    if not lines or lines[0].strip() != _FRONT_MATTER_DELIMITER:
-        raise TaxonomyTemplateError(f"'{source}' debe empezar con el delimitador de front matter YAML ('---').")
-    try:
-        closing_index = lines.index(_FRONT_MATTER_DELIMITER, 1)
-    except ValueError as exc:
-        raise TaxonomyTemplateError(f"'{source}' no cierra el front matter YAML (falta un segundo '---').") from exc
-    return "\n".join(lines[1:closing_index])
-
-
-def _parse_front_matter(front_matter: str, source: str) -> TaxonomyManifest:
-    try:
-        payload = yaml.safe_load(front_matter)
-    except yaml.YAMLError as exc:
-        raise TaxonomyTemplateError(f"El front matter YAML de '{source}' no es válido: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise TaxonomyTemplateError(f"El front matter de '{source}' debe ser un mapeo YAML con 'domains'/'material_types'.")
-    try:
-        return TaxonomyManifest.model_validate(payload)
-    except ValidationError as exc:
-        raise TaxonomyTemplateError(f"El front matter de '{source}' no cumple el schema de taxonomía: {exc}") from exc
 
 
 __all__ = [

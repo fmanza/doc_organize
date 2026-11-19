@@ -4,20 +4,19 @@ import json
 
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 from doc_organize.context.context_builder import ContextBuilder
-from doc_organize.core.exceptions import DomainClassificationError, TaxonomyClassificationError
 from doc_organize.core.models import (
     ConversionResult,
-    DomainClassificationResult,
     Project,
-    TaxonomyCatalogEntry,
-    TaxonomyClassificationResult,
+    TaxonomyEntry,
     TaxonomyManifest,
 )
+from doc_organize.core.progress import ProgressEvent
+from tests.unit.fake_llm import domain_ai, taxonomy_ai
+from tests.unit.taxonomy_helpers import two_axis_manifest
 
 
 def _make_project(tmp_path) -> Project:
@@ -85,38 +84,19 @@ async def test_build_tracks_unclassified_documents_outside_catalog(tmp_path):
     assert context.unclassified_documents == [document.source_path]
 
 
-class _StubAIClient:
-    """Doble de `DomainClassificationClient` para tests — mismo contrato (`async classify(...)`
-    devolviendo `DomainClassificationResult`), sin `httpx` de por medio."""
-
-    config = SimpleNamespace(model="stub-classifier")
-
-    def __init__(self, domain: str | None, confidence: float = 0.8, error: bool = False) -> None:
-        self.domain = domain
-        self.confidence = confidence
-        self.error = error
-        self.calls: list[list[str]] = []
-
-    async def classify(self, *, chunks_text: str, title: str | None, candidate_domains: list[str]) -> DomainClassificationResult:
-        self.calls.append(candidate_domains)
-        if self.error:
-            raise DomainClassificationError("fallo simulado del proxy")
-        return DomainClassificationResult(domain=self.domain, confidence=self.confidence, reasoning=None)
-
-
 @pytest.mark.asyncio
 async def test_ai_fallback_classifies_document_left_unclassified_by_rules(tmp_path):
     project = _make_project(tmp_path)
     document = _make_document(tmp_path, "varios", "receta", "Receta de cocina")
 
-    ai_client = _StubAIClient(domain="calidad")
+    ai_client = domain_ai(domain="calidad")
     builder = ContextBuilder()
     context = await builder.build(
         project,
         [document],
         candidate_domains=["calidad"],
-        ai_classification_enabled=True,
-        ai_classification_client=ai_client,
+        llm=ai_client,
+        ai_scope="unclassified",
     )
 
     assert context.unclassified_documents == []
@@ -126,41 +106,43 @@ async def test_ai_fallback_classifies_document_left_unclassified_by_rules(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_on_ai_progress_called_once_per_unclassified_document(tmp_path):
+async def test_ai_progress_reported_once_per_unclassified_document(tmp_path):
     project = _make_project(tmp_path)
     doc_a = _make_document(tmp_path, "varios", "a", "Receta A")
     doc_b = _make_document(tmp_path, "varios", "b", "Receta B")
 
     progress_calls: list[tuple[int, int, str]] = []
 
-    async def on_progress(index: int, total: int, path: str) -> None:
-        progress_calls.append((index, total, path))
+    def on_progress(event: ProgressEvent) -> None:
+        if event.phase == "classification":
+            progress_calls.append((event.processed, event.total, event.current))
 
-    ai_client = _StubAIClient(domain="calidad")
+    ai_client = domain_ai(domain="calidad")
     builder = ContextBuilder()
     await builder.build(
         project,
         [doc_a, doc_b],
         candidate_domains=["calidad"],
-        ai_classification_enabled=True,
-        ai_classification_client=ai_client,
-        on_ai_progress=on_progress,
+        llm=ai_client,
+        ai_scope="unclassified",
+        on_progress=on_progress,
     )
 
     assert progress_calls == [(1, 2, doc_a.source_path), (2, 2, doc_b.source_path)]
 
 
 @pytest.mark.asyncio
-async def test_on_ai_progress_not_called_when_ai_disabled(tmp_path):
+async def test_ai_progress_not_reported_when_ai_disabled(tmp_path):
     project = _make_project(tmp_path)
     document = _make_document(tmp_path, "varios", "receta", "Receta de cocina")
 
     progress_calls: list[tuple[int, int, str]] = []
 
-    async def on_progress(index: int, total: int, path: str) -> None:
-        progress_calls.append((index, total, path))
+    def on_progress(event: ProgressEvent) -> None:
+        if event.phase == "classification":
+            progress_calls.append((event.processed, event.total, event.current))
 
-    await ContextBuilder().build(project, [document], candidate_domains=["calidad"], on_ai_progress=on_progress)
+    await ContextBuilder().build(project, [document], candidate_domains=["calidad"], on_progress=on_progress)
 
     assert progress_calls == []
 
@@ -170,11 +152,9 @@ async def test_ai_fallback_never_invents_domain_when_ai_finds_no_match(tmp_path)
     project = _make_project(tmp_path)
     document = _make_document(tmp_path, "varios", "receta", "Receta de cocina")
 
-    ai_client = _StubAIClient(domain=None)
+    ai_client = domain_ai(domain=None)
     builder = ContextBuilder()
-    context = await builder.build(
-        project, [document], candidate_domains=["calidad"], ai_classification_enabled=True, ai_classification_client=ai_client
-    )
+    context = await builder.build(project, [document], candidate_domains=["calidad"], llm=ai_client, ai_scope="unclassified")
 
     assert context.domains == []
     assert context.unclassified_documents == [document.source_path]
@@ -185,11 +165,9 @@ async def test_ai_fallback_client_error_leaves_document_unclassified_without_cra
     project = _make_project(tmp_path)
     document = _make_document(tmp_path, "varios", "receta", "Receta de cocina")
 
-    ai_client = _StubAIClient(domain="calidad", error=True)
+    ai_client = domain_ai(domain="calidad", error=True)
     builder = ContextBuilder()
-    context = await builder.build(
-        project, [document], candidate_domains=["calidad"], ai_classification_enabled=True, ai_classification_client=ai_client
-    )
+    context = await builder.build(project, [document], candidate_domains=["calidad"], llm=ai_client, ai_scope="unclassified")
 
     assert context.unclassified_documents == [document.source_path]
 
@@ -200,9 +178,9 @@ async def test_ai_fallback_disabled_by_default_even_with_client_provided(tmp_pat
     project = _make_project(tmp_path)
     document = _make_document(tmp_path, "varios", "receta", "Receta de cocina")
 
-    ai_client = _StubAIClient(domain="calidad")
+    ai_client = domain_ai(domain="calidad")
     builder = ContextBuilder()
-    context = await builder.build(project, [document], candidate_domains=["calidad"], ai_classification_client=ai_client)
+    context = await builder.build(project, [document], candidate_domains=["calidad"], llm=ai_client)
 
     assert context.unclassified_documents == [document.source_path]
     assert ai_client.calls == []
@@ -223,9 +201,9 @@ async def test_ai_fallback_skips_when_no_catalog_available_at_all(tmp_path):
     document = _make_document(tmp_path, "varios", "roto", "Roto")
     Path(document.json_path).unlink()
 
-    ai_client = _StubAIClient(domain="lo-que-sea")
+    ai_client = domain_ai(domain="lo-que-sea")
     builder = ContextBuilder()
-    context = await builder.build(project, [document], ai_classification_enabled=True, ai_classification_client=ai_client)
+    context = await builder.build(project, [document], llm=ai_client, ai_scope="unclassified")
 
     assert context.domains == []
     assert context.unclassified_documents == [document.source_path]
@@ -233,9 +211,9 @@ async def test_ai_fallback_skips_when_no_catalog_available_at_all(tmp_path):
 
 
 def _make_manifest(domain_slugs: list[str], material_slugs: list[str]) -> TaxonomyManifest:
-    return TaxonomyManifest(
-        domains=[TaxonomyCatalogEntry(slug=slug, name=slug.title()) for slug in domain_slugs],
-        material_types=[TaxonomyCatalogEntry(slug=slug, name=slug.title()) for slug in material_slugs],
+    return two_axis_manifest(
+        domains=[TaxonomyEntry(slug=slug, name=slug.title()) for slug in domain_slugs],
+        material_types=[TaxonomyEntry(slug=slug, name=slug.title()) for slug in material_slugs],
     )
 
 
@@ -313,7 +291,7 @@ async def test_build_without_manifest_keeps_material_type_unset(tmp_path):
 
 @pytest.mark.asyncio
 async def test_build_with_manifest_uses_catalog_entry_keywords_for_scoring(tmp_path):
-    """`TaxonomyCatalogEntry.keywords` debe sumar a la puntuación además del propio
+    """`TaxonomyEntry.keywords` debe sumar a la puntuación además del propio
     slug — sin esto, un documento que solo menciona las keywords declaradas (nunca la
     palabra exacta del slug) queda sin clasificar en ese eje (AUDIT_CODE). El texto no
     contiene "ciberseguridad" ni "normativa" (las palabras de los slugs) en absoluto —
@@ -321,9 +299,9 @@ async def test_build_with_manifest_uses_catalog_entry_keywords_for_scoring(tmp_p
     """
     project = _make_project(tmp_path)
     document = _make_document(tmp_path, "varios", "informe", "Informe sobre ENS y controles de acceso")
-    manifest = TaxonomyManifest(
-        domains=[TaxonomyCatalogEntry(slug="ciberseguridad", name="Ciberseguridad", keywords=["ENS"])],
-        material_types=[TaxonomyCatalogEntry(slug="normativa", name="Normativa", keywords=["controles"])],
+    manifest = two_axis_manifest(
+        domains=[TaxonomyEntry(slug="ciberseguridad", name="Ciberseguridad", keywords=["ENS"])],
+        material_types=[TaxonomyEntry(slug="normativa", name="Normativa", keywords=["controles"])],
     )
 
     context = await ContextBuilder().build(project, [document], taxonomy_manifest=manifest, threshold=0.5)
@@ -334,7 +312,7 @@ async def test_build_with_manifest_uses_catalog_entry_keywords_for_scoring(tmp_p
 
 @pytest.mark.asyncio
 async def test_build_with_manifest_uses_catalog_entry_name_and_description_for_domain(tmp_path):
-    """`TaxonomyCatalogEntry.name`/`.description` del manifiesto deben ganar sobre el
+    """`TaxonomyEntry.name`/`.description` del manifiesto deben ganar sobre el
     fallback `slug.replace("-", " ").title()`/`None` — antes de este fix, `Domain.name`
     siempre se derivaba del slug e ignoraba el `name` (obligatorio en el manifiesto) y la
     `description` declarados (AUDIT_CODE, sesión de QA manual de la feature). El slug
@@ -344,9 +322,9 @@ async def test_build_with_manifest_uses_catalog_entry_name_and_description_for_d
     """
     project = _make_project(tmp_path)
     document = _make_document(tmp_path, "varios", "informe", "Gestion de personal y plantilla")
-    manifest = TaxonomyManifest(
-        domains=[TaxonomyCatalogEntry(slug="rrhh", name="Recursos Humanos", description="Gestión de personas", keywords=["personal", "plantilla"])],
-        material_types=[TaxonomyCatalogEntry(slug="normativa", name="Normativa")],
+    manifest = two_axis_manifest(
+        domains=[TaxonomyEntry(slug="rrhh", name="Recursos Humanos", description="Gestión de personas", keywords=["personal", "plantilla"])],
+        material_types=[TaxonomyEntry(slug="normativa", name="Normativa")],
     )
 
     context = await ContextBuilder().build(project, [document], taxonomy_manifest=manifest, threshold=0.5)
@@ -363,9 +341,9 @@ async def test_build_with_manifest_placeholder_domain_keeps_slug_derived_name(tm
     no romperse por el lookup nuevo introducido para el resto de dominios."""
     project = _make_project(tmp_path)
     document = _make_document(tmp_path, "varios", "receta", "Receta de cocina con ingredientes y horno")
-    manifest = TaxonomyManifest(
-        domains=[TaxonomyCatalogEntry(slug="ciberseguridad", name="Ciberseguridad")],
-        material_types=[TaxonomyCatalogEntry(slug="normativa", name="Normativa")],
+    manifest = two_axis_manifest(
+        domains=[TaxonomyEntry(slug="ciberseguridad", name="Ciberseguridad")],
+        material_types=[TaxonomyEntry(slug="normativa", name="Normativa")],
     )
 
     context = await ContextBuilder().build(project, [document], taxonomy_manifest=manifest, threshold=0.5)
@@ -382,9 +360,9 @@ async def test_build_with_manifest_sets_material_type_name_from_catalog_entry(tm
     el llamador lo derive del slug."""
     project = _make_project(tmp_path)
     document = _make_document(tmp_path, "varios", "politica", "Politica de seguridad normativa ISO 27001")
-    manifest = TaxonomyManifest(
-        domains=[TaxonomyCatalogEntry(slug="ciberseguridad", name="Ciberseguridad")],
-        material_types=[TaxonomyCatalogEntry(slug="normativa", name="Normativa Vigente")],
+    manifest = two_axis_manifest(
+        domains=[TaxonomyEntry(slug="ciberseguridad", name="Ciberseguridad")],
+        material_types=[TaxonomyEntry(slug="normativa", name="Normativa Vigente")],
     )
 
     context = await ContextBuilder().build(project, [document], taxonomy_manifest=manifest, threshold=0.1)
@@ -410,42 +388,6 @@ async def test_build_with_manifest_placeholder_material_type_keeps_name_unset(tm
     assert document_result.material_type_name is None
 
 
-class _StubTaxonomyAIClient:
-    """Doble de `TaxonomyClassificationClient` para tests — mismo contrato (`async classify(...)`
-    devolviendo `TaxonomyClassificationResult`, ambos ejes en una sola llamada), sin `httpx` de por medio."""
-
-    config = SimpleNamespace(model="stub-taxonomy-classifier")
-
-    def __init__(
-        self,
-        domain: str | None = None,
-        domain_confidence: float = 0.8,
-        material_type: str | None = None,
-        material_type_confidence: float = 0.8,
-        error: bool = False,
-    ) -> None:
-        self.domain = domain
-        self.domain_confidence = domain_confidence
-        self.material_type = material_type
-        self.material_type_confidence = material_type_confidence
-        self.error = error
-        self.calls: list[tuple[list[str], list[str]]] = []
-
-    async def classify(
-        self, *, chunks_text: str, title: str | None, candidate_domains: list[str], candidate_material_types: list[str]
-    ) -> TaxonomyClassificationResult:
-        self.calls.append((candidate_domains, candidate_material_types))
-        if self.error:
-            raise TaxonomyClassificationError("fallo simulado del proxy")
-        return TaxonomyClassificationResult(
-            domain=self.domain,
-            domain_confidence=self.domain_confidence,
-            material_type=self.material_type,
-            material_type_confidence=self.material_type_confidence,
-            reasoning=None,
-        )
-
-
 @pytest.mark.asyncio
 async def test_manifest_ai_fallback_resolves_both_axes_in_a_single_combined_call(tmp_path):
     """Documento que las reglas dejan sin clasificar en AMBOS ejes: una sola llamada
@@ -455,14 +397,14 @@ async def test_manifest_ai_fallback_resolves_both_axes_in_a_single_combined_call
     document = _make_document(tmp_path, "varios", "receta", "Receta de cocina con ingredientes y horno")
     manifest = _make_manifest(["ciberseguridad", "calidad"], ["normativa", "procedimiento"])
 
-    ai_client = _StubTaxonomyAIClient(domain="calidad", domain_confidence=0.7, material_type="procedimiento", material_type_confidence=0.6)
+    ai_client = taxonomy_ai(domain="calidad", domain_confidence=0.7, material_type="procedimiento", material_type_confidence=0.6)
     context = await ContextBuilder().build(
         project,
         [document],
         taxonomy_manifest=manifest,
         threshold=0.5,
-        ai_classification_enabled=True,
-        taxonomy_classification_client=ai_client,
+        llm=ai_client,
+        ai_scope="unclassified",
     )
 
     assert [domain.slug for domain in context.domains] == ["calidad"]
@@ -483,14 +425,14 @@ async def test_manifest_ai_fallback_only_touches_the_axis_left_unclassified_by_r
     document = _make_document(tmp_path, "ciberseguridad", "informe", "Informe de ciberseguridad general")
     manifest = _make_manifest(["ciberseguridad", "calidad"], ["normativa", "procedimiento"])
 
-    ai_client = _StubTaxonomyAIClient(domain="calidad", material_type="normativa")
+    ai_client = taxonomy_ai(domain="calidad", material_type="normativa")
     context = await ContextBuilder().build(
         project,
         [document],
         taxonomy_manifest=manifest,
         threshold=0.5,
-        ai_classification_enabled=True,
-        taxonomy_classification_client=ai_client,
+        llm=ai_client,
+        ai_scope="unclassified",
     )
 
     assert [domain.slug for domain in context.domains] == ["ciberseguridad"]
@@ -506,14 +448,14 @@ async def test_manifest_ai_fallback_not_invoked_when_both_axes_already_classifie
     document = _make_document(tmp_path, "ciberseguridad", "politica", "Política de seguridad normativa ISO 27001")
     manifest = _make_manifest(["ciberseguridad", "calidad"], ["normativa", "procedimiento"])
 
-    ai_client = _StubTaxonomyAIClient(domain="calidad", material_type="procedimiento")
+    ai_client = taxonomy_ai(domain="calidad", material_type="procedimiento")
     context = await ContextBuilder().build(
         project,
         [document],
         taxonomy_manifest=manifest,
         threshold=0.1,
-        ai_classification_enabled=True,
-        taxonomy_classification_client=ai_client,
+        llm=ai_client,
+        ai_scope="unclassified",
     )
 
     assert context.domains[0].slug == "ciberseguridad"
@@ -528,14 +470,14 @@ async def test_manifest_ai_fallback_keeps_placeholder_and_rules_attribution_when
     document = _make_document(tmp_path, "varios", "receta", "Receta de cocina con ingredientes y horno")
     manifest = _make_manifest(["ciberseguridad", "calidad"], ["normativa", "procedimiento"])
 
-    ai_client = _StubTaxonomyAIClient(domain=None, material_type=None)
+    ai_client = taxonomy_ai(domain=None, material_type=None)
     context = await ContextBuilder().build(
         project,
         [document],
         taxonomy_manifest=manifest,
         threshold=0.5,
-        ai_classification_enabled=True,
-        taxonomy_classification_client=ai_client,
+        llm=ai_client,
+        ai_scope="unclassified",
     )
 
     assert context.domains[0].slug == "sin-clasificar"
@@ -550,14 +492,14 @@ async def test_manifest_ai_fallback_client_error_leaves_document_unclassified_wi
     document = _make_document(tmp_path, "varios", "receta", "Receta de cocina con ingredientes y horno")
     manifest = _make_manifest(["ciberseguridad", "calidad"], ["normativa", "procedimiento"])
 
-    ai_client = _StubTaxonomyAIClient(domain="calidad", material_type="procedimiento", error=True)
+    ai_client = taxonomy_ai(domain="calidad", material_type="procedimiento", error=True)
     context = await ContextBuilder().build(
         project,
         [document],
         taxonomy_manifest=manifest,
         threshold=0.5,
-        ai_classification_enabled=True,
-        taxonomy_classification_client=ai_client,
+        llm=ai_client,
+        ai_scope="unclassified",
     )
 
     assert context.domains[0].slug == "sin-clasificar"
@@ -571,8 +513,8 @@ async def test_manifest_ai_fallback_disabled_by_default_even_with_client_provide
     document = _make_document(tmp_path, "varios", "receta", "Receta de cocina con ingredientes y horno")
     manifest = _make_manifest(["ciberseguridad", "calidad"], ["normativa", "procedimiento"])
 
-    ai_client = _StubTaxonomyAIClient(domain="calidad", material_type="procedimiento")
-    context = await ContextBuilder().build(project, [document], taxonomy_manifest=manifest, threshold=0.5, taxonomy_classification_client=ai_client)
+    ai_client = taxonomy_ai(domain="calidad", material_type="procedimiento")
+    context = await ContextBuilder().build(project, [document], taxonomy_manifest=manifest, threshold=0.5, llm=ai_client)
 
     assert context.domains[0].slug == "sin-clasificar"
     assert ai_client.calls == []
@@ -587,18 +529,19 @@ async def test_manifest_ai_progress_called_once_per_document_pending_fallback_on
 
     progress_calls: list[tuple[int, int, str]] = []
 
-    async def on_progress(index: int, total: int, path: str) -> None:
-        progress_calls.append((index, total, path))
+    def on_progress(event: ProgressEvent) -> None:
+        if event.phase == "classification":
+            progress_calls.append((event.processed, event.total, event.current))
 
-    ai_client = _StubTaxonomyAIClient(domain="calidad", material_type="procedimiento")
+    ai_client = taxonomy_ai(domain="calidad", material_type="procedimiento")
     await ContextBuilder().build(
         project,
         [doc_already_classified, doc_needs_fallback],
         taxonomy_manifest=manifest,
         threshold=0.1,
-        ai_classification_enabled=True,
-        taxonomy_classification_client=ai_client,
-        on_ai_progress=on_progress,
+        llm=ai_client,
+        ai_scope="unclassified",
+        on_progress=on_progress,
     )
 
     assert progress_calls == [(1, 1, doc_needs_fallback.source_path)]

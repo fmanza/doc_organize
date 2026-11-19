@@ -164,79 +164,61 @@ class IncompleteConversionArtifactsError(ContextError):
     """
 
 
-class DomainClassificationError(DocOrganizeError):
-    """Error base del cliente de clasificacion de dominios por IA (`doc_organize.ai`, Sub-fase B)."""
+class AiError(DocOrganizeError):
+    """Error base del cliente único de IA (`doc_organize.ai.LlmClient`, 2.0.0): el proxy respondió con un error."""
 
 
-class DomainClassificationAuthError(DomainClassificationError):
-    """El LiteLLM Proxy rechazo la virtual key de clasificacion (credencial invalida o sin permiso)."""
+class AiAuthError(AiError):
+    """El LiteLLM Proxy rechazó la virtual key de la tarea (HTTP 401/403): no tiene sentido seguir llamando."""
 
 
-class DomainClassificationConnectionError(DomainClassificationError):
-    """Error de red o timeout consultando el LiteLLM Proxy para clasificar un documento."""
+class AiConnectionError(AiError):
+    """Error de red o timeout con el LiteLLM Proxy (tras los reintentos de transporte)."""
 
 
-class TaxonomyClassificationError(DocOrganizeError):
-    """Error base del cliente de clasificacion combinada dominio + tipo de material por IA (`doc_organize.ai`, Sub-fase B, manifiesto de taxonomia)."""
+class AiResponseError(AiError):
+    """La respuesta no es el JSON esperado o no cumple su esquema (también tras la caída a `json_object`)."""
 
 
-class TaxonomyClassificationAuthError(TaxonomyClassificationError):
-    """El LiteLLM Proxy rechazo la virtual key de clasificacion por manifiesto (credencial invalida o sin permiso)."""
+class AiConfigurationError(DocOrganizeError):
+    """La configuración de la IA no es válida o usa variables de entorno de 1.x, que 2.0 ya no lee (D15).
 
-
-class TaxonomyClassificationConnectionError(TaxonomyClassificationError):
-    """Error de red o timeout consultando el LiteLLM Proxy para clasificar un documento por manifiesto."""
-
-
-class DocumentEnrichmentError(DocOrganizeError):
-    """Error base del cliente que describe documentos por IA (`doc_organize.ai`, 1.5.0)."""
-
-
-class DocumentEnrichmentAuthError(DocumentEnrichmentError):
-    """El LiteLLM Proxy rechazo la virtual key de descripcion de documentos (credencial invalida o sin permiso)."""
-
-
-class DocumentEnrichmentConnectionError(DocumentEnrichmentError):
-    """Error de red o timeout consultando el LiteLLM Proxy para describir un documento."""
-
-
-class TaxonomyManifestDraftError(DocOrganizeError):
-    """Error base del cliente de propuesta de manifiesto de taxonomia por IA (`doc_organize.ai`).
-
-    A diferencia de `TaxonomyClassificationError` (Sub-fase B, elige DENTRO de un catalogo ya
-    confirmado), aqui el catalogo mismo es la propuesta que falla -- nunca degrada en silencio a
-    un borrador vacio (violaria `TaxonomyManifest.domains`/`material_types` min_length=1), siempre
-    se propaga.
+    El mensaje dice qué variable nueva usar en lugar de cada antigua, para que actualizar sin reconfigurar falle de forma
+    visible y no con la IA desactivada en silencio (U17).
     """
 
 
-class TaxonomyManifestDraftAuthError(TaxonomyManifestDraftError):
-    """El LiteLLM Proxy rechazo la virtual key de propuesta de manifiesto (credencial invalida o sin permiso)."""
+class OfflineSiteError(DocOrganizeError):
+    """El sitio no se puede entregar sin conexión (2.0.0, F3): `check_site_offline` encontró problemas.
 
+    Attributes:
+        problems (list[str]): Los problemas, en texto (`OfflineSiteReport.problems()`).
+    """
 
-class TaxonomyManifestDraftConnectionError(TaxonomyManifestDraftError):
-    """Error de red o timeout consultando el LiteLLM Proxy para proponer un manifiesto de taxonomia."""
+    def __init__(self, message: str, *, problems: list[str] | None = None) -> None:
+        super().__init__(message)
+        self.problems = problems or []
 
 
 __all__ = [
+    "AiAuthError",
+    "AiConfigurationError",
+    "AiConnectionError",
+    "AiError",
+    "AiResponseError",
     "CacheError",
     "CacheNotFoundError",
     "ContextError",
     "ContextNotFoundError",
     "ConversionError",
     "DocOrganizeError",
-    "DocumentEnrichmentAuthError",
-    "DocumentEnrichmentConnectionError",
-    "DocumentEnrichmentError",
     "DocumentError",
-    "DomainClassificationAuthError",
-    "DomainClassificationConnectionError",
-    "DomainClassificationError",
     "DomainNotFoundError",
     "IncompleteConversionArtifactsError",
     "InvalidPathError",
     "MissingDependencyError",
     "ModelsNotAvailableError",
+    "OfflineSiteError",
     "OperationCancelledError",
     "ProjectAlreadyExistsError",
     "ProjectError",
@@ -247,12 +229,6 @@ __all__ = [
     "ScannedFolderInUseError",
     "ScannedFolderNotFoundError",
     "SiteBuildError",
-    "TaxonomyClassificationAuthError",
-    "TaxonomyClassificationConnectionError",
-    "TaxonomyClassificationError",
-    "TaxonomyManifestDraftAuthError",
-    "TaxonomyManifestDraftConnectionError",
-    "TaxonomyManifestDraftError",
     "TaxonomyManifestError",
     "TaxonomyTemplateError",
     "UsageSourceAuthError",

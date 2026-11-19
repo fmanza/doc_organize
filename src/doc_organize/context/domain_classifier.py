@@ -215,11 +215,20 @@ class DomainClassifier:
 
         Args:
             extra_keywords: Mapa slug saneado -> palabras clave adicionales del manifiesto
-                (`TaxonomyCatalogEntry.keywords`), sumadas a las derivadas del propio slug
+                (`TaxonomyEntry.keywords`), sumadas a las derivadas del propio slug
                 para ese candidato. `None` (default, usado por `classify()` internamente)
                 puntúa solo por las palabras del slug, igual que siempre.
         """
         return self._best_domain(document, chunks_text, title, extra_keywords=extra_keywords)
+
+    def score_candidates(
+        self, document: ConversionResult, chunks_text: str, title: str | None, *, extra_keywords: dict[str, list[str]] | None = None
+    ) -> list[tuple[str, float]]:
+        """La puntuación de cada dominio del catálogo (vacío sin catálogo), con el criterio de `score_domain`."""
+        if not self.candidate_domains:
+            return []
+        folder_slug = self._slugify(Path(document.source_path).parent.name)
+        return catalog_scores(self.candidate_domains, f"{title or ''} {chunks_text}".lower(), folder_slug, extra_keywords=extra_keywords)
 
     @staticmethod
     def _slugify(name: str) -> str:
@@ -273,7 +282,7 @@ def score_catalog(
 
     Args:
         extra_keywords: Mapa slug -> palabras clave adicionales (p. ej.
-            `TaxonomyCatalogEntry.keywords` de un manifiesto de taxonomía), sumadas a las
+            `TaxonomyEntry.keywords` de un manifiesto de taxonomía), sumadas a las
             derivadas del propio slug para ese candidato antes de puntuar. `None` (default)
             puntúa solo por las palabras del slug — comportamiento sin cambios para
             `DomainClassifier._best_from_catalog` (AUDIT_CODE, sesión de manifiesto de
@@ -285,9 +294,25 @@ def score_catalog(
     """
     best_slug: str | None = None
     best_score = 0.0
+    for slug, score in catalog_scores(catalog, haystack, folder_slug, extra_keywords):
+        if score > best_score:  # estricto: en empate gana el primero del catálogo
+            best_slug, best_score = slug, score
+    return best_slug, best_score
+
+
+def catalog_scores(
+    catalog: list[str], haystack: str, folder_slug: str, extra_keywords: dict[str, list[str]] | None = None
+) -> list[tuple[str, float]]:
+    """La puntuación de **cada** slug de `catalog` (en su orden), con el criterio de `score_catalog`, que se queda con la
+    mejor. Para ver empates y casi empates entre entradas (`check_taxonomy_rules`, 2.0.0).
+
+    Example:
+        >>> catalog_scores(["calidad", "seguridad-informacion"], "manual de calidad y seguridad", "")
+        [('calidad', 1.0), ('seguridad-informacion', 0.5)]
+    """
     haystack = fold_accents(haystack)
     folder = fold_accents(folder_slug)
-
+    scores = []
     for slug in catalog:
         keywords = slug.replace("-", " ").split()
         if extra_keywords:
@@ -299,10 +324,8 @@ def score_catalog(
         score = hits / len(keywords)
         if folder and fold_accents(slug) == folder:
             score = min(1.0, score + _PATH_SIGNAL_BONUS)
-        if score > best_score:
-            best_slug, best_score = slug, score
-
-    return best_slug, best_score
+        scores.append((slug, score))
+    return scores
 
 
 class MaterialTypeClassifier:
@@ -335,7 +358,7 @@ class MaterialTypeClassifier:
 
         Args:
             extra_keywords: Mapa slug saneado -> palabras clave adicionales del manifiesto
-                (`TaxonomyCatalogEntry.keywords`), ver `domain_classifier.score_catalog()`.
+                (`TaxonomyEntry.keywords`), ver `domain_classifier.score_catalog()`.
 
         Returns:
             `(slug, score)` — `slug` es `None` si el mejor score queda por debajo de
@@ -345,6 +368,10 @@ class MaterialTypeClassifier:
         haystack = f"{title or ''} {chunks_text}".lower()
         slug, score = score_catalog(self.material_types, haystack, folder_slug="", extra_keywords=extra_keywords)
         return (slug, score) if slug is not None and score >= self.threshold else (None, score)
+
+    def score_candidates(self, *, title: str | None, chunks_text: str, extra_keywords: dict[str, list[str]] | None = None) -> list[tuple[str, float]]:
+        """La puntuación de cada tipo de material, con el criterio de `classify_text`."""
+        return catalog_scores(self.material_types, f"{title or ''} {chunks_text}".lower(), folder_slug="", extra_keywords=extra_keywords)
 
     @staticmethod
     def _normalize(material_types: list[str]) -> list[str]:

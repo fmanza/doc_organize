@@ -12,7 +12,7 @@ contexto), el **valor** se sustituye por ``«REDACTADO»``. Adaptado de ``doc_ia
 * Los hallazgos dan línea y regla, **nunca el valor**.
 * Es una red de seguridad, no una garantía.
 
-Funciones puras, sin E/S ni dependencias: las usan ``ContextBuilder``, ``TaxonomyManifestDraftClient`` y
+Funciones puras, sin E/S ni dependencias: las usan ``LlmClient`` (todo lo que sale hacia la IA) y
 ``SiteGenerator``, y cualquier consumidor que envíe texto fuera.
 """
 

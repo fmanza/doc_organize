@@ -6,7 +6,7 @@ borrador de manifiesto de taxonomía (`ai.taxonomy_manifest_draft_client`).
 from collections.abc import Sequence
 from pathlib import Path, PurePath
 
-from doc_organize.ai.taxonomy_manifest_draft_client import SampledDocument
+from doc_organize.ai.services import SampledDocument
 from doc_organize.context.domain_classifier import read_conversion_json
 from doc_organize.core.models import ConversionResult
 from doc_organize.projects.layout import relative_source_path

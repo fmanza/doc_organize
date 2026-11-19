@@ -5,7 +5,6 @@ import json
 import logging
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -16,14 +15,14 @@ from doc_organize.core.exceptions import ContextError
 from doc_organize.core.models import (
     Context,
     ConversionResult,
-    DomainClassificationResult,
     Project,
-    TaxonomyCatalogEntry,
-    TaxonomyManifest,
+    TaxonomyEntry,
     UnclassifiedDocument,
 )
 from doc_organize.projects.layout import RESERVED_OUTPUT_FOLDER_NAMES, ProjectLayout
-from tests.unit.test_context_builder_enrichment import _document, _project, _ScriptedEnrichment
+from tests.unit.fake_llm import domain_ai
+from tests.unit.taxonomy_helpers import two_axis_manifest
+from tests.unit.test_context_builder_enrichment import _document, _project, _scripted_enrichment, _titles
 from tests.unit.test_document_properties import make_pdf
 from tests.unit.test_language_detection import SPANISH
 
@@ -113,13 +112,13 @@ async def test_rules_proposal_below_the_threshold_is_kept(tmp_path: Path) -> Non
 
 @pytest.mark.asyncio
 async def test_ai_enrichment_never_describes_unclassified_documents(tmp_path: Path) -> None:
-    client = _ScriptedEnrichment()
+    client = _scripted_enrichment()
     documents = _mixed(tmp_path)
     documents.append(_converted(tmp_path, "Calidad", "sin_propiedades.pdf", text=SPANISH, content=make_pdf(None)))
 
-    context = await _build(tmp_path, documents, ai_enrichment_enabled=True, ai_enrichment_client=client)
+    context = await _build(tmp_path, documents, llm=client, enrich=True)
 
-    assert client.titles == ["politica"]  # solo el clasificado
+    assert _titles(client) == ["politica"]  # solo el clasificado
     by_name = {Path(detail.source_path).name: detail for detail in context.unclassified_details}
     assert (by_name["sin_propiedades.pdf"].description, by_name["sin_propiedades.pdf"].keywords) == (None, [])
 
@@ -228,39 +227,26 @@ async def test_classified_documents_are_unchanged(tmp_path: Path) -> None:
     assert context.domains[0].documents[0].author == "Ana Ruiz"
 
 
-class _UndecidedAI:
-    """Doble de `DomainClassificationClient` que nunca elige dominio."""
-
-    config = SimpleNamespace(model="modelo-dominios")
-
-    def __init__(self) -> None:
-        self.calls = 0
-
-    async def classify(self, *, chunks_text: str, title: str | None, candidate_domains: list[str]) -> DomainClassificationResult:
-        self.calls += 1
-        return DomainClassificationResult(domain=None, confidence=0.0)
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize("budget", [None, 0])
 async def test_after_the_ai_phase_they_are_still_below_threshold(tmp_path: Path, budget: int | None) -> None:
     """La IA no eligió dominio (`None`) o no llegó a preguntarse (presupuesto 0): el motivo es el mismo."""
-    client = _UndecidedAI()
+    client = domain_ai(None, 0.0)
     documents = [_converted(tmp_path, "Calidad", "auditorias.pdf", text=SPANISH)]
     await _build(tmp_path, [_converted(tmp_path, "Seguridad", "politica.pdf", text="ciberseguridad")])  # el catálogo existe
 
-    context = await _build(tmp_path, documents, ai_classification_enabled=True, ai_classification_client=client, ai_max_documents=budget)
+    context = await _build(tmp_path, documents, llm=client, ai_scope="unclassified", ai_max_documents=budget)
 
     (detail,) = context.unclassified_details
     assert detail.reason == "below_threshold"
-    assert client.calls == (1 if budget is None else 0)
+    assert len(client.calls) == (1 if budget is None else 0)
 
 
 @pytest.mark.asyncio
 async def test_manifest_mode_only_leaves_incomplete_documents_without_rules_proposal(tmp_path: Path) -> None:
-    manifest = TaxonomyManifest(
-        domains=[TaxonomyCatalogEntry(slug="calidad", name="Calidad")],
-        material_types=[TaxonomyCatalogEntry(slug="procedimiento", name="Procedimiento")],
+    manifest = two_axis_manifest(
+        domains=[TaxonomyEntry(slug="calidad", name="Calidad")],
+        material_types=[TaxonomyEntry(slug="procedimiento", name="Procedimiento")],
     )
     documents = [_converted(tmp_path, "Varios", "nada.pdf", text="texto sin ninguna palabra del catálogo"), _failed(tmp_path, "roto.pdf")]
 
