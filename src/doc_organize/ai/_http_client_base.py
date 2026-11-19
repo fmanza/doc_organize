@@ -116,6 +116,7 @@ class AiHttpClientBase:
         auth_message: str,
         error_message: str,
         allow_statuses: frozenset[int] = frozenset(),
+        retries: int | None = None,
         **kwargs: Any,
     ) -> httpx.Response:
         """Envía la petición y traduce fallos de transporte/HTTP a las excepciones de la subclase.
@@ -131,6 +132,7 @@ class AiHttpClientBase:
                 error. Puede usar el placeholder `{status_code}`.
             allow_statuses: Códigos de error que se devuelven en vez de lanzar (p. ej. 400, para que `LlmClient` pruebe sin
                 `json_schema`); 401/403 lanzan siempre.
+            retries: Reintentos de transporte de esta petición; `None` = los del cliente.
             **kwargs: Argumentos adicionales de `httpx.AsyncClient.request` (`json`, `params`, `headers`...).
 
         Un fallo de transporte (timeout incluido) se reintenta hasta `retries` veces con espera creciente; una
@@ -142,7 +144,7 @@ class AiHttpClientBase:
         """
         rate_limited = 0
         while True:
-            response = await self._send(method, url, timeout_message, connection_message, **kwargs)
+            response = await self._send(method, url, timeout_message, connection_message, retries=retries, **kwargs)
             if response.status_code not in RATE_LIMIT_STATUSES or rate_limited >= self._rate_limit_retries:
                 break
             delay = self._rate_limit_delay(response, rate_limited)
@@ -158,9 +160,12 @@ class AiHttpClientBase:
 
         return response
 
-    async def _send(self, method: str, url: str, timeout_message: str, connection_message: str, **kwargs: Any) -> httpx.Response:
+    async def _send(
+        self, method: str, url: str, timeout_message: str, connection_message: str, *, retries: int | None = None, **kwargs: Any
+    ) -> httpx.Response:
         """Una petición, tras la espera compartida pendiente, con los reintentos de transporte (L-3b)."""
         attempt = 0
+        max_retries = self._retries if retries is None else retries
         while True:
             pending = self._cooldown_until - self._now()
             if pending > 0:
@@ -168,11 +173,11 @@ class AiHttpClientBase:
             try:
                 return await self._client.request(method, url, **kwargs)
             except httpx.TransportError as exc:
-                if attempt < self._retries:
+                if attempt < max_retries:
                     delay = self._backoff_s * (2**attempt)
                     attempt += 1
                     # Sin la URL: puede llevar parámetros sensibles; `type(exc)` basta para diagnosticar.
-                    self.logger.warning(f"{type(exc).__name__} en {method} {url}; reintento {attempt}/{self._retries} en {delay:g} s")
+                    self.logger.warning(f"{type(exc).__name__} en {method} {url}; reintento {attempt}/{max_retries} en {delay:g} s")
                     await asyncio.sleep(delay)
                     continue
                 message = timeout_message if isinstance(exc, httpx.TimeoutException) else connection_message

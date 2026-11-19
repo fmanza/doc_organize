@@ -8,6 +8,11 @@ releases publicados antes de esa versión).
 
 ### Añadido
 
+- **Ajustes por tarea (M10, peticiones de la web)**: `TaskSettings.timeout_s`, `retries` y `max_documents`
+  (`AiSettings.timeout_for`, `retries_for`, `max_documents_for`). El tope de documentos de la tarea se combina con
+  `build(ai_max_documents=)` (manda el menor), así que clasificar y describir pueden tener presupuestos distintos.
+  `default_model_alias(task)`: el alias por defecto de cada tarea (`doc-organize-<tarea>`).
+
 - **Sitio sin conexión (M9, F3)**: `SiteGenerator.generate(offline=True)` construye un sitio para abrirse desde el disco
   y sin nada de terceros: plugin `offline` de Zensical (enlaces a ficheros, búsqueda en `search.js`), Mermaid
   `12.2.0` y el shim `iframe-worker` `1.0.4` empaquetados (MIT, en `context/site_assets/`), y siempre la

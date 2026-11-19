@@ -129,3 +129,28 @@ en `user`: el prefijo es el mismo entre documentos y el proveedor puede cachearl
       members:
         - settings_from_env
         - legacy_variables
+
+
+## Ajustes por tarea
+
+Cada tarea puede tener, en `TaskSettings`, además de su modelo y su clave:
+
+| Campo | Para qué |
+|---|---|
+| `max_tokens` | Tope de tokens de la respuesta (por defecto, `DEFAULT_MAX_TOKENS`) |
+| `timeout_s` | Timeout de cada llamada de la tarea (por defecto, el de `AiSettings`): un borrador de taxonomía o un agente con un modelo local tardan más que una clasificación |
+| `retries` | Reintentos de transporte de la tarea (por defecto, los de `AiSettings`) |
+| `max_documents` | Documentos como mucho por construcción en la fase de la tarea (`classify`, `enrich`); con `ContextBuilder.build(ai_max_documents=)`, manda el menor |
+
+`default_model_alias(task)` da el alias que se usa si la tarea no tiene modelo configurado (`doc-organize-<tarea>`).
+
+```python
+settings = AiSettings(
+    base_url="http://localhost:4000", virtual_key=clave,
+    tasks={
+        "classify": TaskSettings(model="clasificador", max_documents=200),
+        "enrich": TaskSettings(model="clasificador", max_documents=50),
+        "taxonomy_design": TaskSettings(model="grande", timeout_s=600, retries=1),
+    },
+)
+```
