@@ -6,8 +6,17 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
-En desarrollo en la rama `feature/2.0` (plan único de 2.0.0, `.ai/sessions/2026-11-17-ai-2.0/PLAN.md`). MAJOR con
-ruptura; la guía de migración completa llega con la versión.
+## [2.0.0a1] - 2026-11-19
+
+Primera prerrelease de 2.0.0 (plan único de 2.0.0, `.ai/sessions/2026-11-17-ai-2.0/PLAN.md`), desde la rama
+`feature/2.0`: hitos M1 a M6 (taxonomía por ejes, rendimiento, redacción de credenciales, cliente único de IA y caché,
+clasificación con catálogo descrito, perfil, extracto y cita verificada, evaluación, decisiones de personas, cola de
+revisión y clasificación de prueba). MAJOR con ruptura; la API puede cambiar hasta la 2.0.0. La guía de migración
+completa llega con la versión. Mismas dependencias que 1.7.1.
+
+Medida contra la línea base (M0, CALIDAD_VD): ningún eje empeora, el dominio sube 2 puntos (0,233 → 0,253; en los
+documentos que clasifica la IA, 0,333 → 0,435) y el coste por documento enviado a la IA es 1,62× en tokens de entrada
+y 1,70× en total (`.ai/sessions/2026-11-17-ai-2.0/MEDICION_M5.md`).
 
 ### Cambiado (ruptura)
 
