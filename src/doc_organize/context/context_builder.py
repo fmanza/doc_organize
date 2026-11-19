@@ -6,7 +6,7 @@ import asyncio
 
 from collections import Counter
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -32,10 +32,11 @@ from doc_organize.context.conversion_document import ConversionDocument, read_co
 from doc_organize.context.decisions import ClassificationDecisionStore, apply_decisions, not_applied_without_manifest
 from doc_organize.context.document_properties import read_document_properties
 from doc_organize.context.domain_classifier import DomainClassifier, MaterialTypeClassifier, read_conversion_json, resolve_title_and_type
+from doc_organize.context.evaluation import document_keys
 from doc_organize.context.language_detection import detect_language
 from doc_organize.context.project_profile import compose_profile, profile_prompt_text
 from doc_organize.context.reorganizer import assign_organized_paths
-from doc_organize.context.semantic import DEFAULT_SEMANTIC_THRESHOLD, classify_semantic
+from doc_organize.context.semantic import DEFAULT_AI_EXAMPLES, DEFAULT_SEMANTIC_THRESHOLD, AiHints, ai_hints, classify_semantic
 from doc_organize.context.versions import mark_versions, resolve_versions
 from doc_organize.core.constants import UNCLASSIFIED_SLUG
 from doc_organize.core.exceptions import AiAuthError, AiConnectionError, AiError, ContextError, ContextNotFoundError
@@ -72,6 +73,8 @@ from doc_organize.projects.layout import ProjectLayout
 from doc_organize.utils.logging import get_logger
 
 _DEFAULT_THRESHOLD = 0.5
+#: Calcula las ayudas de la IA (ejemplos y preselección, G4) para los documentos que van a ella, por `id()`.
+HintsProvider = Callable[[Sequence[tuple[DomainDocument, list[str]]]], Awaitable[dict[int, AiHints]]]
 #: Medido en un NAS por SMB (G44, 2026-11-16): con 4 lecturas a la vez, 28 ms por documento frente a 88 ms de una en
 #: una; con 8, apenas mejora y la lectura más lenta se duplica.
 _DEFAULT_PROPERTIES_CONCURRENCY = 4
@@ -343,6 +346,8 @@ class ContextBuilder:
         versions: VersionsMode = "all",
         semantic: bool = False,
         semantic_threshold: float = DEFAULT_SEMANTIC_THRESHOLD,
+        ai_examples: int = DEFAULT_AI_EXAMPLES,
+        example_exclusions: Sequence[str] = (),
         on_progress: ProgressCallback | None = None,
         cancel_token: CancelToken | None = None,
         ai_max_failures: int | None = None,
@@ -393,6 +398,11 @@ class ContextBuilder:
                 vacíos, tras las reglas y las decisiones y antes de la IA, con `classified_by="semantic"`. Solo con
                 `taxonomy_manifest`. Los vectores se guardan en `<raíz>/.doc_organize/embeddings/`.
             semantic_threshold: Similitud mínima (coseno, 0-1) para asignar un valor en la sub-fase semántica.
+            ai_examples: Con `semantic` y `ai_scope`, documentos parecidos ya clasificados con fiabilidad que recibe la IA
+                como ejemplo (0 = ninguno). Nunca el propio documento ni sus duplicados. Con `semantic`, además, en los
+                ejes de más de 25 valores al modelo solo van los 15 más parecidos al documento.
+            example_exclusions: Originales que nunca sirven de ejemplo (al evaluar, los de la referencia;
+                `dry_run_classify` los pasa solo).
             versions: Qué hacer con las versiones de un mismo documento (2.0.0, F5): `"all"` (por defecto, como 1.x),
                 `"mark"` (cada documento lleva `version`, `version_group` e `is_current`) o `"current_only"` (solo la
                 vigente se clasifica, se publica y va a la IA; las demás quedan en `Context.superseded_documents`). La
@@ -486,6 +496,9 @@ class ContextBuilder:
                     threshold=threshold,
                     profile=profile_text,
                     locked=decision_outcome.locked,
+                    hints=self._hints_provider(
+                        llm, classified, taxonomy_manifest, project, ai_examples, example_exclusions, enabled=semantic, roots=scan_roots
+                    ),
                 )
         else:
             decision_outcome = not_applied_without_manifest(human_decisions)
@@ -791,6 +804,7 @@ class ContextBuilder:
         threshold: float = _DEFAULT_THRESHOLD,
         profile: str = "",
         locked: dict[int, set[str]] | None = None,
+        hints: HintsProvider | None = None,
     ) -> dict[str, list[DomainDocument]]:
         """Clasificación con IA en modo manifiesto (2.0.0, G1.4).
 
@@ -830,8 +844,18 @@ class ContextBuilder:
             return classified
 
         ai_run = run if run is not None else _AiRun()
+        document_hints = await hints([(document, keys) for _, document, keys in pending]) if hints is not None else {}
 
-        def request_for(keys: list[str]) -> Callable[[ConversionDocument, str], TaskRequest[ClassificationAnswer]]:
+        def axis_request(key: str, hint: AiHints | None) -> AxisRequest:
+            request = requests_by_key[key]
+            keep = set(hint.preselected.get(key, ())) if hint is not None else set()
+            if not keep:
+                return request
+            return replace(request, options=[option for option in request.options if option.slug in keep])
+
+        def request_for(keys: list[str], document: DomainDocument) -> Callable[[ConversionDocument, str], TaskRequest[ClassificationAnswer]]:
+            hint = document_hints.get(id(document))
+
             def request(conversion: ConversionDocument, source_path: str) -> TaskRequest[ClassificationAnswer]:
                 excerpt = build_document_excerpt(
                     conversion,
@@ -840,16 +864,25 @@ class ContextBuilder:
                     catalog_terms=[term for key in keys for term in terms_by_key[key]],
                 )
                 return classification_request(
-                    prompts, axes=[requests_by_key[key] for key in keys], title=conversion.title, content=excerpt, profile=profile
+                    prompts,
+                    axes=[axis_request(key, hint) for key in keys],
+                    title=conversion.title,
+                    content=excerpt,
+                    profile=profile,
+                    examples=hint.examples if hint is not None else (),
                 )
 
             return request
 
-        hits = await self._cache_hits(llm, cache, [(document.json_path, document.source_path, request_for(keys)) for _, document, keys in pending])
+        hits = await self._cache_hits(
+            llm, cache, [(document.json_path, document.source_path, request_for(keys, document)) for _, document, keys in pending]
+        )
 
         async def call(item: tuple[tuple[str, DomainDocument, list[str]], bool]) -> ClassificationAnswer | None:
             (_, document, keys), cached = item
-            asked = await self._ask_ai(llm, ai_run, cache, document, request_for(keys), cached=cached, failure="Falló la clasificación por IA de")
+            asked = await self._ask_ai(
+                llm, ai_run, cache, document, request_for(keys, document), cached=cached, failure="Falló la clasificación por IA de"
+            )
             return asked[0] if asked is not None else None
 
         results = await self._run_ai_phase(list(zip(pending, hits, strict=True)), call, ai_run, on_progress, lambda item: item[0][1].source_path)
@@ -860,6 +893,40 @@ class ContextBuilder:
         # Poda buckets que quedaron vacíos (p.ej. todo "sin-clasificar" se resolvió a otros
         # dominios) — sin esto, `build()` crearía un `Domain` fantasma sin documentos.
         return {slug: documents for slug, documents in classified.items() if documents}
+
+    @staticmethod
+    def _hints_provider(
+        llm: LlmClient,
+        classified: dict[str, list[DomainDocument]],
+        manifest: TaxonomyManifest,
+        project: Project,
+        examples: int,
+        exclusions: Sequence[str],
+        *,
+        enabled: bool,
+        roots: Sequence[str] | None,
+    ) -> HintsProvider | None:
+        """Las ayudas de la IA (ejemplos y preselección, G4), si la sub-fase semántica está activa."""
+        if not enabled:
+            return None
+
+        async def provide(pending: Sequence[tuple[DomainDocument, list[str]]]) -> dict[int, AiHints]:
+            paths = [document.source_path for documents in classified.values() for document in documents]
+            keys = document_keys(paths, roots)
+            wanted = set(exclusions)
+            excluded = [path for path in paths if keys[path] in wanted or path in wanted]
+            return await ai_hints(
+                llm,
+                classified,
+                manifest,
+                pending,
+                project_root=project.root_path,
+                examples=examples,
+                exclude=excluded,
+                slugify=DomainClassifier._slugify,
+            )
+
+        return provide
 
     async def _load_decisions(self, project: Project, decisions: bool | Sequence[ClassificationDecision]) -> list[ClassificationDecision]:
         """Las decisiones de esta construcción: las del proyecto (`True`), ninguna (`False`) o las dadas. Un fichero de

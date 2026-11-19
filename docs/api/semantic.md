@@ -28,6 +28,21 @@ print(context.ai_stats.semantic_classification)  # textos embebidos, sacados del
 
 Necesita la tarea `embed` en `AiSettings` (un modelo de embeddings en el proxy) y un manifiesto de taxonomía.
 
+## Ayudas para la IA: ejemplos y preselección
+
+Con `semantic=True`, la fase de IA también se apoya en los embeddings:
+
+- **Ejemplos** (`ai_examples`, 3 por defecto): cada documento que va a la IA recibe, en el mensaje `user` y antes del
+  documento, los documentos más parecidos ya clasificados **con fiabilidad** (un valor decidido por una persona, o
+  confianza de al menos 0,9 en un eje que organiza), con sus valores en los ejes que se piden. Son orientativos.
+- **Preselección**: en un eje de más de 25 valores, al modelo solo van los 15 más parecidos al documento (un prompt
+  más corto y un `enum` más pequeño).
+
+Un ejemplo **nunca** es el propio documento, ni un duplicado suyo (mismo `source_sha256`), ni un documento de
+`example_exclusions`: al evaluar, la referencia (`dry_run_classify` la excluye sola). Si no, el modelo vería la
+respuesta y la evaluación saldría inflada (B16). El prefijo `system` no cambia entre documentos: los ejemplos van en
+`user`.
+
 ## El índice
 
 `EmbeddingIndex(project_root, model=, redacted=)` guarda los vectores en `<raíz>/.doc_organize/embeddings/<modelo>/`

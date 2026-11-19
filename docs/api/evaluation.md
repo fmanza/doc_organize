@@ -64,6 +64,8 @@ print(base.context.ai_stats.classification.prompt_tokens, nuevo.context.ai_stats
 - Con `gold`, solo clasifica los documentos que están en la referencia (`only_gold=False` para todos): el presupuesto
   (`ai_max_documents`) se gasta en lo que se mide.
 - Por defecto no usa la caché de IA (`ai_cache=False`), para que las dos configuraciones hagan llamadas de verdad.
+- Los documentos de la referencia nunca sirven de ejemplo a la IA (`example_exclusions`): con `only_gold=True` no
+  habrá ejemplos; con `only_gold=False`, los del resto del proyecto sí pueden serlo.
 - Las decisiones, el perfil y los prompts del proyecto se leen como en una construcción normal; no se escribe nada.
 
 `DryRunResult` trae el `context` (con `ai_stats`: llamadas, tokens), la `evaluation` y cuántos `documents` se

@@ -202,6 +202,7 @@ def classification_request(
     title: str | None,
     content: str,
     profile: str = "",
+    examples: Sequence[str] = (),
 ) -> TaskRequest[ClassificationAnswer]:
     """La petición de `classify_document`, sin enviarla.
 
@@ -211,6 +212,8 @@ def classification_request(
         title: Título del documento.
         content: Lo que se envía del documento: el extracto (`build_document_excerpt`), hasta `MAX_EXCERPT_CHARS`.
         profile: Perfil del proyecto ya preparado (`profile_prompt_text`).
+        examples: Documentos parecidos ya clasificados, una línea cada uno (2.0.0, G4); van en el mensaje `user`, antes
+            del documento, para que el prefijo `system` siga siendo el mismo en todo el proyecto.
 
     Raises:
         ValueError: `axes` está vacío.
@@ -222,6 +225,7 @@ def classification_request(
         catalog=render_catalog(axes),
         profile=_profile_block(profile),
         document=f"{DOCUMENT_START}\n{document}\n{DOCUMENT_END}",
+        examples=_examples_block(examples),
         title=title or "(sin título)",
         content=document,
     )
@@ -375,6 +379,12 @@ def render_prompt_preview(
 def _material(content: str, max_chars: int) -> str:
     """Lo que se envía del documento: hasta `max_chars`, sin los delimitadores (no puede cerrar su bloque, G2.2)."""
     return content[:max_chars].replace(DOCUMENT_END, "DOCUMENTO").replace(DOCUMENT_START, "DOCUMENTO")
+
+
+def _examples_block(examples: Sequence[str]) -> str:
+    lines = [_line(example) for example in examples]
+    lines = [line for line in lines if line]
+    return "Documentos parecidos ya clasificados (orientativo):\n" + "\n".join(f"- {line}" for line in lines) if lines else ""
 
 
 def _profile_block(profile: str) -> str:

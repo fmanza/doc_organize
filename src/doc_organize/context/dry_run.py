@@ -80,6 +80,8 @@ async def dry_run_classify(
         keys = document_keys([document.source_path for document in selected], roots)
         wanted = set(gold.by_document())
         selected = [document for document in selected if keys[document.source_path] in wanted]
+    if gold is not None:  # la referencia nunca sirve de ejemplo a la IA: vería la respuesta (B16)
+        build_options["example_exclusions"] = [*build_options.get("example_exclusions", ()), *gold.by_document()]
     context = await (builder or ContextBuilder()).build(project, selected, ai_cache=ai_cache, scan_roots=roots, persist=False, **build_options)
     evaluation = evaluate_classification(context, gold, roots=roots) if gold is not None else None
     return DryRunResult(context=context, evaluation=evaluation, documents=len(selected))

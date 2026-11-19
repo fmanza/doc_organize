@@ -86,7 +86,7 @@ class PromptRegistry:
         >>> template = registry.get("classify")
         >>> (template.prompt_id, template.source)
         ('classify', 'builtin')
-        >>> template.render(catalog="Eje domains: calidad", profile="", document="Título: T")[1]["content"]
+        >>> template.render(catalog="Eje domains: calidad", profile="", examples="", document="Título: T")[1]["content"]
         'Título: T'
     """
 

@@ -83,6 +83,8 @@ class ContextBuilder:
         scan_roots: Sequence[str] | None = None,        # 2.0.0
         semantic: bool = False,                         # 2.0.0
         semantic_threshold: float = 0.75,               # 2.0.0
+        ai_examples: int = 3,                           # 2.0.0
+        example_exclusions: Sequence[str] = (),         # 2.0.0
         versions: Literal["all", "mark", "current_only"] = "all",  # 2.0.0
         on_progress: ProgressCallback | None = None,
         cancel_token: CancelToken | None = None,
@@ -110,6 +112,8 @@ Orquesta Sub-fase A (reglas, siempre) + Sub-fase B (IA, opt-in) y persiste el `C
 | `decisions` | `bool \| Sequence[ClassificationDecision]` | (2.0.0) Decisiones de personas: `True` (por defecto) las del proyecto, `False` ninguna, o una lista. Se aplican tras las reglas y antes de la IA, con manifiesto. Ver [Decisiones de personas](decisions.md) |
 | `semantic` | `bool` | (2.0.0) Sub-fase semántica (embeddings, opt-in): rellena ejes vacíos tras las reglas y antes de la IA, con `classified_by="semantic"`. Necesita `llm` y manifiesto. Ver [Clasificación semántica](semantic.md) |
 | `semantic_threshold` | `float` | (2.0.0) Similitud mínima (coseno, 0-1) para asignar un valor en la sub-fase semántica |
+| `ai_examples` | `int` | (2.0.0) Con `semantic` y `ai_scope`, ejemplos de documentos parecidos y fiables que recibe la IA (0 = ninguno); con `semantic`, además, preselección en ejes de más de 25 valores. Ver [Ayudas para la IA](semantic.md#ayudas-para-la-ia-ejemplos-y-preseleccion) |
+| `example_exclusions` | `Sequence[str]` | (2.0.0) Originales (o claves) que nunca sirven de ejemplo; al evaluar, la referencia |
 | `scan_roots` | `Sequence[str] \| None` | (2.0.0) Raíces de escaneo para las claves de los documentos en las decisiones; por defecto, la carpeta común de los originales |
 | `versions` | `"all" \| "mark" \| "current_only"` | (2.0.0) Versiones de un mismo documento: `all` (por defecto, como 1.x), `mark` (marca versión y vigente) o `current_only` (solo la vigente entra en el contexto). Ver [Versiones de un documento](versions.md) |
 | `ai_max_failures` | `int \| None` | (0.14.0, L-3a) Detiene una fase de IA tras este número de errores de conexión **seguidos** (`AiPhaseStats.stopped = "connection"`). `None`: nunca para por eso. `< 1` → `ValueError` |

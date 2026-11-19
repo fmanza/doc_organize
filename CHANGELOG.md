@@ -24,6 +24,12 @@ releases publicados antes de esa versión).
   cada documento con «nombre, descripción y palabras clave» de cada valor (en un eje de un valor, solo si le saca 0,03
   al segundo); `classified_by="semantic"`. `AiStats.semantic` y `semantic_classification`. Un fallo del modelo de
   embeddings no para la construcción.
+- **Ejemplos y preselección para la IA (M7, G4)**: con `semantic=True`, cada documento que va a la IA recibe los
+  `ai_examples` (3) documentos más parecidos ya clasificados con fiabilidad (decisión de una persona o confianza ≥ 0,9
+  en un eje que organiza), en el mensaje `user` (prompt `classify` versión 4: el prefijo `system` no cambia); nunca el
+  propio documento, sus duplicados (mismo `source_sha256`) ni `example_exclusions` (`dry_run_classify` excluye la
+  referencia sola, B16). En ejes de más de 25 valores, al modelo solo van los 15 más parecidos.
+  `classification_request(..., examples=)`.
 
 ### Cambiado
 
