@@ -8,6 +8,14 @@ releases publicados antes de esa versión).
 
 ### Añadido
 
+- **Guía «De 1.x a 2.0» completa (M10)**: pasos para actualizar, todo lo que se retira y su sustituto, lo que cambia
+  de comportamiento sin cambiar la API (citas verificadas, extracto y perfil, caché de IA, redacción por defecto,
+  decisiones, historial) y un índice de lo nuevo, que es todo opcional.
+- **Matriz de combinaciones (M10, U7)**: tests con invariantes (valores del catálogo, un valor en los ejes que
+  organizan, la carpeta es el valor del dominio) sin IA, con `ai_scope="unclassified"` y con `missing_axes` +
+  semántica + decisiones + `versions="current_only"` a la vez (los cuatro mecanismos en una construcción), seguida del
+  sitio sin conexión con `llms.txt`, el paquete para IA y una reconstrucción sin ninguna llamada.
+
 - **Paquete para IA (M9, F7)**: `write_ai_context_bundle(destination, project, context, *, include_text=True,
   current_only=True, redact=True, max_file_chars=None, max_full_chars=None)` escribe un ZIP para subir a un chat o
   agente: `llms.txt` (llmstxt.org), `documentos/…/*.md` con front matter (título, dominio, tipo, ejes, versión, ruta
