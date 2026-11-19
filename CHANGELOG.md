@@ -8,6 +8,20 @@ releases publicados antes de esa versión).
 
 ### Añadido
 
+- **Sitio sin conexión (M9, F3)**: `SiteGenerator.generate(offline=True)` construye un sitio para abrirse desde el disco
+  y sin nada de terceros: plugin `offline` de Zensical (enlaces a ficheros, búsqueda en `search.js`), Mermaid
+  `12.2.0` y el shim `iframe-worker` `1.0.4` empaquetados (MIT, en `context/site_assets/`), y siempre la
+  neutralización de las páginas de los documentos. `SiteResult.offline`, `neutralized` y `neutralized_counts`.
+- **`neutralize_untrusted_markdown(text)` (D6 a)**: HTML escapado fuera del código (comentarios conservados), enlaces
+  `javascript:`/`vbscript:`/`data:` a texto (también disfrazados con entidades o espacios), imágenes remotas y por
+  referencia a enlaces y listas de atributos con `on*`, `href`, `src` o `style` escapadas; idempotente.
+  `NeutralizeResult` con recuentos por tipo.
+- **`check_site_offline(site_dir)`**: ningún recurso de terceros en las páginas, enlaces internos a ficheros que
+  existen, índice de búsqueda en JavaScript y nada activo (`javascript:`, `on*`); `OfflineSiteReport.ok` y
+  `problems()`. Las URLs de terceros del JavaScript del tema (bajo demanda) se listan aparte, como información.
+- Test de aceptación de D6 con un build real: un documento con `<script>`, `<img onerror>`, `<iframe>`, `javascript:`,
+  `{onclick=…}` y una imagen remota no deja nada activo ni en el HTML ni en el índice de búsqueda.
+
 - **Agentes (M8, G5)**: `AgentRunner(llm, tools, *, limits=, answer_schema=, parse_answer=)` ejecuta un agente con
   herramientas sobre la tarea `agent`. Solo ejecuta las `AgentTool` que se le dan (un nombre desconocido o unos
   argumentos que no son JSON vuelven al modelo como error); topes de pasos, tokens acumulados, herramientas y tamaño de
@@ -49,6 +63,10 @@ releases publicados antes de esa versión).
   puntuaciones, no solo la mejor (el resultado de la clasificación no cambia).
 
 ### Cambiado
+
+- La CSP en `<meta>` del sitio sin conexión (D6 b) **no se incluye**: el tema necesita `'unsafe-inline'` y no se ha
+  podido comprobar en los tres navegadores con `file://`; la protección es la neutralización.
+- La rueda pesa unos 1,5 MB más por Mermaid empaquetado (solo se copia al sitio con `offline=True`).
 
 - `LlmClient.complete_with_tools` envía `max_tokens` como `complete_json`; la tarea `agent` tiene 4096 por defecto
   (`DEFAULT_MAX_TOKENS`).

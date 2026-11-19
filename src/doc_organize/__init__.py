@@ -160,6 +160,10 @@ _EXPORTS: dict[str, str] = {
     "DocumentCredentialFindings": "doc_organize.core.models",
     # Credenciales (1.7.0)
     "redact_credentials": "doc_organize.security.credentials",
+    "neutralize_untrusted_markdown": "doc_organize.security.untrusted_markdown",
+    "NeutralizeResult": "doc_organize.security.untrusted_markdown",
+    "check_site_offline": "doc_organize.context.offline_site",
+    "OfflineSiteReport": "doc_organize.context.offline_site",
     "scan_credentials": "doc_organize.security.credentials",
     "RedactionResult": "doc_organize.security.credentials",
     "CredentialFinding": "doc_organize.security.credentials",
