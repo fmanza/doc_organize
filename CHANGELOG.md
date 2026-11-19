@@ -6,6 +6,19 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [2.0.0rc1] - 2026-11-19
+
+Primera versión candidata de 2.0.0: hitos M8 (agentes), M9 (sitio sin conexión y paquete para IA) y M10 (guía de
+migración, matriz de combinaciones, peticiones de la web y medición final). La API no debería cambiar hasta 2.0.0.
+Medición final contra la línea base de 1.6.0 con el mismo modelo (`qwen2.5-coder:14b`, CALIDAD_VD, 150 documentos
+etiquetados): exactitud de dominio 0,23 → 0,247 (en los documentos que van a la IA, 0,33 → 0,39) y de tipo de material
+0,22 → 0,227; 38 de 38 documentos clasificados por la IA sin fallos; coste de entrada 1,64× (referencia 1,5×, aceptado
+como en M5). **Puerta del diseñador de la taxonomía (M8.2) no cumplida**: con los modelos locales disponibles su
+propuesta no mejora a la vez cobertura y conflictos de la plantilla original en todos los ejes; se publica como
+herramienta de apoyo (la propuesta la revisa una persona y conserva el mejor borrador comprobado), por decisión del
+mantenedor. Nueva dependencia empaquetada: Mermaid 12.2.0 e `iframe-worker` 1.0.4 (MIT) para el sitio sin conexión;
+la rueda pasa a unos 2 MB.
+
 ### Añadido
 
 - **Peticiones de la web en W3 (M10)**: sin manifiesto (dominios descubiertos o catálogo propio), el valor que asigna la
