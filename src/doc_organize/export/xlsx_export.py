@@ -111,7 +111,13 @@ CONTEXT_CHANGES_COLUMNS = (
     "Tipo de material",
     "Clasificado por",
 )
-_CHANGE_LABELS = {"added": "Entra", "removed": "Sale", "reclassified": "Cambia"}
+_CHANGE_LABELS = {
+    "added": "Entra",
+    "removed": "Sale",
+    "reclassified": "Cambia",
+    "superseded": "Sale (versión antigua)",
+    "excluded": "Sale (excluido)",
+}
 _UNCLASSIFIED_LABEL = "(sin clasificar)"
 
 _FORMULA_TRIGGER_CHARS = ("=", "+", "-", "@", "\t", "\r")
@@ -443,7 +449,7 @@ def _placement_label(value: str | None, present: bool) -> str:
 
 
 def _context_change_row(record: ContextBuildRecord, change: ContextChange) -> Row:
-    before, after = change.change != "added", change.change != "removed"
+    before, after = change.change != "added", change.change in ("added", "reclassified")
     return (
         _excel_safe(record.built_at),
         *_file_columns(change.source_path),

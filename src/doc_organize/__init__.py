@@ -63,6 +63,9 @@ _EXPORTS: dict[str, str] = {
     # Cola de revisión (2.0.0, F6)
     "review_queue": "doc_organize.context.review_queue",
     "ReviewItem": "doc_organize.context.review_queue",
+    # Versiones de un documento (2.0.0, F5)
+    "detect_document_versions": "doc_organize.context.versions",
+    "DocumentVersionGroup": "doc_organize.core.models",
     # Diagnóstico del entorno (2.0.0, F2)
     "check_environment": "doc_organize.diagnostics",
     # Cliente único de IA (2.0.0, G1)
@@ -203,6 +206,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         parse_taxonomy_template,
         render_taxonomy_template,
     )
+    from doc_organize.context.versions import detect_document_versions
     from doc_organize.converter.converter import DocumentConverter
     from doc_organize.converter.ocr_scheduler import OCRScheduler
     from doc_organize.core.exceptions import (
@@ -241,6 +245,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         DocumentCredentialFindings,
         DocumentMetadata,
         DocumentStatus,
+        DocumentVersionGroup,
         DuplicateGroup,
         DuplicateReason,
         EnvironmentCheck,

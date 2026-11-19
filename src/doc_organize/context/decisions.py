@@ -122,7 +122,7 @@ def gold_from_decisions(decisions: Sequence[ClassificationDecision]) -> GoldStan
     """
     labels: dict[str, dict[str, list[str]]] = {}
     for decision in decisions:
-        if decision.action != "exclude":
+        if decision.axes:  # `exclude` y `set_current_version` no dicen nada de la clasificación
             labels.setdefault(decision.document_key, {}).update(decision.axes)
     return GoldStandard(labels=[GoldLabel(document=key, axes=axes) for key, axes in labels.items()])
 
@@ -140,8 +140,13 @@ class DecisionOutcome:
 
 
 def not_applied_without_manifest(decisions: Sequence[ClassificationDecision]) -> DecisionOutcome:
-    """Sin manifiesto no se aplican decisiones: todas quedan en `stale` con `no_manifest`."""
-    return DecisionOutcome(stale=[DecisionIssue(decision_id=d.id, document_key=d.document_key, reason="no_manifest") for d in decisions])
+    """Sin manifiesto no se aplican decisiones de clasificación: quedan en `stale` con `no_manifest` (las de versión
+    vigente sí se aplican: no dependen del catálogo)."""
+    return DecisionOutcome(
+        stale=[
+            DecisionIssue(decision_id=d.id, document_key=d.document_key, reason="no_manifest") for d in decisions if d.action != "set_current_version"
+        ]
+    )
 
 
 def apply_decisions(
@@ -173,6 +178,8 @@ def apply_decisions(
     current_slug = {id(document): slug for slug, document in documents.values()}
 
     for decision in decisions:
+        if decision.action == "set_current_version":
+            continue  # las aplica `versions.resolve_versions`, antes de clasificar
         target = by_key.get(decision.document_key)
         issue = _issue(decision, target, manifest, slugify)
         if issue is not None or target is None:
@@ -286,6 +293,8 @@ def _replace(active: list[ClassificationDecision], new: ClassificationDecision) 
     def replaced(old: ClassificationDecision) -> bool:
         if old.document_key != new.document_key:
             return False
+        if "set_current_version" in (new.action, old.action):
+            return new.action == old.action  # la versión vigente va aparte de la clasificación
         if new.action in ("confirm", "exclude") or old.action == "exclude":
             return True
         return old.axis == new.axis  # un `confirm` anterior se queda: el `set_axis` se aplica después y gana en su eje

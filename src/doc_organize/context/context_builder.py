@@ -35,6 +35,7 @@ from doc_organize.context.domain_classifier import DomainClassifier, MaterialTyp
 from doc_organize.context.language_detection import detect_language
 from doc_organize.context.project_profile import compose_profile, profile_prompt_text
 from doc_organize.context.reorganizer import assign_organized_paths
+from doc_organize.context.versions import mark_versions, resolve_versions
 from doc_organize.core.constants import UNCLASSIFIED_SLUG
 from doc_organize.core.exceptions import AiAuthError, AiConnectionError, AiError, ContextError, ContextNotFoundError
 from doc_organize.core.models import (
@@ -63,6 +64,7 @@ from doc_organize.core.models import (
     TaxonomyEntry,
     TaxonomyManifest,
     UnclassifiedDocument,
+    VersionsMode,
 )
 from doc_organize.core.progress import CancelToken, Phase, ProgressCallback, ProgressEvent, checkpoint
 from doc_organize.projects.layout import ProjectLayout
@@ -337,6 +339,7 @@ class ContextBuilder:
         profile: ProjectProfile | None = None,
         decisions: bool | Sequence[ClassificationDecision] = True,
         scan_roots: Sequence[str] | None = None,
+        versions: VersionsMode = "all",
         on_progress: ProgressCallback | None = None,
         cancel_token: CancelToken | None = None,
         ai_max_failures: int | None = None,
@@ -383,6 +386,10 @@ class ContextBuilder:
                 aplicar queda en `Context.stale_decisions`/`orphan_decisions`.
             scan_roots: Raíces de escaneo para las claves de los documentos en las decisiones (`document_key`); por
                 defecto, la carpeta común de todos los originales.
+            versions: Qué hacer con las versiones de un mismo documento (2.0.0, F5): `"all"` (por defecto, como 1.x),
+                `"mark"` (cada documento lleva `version`, `version_group` e `is_current`) o `"current_only"` (solo la
+                vigente se clasifica, se publica y va a la IA; las demás quedan en `Context.superseded_documents`). La
+                vigente es la versión más alta o la que decidió una persona (`set_current_version`).
             on_progress: Recibe un `ProgressEvent` (`operation="context_build"`, fase `classification` o `enrichment`)
                 tras cada documento de una fase de IA (L-2). Un fallo del callback se registra y no para la construcción.
             cancel_token: Si se cancela, la construcción para entre documentos con `OperationCancelledError`, **sin**
@@ -413,6 +420,10 @@ class ContextBuilder:
         prompts = prompts if prompts is not None else PromptRegistry(project.root_path)
         cache = ai_cache if isinstance(ai_cache, AiResultCache) else (AiResultCache(project.root_path) if ai_cache and llm is not None else None)
         human_decisions = await self._load_decisions(project, decisions)
+        version_outcome = resolve_versions(documents, versions, human_decisions, roots=scan_roots)
+        if version_outcome.superseded:
+            superseded = set(version_outcome.superseded)
+            documents = [document for document in documents if document.source_path not in superseded]
         if profile is None:
             profile = compose_profile(taxonomy_manifest.profile if taxonomy_manifest is not None else None, project.root_path)
         profile_text = profile_prompt_text(profile)
@@ -499,10 +510,13 @@ class ContextBuilder:
             ai_fallback_threshold=threshold,
             built_with_version=__version__,
             domains=domains,
-            decisions_applied=decision_outcome.applied,
-            stale_decisions=decision_outcome.stale,
-            orphan_decisions=decision_outcome.orphan,
+            decisions_applied=decision_outcome.applied + version_outcome.applied,
+            stale_decisions=decision_outcome.stale + version_outcome.stale,
+            orphan_decisions=decision_outcome.orphan + version_outcome.orphan,
             excluded_documents=decision_outcome.excluded,
+            versions_mode=versions,
+            version_groups=version_outcome.groups,
+            superseded_documents=version_outcome.superseded,
             unclassified_documents=[document.source_path for document in unclassified],
             unclassified_details=unclassified_details,
             taxonomy_manifest_used=taxonomy_manifest is not None,
@@ -517,6 +531,8 @@ class ContextBuilder:
             created_at=now,
             updated_at=now,
         )
+        mark_versions([document for domain in domains for document in domain.documents], version_outcome)
+        mark_versions(unclassified_details, version_outcome)
         assign_organized_paths(context, project.root_path)  # L-8d: ruta final de cada documento, para el consumidor
         checkpoint(cancel_token)  # nunca se persiste un contexto a medias
         if persist:
