@@ -12,6 +12,14 @@ releases publicados antes de esa versión).
   (`AiSettings.timeout_for`, `retries_for`, `max_documents_for`). El tope de documentos de la tarea se combina con
   `build(ai_max_documents=)` (manda el menor), así que clasificar y describir pueden tener presupuestos distintos.
   `default_model_alias(task)`: el alias por defecto de cada tarea (`doc-organize-<tarea>`).
+- **Paquete para IA (M9, F7)**: `write_ai_context_bundle(destination, project, context, *, include_text=True,
+  current_only=True, redact=True, max_file_chars=None, max_full_chars=None)` escribe un ZIP para subir a un chat o
+  agente: `llms.txt` (llmstxt.org), `documentos/…/*.md` con front matter (título, dominio, tipo, ejes, versión, ruta
+  relativa del original, huella, quién clasificó), `context.json` reducido sin rutas absolutas y, con tope,
+  `llms-full.txt`. Redactado y solo vigentes por defecto; reproducible, en *streaming*, con progreso y cancelación.
+  `AiBundleStats`. Puerta de M9: ningún valor redactado llega al paquete.
+- `SiteGenerator.generate(llms_txt=True)`: el mismo `llms.txt` en la raíz del sitio, con enlaces a sus páginas;
+  `render_llms_txt` para cualquier destino.
 
 - **Sitio sin conexión (M9, F3)**: `SiteGenerator.generate(offline=True)` construye un sitio para abrirse desde el disco
   y sin nada de terceros: plugin `offline` de Zensical (enlaces a ficheros, búsqueda en `search.js`), Mermaid
