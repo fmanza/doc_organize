@@ -6,6 +6,12 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+### Añadido
+
+- `check_environment` comprueba también modelos de embeddings: `AiEndpoint(kind="embedding")` pide un vector a
+  `/embeddings` y da su dimensión; con variables de entorno, `embed` se comprueba si tiene modelo propio (como `agent`).
+  Petición de doc_organize_web (W4).
+
 ## [2.0.0rc1] - 2026-11-19
 
 Primera versión candidata de 2.0.0: hitos M8 (agentes), M9 (sitio sin conexión y paquete para IA) y M10 (guía de

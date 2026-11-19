@@ -40,13 +40,19 @@ Una llamada por modelo con **texto sintético** (nunca nada de un documento) pid
 - el proxy rechaza el esquema (HTTP 400) pero responde con `json_object`: `warning` (funciona, con menos garantías);
 - clave rechazada (401/403), alias que no existe, error de red o sin respuesta en 60 s: `error`.
 
-Por defecto se comprueban los modelos configurados por variables de entorno. Para otros:
+Un modelo de **embeddings** (`AiEndpoint(kind="embedding")`) se comprueba pidiendo un vector a `/embeddings`: `ok` con
+su dimensión, o `error` si la clave, el alias o la respuesta fallan.
+
+Por defecto se comprueban los modelos configurados por variables de entorno: clasificar, describir y diseñar la
+taxonomía siempre, y agentes y embeddings si tienen modelo propio (`DOC_ORGANIZE_LITELLM_MODEL_AGENT`,
+`_MODEL_EMBED`). Para otros:
 
 ```python
 from doc_organize import AiEndpoint, check_environment
 
 endpoint = AiEndpoint(name="clasificacion", base_url="http://localhost:4000", virtual_key=clave, model="mi-alias")
-report = await check_environment(check_ai=True, ai_endpoints=[endpoint])
+embeddings = AiEndpoint(name="embed", base_url="http://localhost:4000", virtual_key=clave, model="mi-embedding", kind="embedding")
+report = await check_environment(check_ai=True, ai_endpoints=[endpoint, embeddings])
 ```
 
 ::: doc_organize.diagnostics

@@ -142,6 +142,36 @@ async def test_ai_connection_error() -> None:
     assert check.status == "error" and "ConnectError" in check.detail
 
 
+async def _embedding_check(transport: httpx.MockTransport):
+    endpoint = AiEndpoint(name="embed", base_url="https://proxy.test", virtual_key=_KEY, model="modelo-e", kind="embedding")
+    report = await check_environment(check_ai=True, ai_endpoints=[endpoint], build_site=False, transport=transport)
+    return _by_name(report)["ai:embed"], report
+
+
+@pytest.mark.asyncio
+async def test_embedding_endpoint_asks_for_a_vector() -> None:
+    requests: list[httpx.Request] = []
+
+    check, report = await _embedding_check(
+        _transport(httpx.Response(200, json={"data": [{"index": 0, "embedding": [0.1] * 1024}]}), requests=requests)
+    )
+
+    assert check.status == "ok" and "1024" in check.detail
+    assert requests[0].url.path == "/embeddings" and json.loads(requests[0].content)["model"] == "modelo-e"
+    assert _KEY not in json.dumps(report.model_dump())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("response", "fragment"),
+    [(httpx.Response(403), "clave rechazada"), (httpx.Response(404), "HTTP 404"), (httpx.Response(200, json={"data": []}), "no trae un vector")],
+)
+async def test_embedding_errors(response, fragment) -> None:
+    check, _ = await _embedding_check(_transport(response))
+
+    assert check.status == "error" and fragment in check.detail
+
+
 def _clear_ai_env(monkeypatch) -> None:
     import os
 
@@ -166,6 +196,12 @@ async def test_ai_endpoints_come_from_the_2_0_environment(monkeypatch) -> None:
     checks = _by_name(report)
     assert [checks[name].status for name in ("ai:classify", "ai:enrich", "ai:taxonomy_design")] == ["ok", "ok", "ok"]
     assert [json.loads(request.content)["model"] for request in requests] == ["modelo-c", "doc-organize-enrich", "doc-organize-taxonomy-design"]
+
+    monkeypatch.setenv("DOC_ORGANIZE_LITELLM_MODEL_EMBED", "modelo-e")  # con modelo propio, también los embeddings
+    chat = httpx.Response(200, json={"choices": [{"message": {"content": '{"ok": true}'}}]})
+    vector = httpx.Response(200, json={"data": [{"index": 0, "embedding": [0.0, 1.0]}]})
+    report = await check_environment(check_ai=True, build_site=False, transport=_transport(chat, chat, chat, vector))
+    assert _by_name(report)["ai:embed"].status == "ok"
 
 
 @pytest.mark.asyncio

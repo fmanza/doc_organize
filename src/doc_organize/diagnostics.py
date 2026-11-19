@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib.util import find_spec
 from pathlib import Path
+from typing import Literal
 
 import httpx
 
@@ -43,12 +44,14 @@ class AiEndpoint:
         base_url (str): URL del LiteLLM Proxy.
         virtual_key (str): Clave; nunca aparece en el informe.
         model (str): Alias del modelo en el proxy.
+        kind (str): `chat` (una respuesta JSON con `json_schema`) o `embedding` (un vector de `/embeddings`, 2.0.0).
     """
 
     name: str
     base_url: str
     virtual_key: str
     model: str
+    kind: Literal["chat", "embedding"] = "chat"
 
 
 async def check_environment(
@@ -257,7 +260,7 @@ def _check_av() -> EnvironmentCheck:
 
 
 #: Tareas de texto que se comprueban siempre que la IA esté configurada (con su alias recomendado si no tienen modelo);
-#: `agent` solo si tiene modelo propio, y `embed` no (usa `/embeddings`, no `chat/completions`).
+#: `agent` y `embed` solo si tienen modelo propio (`embed`, con una petición a `/embeddings`).
 _CHECKED_TASKS = ("classify", "enrich", "taxonomy_design")
 
 
@@ -272,9 +275,15 @@ def _endpoints_from_env() -> list[AiEndpoint]:
     settings = settings_from_env()
     if settings is None:
         return []
-    tasks = [*_CHECKED_TASKS, *(["agent"] if "agent" in settings.tasks else [])]
+    tasks = [*_CHECKED_TASKS, *(task for task in ("agent", "embed") if task in settings.tasks)]
     return [
-        AiEndpoint(name=task, base_url=settings.base_url, virtual_key=settings.key_for(task), model=settings.model_for(task))  # type: ignore[arg-type]
+        AiEndpoint(
+            name=task,
+            base_url=settings.base_url,
+            virtual_key=settings.key_for(task),  # type: ignore[arg-type]
+            model=settings.model_for(task),  # type: ignore[arg-type]
+            kind="embedding" if task == "embed" else "chat",
+        )
         for task in tasks
     ]
 
@@ -293,8 +302,49 @@ _STRICT_SCHEMA = {
 }
 
 
+async def _check_embedding(endpoint: AiEndpoint, transport: httpx.AsyncBaseTransport | None) -> EnvironmentCheck:
+    """Un vector de `/embeddings` para un texto sintético."""
+    name = f"ai:{endpoint.name}"
+    headers = {"Authorization": f"Bearer {endpoint.virtual_key}"}
+    async with httpx.AsyncClient(base_url=endpoint.base_url, timeout=_AI_TIMEOUT_S, transport=transport) as client:
+        try:
+            response = await client.post("/embeddings", json={"model": endpoint.model, "input": ["Texto sintético de diagnóstico"]}, headers=headers)
+        except httpx.TimeoutException:
+            return EnvironmentCheck(
+                name=name,
+                status="error",
+                detail=f"{endpoint.model}: sin respuesta en {_AI_TIMEOUT_S:g} s",
+                remedy="Comprueba el proxy y que el modelo está cargado",
+            )
+        except httpx.HTTPError as exc:
+            return EnvironmentCheck(
+                name=name, status="error", detail=f"{endpoint.model}: error de red ({type(exc).__name__})", remedy="Comprueba la URL del proxy"
+            )
+    if response.status_code in (401, 403):
+        return EnvironmentCheck(
+            name=name, status="error", detail=f"{endpoint.model}: clave rechazada (HTTP {response.status_code})", remedy="Revisa la virtual key"
+        )
+    if response.is_error:
+        return EnvironmentCheck(
+            name=name,
+            status="error",
+            detail=f"{endpoint.model}: HTTP {response.status_code}",
+            remedy="Comprueba que el alias de embeddings existe en el proxy",
+        )
+    try:
+        dimension = len(response.json()["data"][0]["embedding"])
+    except (KeyError, IndexError, TypeError, ValueError):
+        return EnvironmentCheck(
+            name=name, status="error", detail=f"{endpoint.model}: la respuesta no trae un vector", remedy="¿Es un modelo de embeddings?"
+        )
+    return EnvironmentCheck(name=name, status="ok", detail=f"{endpoint.model} da vectores de dimensión {dimension}")
+
+
 async def _check_ai(endpoint: AiEndpoint, transport: httpx.AsyncBaseTransport | None) -> EnvironmentCheck:
-    """Una llamada con texto sintético y salida `json_schema` estricta; si el proxy la rechaza (400), otra con `json_object`."""
+    """Una llamada con texto sintético y salida `json_schema` estricta; si el proxy la rechaza (400), otra con `json_object`.
+    Un endpoint de embeddings, con `_check_embedding`."""
+    if endpoint.kind == "embedding":
+        return await _check_embedding(endpoint, transport)
     name = f"ai:{endpoint.name}"
     headers = {"Authorization": f"Bearer {endpoint.virtual_key}"}
     async with httpx.AsyncClient(base_url=endpoint.base_url, timeout=_AI_TIMEOUT_S, transport=transport) as client:
