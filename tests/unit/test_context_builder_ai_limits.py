@@ -14,7 +14,7 @@ import pytest
 
 from doc_organize.context.context_builder import ContextBuilder
 from doc_organize.core.exceptions import OperationCancelledError
-from doc_organize.core.models import AiSettings, Context, ConversionResult, Project, TaxonomyEntry, TaxonomyManifest
+from doc_organize.core.models import AiSettings, Context, ConversionResult, Project, TaskSettings, TaxonomyEntry, TaxonomyManifest
 from doc_organize.core.progress import CancelToken, ProgressEvent
 from tests.unit.fake_llm import FakeLlmClient, fake_client, script
 from tests.unit.taxonomy_helpers import two_axis_manifest
@@ -227,6 +227,17 @@ async def test_max_documents_in_manifest_mode(tmp_path):
     assert len(client.proxy.requests) == 1
     assert context.ai_stats.classification.stopped == "budget"
     assert (context.ai_stats.classification.sent, context.ai_stats.classification.assigned, context.ai_stats.classification.failed) == (1, 1, 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("own", "general", "sent"), [(1, None, 1), (3, 2, 2), (1, 4, 1), (None, None, 4)])
+async def test_task_budget_combines_with_the_build_budget(tmp_path, own, general, sent):
+    """2.0.0: `TaskSettings.max_documents` es el presupuesto de la fase de la tarea; con `ai_max_documents`, el menor."""
+    client = _scripted(["ok"] * 4, tasks={"classify": TaskSettings(model="stub", max_documents=own)})
+
+    context = await _build(tmp_path, _documents(tmp_path, 4), client, ai_max_documents=general)
+
+    assert _calls(client) == sent and context.ai_stats.classification.sent == sent
 
 
 @pytest.mark.asyncio

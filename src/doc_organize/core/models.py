@@ -1862,6 +1862,17 @@ AI_TASKS: Final[tuple[AiTask, ...]] = ("classify", "enrich", "taxonomy_design", 
 DEFAULT_MAX_TOKENS: dict[str, int] = {"classify": 1024, "enrich": 512, "taxonomy_design": 4096, "agent": 4096}
 
 
+def default_model_alias(task: AiTask) -> str:
+    """El alias del modelo de `task` en el LiteLLM Proxy si no se configura otro: `doc-organize-<tarea>` (recomendado,
+    no obligatorio: U10).
+
+    Example:
+        >>> default_model_alias("taxonomy_design")
+        'doc-organize-taxonomy-design'
+    """
+    return f"doc-organize-{task.replace('_', '-')}"
+
+
 class TaskSettings(BaseModel):
     """Modelo y, si se quiere, clave propia de una tarea de IA (2.0.0, G1; claves por tarea opcionales, D12).
 
@@ -1872,6 +1883,12 @@ class TaskSettings(BaseModel):
             `AiSettings`.
         max_tokens (int | None): Tope de tokens de la respuesta; `None` = el de la tarea (`DEFAULT_MAX_TOKENS`). Corta
             las respuestas que se desbocan (una respuesta cortada no pasa la validación y cuenta como fallo).
+        timeout_s (float | None): Timeout de cada llamada de la tarea; `None` = el de `AiSettings` (un borrador de
+            taxonomía o un agente con un modelo local tardan más que una clasificación).
+        retries (int | None): Reintentos de transporte de la tarea; `None` = los de `AiSettings`.
+        max_documents (int | None): Documentos como mucho por construcción en la fase de la tarea (`classify`,
+            `enrich`); se combina con `ContextBuilder.build(ai_max_documents=)` (manda el menor). `None` = sin tope
+            propio.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -1879,6 +1896,9 @@ class TaskSettings(BaseModel):
     model: str = Field(..., min_length=1, description="Alias del modelo en el proxy para esta tarea")
     virtual_key: str | None = Field(default=None, repr=False, description="Clave propia de la tarea; None = la general")
     max_tokens: int | None = Field(default=None, gt=0, description="Tope de tokens de la respuesta; None = el de la tarea")
+    timeout_s: float | None = Field(default=None, gt=0, description="Timeout de la tarea, en segundos; None = el general")
+    retries: int | None = Field(default=None, ge=0, description="Reintentos de transporte de la tarea; None = los generales")
+    max_documents: int | None = Field(default=None, ge=0, description="Documentos como mucho en la fase de la tarea; None = sin tope propio")
 
 
 class PromptProvenance(BaseModel):
@@ -1936,9 +1956,24 @@ class AiSettings(BaseModel):
     tags: list[str] = Field(default_factory=list, description="Etiquetas para el proxy (`metadata.tags`)")
 
     def model_for(self, task: AiTask) -> str:
-        """El modelo de `task`: el configurado o el alias recomendado `doc-organize-<tarea>`."""
+        """El modelo de `task`: el configurado o el alias recomendado (`default_model_alias`)."""
         configured = self.tasks.get(task)
-        return configured.model if configured is not None else f"doc-organize-{task.replace('_', '-')}"
+        return configured.model if configured is not None else default_model_alias(task)
+
+    def timeout_for(self, task: AiTask) -> float:
+        """El timeout de `task`: el suyo o el general."""
+        configured = self.tasks.get(task)
+        return configured.timeout_s if configured is not None and configured.timeout_s is not None else self.timeout_s
+
+    def retries_for(self, task: AiTask) -> int:
+        """Los reintentos de transporte de `task`: los suyos o los generales."""
+        configured = self.tasks.get(task)
+        return configured.retries if configured is not None and configured.retries is not None else self.retries
+
+    def max_documents_for(self, task: AiTask) -> int | None:
+        """El tope de documentos propio de la fase de `task`, o `None`."""
+        configured = self.tasks.get(task)
+        return configured.max_documents if configured is not None else None
 
     def key_for(self, task: AiTask) -> str:
         """La clave de `task`: la suya si la tiene, si no la general."""

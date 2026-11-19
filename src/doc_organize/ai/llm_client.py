@@ -275,6 +275,8 @@ class LlmClient:
             json=body,
             headers={"Authorization": f"Bearer {self.settings.key_for(task)}"},
             allow_statuses=frozenset({400}) if allow_bad_request else frozenset(),
+            retries=self.settings.retries_for(task),
+            timeout=self.settings.timeout_for(task),
             timeout_message=f"Timeout consultando el LiteLLM Proxy para '{task}'",
             connection_message=f"Error de red consultando el LiteLLM Proxy para '{task}'",
             auth_message=f"El LiteLLM Proxy rechazó la clave de '{task}' (HTTP {{status_code}})",

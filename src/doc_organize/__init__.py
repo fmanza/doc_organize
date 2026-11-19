@@ -91,6 +91,7 @@ _EXPORTS: dict[str, str] = {
     "prune_ai_cache": "doc_organize.ai.cache",
     "AiSettings": "doc_organize.core.models",
     "TaskSettings": "doc_organize.core.models",
+    "default_model_alias": "doc_organize.core.models",
     "AiEndpoint": "doc_organize.diagnostics",
     "EnvironmentCheck": "doc_organize.core.models",
     "EnvironmentReport": "doc_organize.core.models",
