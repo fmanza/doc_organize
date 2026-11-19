@@ -63,6 +63,33 @@ información, las URLs de terceros que hay dentro del JavaScript del tema: el te
 funciones que este sitio no activa (Pyodide y ACE para bloques de código ejecutables, la galería de imágenes, el
 polyfill de `ResizeObserver` para navegadores antiguos, y Mermaid si no estuviera ya cargado).
 
+## Empaquetar el sitio para entregarlo
+
+`write_site_zip(destination, site_dir, *, project_name=)` empaqueta un sitio que pasa `check_site_offline` (si no,
+lanza `OfflineSiteError` con los problemas y no escribe nada):
+
+```python
+import asyncio
+from doc_organize import write_site_zip
+
+zipped = await asyncio.to_thread(write_site_zip, "sitio.zip", result.site_dir, project_name=project.name)
+print(zipped.sha256, zipped.zip_size_bytes)  # la huella que se da al destinatario
+```
+
+El ZIP lleva:
+
+| Fichero | Para qué |
+|---|---|
+| `sitio/` | El sitio: `sitio/index.html` se abre con doble clic |
+| `start_server.py` | Servidor local (Python 3.10+, sin instalar nada) en `127.0.0.1` y un puerto libre, si el navegador limita la búsqueda desde `file://` |
+| `VER_SITIO.md` | Cómo abrirlo en Windows, macOS y Linux, cómo comprobar la huella y el aviso de contenido de terceros |
+
+Es **reproducible**: orden alfabético, fecha (1980-01-01) y permisos fijos y la misma compresión, así que el mismo
+`site/` da el mismo SHA-256, se escriba en una ruta o en un fichero abierto. Dos construcciones del mismo contexto dan
+el mismo `site/` (comprobado con Zensical 0.1.1) y, por tanto, el mismo ZIP. Escribe en *streaming*, con progreso
+(`ProgressEvent(operation="export")`) y cancelación (`CancelToken`) como `write_project_zip`; es síncrona: desde
+código async, con `asyncio.to_thread`.
+
 ::: doc_organize.security.untrusted_markdown
     options:
       show_root_heading: false
@@ -77,3 +104,5 @@ polyfill de `ResizeObserver` para navegadores antiguos, y Mermaid si no estuvier
         - check_site_offline
         - OfflineSiteReport
         - OfflineIssue
+        - write_site_zip
+        - SiteZipResult

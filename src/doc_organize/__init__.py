@@ -164,6 +164,8 @@ _EXPORTS: dict[str, str] = {
     "NeutralizeResult": "doc_organize.security.untrusted_markdown",
     "check_site_offline": "doc_organize.context.offline_site",
     "OfflineSiteReport": "doc_organize.context.offline_site",
+    "write_site_zip": "doc_organize.context.offline_site",
+    "SiteZipResult": "doc_organize.context.offline_site",
     "scan_credentials": "doc_organize.security.credentials",
     "RedactionResult": "doc_organize.security.credentials",
     "CredentialFinding": "doc_organize.security.credentials",
@@ -180,6 +182,7 @@ _EXPORTS: dict[str, str] = {
     "ProjectNotFoundError": "doc_organize.core.exceptions",
     "ContextError": "doc_organize.core.exceptions",
     "SiteBuildError": "doc_organize.core.exceptions",
+    "OfflineSiteError": "doc_organize.core.exceptions",
 }
 
 __all__ = ["__version__", *sorted(_EXPORTS)]  # noqa: PLE0604 - las claves de _EXPORTS son cadenas
