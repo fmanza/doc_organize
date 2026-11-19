@@ -278,7 +278,9 @@ def test_malformed_project_prompts_are_rejected(tmp_path, text: str, match: str)
 def test_missing_placeholder_and_unknown_task() -> None:
     with pytest.raises(AiConfigurationError, match="marcador"):
         PromptRegistry().get("classify").render(title="T")
-    with pytest.raises(AiConfigurationError, match="no tiene prompt"):
-        PromptRegistry().get("agent")  # llega en M8
+    with pytest.raises(AiConfigurationError, match="no tiene el prompt"):
+        PromptRegistry().get("agent")  # los agentes tienen prompts con nombre
+    with pytest.raises(AiConfigurationError, match="no válido"):
+        PromptRegistry().get("agent", "../classify")
     with pytest.raises(AiConfigurationError, match="desconocida"):
         PromptRegistry().get("otra")  # type: ignore[arg-type]

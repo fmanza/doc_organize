@@ -25,6 +25,8 @@ from doc_organize.core.models import AI_TASKS, AiTask, PromptProvenance
 _BUILTIN_DIR = Path(__file__).parent
 #: Carpeta de los prompts de un proyecto, relativa a su raíz.
 PROJECT_PROMPTS_DIR = Path(".doc_organize") / "prompts"
+#: Nombre de un prompt: el de su fichero, sin rutas.
+_PROMPT_NAME = re.compile(r"^[a-z][a-z0-9_]{0,40}$")
 _SECTION = re.compile(r"^## (system|user)\s*$", re.MULTILINE)
 
 PromptSource = Literal["builtin", "project"]
@@ -92,28 +94,33 @@ class PromptRegistry:
 
     def __init__(self, project_root: Path | str | None = None) -> None:
         self.project_dir = Path(project_root) / PROJECT_PROMPTS_DIR if project_root is not None else None
-        self._cache: dict[AiTask, PromptTemplate] = {}
+        self._cache: dict[tuple[AiTask, str], PromptTemplate] = {}
 
-    def get(self, task: AiTask) -> PromptTemplate:
-        """El prompt de `task`.
+    def get(self, task: AiTask, name: str | None = None) -> PromptTemplate:
+        """El prompt de `task`; con `name`, el prompt con ese nombre de una tarea que tiene varios (los agentes:
+        `get("agent", "taxonomy_agent")` lee `taxonomy_agent.md`).
 
         Raises:
-            AiConfigurationError: La tarea no existe, no tiene prompt o el fichero no tiene el formato esperado.
+            AiConfigurationError: La tarea no existe, el nombre no es válido, no hay prompt o el fichero no tiene el
+                formato esperado.
         """
         if task not in AI_TASKS:
             raise AiConfigurationError(f"Tarea de IA desconocida: '{task}'")
-        if task not in self._cache:
-            self._cache[task] = self._load(task)
-        return self._cache[task]
+        name = name or task
+        if not _PROMPT_NAME.match(name):
+            raise AiConfigurationError(f"Nombre de prompt no válido: '{name}'")
+        if (task, name) not in self._cache:
+            self._cache[(task, name)] = self._load(task, name)
+        return self._cache[(task, name)]
 
-    def _load(self, task: AiTask) -> PromptTemplate:
+    def _load(self, task: AiTask, name: str) -> PromptTemplate:
         if self.project_dir is not None:
-            candidate = self.project_dir / f"{task}.md"
+            candidate = self.project_dir / f"{name}.md"
             if candidate.is_file() and not candidate.is_symlink():
                 return _parse(task, candidate.read_text(encoding="utf-8"), "project")
-        builtin = _BUILTIN_DIR / f"{task}.md"
+        builtin = _BUILTIN_DIR / f"{name}.md"
         if not builtin.is_file():
-            raise AiConfigurationError(f"La tarea '{task}' no tiene prompt")
+            raise AiConfigurationError(f"La tarea '{task}' no tiene el prompt '{name}'")
         return _parse(task, builtin.read_text(encoding="utf-8"), "builtin")
 
 

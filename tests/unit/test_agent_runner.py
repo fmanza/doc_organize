@@ -128,7 +128,7 @@ async def test_tokens_are_estimated_when_the_proxy_does_not_report_them() -> Non
 @pytest.mark.asyncio
 async def test_max_tool_calls() -> None:
     executed: list[Any] = []
-    llm = fake_llm(agent=lambda request: call_tools(("count", {}), ("count", {})))
+    llm = fake_llm(agent=lambda request: call_tools(("count", {"page": 1}), ("count", {"page": 2})))
 
     run = await AgentRunner(llm, [_tool(handler=lambda arguments: executed.append(1))], limits=AgentLimits(max_tool_calls=3)).run(QUESTION)
 
@@ -237,3 +237,87 @@ def test_tool_names_must_be_unique_and_not_reserved() -> None:
         AgentRunner(llm, [_tool(FINISH_TOOL)])
     with pytest.raises(ValueError):
         AgentLimits(max_steps=0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"name": "count", "arguments": {"folder": "a"}}',
+        '```json\n{"function": {"name": "count", "arguments": "{\\"folder\\": \\"a\\"}"}}\n```',
+        '{"tool_calls": [{"type": "function", "function": {"name": "count", "parameters": {"folder": "a"}}}]}',
+    ],
+)
+async def test_tool_calls_written_as_text_are_run(content: str) -> None:
+    received: list[Any] = []
+    llm = fake_llm(agent=agent_script(say(content), say("Hay 3")))
+
+    run = await AgentRunner(llm, [_tool(handler=lambda arguments: received.append(arguments) or 3)]).run(QUESTION)
+
+    assert run.finished and run.answer == "Hay 3" and received == [{"folder": "a"}] and run.steps[0].calls_in_text
+    assert run.messages[2]["content"] is None and run.messages[2]["tool_calls"][0]["function"]["name"] == "count"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content", ['{"name": "delete_everything", "arguments": {}}', '{"total": 3}', "[1, 2]", "Hay {3}"])
+async def test_text_that_is_not_a_known_tool_call_is_an_answer(content: str) -> None:
+    llm = fake_llm(agent=agent_script(say(content)))
+
+    run = await AgentRunner(llm, [_tool()]).run(QUESTION)
+
+    assert run.finished and run.answer == content and not run.steps[0].calls_in_text
+
+
+@pytest.mark.asyncio
+async def test_finish_written_as_text() -> None:
+    llm = fake_llm(agent=agent_script(say('{"name": "finish", "arguments": {"total": 3}}')))
+
+    run = await AgentRunner(llm, [], answer_schema=ANSWER_SCHEMA, parse_answer=lambda data: int(data["total"])).run(QUESTION)
+
+    assert run.finished and run.answer == 3
+
+
+@pytest.mark.asyncio
+async def test_old_tool_results_are_omitted_but_kept_in_the_run() -> None:
+    llm = fake_llm(agent=agent_script(*(call_tools(("count", {"page": page})) for page in range(3)), say("fin")))
+    results = iter(["uno", "dos", "tres"])
+
+    run = await AgentRunner(llm, [_tool(handler=lambda arguments: next(results))], limits=AgentLimits(keep_tool_results=1)).run(QUESTION)
+
+    last = llm.proxy.calls("agent")[-1].body["messages"]  # type: ignore[attr-defined]
+    sent = [message["content"] for message in last if message["role"] == "tool"]
+    assert sent[2] == "tres" and all("omitido" in content for content in sent[:2])
+    assert [message["content"] for message in run.messages if message["role"] == "tool"] == ["uno", "dos", "tres"]
+    with pytest.raises(ValueError):
+        AgentLimits(keep_tool_results=0)
+
+
+@pytest.mark.asyncio
+async def test_a_repeated_idempotent_call_is_not_run_again() -> None:
+    executed: list[Any] = []
+    replies: list[str] = []
+    undo = AgentTool("undo", "Deshace", {"type": "object", "properties": {}}, lambda arguments: executed.append("undo") or "ok", idempotent=False)
+    llm = fake_llm(
+        agent=agent_script(
+            call_tools(("count", {"page": 1})),
+            call_tools(("count", {"page": 1})),
+            lambda request: replies.append(_last_message(request)["content"]) or call_tools(("undo", {})),
+            call_tools(("undo", {})),
+            say("fin"),
+        )
+    )
+
+    run = await AgentRunner(llm, [_tool(handler=lambda arguments: executed.append("count") or 1), undo]).run(QUESTION)
+
+    assert executed == ["count", "undo", "undo"] and "misma llamada" in replies[0] and "misma llamada" in (run.tool_calls[1].error or "")
+
+
+@pytest.mark.asyncio
+async def test_the_model_is_told_to_finish_before_the_last_steps() -> None:
+    llm = fake_llm(agent=lambda request: call_tools(("count", {"page": len(request.body["messages"])})))
+
+    run = await AgentRunner(llm, [_tool()], limits=AgentLimits(max_steps=4), answer_schema=ANSWER_SCHEMA).run(QUESTION)
+
+    warnings = [message for message in run.messages if message["role"] == "user" and "Te quedan 2 llamadas" in message["content"]]
+    assert run.stop_reason == "max_steps" and len(warnings) == 1
+    assert "Te quedan" in llm.proxy.calls("agent")[2].body["messages"][-1]["content"]  # type: ignore[attr-defined]

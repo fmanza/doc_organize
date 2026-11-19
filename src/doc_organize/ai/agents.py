@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 import time
 
 from collections.abc import Awaitable, Callable, Sequence
@@ -72,12 +73,16 @@ class AgentTool:
         handler (ToolHandler): Función (o corrutina) que recibe los argumentos y devuelve algo serializable a JSON. Debe
             ser **de solo lectura**: el runner no puede comprobarlo. Un `ValueError`, `TypeError` o `KeyError` vuelve al
             modelo como error de la herramienta; cualquier otra excepción se propaga.
+        idempotent (bool): La misma llamada da el mismo resultado si nada cambia entre medias. Si lo es, una llamada
+            idéntica a la anterior no se ejecuta y vuelve como error (los modelos pequeños se quedan en bucle); las
+            herramientas que cambian algo (deshacer en un borrador) deben ser `False`.
     """
 
     name: str
     description: str
     parameters: dict[str, Any]
     handler: ToolHandler
+    idempotent: bool = True
 
     def spec(self) -> dict[str, Any]:
         """La herramienta como la pide el formato de OpenAI/LiteLLM."""
@@ -95,6 +100,10 @@ class AgentLimits:
         max_tool_calls (int): Herramientas ejecutadas como máximo.
         max_tool_result_chars (int): Caracteres de cada resultado que vuelve al modelo (el resto se corta y se avisa).
         answer_retries (int): Veces que se le pide al modelo que corrija una respuesta final que no cumple el esquema.
+        keep_tool_results (int | None): Resultados de herramientas que se reenvían enteros (los últimos); los
+            anteriores se sustituyen por un aviso breve para que cada llamada no crezca sin límite (un modelo local
+            con poco contexto pierde el principio de la conversación, y con él las instrucciones). `None` = todos.
+            `AgentRun.messages` los guarda siempre enteros.
     """
 
     max_steps: int = 12
@@ -102,10 +111,13 @@ class AgentLimits:
     max_tool_calls: int = 40
     max_tool_result_chars: int = 8_000
     answer_retries: int = 1
+    keep_tool_results: int | None = None
 
     def __post_init__(self) -> None:
         if min(self.max_steps, self.max_tokens, self.max_tool_calls, self.max_tool_result_chars) < 1 or self.answer_retries < 0:
             raise ValueError("Los topes del agente deben ser positivos")
+        if self.keep_tool_results is not None and self.keep_tool_results < 1:
+            raise ValueError("keep_tool_results debe ser 1 o más (o None)")
 
 
 @dataclass(frozen=True)
@@ -133,6 +145,8 @@ class AgentStep:
     tool_calls: list[AgentToolCall]
     usage: LlmUsage
     estimated_tokens: bool = False
+    #: El modelo escribió las llamadas como JSON en el texto en lugar de `tool_calls` (algunos modelos locales).
+    calls_in_text: bool = False
 
 
 @dataclass
@@ -228,50 +242,29 @@ class AgentRunner:
         """
         started = time.monotonic()
         run = AgentRun(stop_reason="max_steps", messages=[dict(message) for message in messages])
+        state = _RunState(retries_left=self.limits.answer_retries)
         specs = self.tool_specs()
-        retries_left = self.limits.answer_retries
-        tool_calls = 0
         try:
             for index in range(self.limits.max_steps):
-                if cancel_token is not None and cancel_token.cancelled:
-                    run.stop_reason = "cancelled"
+                stop = self._stop_before_call(run, cancel_token)
+                if stop is not None:
+                    run.stop_reason = stop
                     return run
-                if run.total_tokens >= self.limits.max_tokens:
-                    run.stop_reason = "max_tokens"
-                    return run
-                message, usage = await self.llm.complete_with_tools(self.task, run.messages, specs)
+                if self.answer_schema is not None and self.limits.max_steps - index == _FINISH_WARNING_STEPS:
+                    run.messages.append({"role": "user", "content": _FINISH_WARNING.format(steps=_FINISH_WARNING_STEPS, finish=FINISH_TOOL)})
+                sent = _compact(run.messages, self.limits.keep_tool_results)
+                message, usage = await self.llm.complete_with_tools(self.task, sent, specs)
                 estimated = usage.prompt_tokens is None or usage.completion_tokens is None
-                run.prompt_tokens += usage.prompt_tokens if usage.prompt_tokens is not None else _estimate(run.messages)
+                run.prompt_tokens += usage.prompt_tokens if usage.prompt_tokens is not None else _estimate(sent)
                 run.completion_tokens += usage.completion_tokens if usage.completion_tokens is not None else _estimate([message])
-                assistant = _assistant_message(message)
+                assistant, in_text = self._assistant(message)
                 run.messages.append(assistant)
+                step = AgentStep(index=index, tool_calls=[], usage=usage, estimated_tokens=estimated, calls_in_text=in_text)
+                run.steps.append(step)
                 requested = assistant.get("tool_calls") or []
-                step_calls: list[AgentToolCall] = []
-                run.steps.append(AgentStep(index=index, tool_calls=step_calls, usage=usage, estimated_tokens=estimated))
-                if not requested:
-                    done, retries_left = self._final_text(run, assistant, retries_left)
-                    if done:
-                        return run
-                    continue
-                for call in requested:
-                    if cancel_token is not None and cancel_token.cancelled:
-                        run.stop_reason = "cancelled"
-                        return run
-                    name, arguments, error = _decode_call(call)
-                    if name == FINISH_TOOL and self.answer_schema is not None and error is None:
-                        done, retries_left, reply = self._finish(run, arguments, retries_left)
-                        step_calls.append(AgentToolCall(name, arguments, error=None if done else reply))
-                        if done:
-                            return run
-                        run.messages.append(_tool_message(call, reply))
-                        continue
-                    if tool_calls >= self.limits.max_tool_calls:
-                        run.stop_reason = "max_tool_calls"
-                        return run
-                    tool_calls += 1
-                    content, error, truncated = await self._execute(name, arguments, error)
-                    step_calls.append(AgentToolCall(name, arguments, error=error, truncated=truncated))
-                    run.messages.append(_tool_message(call, content))
+                done = await self._calls(run, step, requested, state, cancel_token) if requested else self._final_text(run, assistant, state)
+                if done:
+                    return run
             run.stop_reason = "max_steps"
             return run
         finally:
@@ -287,29 +280,81 @@ class AgentRunner:
 
     # --- Internos ------------------------------------------------------------------------------------------------------
 
-    def _final_text(self, run: AgentRun, assistant: Message, retries_left: int) -> tuple[bool, int]:
+    def _stop_before_call(self, run: AgentRun, cancel_token: CancelToken | None) -> AgentStopReason | None:
+        if cancel_token is not None and cancel_token.cancelled:
+            return "cancelled"
+        if run.total_tokens >= self.limits.max_tokens:
+            return "max_tokens"
+        return None
+
+    def _assistant(self, message: Message) -> tuple[Message, bool]:
+        """El mensaje del asistente, con las llamadas escritas como texto convertidas en `tool_calls` (y si lo eran)."""
+        assistant = _assistant_message(message)
+        if assistant.get("tool_calls"):
+            return assistant, False
+        known = {*self.tools, FINISH_TOOL} if self.answer_schema is not None else set(self.tools)
+        calls = _calls_from_text(assistant.get("content"), known)
+        if not calls:
+            return assistant, False
+        return {"role": "assistant", "content": None, "tool_calls": calls}, True  # modelos locales que escriben JSON
+
+    async def _calls(self, run: AgentRun, step: AgentStep, requested: list[Any], state: _RunState, cancel_token: CancelToken | None) -> bool:
+        """Ejecuta las herramientas pedidas en un paso; `True` si el agente termina."""
+        for call in requested:
+            if cancel_token is not None and cancel_token.cancelled:
+                run.stop_reason = "cancelled"
+                return True
+            name, arguments, error = _decode_call(call)
+            if name == FINISH_TOOL and self.answer_schema is not None and error is None:
+                done, reply = self._finish(run, arguments, state)
+                step.tool_calls.append(AgentToolCall(name, arguments, error=None if done else reply))
+                if done:
+                    return True
+                run.messages.append(_tool_message(call, reply))
+                continue
+            if state.tool_calls >= self.limits.max_tool_calls:
+                run.stop_reason = "max_tool_calls"
+                return True
+            state.tool_calls += 1
+            signature = (name, json.dumps(arguments, sort_keys=True, ensure_ascii=False))
+            if error is None and signature == state.last_call and name in self.tools and self.tools[name].idempotent:
+                error = _REPEATED_CALL
+            state.last_call = signature
+            content, error, truncated = await self._execute(name, arguments, error)
+            step.tool_calls.append(AgentToolCall(name, arguments, error=error, truncated=truncated))
+            run.messages.append(_tool_message(call, content))
+        return False
+
+    def _final_text(self, run: AgentRun, assistant: Message, state: _RunState) -> bool:
         """El modelo respondió sin herramientas. Sin esquema, es la respuesta; con esquema, se le recuerda `finish`."""
         if self.answer_schema is None:
             run.answer = assistant.get("content") or ""
             run.stop_reason = "finished"
-            return True, retries_left
-        if retries_left <= 0:
+            return True
+        if state.retries_left <= 0:
             run.stop_reason = "invalid_answer"
-            return True, retries_left
-        run.messages.append({"role": "user", "content": f"Da la respuesta final llamando a la herramienta `{FINISH_TOOL}`."})
-        return False, retries_left - 1
+            return True
+        run.messages.append(
+            {
+                "role": "user",
+                "content": f"Responde siempre llamando a una herramienta; cuando hayas terminado, da la respuesta final con `{FINISH_TOOL}`.",
+            }
+        )
+        state.retries_left -= 1
+        return False
 
-    def _finish(self, run: AgentRun, arguments: dict[str, Any], retries_left: int) -> tuple[bool, int, str]:
+    def _finish(self, run: AgentRun, arguments: dict[str, Any], state: _RunState) -> tuple[bool, str]:
         try:
             run.answer = self.parse_answer(arguments) if self.parse_answer is not None else arguments
         except (ValueError, TypeError, KeyError) as exc:
             run.answer = None
-            if retries_left <= 0:
+            if state.retries_left <= 0:
                 run.stop_reason = "invalid_answer"
-                return True, retries_left, ""
-            return False, retries_left - 1, f"Respuesta no válida ({_short(exc)}); corrígela y vuelve a llamar a `{FINISH_TOOL}`."
+                return True, ""
+            state.retries_left -= 1
+            return False, f"Respuesta no válida ({_short(exc)}); corrígela y vuelve a llamar a `{FINISH_TOOL}`."
         run.stop_reason = "finished"
-        return True, retries_left, ""
+        return True, ""
 
     async def _execute(self, name: str, arguments: dict[str, Any], error: str | None) -> tuple[str, str | None, bool]:
         """Contenido para el modelo, error (o `None`) y si se cortó."""
@@ -329,6 +374,21 @@ class AgentRunner:
         if len(content) <= limit:
             return content, None, False
         return content[:limit] + f"\n[... resultado cortado: {len(content) - limit} caracteres más]", None, True
+
+
+@dataclass
+class _RunState:
+    """Lo que el runner lleva entre pasos."""
+
+    retries_left: int
+    tool_calls: int = 0
+    last_call: tuple[str, str] | None = None
+
+
+#: Pasos que quedan cuando se avisa al modelo de que termine (con `answer_schema`).
+_FINISH_WARNING_STEPS = 2
+_FINISH_WARNING = "Te quedan {steps} llamadas: deja de explorar y da la respuesta final con `{finish}`."
+_REPEATED_CALL = "Acabas de hacer esta misma llamada con los mismos argumentos; su resultado ya está en la conversación. Haz otra cosa o termina."
 
 
 def _no_handler(arguments: dict[str, Any]) -> Any:  # pragma: no cover - `finish` nunca se ejecuta como herramienta
@@ -360,6 +420,54 @@ def _decode_call(call: Any) -> tuple[str, dict[str, Any], str | None]:
     if not isinstance(arguments, dict):
         return name, {}, "Los argumentos deben ser un objeto JSON"
     return name, arguments, None
+
+
+_FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
+
+
+def _calls_from_text(content: Any, known: set[str]) -> list[dict[str, Any]]:
+    """Llamadas a herramientas escritas como JSON en el texto (`{"name", "arguments"}`, `{"function": {...}}`, una
+    lista de ellas o `{"tool_calls": [...]}`), con el formato de `tool_calls`. Solo si **todas** son de herramientas
+    conocidas; si no, ninguna (el texto es una respuesta)."""
+    if not isinstance(content, str) or not content.strip():
+        return []
+    text = content.strip()
+    fenced = _FENCE.match(text)
+    try:
+        data = json.loads(fenced.group(1) if fenced else text)
+    except json.JSONDecodeError:
+        return []
+    items = data.get("tool_calls") if isinstance(data, dict) and "tool_calls" in data else data
+    items = items if isinstance(items, list) else [items]
+    calls = []
+    for index, item in enumerate(items):
+        function = item.get("function", item) if isinstance(item, dict) else None
+        if not isinstance(function, dict) or function.get("name") not in known:
+            return []
+        arguments = function.get("arguments", function.get("parameters", {}))
+        calls.append(
+            {
+                "id": f"text_call_{index}",
+                "type": "function",
+                "function": {
+                    "name": function["name"],
+                    "arguments": arguments if isinstance(arguments, str) else json.dumps(arguments, ensure_ascii=False),
+                },
+            }
+        )
+    return calls
+
+
+_OMITTED = "[Resultado anterior omitido para ahorrar contexto; vuelve a pedirlo si lo necesitas]"
+
+
+def _compact(messages: list[Message], keep: int | None) -> list[Message]:
+    """`messages` con solo los últimos `keep` resultados de herramientas enteros (los demás, un aviso)."""
+    if keep is None:
+        return messages
+    positions = [index for index, message in enumerate(messages) if message.get("role") == "tool"]
+    old = set(positions[:-keep])
+    return [{**message, "content": _OMITTED} if index in old else message for index, message in enumerate(messages)]
 
 
 def _tool_message(call: Any, content: str) -> Message:

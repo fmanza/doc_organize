@@ -85,6 +85,12 @@ class AxisRuleScorer:
         """Valores del eje para `text`: los que llegan al umbral, de mayor a menor confianza (en empate, el orden del
         catálogo); como mucho 5 si el eje es de varios valores y solo el mejor si no. Vacío si el eje es `rules: false`.
         """
+        scored = self.scores(text)
+        return scored[:MAX_VALUES_PER_AXIS] if self.axis.multiple else scored[:1]
+
+    def scores(self, text: FoldedText) -> list[AxisValue]:
+        """Todos los valores que llegan al umbral, de mayor a menor confianza, sin el recorte de `classify` (para ver
+        empates entre entradas)."""
         if not self.axis.rules:
             return []
         scored = []
@@ -94,7 +100,7 @@ class AxisRuleScorer:
             if hits and confidence >= self.threshold:
                 scored.append(AxisValue(slug=entry.slug, name=entry.name, confidence=confidence, classified_by="rules"))
         scored.sort(key=lambda value: value.confidence, reverse=True)  # estable: en empate, el orden del catálogo
-        return scored[:MAX_VALUES_PER_AXIS] if self.axis.multiple else scored[:1]
+        return scored
 
 
 def _entry_terms(entry: TaxonomyEntry, siblings: Iterable[TaxonomyEntry]) -> set[str]:
