@@ -6,6 +6,15 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [2.0.0a2] - 2026-11-19
+
+Segunda prerrelease de 2.0.0, desde `feature/2.0`: hito M7 (versiones de un documento y embeddings). La API puede
+cambiar hasta la 2.0.0. Mismas dependencias que 2.0.0a1: los embeddings se guardan con el módulo `array` (sin numpy)
+y la sub-fase semántica es opcional (`semantic=False` por defecto). Puertas de M7: ningún falso positivo de versiones
+en los 213 nombres de CALIDAD_VD y ejemplos de la IA sin fugas (ni el propio documento, ni sus duplicados, ni la
+referencia al evaluar). La sub-fase semántica está probada con embeddings simulados; falta medirla con un modelo de
+embeddings real.
+
 ### Añadido
 
 - **Versiones de un documento (M7, F5)**: `detect_document_versions(source_paths, *, across_extensions=False)` agrupa
