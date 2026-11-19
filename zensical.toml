@@ -56,6 +56,7 @@ nav = [
     { "Organización documental (dominios y contextos)" = "api/context.md" },
     { "Clasificación semántica (2.0)" = "api/semantic.md" },
     { "Agentes (2.0)" = "api/agents.md" },
+    { "Paquete para IA (2.0)" = "api/ai_bundle.md" },
     { "Sitio sin conexión (2.0)" = "api/offline_site.md" },
     { "Evaluación contra una referencia (2.0)" = "api/evaluation.md" },
     { "Decisiones de personas (2.0)" = "api/decisions.md" },
