@@ -15,9 +15,33 @@ releases publicados antes de esa versión).
   herramienta `finish` y un reintento si no cumple el esquema. Al llegar a un tope o cancelar, para con
   `AgentRun.stop_reason` sin lanzar. Los resultados de las herramientas se redactan como el resto de lo que sale.
 
+- **Diseñador de la taxonomía (M8, G5)**: `TaxonomyDesignAgent(llm).propose(documents, *, base=, instructions=)` mejora
+  un manifiesto (o diseña uno) editando un borrador en memoria con cambios pequeños (`edit_draft`, `undo_edit`,
+  `restore_best`, `set_draft`) que se comprueban con las reglas contra todos los documentos, tras explorarlos (`overview`,
+  `search_documents`, `read_document`). Herramientas sin escritura y sin IA dentro. La propuesta
+  (`TaxonomyDesignProposal`) conserva los ejes, el título y el perfil del de partida, trae el informe por reglas de las
+  dos y nunca se guarda sola; `best` guarda el mejor borrador comprobado que mejoraba el de partida, aunque el agente
+  terminara con otro. Prompt `taxonomy_agent` de la tarea `agent`.
+- **Comprobación por reglas (M8)**: `check_taxonomy_rules(manifest, RulesCorpus)` da por eje la cobertura, los
+  conflictos (las dos mejores entradas a menos de 0,1 en un eje de un valor), las entradas vacías, los términos
+  compartidos, las palabras clave que no aparecen en ningún documento y, de algunos documentos, los términos que
+  encajan en cada entrada empatada (`conflict_terms`) y la entrada que más se acercó al umbral (`near_misses`), igual
+  que la fase de reglas de `build` y sin guardar nada; `TaxonomyRulesReport.improves_on(base)`.
+- `AgentRunner` reconoce las llamadas a herramientas que algunos modelos locales escriben como JSON en el texto (solo
+  si todas son de herramientas que existen; `AgentStep.calls_in_text`).
+- `AgentRunner`: una llamada idéntica a la anterior a una herramienta `idempotent` (por defecto) no se ejecuta y vuelve
+  como error (bucles de modelos pequeños); con `answer_schema`, aviso al modelo dos pasos antes del tope para que
+  responda con `finish`.
+- `AgentLimits.keep_tool_results`: reenvía enteros solo los últimos resultados de herramientas (los anteriores, un
+  aviso), para que cada llamada no crezca sin límite; `AgentRun.messages` los guarda enteros. La guía de agentes avisa
+  de que Ollama recorta por defecto el contexto a 4096 tokens sin error (subir `num_ctx`).
+- `PromptRegistry.get(task, name=None)`: una tarea puede tener varios prompts con nombre (los agentes).
+- `catalog_scores` y `score_candidates` de los clasificadores por reglas, y `AxisRuleScorer.scores`: todas las
+  puntuaciones, no solo la mejor (el resultado de la clasificación no cambia).
+
 ### Cambiado
 
-- `LlmClient.complete_with_tools` envía `max_tokens` como `complete_json`; la tarea `agent` tiene 2048 por defecto
+- `LlmClient.complete_with_tools` envía `max_tokens` como `complete_json`; la tarea `agent` tiene 4096 por defecto
   (`DEFAULT_MAX_TOKENS`).
 
 ## [2.0.0a2] - 2026-11-19

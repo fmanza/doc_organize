@@ -41,8 +41,27 @@ Los agentes leen texto que viene de los documentos, y un documento puede intenta
 - **Redacción**: todo lo que se envía, también los resultados de las herramientas, pasa por `LlmClient`, que redacta
   credenciales (D7).
 
+Dos ayudas para modelos pequeños, que tienden a quedarse en bucle o a no terminar:
+
+- Una llamada **idéntica a la anterior** (mismo nombre y argumentos) a una herramienta `idempotent` (por defecto) no se
+  ejecuta: vuelve como error para que el modelo haga otra cosa. Las herramientas que cambian algo (deshacer en un
+  borrador) se declaran con `idempotent=False`.
+- Con `answer_schema`, cuando quedan dos pasos se le dice al modelo que deje de explorar y responda con `finish`.
+
 Si una herramienta lanza `ValueError`, `TypeError` o `KeyError`, el error vuelve al modelo como resultado (puede
 corregir los argumentos). Cualquier otra excepción es un fallo del programa y se propaga.
+
+## Contexto del modelo
+
+Un agente reenvía la conversación entera en cada llamada, así que necesita un modelo con **contexto amplio**
+(16 000 tokens o más; el diseñador de la taxonomía, unos 32 000). Ollama usa por defecto un contexto de 4096 tokens y
+**recorta el principio** de lo que no cabe (las instrucciones), sin error: el modelo responde, pero sin saber qué
+tiene que hacer. Con Ollama, sube el contexto del modelo que use la tarea `agent`: `num_ctx` en `litellm_params` del
+modelo en la configuración del LiteLLM Proxy, o `OLLAMA_CONTEXT_LENGTH` en el servidor de Ollama.
+
+`AgentLimits.keep_tool_results` reenvía enteros solo los últimos resultados de herramientas y sustituye los anteriores
+por un aviso breve, para que cada llamada no crezca sin límite (el diseñador usa 3). `run.messages` los guarda
+siempre enteros.
 
 ## Respuesta estructurada
 
@@ -50,6 +69,10 @@ Con `answer_schema`, el runner añade la herramienta `finish`: el modelo da su r
 la respuesta. `parse_answer` la valida; si lanza `ValueError`, `TypeError` o `KeyError`, se le pide al modelo que la
 corrija (`AgentLimits.answer_retries`, una vez por defecto), y si sigue sin valer, `stop_reason == "invalid_answer"`.
 Si el modelo contesta con texto en lugar de llamar a `finish`, se le recuerda.
+
+Algunos modelos locales escriben la llamada como JSON en el texto (`{"name": "count", "arguments": {...}}`) en lugar
+de usar `tool_calls`. El runner la reconoce si **todas** las llamadas del texto son de herramientas que existen (si no,
+el texto es la respuesta), y lo marca en `AgentStep.calls_in_text`.
 
 ```python
 runner = AgentRunner(
@@ -71,8 +94,94 @@ runner = AgentRunner(
 `run.steps` trae cada llamada al modelo con las herramientas que pidió (y sus errores) y `run.messages` la conversación
 completa, para auditarla.
 
-El tope de tokens de **cada respuesta** del modelo es `TaskSettings.max_tokens` de la tarea `agent` (2048 por
+El tope de tokens de **cada respuesta** del modelo es `TaskSettings.max_tokens` de la tarea `agent` (4096 por
 defecto); `AgentLimits.max_tokens` es el del agente entero.
+
+## Diseñador de la taxonomía
+
+`TaxonomyDesignAgent` mejora un manifiesto (el del proyecto o una plantilla) o diseña uno desde cero. Mira los
+documentos y **prueba** cada variante con las reglas contra todos ellos, hasta proponer la que más documentos cubre con
+menos conflictos. `draft_taxonomy`, en cambio, propone un borrador en una sola llamada a partir de una muestra, sin
+comprobarlo.
+
+```python
+from doc_organize import TaxonomyDesignAgent
+
+proposal = await TaxonomyDesignAgent(llm).propose(documents, base=manifest, instructions="Separa calidad de medio ambiente")
+if proposal.manifest is not None:
+    print(proposal.base_report.to_markdown())  # la de partida, por reglas
+    print(proposal.report.to_markdown())       # la propuesta
+    print(proposal.improves, proposal.rationale)
+    texto = proposal.markdown()                # para revisarla y, si se acepta, save_taxonomy_manifest
+```
+
+El agente trabaja sobre un **borrador** que empieza siendo el manifiesto de partida. Con `edit_draft` aplica cambios
+pequeños (añadir, cambiar o quitar entradas y palabras clave) y recibe el informe por reglas, y con `undo_edit` deshace
+el último. Así un modelo local no tiene que escribir el manifiesto entero: al terminar llama a `finish` solo con la
+justificación, y la propuesta es el borrador, siempre válido y ya comprobado.
+
+Sus herramientas no escriben nada (el borrador vive en memoria) y no llaman a ningún modelo:
+
+| Herramienta | Qué hace |
+|---|---|
+| `overview` | Documentos por carpeta (hasta dos niveles), el borrador y su informe por reglas |
+| `search_documents` | Documentos cuyo título o texto contiene una palabra o frase, o los de una carpeta (20 por página) |
+| `read_document` | El comienzo del texto de un documento (hasta 2000 caracteres) |
+| `edit_draft` | Aplica cambios al borrador (`add`, `update` con `keywords`, `add_keywords` o `remove_keywords`, `remove`); si uno no es válido, no aplica ninguno. Devuelve el informe y si mejora el de partida |
+| `undo_edit` | Deshace la última edición |
+| `restore_best` | Vuelve al mejor borrador comprobado que mejoraba el de partida |
+| `set_draft` | Sustituye el borrador por un manifiesto completo (para empezar sin manifiesto de partida) |
+
+La propuesta **conserva los ejes** del de partida (mismas claves, `organizes` y `multiple`) y su título, descripción y
+perfil. **Nunca se guarda sola**: si el agente no termina (tope, cancelación o respuesta no válida),
+`proposal.manifest` es `None` y `proposal.run.stop_reason` dice por qué; `proposal.draft` conserva el último borrador
+para no perder lo avanzado. `proposal.best` es el mejor borrador comprobado que mejoraba el de partida (más cobertura
+menos conflictos), aunque el agente terminara con otro: un modelo pequeño puede empeorar al final. Por eso, si el
+agente llama a `finish` con un borrador que no mejora habiendo tenido uno que sí, se le pide una vez que lo recupere
+(`restore_best`) o corrija el actual. El prompt es `taxonomy_agent` de la tarea `agent`, sustituible en
+`<raíz>/.doc_organize/prompts/taxonomy_agent.md`.
+
+## Comprobar un manifiesto por reglas
+
+`check_taxonomy_rules(manifest, corpus)` clasifica los documentos con un manifiesto candidato igual que la fase de
+reglas de `ContextBuilder.build` (mismos puntuadores, umbral y texto), sin guardar nada ni llamar a la IA. Por eje da:
+
+- **cobertura**: documentos con algún valor;
+- **conflictos** (ejes de un valor): documentos en los que las dos mejores entradas quedan a menos de 0,1
+  (`CONFLICT_MARGIN`), y las reglas eligen casi por azar;
+- **entradas vacías** y **términos compartidos** entre entradas;
+- **palabras clave sin uso** (`unused_keywords`): las que no aparecen en ningún documento (en los ejes que organizan,
+  además, bajan la puntuación de su entrada);
+- de algunos documentos en conflicto, **qué términos encajan** en cada entrada empatada (`conflict_terms`), y de
+  algunos sin cubrir, la entrada que **más se acercó** al umbral con los términos que encajan y los que faltan
+  (`near_misses`).
+
+`RulesCorpus.load(documents)` lee los textos una vez, para comprobar muchas variantes. `report.improves_on(base)` es
+`True` si ningún eje pierde cobertura ni gana conflictos y alguno mejora.
+
+```python
+corpus = await RulesCorpus.load(documents)
+print(check_taxonomy_rules(manifest, corpus).to_markdown())
+```
+
+::: doc_organize.context.taxonomy_agent
+    options:
+      show_root_heading: false
+      members:
+        - TaxonomyDesignAgent
+        - TaxonomyDesignProposal
+
+::: doc_organize.context.taxonomy_check
+    options:
+      show_root_heading: false
+      members:
+        - check_taxonomy_rules
+        - RulesCorpus
+        - TaxonomyRulesReport
+        - AxisRulesReport
+        - NearMiss
+
+## Referencia del runner
 
 ::: doc_organize.ai.agents
     options:
