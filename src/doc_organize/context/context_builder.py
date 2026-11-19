@@ -35,6 +35,7 @@ from doc_organize.context.domain_classifier import DomainClassifier, MaterialTyp
 from doc_organize.context.language_detection import detect_language
 from doc_organize.context.project_profile import compose_profile, profile_prompt_text
 from doc_organize.context.reorganizer import assign_organized_paths
+from doc_organize.context.semantic import DEFAULT_SEMANTIC_THRESHOLD, classify_semantic
 from doc_organize.context.versions import mark_versions, resolve_versions
 from doc_organize.core.constants import UNCLASSIFIED_SLUG
 from doc_organize.core.exceptions import AiAuthError, AiConnectionError, AiError, ContextError, ContextNotFoundError
@@ -340,6 +341,8 @@ class ContextBuilder:
         decisions: bool | Sequence[ClassificationDecision] = True,
         scan_roots: Sequence[str] | None = None,
         versions: VersionsMode = "all",
+        semantic: bool = False,
+        semantic_threshold: float = DEFAULT_SEMANTIC_THRESHOLD,
         on_progress: ProgressCallback | None = None,
         cancel_token: CancelToken | None = None,
         ai_max_failures: int | None = None,
@@ -386,6 +389,10 @@ class ContextBuilder:
                 aplicar queda en `Context.stale_decisions`/`orphan_decisions`.
             scan_roots: Raíces de escaneo para las claves de los documentos en las decisiones (`document_key`); por
                 defecto, la carpeta común de todos los originales.
+            semantic: Sub-fase semántica (2.0.0, G4, opt-in): rellena con embeddings (tarea `embed` de `llm`) los ejes
+                vacíos, tras las reglas y las decisiones y antes de la IA, con `classified_by="semantic"`. Solo con
+                `taxonomy_manifest`. Los vectores se guardan en `<raíz>/.doc_organize/embeddings/`.
+            semantic_threshold: Similitud mínima (coseno, 0-1) para asignar un valor en la sub-fase semántica.
             versions: Qué hacer con las versiones de un mismo documento (2.0.0, F5): `"all"` (por defecto, como 1.x),
                 `"mark"` (cada documento lleva `version`, `version_group` e `is_current`) o `"current_only"` (solo la
                 vigente se clasifica, se publica y va a la IA; las demás quedan en `Context.superseded_documents`). La
@@ -414,12 +421,15 @@ class ContextBuilder:
             raise ValueError("ai_max_failures debe ser >= 1 (o None)")
         if ai_max_documents is not None and ai_max_documents < 0:
             raise ValueError("ai_max_documents debe ser >= 0 (o None)")
-        if (ai_scope != "off" or enrich) and llm is None:
-            raise ValueError("ai_scope y enrich necesitan un cliente de IA (llm)")
+        if (ai_scope != "off" or enrich or semantic) and llm is None:
+            raise ValueError("ai_scope, enrich y semantic necesitan un cliente de IA (llm)")
+        if not 0.0 <= semantic_threshold <= 1.0:
+            raise ValueError(f"semantic_threshold debe estar entre 0 y 1, no {semantic_threshold}")
         checkpoint(cancel_token)
         prompts = prompts if prompts is not None else PromptRegistry(project.root_path)
         cache = ai_cache if isinstance(ai_cache, AiResultCache) else (AiResultCache(project.root_path) if ai_cache and llm is not None else None)
         human_decisions = await self._load_decisions(project, decisions)
+        semantic_stats = AiPhaseStats()
         version_outcome = resolve_versions(documents, versions, human_decisions, roots=scan_roots)
         if version_outcome.superseded:
             superseded = set(version_outcome.superseded)
@@ -453,6 +463,16 @@ class ContextBuilder:
             decision_outcome = apply_decisions(
                 human_decisions, classified, unclassified, taxonomy_manifest, slugify=DomainClassifier._slugify, roots=scan_roots
             )
+            if llm is not None and semantic:
+                semantic_stats = await classify_semantic(
+                    llm,
+                    classified,
+                    taxonomy_manifest,
+                    project_root=project.root_path,
+                    threshold=semantic_threshold,
+                    locked=decision_outcome.locked,
+                    slugify=DomainClassifier._slugify,
+                )
             if llm is not None and ai_scope != "off":
                 classified = await self._classify_with_manifest_ai(
                     llm,
@@ -521,7 +541,14 @@ class ContextBuilder:
             unclassified_details=unclassified_details,
             taxonomy_manifest_used=taxonomy_manifest is not None,
             taxonomy_template_name=taxonomy_template_name,
-            ai_stats=AiStats(scope=ai_scope, enrich=enrich, classification=ai_run.stats(), enrichment=enrichment_run.stats()),
+            ai_stats=AiStats(
+                scope=ai_scope,
+                enrich=enrich,
+                classification=ai_run.stats(),
+                enrichment=enrichment_run.stats(),
+                semantic=semantic,
+                semantic_classification=semantic_stats,
+            ),
             ai_provenance=_provenance(llm, prompts, [("classify", ai_run), ("enrich", enrichment_run)]),
             ai_redact_credentials=llm.settings.redact_credentials if llm is not None else True,
             credential_findings=[

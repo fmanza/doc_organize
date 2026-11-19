@@ -54,6 +54,7 @@ nav = [
     { "Monitorización de uso IA" = "api/ai_usage_monitoring.md" },
     { "Diagnóstico del entorno" = "api/diagnostics.md" },
     { "Organización documental (dominios y contextos)" = "api/context.md" },
+    { "Clasificación semántica (2.0)" = "api/semantic.md" },
     { "Evaluación contra una referencia (2.0)" = "api/evaluation.md" },
     { "Decisiones de personas (2.0)" = "api/decisions.md" },
     { "Versiones de un documento (2.0)" = "api/versions.md" },

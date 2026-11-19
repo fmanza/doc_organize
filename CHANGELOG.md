@@ -18,6 +18,13 @@ releases publicados antes de esa versión).
   si el documento no tiene grupo) y motivo `unconfirmed_version` en la cola de revisión. En CALIDAD_VD: un grupo y
   ningún falso positivo en 213 nombres.
 
+- **Clasificación semántica (M7, G4)**: `EmbeddingIndex` (vectores en `<raíz>/.doc_organize/embeddings/`, `array` sin
+  numpy, clave por modelo, redacción y texto) y `ContextBuilder.build(semantic=False, semantic_threshold=0.75)`: con
+  `semantic=True`, tras las reglas y las decisiones y antes de la IA, rellena los ejes vacíos comparando el extracto de
+  cada documento con «nombre, descripción y palabras clave» de cada valor (en un eje de un valor, solo si le saca 0,03
+  al segundo); `classified_by="semantic"`. `AiStats.semantic` y `semantic_classification`. Un fallo del modelo de
+  embeddings no para la construcción.
+
 ### Cambiado
 
 - El historial del contexto distingue los documentos que salen por ser una versión antigua (`superseded`) o porque los

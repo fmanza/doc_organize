@@ -71,6 +71,8 @@ class FakeProxy:
         answer = responder(fake)
         if isinstance(answer, httpx.Response):
             return answer
+        if task == "embed":  # la función devuelve un vector por texto de `request.body["input"]`
+            return httpx.Response(200, json={"data": [{"index": index, "embedding": vector} for index, vector in enumerate(answer)]})
         if task == "classify":
             answer = _classification(fake, answer)
         return httpx.Response(
