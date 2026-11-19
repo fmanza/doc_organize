@@ -7,7 +7,7 @@ import pytest
 
 from doc_organize.ai import LlmClient, PromptRegistry, _http_client_base, legacy_variables, settings_from_env
 from doc_organize.core.exceptions import AiAuthError, AiConfigurationError, AiError, AiResponseError
-from doc_organize.core.models import AiSettings, TaskSettings
+from doc_organize.core.models import DEFAULT_MAX_TOKENS, AiSettings, TaskSettings
 
 SECRET = "Xq7#Secreto-9931"
 SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"], "additionalProperties": False}
@@ -59,6 +59,15 @@ async def test_sends_strict_schema_with_the_task_model_key_and_tags() -> None:
     assert proxy.requests[0].headers["Authorization"] == "Bearer sk-clasificar"
     assert (result.value, result.model, result.response_format) == (True, "modelo-c", "json_schema")
     assert (result.usage.prompt_tokens, result.usage.completion_tokens) == (12, 3)
+
+
+@pytest.mark.asyncio
+async def test_sends_the_task_response_token_limit() -> None:
+    proxy = _Proxy()
+    await _ask(_client(proxy))
+    await _ask(_client(proxy, tasks={"classify": TaskSettings(model="m", max_tokens=300)}))
+
+    assert [body["max_tokens"] for body in proxy.bodies()] == [DEFAULT_MAX_TOKENS["classify"], 300]
 
 
 @pytest.mark.asyncio
@@ -230,7 +239,7 @@ def test_builtin_prompts_load_with_their_provenance(task: str) -> None:
     assert (provenance.task, provenance.prompt_id, provenance.version, provenance.source, provenance.model) == (
         task,
         task,
-        {"classify": "2"}.get(task, "1"),
+        {"classify": "3"}.get(task, "2"),
         "builtin",
         "modelo-x",
     )

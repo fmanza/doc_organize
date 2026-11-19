@@ -1811,6 +1811,11 @@ AiTask = Literal["classify", "enrich", "taxonomy_design", "agent", "embed"]
 AI_TASKS: Final[tuple[AiTask, ...]] = ("classify", "enrich", "taxonomy_design", "agent", "embed")
 
 
+#: Tope de tokens de la respuesta de cada tarea si no se configura otro (`TaskSettings.max_tokens`). Holgado para la
+#: respuesta normal (en CALIDAD_VD, `classify` da ~350 de mediana) y suficiente para cortar las que se desbocan.
+DEFAULT_MAX_TOKENS: dict[str, int] = {"classify": 1024, "enrich": 512, "taxonomy_design": 4096}
+
+
 class TaskSettings(BaseModel):
     """Modelo y, si se quiere, clave propia de una tarea de IA (2.0.0, G1; claves por tarea opcionales, D12).
 
@@ -1819,12 +1824,15 @@ class TaskSettings(BaseModel):
             exigen, U10).
         virtual_key (str | None): Clave propia de la tarea (presupuesto y límites aparte en el proxy); `None` = la de
             `AiSettings`.
+        max_tokens (int | None): Tope de tokens de la respuesta; `None` = el de la tarea (`DEFAULT_MAX_TOKENS`). Corta
+            las respuestas que se desbocan (una respuesta cortada no pasa la validación y cuenta como fallo).
     """
 
     model_config = ConfigDict(frozen=True)
 
     model: str = Field(..., min_length=1, description="Alias del modelo en el proxy para esta tarea")
     virtual_key: str | None = Field(default=None, repr=False, description="Clave propia de la tarea; None = la general")
+    max_tokens: int | None = Field(default=None, gt=0, description="Tope de tokens de la respuesta; None = el de la tarea")
 
 
 class PromptProvenance(BaseModel):
@@ -1891,6 +1899,18 @@ class AiSettings(BaseModel):
         configured = self.tasks.get(task)
         return configured.virtual_key if configured is not None and configured.virtual_key else self.virtual_key
 
+    def max_tokens_for(self, task: AiTask) -> int | None:
+        """El tope de tokens de la respuesta de `task`: el configurado o el de la tarea (`DEFAULT_MAX_TOKENS`).
+
+        Example:
+            >>> AiSettings(base_url="http://proxy", virtual_key="sk").max_tokens_for("classify")
+            1024
+        """
+        configured = self.tasks.get(task)
+        if configured is not None and configured.max_tokens is not None:
+            return configured.max_tokens
+        return DEFAULT_MAX_TOKENS.get(task)
+
 
 class TaxonomyManifestDraftResult(BaseModel):
     """Resultado de pedir a la IA un borrador de manifiesto de taxonomía (dominios + tipos de
@@ -1903,10 +1923,11 @@ class TaxonomyManifestDraftResult(BaseModel):
 
     domains: list[TaxonomyEntry] = Field(..., min_length=1, description="Catálogo de dominios propuesto por la IA")
     material_types: list[TaxonomyEntry] = Field(..., min_length=1, description="Catálogo de tipos de material propuesto por la IA")
+    profile: ProjectProfile | None = Field(default=None, description="Perfil inicial del proyecto propuesto por la IA (2.0.0)")
     reasoning: str | None = Field(default=None, description="Justificación breve devuelta por el modelo, si la reporta")
 
     def to_manifest(self) -> TaxonomyManifest:
-        """El borrador como manifiesto v2: eje `domains` (carpeta) y eje `material_types` (subcarpeta).
+        """El borrador como manifiesto v2: eje `domains` (carpeta), eje `material_types` (subcarpeta) y su perfil.
 
         Example:
             >>> draft = TaxonomyManifestDraftResult(
@@ -1920,7 +1941,8 @@ class TaxonomyManifestDraftResult(BaseModel):
             axes=[
                 TaxonomyAxis(key="domains", name="Dominios", organizes="folder", entries=self.domains),
                 TaxonomyAxis(key="material_types", name="Tipos de material", organizes="subfolder", entries=self.material_types),
-            ]
+            ],
+            profile=self.profile,
         )
 
 
@@ -1940,6 +1962,7 @@ Context.model_rebuild()  # `taxonomy_axes` y `ai_provenance` usan modelos defini
 __all__ = [
     "AI_TASKS",
     "CONTEXT_SCHEMA_VERSION",
+    "DEFAULT_MAX_TOKENS",
     "LEGACY_FOLDER_AXIS_KEY",
     "LEGACY_SUBFOLDER_AXIS_KEY",
     "AiClassificationStopReason",

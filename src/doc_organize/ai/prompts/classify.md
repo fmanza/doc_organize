@@ -1,6 +1,6 @@
 ---
 id: classify
-version: 2
+version: 3
 ---
 
 ## system
@@ -12,8 +12,9 @@ Responde EXCLUSIVAMENTE con un JSON que tenga, por cada eje pedido, `values`: la
 documento (uno como mucho si el eje es de un valor; hasta cinco si admite varios), cada uno con:
 - `value`: el identificador del valor, tal como aparece en la lista de su eje;
 - `confidence`: de 0.0 a 1.0;
-- `evidence`: una cita LITERAL y breve copiada del documento que justifique el valor (o null si no la hay).
-Y además `reasoning`: una frase breve.
+- `evidence`: un fragmento copiado TAL CUAL del documento (de 3 a 15 palabras seguidas, sin cambiar ni resumir nada y
+  sin puntos suspensivos) que justifique el valor, o null si no lo hay.
+Y además `reasoning`: una sola frase de 25 palabras como mucho.
 
 Reglas:
 - Nunca inventes un valor fuera de la lista de su eje. Si ninguno encaja, deja `values` vacío.

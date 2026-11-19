@@ -93,21 +93,31 @@ ruptura; la guía de migración completa llega con la versión.
   `TaskRequest` (`classification_request`, `enrichment_request`) y `prune_ai_cache(project_root, max_age_days=90)`.
 
 - **Lo que recibe el modelo (M5, G2, primer paso)**: `read_conversion_document` (`.json` completo, con los títulos de
-  sección de cada fragmento y la huella del original); `build_document_excerpt` (extracto de hasta 6000 caracteres:
+  sección de cada fragmento y la huella del original); `build_document_excerpt` (extracto de hasta 4500 caracteres:
   título, carpeta de dos niveles, metadatos, esquema de títulos, comienzo con texto de verdad y fragmentos con términos del
   catálogo; `EXCERPT_VERSION`); `ProjectProfile` y `TaxonomyManifest.profile`, leído de las secciones `## Contexto del
   proyecto`, `## Reglas de desempate`, `## Glosario` y `## Ejemplos` del cuerpo, con el de
   `<raíz>/.doc_organize/profile.md` añadido detrás (`compose_profile`, D11).
-- **Clasificación con IA de 2.0 (M5, G1.4 y G2)**: el prompt `classify` (versión 2) envía el catálogo con nombres y
+- **Clasificación con IA de 2.0 (M5, G1.4 y G2)**: el prompt `classify` (versión 3) envía el catálogo con nombres y
   descripciones (`render_catalog`), el perfil del proyecto y el extracto del documento entre `<<<DOCUMENTO` y
   `DOCUMENTO>>>`. La respuesta es, por eje, una lista `values` de `{value, confidence, evidence}` (uno como mucho, o 5
-  en un eje múltiple); la cita se comprueba contra lo enviado y, si no aparece, la confianza queda por debajo del umbral
-  del eje (D10). `AxisRequest` pasa a llevar `AxisOption` (`from_axis`, `from_slugs`), `AxisAnswer.choices` con
+  en un eje múltiple); la cita (de 3 a 15 palabras copiadas tal cual) se comprueba contra lo enviado, trozo a trozo si
+  lleva puntos suspensivos, y, si no aparece, la confianza queda por debajo del umbral del eje (D10). `AxisRequest` pasa a llevar `AxisOption` (`from_axis`, `from_slugs`), `AxisAnswer.choices` con
   `AxisChoice` (`evidence`, `evidence_verified`), `classify_document(..., profile=)`, `render_prompt_preview(manifest)`
   (los mensajes, sin llamar a nadie) y `ContextBuilder.build(profile=)`.
 - `ai_scope="missing_axes"`: la IA clasifica también los documentos con algún eje que solo etiqueta vacío (incluidos los
   de `rules: false`), con una llamada por documento y solo los ejes que le faltan. La IA solo rellena ejes vacíos; los
   valores de los ejes que etiquetan pasan por su umbral. `AxisValue.evidence`/`evidence_verified` guardan la cita.
+- **Enriquecimiento y borrador sobre la entrada nueva (M5)**: `enrich` (prompt versión 2) describe a partir del extracto
+  del documento (hasta `MAX_CONTENT_CHARS`, 4000, como en 1.x) entre delimitadores, con el perfil del proyecto
+  (`enrich_document(..., profile=)`). `taxonomy_design` (versión 2) pide descripciones que digan qué entra en cada
+  entrada y qué no, y un **perfil inicial** (`TaxonomyManifestDraftResult.profile`: contexto, reglas de desempate y
+  glosario); `to_manifest()` lo lleva al manifiesto y `render_taxonomy_manifest_markdown` lo escribe en las secciones
+  que se vuelven a leer al cargarlo.
+- `TaskSettings.max_tokens` y `AiSettings.max_tokens_for(task)`: tope de tokens de la respuesta por tarea
+  (`DEFAULT_MAX_TOKENS`: 1024 en `classify`, 512 en `enrich`, 4096 en `taxonomy_design`), que se envía como
+  `max_tokens`. Medido en CALIDAD_VD (M5): la respuesta media de `classify` pasa de 519 a 284 tokens y la máxima de 4964
+  a 693.
 - **Evaluación contra una referencia (M6, G3)**: `evaluate_classification(context, gold) -> EvaluationReport`, con
   exactitud, cobertura, precisión y *recall* por eje, exactitud según quién clasificó y confusiones más frecuentes
   (`to_markdown()`); `load_gold_xlsx` lee la hoja de la línea base (`dominio_ok`, `tipo_ok`, o las columnas que se

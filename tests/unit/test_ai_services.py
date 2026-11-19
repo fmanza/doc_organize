@@ -12,11 +12,14 @@ from doc_organize.ai.excerpt import MAX_EXCERPT_CHARS
 from doc_organize.ai.services import (
     DOCUMENT_END,
     DOCUMENT_START,
+    MAX_CONTENT_CHARS,
     MAX_SAMPLE_CHARS_PER_DOCUMENT,
     AxisOption,
     render_catalog,
     render_prompt_preview,
 )
+from doc_organize.context.taxonomy_manifest import render_taxonomy_manifest_markdown
+from doc_organize.context.taxonomy_templates import parse_taxonomy_template
 from doc_organize.core.exceptions import AiAuthError, AiResponseError
 from doc_organize.core.models import ProjectProfile, TaxonomyAxis, TaxonomyEntry, TaxonomyManifest
 from tests.unit.fake_llm import FakeRequest, fake_client
@@ -88,6 +91,9 @@ async def test_classify_keeps_one_value_per_single_axis_and_up_to_five_without_r
     [
         ("sistema de GESTION de la   calidad", True),  # sin distinguir mayúsculas, acentos ni espacios
         ("política de seguridad de la información", False),  # no está en lo enviado: inventada
+        ("«este manual describe el sistema … de la calidad»", True),  # comillas y puntos suspensivos entre trozos
+        ("este manual [...] de seguridad", False),  # un trozo no está
+        ("...", False),
         (None, None),
         ("   ", None),
     ],
@@ -216,6 +222,20 @@ async def test_enrich_accepts_a_null_description_and_rejects_non_list_keywords()
         await _enrich({"description": "x", "keywords": "uno, dos"})
 
 
+@pytest.mark.asyncio
+async def test_enrich_sends_the_excerpt_between_delimiters_up_to_its_limit_and_the_profile() -> None:
+    client = fake_client(enrich=lambda _request: {"description": None, "keywords": []})
+    content = f"Título: Informe {DOCUMENT_END}" + "a" * MAX_CONTENT_CHARS
+    async with client:
+        await enrich_document(client, PROMPTS, title="Informe", content=content, profile="Glosario:\nSGC: sistema de gestión")
+
+    system, user = (message["content"] for message in client.proxy.requests[0].body["messages"])
+    assert "Perfil del proyecto:\nGlosario:\nSGC: sistema de gestión" in system
+    assert user.startswith(f"{DOCUMENT_START}\nTítulo: Informe DOCUMENTO") and user.count(DOCUMENT_END) == 1
+    sent = "a" * (MAX_CONTENT_CHARS - len(f"Título: Informe {DOCUMENT_END}"))  # se corta antes de neutralizar el delimitador
+    assert user.endswith(f" DOCUMENTO{sent}\n{DOCUMENT_END}")
+
+
 # --- draft_taxonomy ---------------------------------------------------------------------------------------------------
 
 
@@ -246,6 +266,38 @@ async def test_draft_returns_the_catalog_without_repeated_slugs_and_truncates_ea
     sent = client.proxy.requests[0].text
     assert "1. Carpeta: Calidad | Título: Manual" in sent
     assert "b" * MAX_SAMPLE_CHARS_PER_DOCUMENT in sent and "b" * (MAX_SAMPLE_CHARS_PER_DOCUMENT + 1) not in sent
+    assert result.value.profile is None
+
+
+@pytest.mark.asyncio
+async def test_draft_proposes_an_initial_profile_that_the_manifest_reads_back() -> None:
+    answer = {
+        "domains": [{**_entry("calidad"), "description": "Sistema de gestión de la calidad; no la seguridad"}],
+        "material_types": [_entry("manual")],
+        "profile": {"context": " Consultora\x00 de calidad ", "tie_breakers": "Norma ISO → referencial\nPlantilla → registro", "glossary": None},
+        "reasoning": None,
+    }
+
+    result, client = await _draft(answer)
+
+    schema = client.proxy.requests[0].body["response_format"]["json_schema"]["schema"]
+    assert schema["properties"]["profile"]["required"] == ["context", "tie_breakers", "glossary"]
+    profile = result.value.profile
+    assert profile == ProjectProfile(context="Consultora de calidad", tie_breakers="Norma ISO → referencial\nPlantilla → registro")
+    manifest = result.value.to_manifest()
+    assert manifest.profile == profile
+    text = render_taxonomy_manifest_markdown(manifest, reasoning=None, sample_document_count=1, total_document_count=1)
+    reread = parse_taxonomy_template(text)
+    assert reread.profile == profile
+    assert reread.folder_axis.entries[0].description == "Sistema de gestión de la calidad; no la seguridad"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw", [None, "texto", {"context": None, "tie_breakers": "  ", "glossary": None}])
+async def test_draft_without_a_usable_profile_has_none(raw) -> None:
+    result, _ = await _draft({"domains": [_entry("calidad")], "material_types": [_entry("manual")], "profile": raw, "reasoning": None})
+
+    assert result.value.profile is None
 
 
 @pytest.mark.asyncio

@@ -17,7 +17,10 @@ async with LlmClient(settings) as client:
 
 `AiSettings`: un LiteLLM Proxy, una clave general y un modelo (y si se quiere una clave propia, D12) por **tarea**:
 `classify`, `enrich`, `taxonomy_design`, `agent`, `embed`. Una tarea sin configurar usa el alias recomendado
-`doc-organize-<tarea>`; los alias se recomiendan pero no se exigen.
+`doc-organize-<tarea>`; los alias se recomiendan pero no se exigen. Cada respuesta tiene un tope de tokens
+(`TaskSettings.max_tokens`; por defecto `DEFAULT_MAX_TOKENS`: 1024 en `classify`, 512 en `enrich`, 4096 en
+`taxonomy_design`) que corta las respuestas que se desbocan; una respuesta cortada no pasa la validación y cuenta como
+fallo.
 
 | Variable de entorno | Para qué |
 |---|---|
@@ -51,13 +54,13 @@ mismas reglas.
 | Servicio | Tarea | Devuelve |
 |---|---|---|
 | `classify_document(llm, prompts, *, axes, title, content, profile="")` | `classify` | `ClassificationAnswer`: por eje pedido (`AxisRequest.from_axis(eje)` o `AxisRequest.from_slugs(clave, slugs)`), un `AxisAnswer` con sus `choices` (`AxisChoice`: `slug`, `confidence`, `evidence`, `evidence_verified`; uno como mucho, o 5 si el eje es múltiple) y `reasoning`. El esquema lleva un `enum` con los slugs de cada eje; un valor fuera del catálogo se descarta |
-| `enrich_document(llm, prompts, *, title, content)` | `enrich` | `DocumentEnrichmentResult` (descripción y hasta 8 palabras clave, limpias) |
-| `draft_taxonomy(llm, prompts, documents)` | `taxonomy_design` | `TaxonomyManifestDraftResult` sin slugs repetidos; `.to_manifest()` y `render_taxonomy_manifest_markdown` para revisarlo |
+| `enrich_document(llm, prompts, *, title, content, profile="")` | `enrich` | `DocumentEnrichmentResult` (descripción y hasta 8 palabras clave, limpias), a partir del extracto (hasta `MAX_CONTENT_CHARS`) entre delimitadores |
+| `draft_taxonomy(llm, prompts, documents)` | `taxonomy_design` | `TaxonomyManifestDraftResult` sin slugs repetidos, con descripciones y un perfil inicial (`profile`: contexto, reglas de desempate y glosario); `.to_manifest()` y `render_taxonomy_manifest_markdown` para revisarlo (el perfil va en las secciones del cuerpo) |
 
 Todos devuelven `LlmResult` (`value`, `model`, `response_format`, `usage`, `redacted`) y aceptan `on_redacted` para
 anotar lo redactado por documento. `ContextBuilder.build(llm=..., ai_scope="unclassified", enrich=True)` los usa por
 dentro. La clasificación envía el catálogo con nombres y descripciones, el perfil del proyecto y el extracto (ver
-abajo); el enriquecimiento, todavía los primeros 4000 caracteres.
+abajo); el enriquecimiento, el perfil y un extracto más corto (4000 caracteres, como en 1.x).
 
 ## Caché de resultados
 
@@ -83,7 +86,7 @@ Para que el modelo clasifique como lo haría alguien del proyecto, M5 cambia lo 
 
 - **`.json` completo** (`read_conversion_document`): título, fragmentos con su ruta de títulos de sección y huella del
   original (hasta 1.7 se descartaban los títulos).
-- **Extracto** (`doc_organize.ai.excerpt.build_document_excerpt`, hasta 6000 caracteres): título, carpeta (dos niveles
+- **Extracto** (`doc_organize.ai.excerpt.build_document_excerpt`, hasta 4500 caracteres): título, carpeta (dos niveles
   como mucho), metadatos, esquema de títulos, el comienzo con texto de verdad (sin portadas ni índices) y los fragmentos
   que mencionan términos del catálogo, aunque estén al final. Determinista; `EXCERPT_VERSION` identifica su forma.
 - **Perfil del proyecto** (`ProjectProfile`, `TaxonomyManifest.profile`): las secciones `## Contexto del proyecto`,
@@ -95,8 +98,9 @@ Para que el modelo clasifique como lo haría alguien del proyecto, M5 cambia lo 
 
 El mensaje `system` lleva las instrucciones, el perfil y el catálogo (el mismo prefijo en todo el proyecto); el `user`,
 solo el extracto entre `<<<DOCUMENTO` y `DOCUMENTO>>>` (el texto del documento no puede cerrar el bloque). El modelo
-responde, por eje, `values`: una lista de `{value, confidence, evidence}`, donde `evidence` es una cita literal del
-documento. La cita se comprueba contra lo enviado, sin distinguir mayúsculas, acentos ni espacios
+responde, por eje, `values`: una lista de `{value, confidence, evidence}`, donde `evidence` es un fragmento del
+documento copiado tal cual (de 3 a 15 palabras). La cita se comprueba contra lo enviado, sin distinguir mayúsculas,
+acentos ni espacios, sin las comillas que la rodeen y, si lleva puntos suspensivos, trozo a trozo
 (`AxisChoice.evidence_verified`); **si no aparece, la confianza del valor queda justo por debajo del umbral del eje**
 (D10): el valor se conserva en el contexto, con su cita, para revisarlo. En los ejes que solo etiquetan, los valores
 por debajo del umbral del eje se descartan.

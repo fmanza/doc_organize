@@ -27,8 +27,8 @@ if TYPE_CHECKING:  # solo para los tipos: `context` importa `ai` (evita el ciclo
     from doc_organize.context.conversion_document import ConversionDocument
 
 #: Versión de la forma del extracto: cámbiala si cambia `build_document_excerpt`.
-EXCERPT_VERSION = "1"
-MAX_EXCERPT_CHARS = 6000
+EXCERPT_VERSION = "2"
+MAX_EXCERPT_CHARS = 4500
 #: Un fragmento con menos letras no cuenta como «texto de verdad» para el comienzo (títulos sueltos, números de página).
 _MIN_REAL_TEXT_LETTERS = 40
 _MAX_OUTLINE_CHARS = 1500
