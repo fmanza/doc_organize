@@ -44,6 +44,38 @@ Las claves del contexto se calculan con `roots` (raíces de escaneo) o, por defe
 originales, así que una referencia hecha con las rutas del contenedor de la web (`/mnt/...`) vale con un contexto del
 equipo y al revés.
 
+## Clasificación de prueba
+
+`dry_run_classify(project, documents, *, gold=None, only_gold=True, roots=None, **opciones_de_build)` construye el
+contexto como `ContextBuilder.build`, **sin guardarlo** (`build(persist=False)`: ni `context.json` ni histórico) y lo
+evalúa contra `gold`. Sirve para comparar reglas, prompts, perfiles o modelos antes de adoptarlos:
+
+```python
+from doc_organize import PromptRegistry, dry_run_classify
+
+opciones = {"gold": gold, "taxonomy_manifest": manifest, "llm": llm, "ai_scope": "unclassified", "ai_max_documents": 50}
+base = await dry_run_classify(project, documents, **opciones)
+nuevo = await dry_run_classify(project, documents, prompts=PromptRegistry(carpeta_con_otro_prompt), **opciones)
+print(base.evaluation.to_markdown())
+print(nuevo.evaluation.to_markdown())
+print(base.context.ai_stats.classification.prompt_tokens, nuevo.context.ai_stats.classification.prompt_tokens)
+```
+
+- Con `gold`, solo clasifica los documentos que están en la referencia (`only_gold=False` para todos): el presupuesto
+  (`ai_max_documents`) se gasta en lo que se mide.
+- Por defecto no usa la caché de IA (`ai_cache=False`), para que las dos configuraciones hagan llamadas de verdad.
+- Las decisiones, el perfil y los prompts del proyecto se leen como en una construcción normal; no se escribe nada.
+
+`DryRunResult` trae el `context` (con `ai_stats`: llamadas, tokens), la `evaluation` y cuántos `documents` se
+clasificaron.
+
+::: doc_organize.context.dry_run
+    options:
+      show_root_heading: false
+      members:
+        - dry_run_classify
+        - DryRunResult
+
 ::: doc_organize.context.evaluation
     options:
       show_root_heading: false

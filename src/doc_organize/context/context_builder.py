@@ -328,6 +328,7 @@ class ContextBuilder:
         cancel_token: CancelToken | None = None,
         ai_max_failures: int | None = None,
         ai_max_documents: int | None = None,
+        persist: bool = True,
     ) -> Context:
         """Clasifica `documents` y persiste el contexto de `project`.
 
@@ -376,6 +377,7 @@ class ContextBuilder:
             ai_max_failures: Una fase de IA se detiene tras este número de errores de conexión **seguidos**
                 (`AiPhaseStats.stopped = "connection"`, L-3a); un 401/403 la detiene siempre en el acto (`"auth"`).
             ai_max_documents: Tope de documentos enviados en cada fase de IA (L-3b); al alcanzarlo, `"budget"`.
+            persist: `False` devuelve el contexto sin guardarlo ni tocar el histórico (2.0.0, G3: `dry_run_classify`).
 
             Al detenerse una fase, los documentos pendientes no se envían y la construcción termina con normalidad. Los
             recuentos y tokens quedan en `Context.ai_stats`, y el prompt y modelo de cada tarea en
@@ -502,7 +504,8 @@ class ContextBuilder:
         )
         assign_organized_paths(context, project.root_path)  # L-8d: ruta final de cada documento, para el consumidor
         checkpoint(cancel_token)  # nunca se persiste un contexto a medias
-        await self._save_and_record(project, context)
+        if persist:
+            await self._save_and_record(project, context)
         self.logger.info(f"Contexto construido para '{project.name}': {len(domains)} dominio(s), {len(unclassified)} documento(s) sin clasificar")
         return context
 

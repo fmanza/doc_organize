@@ -85,6 +85,7 @@ class ContextBuilder:
         cancel_token: CancelToken | None = None,
         ai_max_failures: int | None = None,             # 0.14.0
         ai_max_documents: int | None = None,            # 0.14.0
+        persist: bool = True,                           # 2.0.0
     ) -> Context
 ```
 
@@ -107,6 +108,7 @@ Orquesta Sub-fase A (reglas, siempre) + Sub-fase B (IA, opt-in) y persiste el `C
 | `scan_roots` | `Sequence[str] \| None` | (2.0.0) Raíces de escaneo para las claves de los documentos en las decisiones; por defecto, la carpeta común de los originales |
 | `ai_max_failures` | `int \| None` | (0.14.0, L-3a) Detiene una fase de IA tras este número de errores de conexión **seguidos** (`AiPhaseStats.stopped = "connection"`). `None`: nunca para por eso. `< 1` → `ValueError` |
 | `ai_max_documents` | `int \| None` | (0.14.0, L-3b) Tope de documentos enviados en cada fase de IA; al alcanzarlo con documentos pendientes, para con `"budget"`. `None`: sin tope. `< 0` → `ValueError` |
+| `persist` | `bool` | (2.0.0) `False`: devuelve el contexto sin guardarlo ni añadirlo al histórico. Ver [Clasificación de prueba](evaluation.md#clasificacion-de-prueba) |
 
 `ai_scope` o `enrich` sin `llm` lanza `ValueError`.
 
