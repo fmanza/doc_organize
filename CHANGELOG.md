@@ -8,6 +8,12 @@ releases publicados antes de esa versión).
 
 ### Añadido
 
+- **Peticiones de la web en W3 (M10)**: sin manifiesto (dominios descubiertos o catálogo propio), el valor que asigna la
+  IA en el eje `domains` guarda también su **cita** y si se verificó, con la confianza limitada por debajo del umbral
+  si no aparece (D10), como con manifiesto; así llega a la cola de revisión. `compose_profile_text(template,
+  project_text)`: el perfil compuesto (D11) a partir del texto de `profile.md` que se está editando, para la vista
+  previa sin guardar.
+
 - **Guía «De 1.x a 2.0» completa (M10)**: pasos para actualizar, todo lo que se retira y su sustituto, lo que cambia
   de comportamiento sin cambiar la API (citas verificadas, extracto y perfil, caché de IA, redacción por defecto,
   decisiones, historial) y un índice de lo nuevo, que es todo opcional.

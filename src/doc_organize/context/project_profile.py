@@ -108,6 +108,22 @@ def compose_profile(template: ProjectProfile | None, project_root: Path | str | 
     return template.merged(project)
 
 
+def compose_profile_text(template: ProjectProfile | None, project_text: str | None) -> ProjectProfile | None:
+    """Como `compose_profile`, con el perfil del proyecto dado como texto (el `profile.md` que se está editando, antes
+    de guardarlo): para la vista previa de un editor.
+
+    Example:
+        >>> template = ProjectProfile(context="Sistema de gestión de calidad")
+        >>> profile = compose_profile_text(template, "## Glosario\\n\\nSGC: sistema de gestión de calidad")
+        >>> (profile.context, profile.glossary)
+        ('Sistema de gestión de calidad', 'SGC: sistema de gestión de calidad')
+    """
+    project = parse_profile(project_text) if project_text else None
+    if template is None:
+        return project
+    return template.merged(project)
+
+
 def profile_prompt_text(profile: ProjectProfile | None) -> str:
     """El perfil tal como va en el prompt: secciones con su título, sin caracteres de control y con el tope de
     `PROFILE_MAX_CHARS` (S3)."""
@@ -129,4 +145,12 @@ def _clean(text: str) -> str:
     return " ".join(text.split())
 
 
-__all__ = ["PROJECT_PROFILE_FILE", "compose_profile", "load_project_profile", "parse_profile", "profile_prompt_text", "render_profile_sections"]
+__all__ = [
+    "PROJECT_PROFILE_FILE",
+    "compose_profile",
+    "compose_profile_text",
+    "load_project_profile",
+    "parse_profile",
+    "profile_prompt_text",
+    "render_profile_sections",
+]
