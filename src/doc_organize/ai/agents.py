@@ -11,8 +11,8 @@ U11, inyección desde los documentos):
 - **Topes** (`AgentLimits`): pasos (llamadas al modelo), tokens acumulados, llamadas a herramientas y tamaño de cada
   resultado que vuelve al modelo. Al llegar a uno, el runner para y lo dice (`AgentRun.stop_reason`); nunca lanza por
   ello.
-- **Cancelación** (`AgentCancellation`): se comprueba antes de cada llamada al modelo y de cada herramienta; se puede
-  cancelar desde otro hilo (p. ej. la web). La cancelación de la tarea de asyncio también funciona y se propaga.
+- **Cancelación** (`CancelToken`, el mismo de `ContextBuilder.build`): se comprueba antes de cada llamada al modelo y
+  de cada herramienta; se puede cancelar desde otro hilo (p. ej. la web). La cancelación de la tarea de asyncio también funciona y se propaga.
 - **Redacción**: todo lo que sale (también los resultados de las herramientas) pasa por `LlmClient`, que redacta
   credenciales (D7).
 
@@ -36,7 +36,6 @@ from __future__ import annotations
 
 import inspect
 import json
-import threading
 import time
 
 from collections.abc import Awaitable, Callable, Sequence
@@ -46,6 +45,7 @@ from typing import Any, Literal
 from doc_organize.ai.llm_client import LlmClient, LlmUsage, Message
 from doc_organize.core.exceptions import AiResponseError
 from doc_organize.core.models import AiTask
+from doc_organize.core.progress import CancelToken
 from doc_organize.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -106,31 +106,6 @@ class AgentLimits:
     def __post_init__(self) -> None:
         if min(self.max_steps, self.max_tokens, self.max_tool_calls, self.max_tool_result_chars) < 1 or self.answer_retries < 0:
             raise ValueError("Los topes del agente deben ser positivos")
-
-
-class AgentCancellation:
-    """Señal de cancelación de un agente; `cancel()` se puede llamar desde otro hilo.
-
-    Example:
-        >>> cancellation = AgentCancellation()
-        >>> cancellation.cancelled
-        False
-        >>> cancellation.cancel()
-        >>> cancellation.cancelled
-        True
-    """
-
-    def __init__(self) -> None:
-        self._event = threading.Event()
-
-    def cancel(self) -> None:
-        """Pide que el agente pare en el siguiente punto de comprobación."""
-        self._event.set()
-
-    @property
-    def cancelled(self) -> bool:
-        """Si se ha pedido cancelar."""
-        return self._event.is_set()
 
 
 @dataclass(frozen=True)
@@ -244,7 +219,7 @@ class AgentRunner:
             specs.append(finish.spec())
         return specs
 
-    async def run(self, messages: Sequence[Message], *, cancellation: AgentCancellation | None = None) -> AgentRun:
+    async def run(self, messages: Sequence[Message], *, cancel_token: CancelToken | None = None) -> AgentRun:
         """Ejecuta el agente desde `messages` (sistema e instrucciones del usuario).
 
         Raises:
@@ -258,7 +233,7 @@ class AgentRunner:
         tool_calls = 0
         try:
             for index in range(self.limits.max_steps):
-                if cancellation is not None and cancellation.cancelled:
+                if cancel_token is not None and cancel_token.cancelled:
                     run.stop_reason = "cancelled"
                     return run
                 if run.total_tokens >= self.limits.max_tokens:
@@ -279,7 +254,7 @@ class AgentRunner:
                         return run
                     continue
                 for call in requested:
-                    if cancellation is not None and cancellation.cancelled:
+                    if cancel_token is not None and cancel_token.cancelled:
                         run.stop_reason = "cancelled"
                         return run
                     name, arguments, error = _decode_call(call)
@@ -402,7 +377,6 @@ def _short(exc: Exception) -> str:
 
 
 __all__ = [
-    "AgentCancellation",
     "AgentLimits",
     "AgentRun",
     "AgentRunner",

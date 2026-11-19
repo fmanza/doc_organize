@@ -11,7 +11,7 @@ releases publicados antes de esa versión).
 - **Agentes (M8, G5)**: `AgentRunner(llm, tools, *, limits=, answer_schema=, parse_answer=)` ejecuta un agente con
   herramientas sobre la tarea `agent`. Solo ejecuta las `AgentTool` que se le dan (un nombre desconocido o unos
   argumentos que no son JSON vuelven al modelo como error); topes de pasos, tokens acumulados, herramientas y tamaño de
-  cada resultado (`AgentLimits`); cancelación desde otro hilo (`AgentCancellation`); respuesta estructurada con la
+  cada resultado (`AgentLimits`); cancelación con el `CancelToken` de `build` (también desde otro hilo); respuesta estructurada con la
   herramienta `finish` y un reintento si no cumple el esquema. Al llegar a un tope o cancelar, para con
   `AgentRun.stop_reason` sin lanzar. Los resultados de las herramientas se redactan como el resto de lo que sale.
 

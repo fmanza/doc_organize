@@ -6,8 +6,9 @@ from typing import Any
 
 import pytest
 
-from doc_organize.ai.agents import FINISH_TOOL, AgentCancellation, AgentLimits, AgentRunner, AgentTool
+from doc_organize.ai.agents import FINISH_TOOL, AgentLimits, AgentRunner, AgentTool
 from doc_organize.core.models import DEFAULT_MAX_TOKENS
+from doc_organize.core.progress import CancelToken
 from tests.unit.fake_llm import FakeRequest, agent_script, call_tools, fake_llm, say
 
 SECRET = "Xq7#Secreto-9931"
@@ -146,28 +147,28 @@ async def test_long_results_are_cut() -> None:
 @pytest.mark.asyncio
 async def test_cancelled_before_starting_calls_nothing() -> None:
     llm = fake_llm(agent=agent_script(say("Hay 3")))
-    cancellation = AgentCancellation()
-    cancellation.cancel()
+    token = CancelToken()
+    token.cancel()
 
-    run = await AgentRunner(llm, [_tool()]).run(QUESTION, cancellation=cancellation)
+    run = await AgentRunner(llm, [_tool()]).run(QUESTION, cancel_token=token)
 
     assert run.stop_reason == "cancelled" and llm.proxy.requests == []  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio
 async def test_cancelled_between_tools_stops_before_the_next() -> None:
-    cancellation = AgentCancellation()
+    token = CancelToken()
     executed: list[str] = []
 
     def first(arguments: dict[str, Any]) -> str:
         executed.append("first")
-        cancellation.cancel()
+        token.cancel()
         return "ok"
 
     second = _tool("second", handler=lambda arguments: executed.append("second"))
     llm = fake_llm(agent=agent_script(call_tools(("first", {}), ("second", {}))))
 
-    run = await AgentRunner(llm, [_tool("first", handler=first), second]).run(QUESTION, cancellation=cancellation)
+    run = await AgentRunner(llm, [_tool("first", handler=first), second]).run(QUESTION, cancel_token=token)
 
     assert run.stop_reason == "cancelled" and executed == ["first"] and len(llm.proxy.calls("agent")) == 1  # type: ignore[attr-defined]
 

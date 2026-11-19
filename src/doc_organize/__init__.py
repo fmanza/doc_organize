@@ -74,7 +74,6 @@ _EXPORTS: dict[str, str] = {
     "AgentRunner": "doc_organize.ai.agents",
     "AgentTool": "doc_organize.ai.agents",
     "AgentLimits": "doc_organize.ai.agents",
-    "AgentCancellation": "doc_organize.ai.agents",
     "AgentRun": "doc_organize.ai.agents",
     "PromptRegistry": "doc_organize.ai.prompts",
     "settings_from_env": "doc_organize.ai.settings",

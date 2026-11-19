@@ -1,6 +1,6 @@
 """Monitorización de uso/coste de IA multi-fuente y cliente único de IA (2.0.0): configuración, prompts y servicios."""
 
-from doc_organize.ai.agents import AgentCancellation, AgentLimits, AgentRun, AgentRunner, AgentTool
+from doc_organize.ai.agents import AgentLimits, AgentRun, AgentRunner, AgentTool
 from doc_organize.ai.cache import AiResultCache, prune_ai_cache
 from doc_organize.ai.embeddings import EmbeddingIndex
 from doc_organize.ai.github_copilot_usage_client import (
@@ -23,7 +23,6 @@ from doc_organize.ai.settings import legacy_variables, settings_from_env
 from doc_organize.ai.usage_source import UsageSource
 
 __all__ = [
-    "AgentCancellation",
     "AgentLimits",
     "AgentRun",
     "AgentRunner",

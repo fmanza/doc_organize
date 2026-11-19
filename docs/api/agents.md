@@ -34,8 +34,9 @@ Los agentes leen texto que viene de los documentos, y un documento puede intenta
   estimados por tamaño si el proxy no los informa), herramientas ejecutadas (`max_tool_calls`) y caracteres de cada
   resultado que vuelve al modelo (`max_tool_result_chars`; el resto se corta y se le avisa). Al llegar a un tope, el
   agente para con `stop_reason` y **no lanza** excepción.
-- **Cancelación**: `AgentCancellation().cancel()` (se puede llamar desde otro hilo) para el agente antes de la
-  siguiente llamada al modelo o herramienta: `stop_reason == "cancelled"`. Cancelar la tarea de asyncio también
+- **Cancelación**: `run(messages, cancel_token=token)` con el mismo `CancelToken` de `ContextBuilder.build`;
+  `token.cancel()` (se puede llamar desde otro hilo) para el agente antes de la siguiente llamada al modelo o
+  herramienta: `stop_reason == "cancelled"`. Cancelar la tarea de asyncio también
   funciona.
 - **Redacción**: todo lo que se envía, también los resultados de las herramientas, pasa por `LlmClient`, que redacta
   credenciales (D7).
@@ -64,7 +65,7 @@ runner = AgentRunner(
 |---|---|
 | `finished` | El modelo respondió (`run.answer`) |
 | `max_steps`, `max_tokens`, `max_tool_calls` | Se llegó a ese tope |
-| `cancelled` | Se canceló con `AgentCancellation` |
+| `cancelled` | Se canceló con el `CancelToken` |
 | `invalid_answer` | La respuesta no cumplía `answer_schema` tras los reintentos |
 
 `run.steps` trae cada llamada al modelo con las herramientas que pidió (y sus errores) y `run.messages` la conversación
@@ -80,7 +81,6 @@ defecto); `AgentLimits.max_tokens` es el del agente entero.
         - AgentRunner
         - AgentTool
         - AgentLimits
-        - AgentCancellation
         - AgentRun
         - AgentStep
         - AgentToolCall
