@@ -1,6 +1,7 @@
 """Monitorización de uso/coste de IA multi-fuente y cliente único de IA (2.0.0): configuración, prompts y servicios."""
 
 from doc_organize.ai.cache import AiResultCache, prune_ai_cache
+from doc_organize.ai.embeddings import EmbeddingIndex
 from doc_organize.ai.github_copilot_usage_client import (
     GitHubCopilotUsageClient,
     github_copilot_usage_config_from_env,
@@ -25,6 +26,7 @@ __all__ = [
     "AxisAnswer",
     "AxisRequest",
     "ClassificationAnswer",
+    "EmbeddingIndex",
     "GitHubCopilotUsageClient",
     "LiteLLMUsageClient",
     "LlmClient",

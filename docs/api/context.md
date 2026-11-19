@@ -81,6 +81,8 @@ class ContextBuilder:
         profile: ProjectProfile | None = None,          # 2.0.0
         decisions: bool | Sequence[ClassificationDecision] = True,  # 2.0.0
         scan_roots: Sequence[str] | None = None,        # 2.0.0
+        semantic: bool = False,                         # 2.0.0
+        semantic_threshold: float = 0.75,               # 2.0.0
         versions: Literal["all", "mark", "current_only"] = "all",  # 2.0.0
         on_progress: ProgressCallback | None = None,
         cancel_token: CancelToken | None = None,
@@ -106,6 +108,8 @@ Orquesta Sub-fase A (reglas, siempre) + Sub-fase B (IA, opt-in) y persiste el `C
 | `ai_cache` | `bool \| AiResultCache` | (2.0.0) Caché de resultados de IA (por defecto, la del proyecto): reconstruir sin cambios no llama al modelo. Ver [Caché de resultados](llm_client.md#cache-de-resultados) |
 | `profile` | `ProjectProfile \| None` | (2.0.0) Perfil del proyecto para el prompt de clasificación. Por defecto, el de `taxonomy_manifest` más el de `<raíz>/.doc_organize/profile.md` (ver [Lo que recibe el modelo](llm_client.md#lo-que-recibe-el-modelo-200-m5)) |
 | `decisions` | `bool \| Sequence[ClassificationDecision]` | (2.0.0) Decisiones de personas: `True` (por defecto) las del proyecto, `False` ninguna, o una lista. Se aplican tras las reglas y antes de la IA, con manifiesto. Ver [Decisiones de personas](decisions.md) |
+| `semantic` | `bool` | (2.0.0) Sub-fase semántica (embeddings, opt-in): rellena ejes vacíos tras las reglas y antes de la IA, con `classified_by="semantic"`. Necesita `llm` y manifiesto. Ver [Clasificación semántica](semantic.md) |
+| `semantic_threshold` | `float` | (2.0.0) Similitud mínima (coseno, 0-1) para asignar un valor en la sub-fase semántica |
 | `scan_roots` | `Sequence[str] \| None` | (2.0.0) Raíces de escaneo para las claves de los documentos en las decisiones; por defecto, la carpeta común de los originales |
 | `versions` | `"all" \| "mark" \| "current_only"` | (2.0.0) Versiones de un mismo documento: `all` (por defecto, como 1.x), `mark` (marca versión y vigente) o `current_only` (solo la vigente entra en el contexto). Ver [Versiones de un documento](versions.md) |
 | `ai_max_failures` | `int \| None` | (0.14.0, L-3a) Detiene una fase de IA tras este número de errores de conexión **seguidos** (`AiPhaseStats.stopped = "connection"`). `None`: nunca para por eso. `< 1` → `ValueError` |

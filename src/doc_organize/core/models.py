@@ -1136,6 +1136,11 @@ class AiStats(BaseModel):
     enrich: bool = False
     classification: AiPhaseStats = Field(default_factory=AiPhaseStats)
     enrichment: AiPhaseStats = Field(default_factory=AiPhaseStats)
+    semantic: bool = Field(default=False, description="Si se usó la sub-fase semántica (2.0.0, G4)")
+    semantic_classification: AiPhaseStats = Field(
+        default_factory=AiPhaseStats,
+        description="Sub-fase semántica: `sent` = textos embebidos, `cached` = sacados del índice, `assigned` = documentos con algún eje asignado",
+    )
 
 
 class DocumentCredentialFindings(BaseModel):
