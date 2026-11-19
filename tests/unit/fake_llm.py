@@ -73,6 +73,9 @@ class FakeProxy:
             return answer
         if task == "embed":  # la función devuelve un vector por texto de `request.body["input"]`
             return httpx.Response(200, json={"data": [{"index": index, "embedding": vector} for index, vector in enumerate(answer)]})
+        if "tools" in body:  # agentes: la función devuelve el mensaje del asistente (`say`, `call_tools`)
+            usage = answer.pop("_usage", {"prompt_tokens": 100, "completion_tokens": 10}) if isinstance(answer, dict) else None
+            return httpx.Response(200, json={"choices": [{"message": answer}], **({"usage": usage} if usage else {})})
         if task == "classify":
             answer = _classification(fake, answer)
         return httpx.Response(
@@ -215,3 +218,32 @@ def taxonomy_ai(
 def enrichment(description: str | None = "Descripción de la IA", keywords: list[str] | None = None) -> Responder:
     """Respuesta de la tarea `enrich`."""
     return lambda _request: {"description": description, "keywords": ["clave"] if keywords is None else keywords}
+
+
+def say(text: str, **extra: Any) -> dict[str, Any]:
+    """Mensaje del asistente sin herramientas (respuesta final en texto)."""
+    return {"role": "assistant", "content": text, **extra}
+
+
+def call_tools(*calls: tuple[str, dict[str, Any] | str], **extra: Any) -> dict[str, Any]:
+    """Mensaje del asistente que pide herramientas: `(nombre, argumentos)`; argumentos en texto se envían tal cual."""
+    tool_calls = [
+        {
+            "id": f"call_{index}",
+            "type": "function",
+            "function": {"name": name, "arguments": arguments if isinstance(arguments, str) else json.dumps(arguments)},
+        }
+        for index, (name, arguments) in enumerate(calls)
+    ]
+    return {"role": "assistant", "content": None, "tool_calls": tool_calls, **extra}
+
+
+def agent_script(*messages: dict[str, Any] | Responder) -> Responder:
+    """Un mensaje del asistente por llamada (o una función de la petición); tras el guion, `say("fin")`."""
+    queue = list(messages)
+
+    def respond(request: FakeRequest) -> Any:
+        item = queue.pop(0) if queue else say("fin")
+        return dict(item(request)) if callable(item) else dict(item)
+
+    return respond

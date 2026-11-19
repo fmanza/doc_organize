@@ -1859,7 +1859,7 @@ AI_TASKS: Final[tuple[AiTask, ...]] = ("classify", "enrich", "taxonomy_design", 
 
 #: Tope de tokens de la respuesta de cada tarea si no se configura otro (`TaskSettings.max_tokens`). Holgado para la
 #: respuesta normal (en CALIDAD_VD, `classify` da ~350 de mediana) y suficiente para cortar las que se desbocan.
-DEFAULT_MAX_TOKENS: dict[str, int] = {"classify": 1024, "enrich": 512, "taxonomy_design": 4096}
+DEFAULT_MAX_TOKENS: dict[str, int] = {"classify": 1024, "enrich": 512, "taxonomy_design": 4096, "agent": 2048}
 
 
 class TaskSettings(BaseModel):

@@ -204,7 +204,11 @@ class LlmClient:
         """
         model = self.model_for(task)
         sent, _ = self._redact(messages)
-        payload = await self._post(task, "/chat/completions", {"model": model, "messages": sent, "tools": list(tools), "temperature": 0})
+        body: dict[str, Any] = {"model": model, "messages": sent, "tools": list(tools), "temperature": 0}
+        max_tokens = self.settings.max_tokens_for(task)
+        if max_tokens is not None:
+            body["max_tokens"] = max_tokens
+        payload = await self._post(task, "/chat/completions", body)
         try:
             message = payload["choices"][0]["message"]
         except (KeyError, IndexError, TypeError) as exc:

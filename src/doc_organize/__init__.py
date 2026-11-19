@@ -70,6 +70,12 @@ _EXPORTS: dict[str, str] = {
     "check_environment": "doc_organize.diagnostics",
     # Cliente único de IA (2.0.0, G1)
     "LlmClient": "doc_organize.ai.llm_client",
+    # Agentes (2.0.0, G5)
+    "AgentRunner": "doc_organize.ai.agents",
+    "AgentTool": "doc_organize.ai.agents",
+    "AgentLimits": "doc_organize.ai.agents",
+    "AgentCancellation": "doc_organize.ai.agents",
+    "AgentRun": "doc_organize.ai.agents",
     "PromptRegistry": "doc_organize.ai.prompts",
     "settings_from_env": "doc_organize.ai.settings",
     "AiResultCache": "doc_organize.ai.cache",
