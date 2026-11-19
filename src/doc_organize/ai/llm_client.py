@@ -254,7 +254,10 @@ class LlmClient:
 
     async def _chat(self, task: AiTask, model: str, messages: list[Message], response_format: dict[str, Any]) -> dict[str, Any] | None:
         """`None` si el proxy respondió 400 (no admite el formato pedido)."""
-        body = {"model": model, "messages": messages, "response_format": response_format, "temperature": 0}
+        body: dict[str, Any] = {"model": model, "messages": messages, "response_format": response_format, "temperature": 0}
+        max_tokens = self.settings.max_tokens_for(task)
+        if max_tokens is not None:
+            body["max_tokens"] = max_tokens
         payload = await self._post(task, "/chat/completions", body, allow_bad_request=response_format["type"] == "json_schema")
         if payload is not None and not isinstance(payload, dict):
             raise AiResponseError(f"La respuesta de '{task}' no es un objeto JSON")

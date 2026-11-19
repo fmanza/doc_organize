@@ -91,6 +91,9 @@ async def test_classify_keeps_one_value_per_single_axis_and_up_to_five_without_r
     [
         ("sistema de GESTION de la   calidad", True),  # sin distinguir mayúsculas, acentos ni espacios
         ("política de seguridad de la información", False),  # no está en lo enviado: inventada
+        ("«este manual describe el sistema … de la calidad»", True),  # comillas y puntos suspensivos entre trozos
+        ("este manual [...] de seguridad", False),  # un trozo no está
+        ("...", False),
         (None, None),
         ("   ", None),
     ],

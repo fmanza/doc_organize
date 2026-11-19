@@ -7,6 +7,8 @@ Cada servicio arma los mensajes con el prompt de su tarea (`PromptRegistry`), de
 descripciones, el perfil del proyecto y el extracto del documento, y pide una cita por valor.
 """
 
+import re
+
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -168,6 +170,7 @@ DOCUMENT_END = "DOCUMENTO>>>"
 #: Valores como mucho por eje de varios valores (como las reglas, A2).
 MAX_VALUES_PER_AXIS = 5
 _MAX_EVIDENCE_CHARS = 300
+_ELLIPSIS = re.compile(r"\[\.\.\.\]|\.\.\.+|…")
 
 
 def render_catalog(axes: Sequence[AxisRequest]) -> str:
@@ -283,9 +286,23 @@ def _choices(axis: AxisRequest, values: list[Any], sent: FoldedText) -> tuple[Ax
         evidence = item.get("evidence")
         cleaned = clean_text(evidence) if isinstance(evidence, str) else None
         text = cleaned[:_MAX_EVIDENCE_CHARS] if cleaned else None
-        verified = None if text is None else bool(fold(text)) and sent.contains(fold(text))
+        verified = None if text is None else _evidence_found(text, sent)
         choices.append(AxisChoice(slug=item["value"], confidence=_confidence(item.get("confidence")), evidence=text, evidence_verified=verified))
     return tuple(choices[: MAX_VALUES_PER_AXIS if axis.multiple else 1])
+
+
+def _evidence_found(evidence: str, sent: FoldedText) -> bool:
+    """Si la cita aparece en lo enviado (sin distinguir mayúsculas, acentos ni espacios). Una cita con puntos
+    suspensivos vale si cada trozo aparece; las comillas que la rodeen no cuentan.
+
+    Example:
+        >>> sent = FoldedText.of("La política de seguridad se revisa anualmente por la dirección.")
+        >>> _evidence_found("«política de seguridad … por la dirección»", sent), _evidence_found("política de calidad", sent)
+        (True, False)
+    """
+    pieces = [fold(piece) for piece in _ELLIPSIS.split(evidence.strip().strip("\"'«»“”‘’"))]
+    pieces = [piece for piece in pieces if piece]
+    return bool(pieces) and all(sent.contains(piece) for piece in pieces)
 
 
 async def classify_document(
