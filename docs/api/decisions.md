@@ -62,6 +62,30 @@ un `set_axis`, lo del mismo eje y un `exclude`. Un `confirm` anterior se conserv
 `gold_from_decisions(decisions)` convierte los `confirm` y `set_axis` en una referencia para
 [`evaluate_classification`](evaluation.md): lo que decidieron las personas es la clasificación correcta.
 
+## Cola de revisión
+
+`review_queue(context, *, roots=None)` dice qué documentos debería mirar una persona y por qué, sin cambiar nada. Cada
+`ReviewItem` trae la clave del documento (la de las decisiones), el eje y el valor afectados, su confianza y una
+explicación, ordenado por prioridad:
+
+| Prioridad | `reason` | Cuándo |
+|---|---|---|
+| 0 | `stale_decision` | Una decisión no se aplicó (original o catálogo cambiados) |
+| 1 | `unclassified` | Sin conversión, o con el eje que organiza en carpeta vacío |
+| 2 | `rules_ai_disagreement` | La IA propuso otro dominio que el que quedó |
+| 3 | `unverified_evidence` | La cita de la IA no aparece en el documento (su confianza quedó bajo el umbral) |
+| 4 | `low_confidence` | Un valor por debajo del umbral de su eje |
+
+Lo que decidió una persona (`classified_by="human"`) no vuelve a la cola. Al resolver un elemento con una decisión
+(`ClassificationDecisionStore.add`), desaparece en la siguiente construcción.
+
+::: doc_organize.context.review_queue
+    options:
+      show_root_heading: false
+      members:
+        - review_queue
+        - ReviewItem
+
 ::: doc_organize.context.decisions
     options:
       show_root_heading: false

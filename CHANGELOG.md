@@ -124,6 +124,9 @@ ruptura; la guía de migración completa llega con la versión.
   lo decidido queda con `classified_by="human"` y la IA no lo pregunta. `Context.decisions_applied`,
   `stale_decisions` (original cambiado, eje o valor fuera del catálogo, sin manifiesto), `orphan_decisions` (documento
   ausente) y `excluded_documents`. `gold_from_decisions` convierte las decisiones en una referencia para la evaluación.
+- **Cola de revisión (M6, F6)**: `review_queue(context, *, roots=None) -> list[ReviewItem]`, lo que una persona debería
+  mirar y por qué, por prioridad: decisiones desfasadas, sin clasificar, discrepancia reglas/IA en el dominio, cita de
+  la IA no verificada y confianza por debajo del umbral del eje. Lo decidido por una persona no vuelve a la cola.
 
 ### Retirado (ruptura)
 
