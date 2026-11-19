@@ -6,3 +6,4 @@ include src/doc_organize/py.typed
 include README.md
 include LICENSE
 recursive-include src/doc_organize/ai/prompts *.md
+recursive-include src/doc_organize/context/site_assets *

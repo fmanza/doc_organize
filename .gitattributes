@@ -13,3 +13,6 @@
 *.png binary
 *.jpg binary
 *.gif binary
+
+# Recursos de terceros empaquetados (sitio sin conexión): tal cual, sin normalizar finales de línea (su SHA-256 se comprueba)
+src/doc_organize/context/site_assets/vendor/** -text -diff linguist-vendored
