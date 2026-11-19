@@ -12,6 +12,7 @@ Modelos Pydantic v2 usados en todos los módulos:
 - ScanRunReport: duración de una ejecución de escaneo (histórico de tiempos)
 """
 
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Final, Literal
@@ -1143,6 +1144,82 @@ class DocumentCredentialFindings(BaseModel):
     rules: dict[str, int] = Field(default_factory=dict)
 
 
+DecisionAction = Literal["confirm", "set_axis", "exclude"]
+"""Qué decide una persona sobre un documento (2.0.0, F6): confirmar su clasificación (los valores de todos sus ejes en
+`ClassificationDecision.axes`), fijar los valores de un eje, o sacarlo del contexto."""
+
+DecisionIssueReason = Literal["source_changed", "unknown_axis", "unknown_value", "missing_document", "no_manifest"]
+
+
+class ClassificationDecision(BaseModel):
+    """Una decisión de una persona sobre la clasificación de un documento (2.0.0, F6).
+
+    Se aplica en cada construcción **después de las reglas y antes de la IA**: los ejes decididos quedan con
+    `classified_by="human"` y ni las reglas ni la IA los cambian. Si el original cambió desde la decisión
+    (`source_sha256` distinto), deja de aplicarse y aparece en `Context.stale_decisions` para revisarla.
+
+    Attributes:
+        id (str): Identificador único (lo pone `ClassificationDecisionStore.add` si falta).
+        document_key (str): Ruta del original relativa a la raíz de escaneo (`document_key`).
+        source_sha256 (str | None): Huella del original cuando se decidió; `None` = vale para cualquier versión.
+        action (DecisionAction): `confirm`, `set_axis` o `exclude`.
+        axes (dict[str, list[str]]): Valores por eje: uno solo en `set_axis`, todos los del documento en `confirm`,
+            vacío en `exclude`. En un eje que organiza (carpeta, subcarpeta) va exactamente un valor.
+        author (str | None): Quién decidió.
+        decided_at (str): Cuándo (ISO 8601).
+        reason (str | None): Por qué, si se dijo.
+        revoked_at (str | None): Cuándo se revocó o sustituyó (solo en el historial).
+        revoked_by (str | None): Quién la revocó.
+        revoke_reason (str | None): Por qué (`"replaced"` si la sustituyó otra).
+
+    Example:
+        >>> decision = ClassificationDecision(document_key="ENS/plan.pdf", action="set_axis", axes={"domains": ["seguridad"]})
+        >>> decision.axis
+        'domains'
+    """
+
+    id: str = Field(default="", description="Identificador único")
+    document_key: str = Field(..., min_length=1, description="Ruta del original relativa a la raíz de escaneo")
+    source_sha256: str | None = Field(default=None, description="Huella del original al decidir; None = cualquier versión")
+    action: DecisionAction = Field(..., description="confirm, set_axis o exclude")
+    axes: dict[str, list[str]] = Field(default_factory=dict, description="Valores decididos por eje")
+    author: str | None = Field(default=None, description="Quién decidió")
+    decided_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"), description="Cuándo (ISO 8601)")
+    reason: str | None = Field(default=None, description="Por qué")
+    revoked_at: str | None = Field(default=None, description="Cuándo se revocó (historial)")
+    revoked_by: str | None = Field(default=None, description="Quién la revocó")
+    revoke_reason: str | None = Field(default=None, description="Por qué se revocó; 'replaced' si la sustituyó otra")
+
+    @model_validator(mode="after")
+    def _check_axes(self) -> "ClassificationDecision":
+        if self.action == "set_axis" and len(self.axes) != 1:
+            raise ValueError("set_axis decide exactamente un eje")
+        if self.action == "confirm" and not self.axes:
+            raise ValueError("confirm necesita los valores de los ejes que se confirman")
+        if self.action == "exclude" and self.axes:
+            raise ValueError("exclude no lleva valores")
+        return self
+
+    @property
+    def axis(self) -> str | None:
+        """El eje de un `set_axis`; `None` en las demás acciones."""
+        return next(iter(self.axes)) if self.action == "set_axis" else None
+
+
+class DecisionIssue(BaseModel):
+    """Una decisión que no se aplicó en una construcción, y por qué (2.0.0, F6).
+
+    `reason`: `source_changed` (el original cambió desde la decisión), `unknown_axis`/`unknown_value` (el eje o el
+    valor ya no están en el catálogo), `missing_document` (el documento no está en la construcción) o `no_manifest`
+    (sin manifiesto no se aplican decisiones).
+    """
+
+    decision_id: str
+    document_key: str
+    reason: DecisionIssueReason
+    detail: str | None = None
+
+
 class Context(BaseModel):
     """Contexto de organización documental de un proyecto: configuración de clasificación + dominios.
 
@@ -1226,6 +1303,14 @@ class Context(BaseModel):
         ),
     )
     ai_stats: AiStats = Field(default_factory=AiStats, description="Qué hizo la IA en esta construcción (2.0.0): alcance, recuentos y tokens")
+    decisions_applied: int = Field(default=0, description="Decisiones de personas aplicadas en esta construcción (2.0.0, F6)")
+    stale_decisions: list[DecisionIssue] = Field(
+        default_factory=list, description="Decisiones que no se aplicaron porque el original o el catálogo cambiaron (2.0.0, F6)"
+    )
+    orphan_decisions: list[DecisionIssue] = Field(
+        default_factory=list, description="Decisiones de documentos que no están en esta construcción (2.0.0, F6)"
+    )
+    excluded_documents: list[str] = Field(default_factory=list, description="Originales que una persona sacó del contexto (`exclude`, 2.0.0 F6)")
     ai_provenance: "list[PromptProvenance]" = Field(
         default_factory=list, description="Prompt y modelo de cada tarea de IA que llegó a enviar algo (2.0.0, G1)"
     )
@@ -1892,6 +1977,7 @@ __all__ = [
     "CacheConfig",
     "CacheEntry",
     "CacheExportSnapshot",
+    "ClassificationDecision",
     "Context",
     "ContextBuildEvent",
     "ContextBuildEventType",
@@ -1902,6 +1988,9 @@ __all__ = [
     "ContextDeleteEventType",
     "ConversionResult",
     "ConversionStatus",
+    "DecisionAction",
+    "DecisionIssue",
+    "DecisionIssueReason",
     "DedupEvent",
     "DedupEventType",
     "DeduplicationReport",

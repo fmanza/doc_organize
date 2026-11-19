@@ -79,10 +79,13 @@ class ContextBuilder:
         prompts: PromptRegistry | None = None,          # 2.0.0
         ai_cache: bool | AiResultCache = True,          # 2.0.0
         profile: ProjectProfile | None = None,          # 2.0.0
+        decisions: bool | Sequence[ClassificationDecision] = True,  # 2.0.0
+        scan_roots: Sequence[str] | None = None,        # 2.0.0
         on_progress: ProgressCallback | None = None,
         cancel_token: CancelToken | None = None,
         ai_max_failures: int | None = None,             # 0.14.0
         ai_max_documents: int | None = None,            # 0.14.0
+        persist: bool = True,                           # 2.0.0
     ) -> Context
 ```
 
@@ -101,8 +104,11 @@ Orquesta Sub-fase A (reglas, siempre) + Sub-fase B (IA, opt-in) y persiste el `C
 | `prompts` | `PromptRegistry \| None` | (2.0.0) Prompts de cada tarea; por defecto, los de `<raíz>/.doc_organize/prompts/` o los empaquetados |
 | `ai_cache` | `bool \| AiResultCache` | (2.0.0) Caché de resultados de IA (por defecto, la del proyecto): reconstruir sin cambios no llama al modelo. Ver [Caché de resultados](llm_client.md#cache-de-resultados) |
 | `profile` | `ProjectProfile \| None` | (2.0.0) Perfil del proyecto para el prompt de clasificación. Por defecto, el de `taxonomy_manifest` más el de `<raíz>/.doc_organize/profile.md` (ver [Lo que recibe el modelo](llm_client.md#lo-que-recibe-el-modelo-200-m5)) |
+| `decisions` | `bool \| Sequence[ClassificationDecision]` | (2.0.0) Decisiones de personas: `True` (por defecto) las del proyecto, `False` ninguna, o una lista. Se aplican tras las reglas y antes de la IA, con manifiesto. Ver [Decisiones de personas](decisions.md) |
+| `scan_roots` | `Sequence[str] \| None` | (2.0.0) Raíces de escaneo para las claves de los documentos en las decisiones; por defecto, la carpeta común de los originales |
 | `ai_max_failures` | `int \| None` | (0.14.0, L-3a) Detiene una fase de IA tras este número de errores de conexión **seguidos** (`AiPhaseStats.stopped = "connection"`). `None`: nunca para por eso. `< 1` → `ValueError` |
 | `ai_max_documents` | `int \| None` | (0.14.0, L-3b) Tope de documentos enviados en cada fase de IA; al alcanzarlo con documentos pendientes, para con `"budget"`. `None`: sin tope. `< 0` → `ValueError` |
+| `persist` | `bool` | (2.0.0) `False`: devuelve el contexto sin guardarlo ni añadirlo al histórico. Ver [Clasificación de prueba](evaluation.md#clasificacion-de-prueba) |
 
 `ai_scope` o `enrich` sin `llm` lanza `ValueError`.
 

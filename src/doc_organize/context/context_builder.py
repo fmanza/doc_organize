@@ -29,6 +29,7 @@ from doc_organize.context.axis_rules import TAG_AXIS_TEXT_CHARS, AxisRuleScorer,
 from doc_organize.context.context_history import ContextHistoryPolicy, append_context_build, build_record
 from doc_organize.context.context_registry import ContextRegistry
 from doc_organize.context.conversion_document import ConversionDocument, read_conversion_document
+from doc_organize.context.decisions import ClassificationDecisionStore, apply_decisions, not_applied_without_manifest
 from doc_organize.context.document_properties import read_document_properties
 from doc_organize.context.domain_classifier import DomainClassifier, MaterialTypeClassifier, read_conversion_json, resolve_title_and_type
 from doc_organize.context.language_detection import detect_language
@@ -46,6 +47,7 @@ from doc_organize.core.models import (
     AiTask,
     AxisClassifiedBy,
     AxisValue,
+    ClassificationDecision,
     Context,
     ConversionResult,
     DocumentClassification,
@@ -333,10 +335,13 @@ class ContextBuilder:
         prompts: PromptRegistry | None = None,
         ai_cache: bool | AiResultCache = True,
         profile: ProjectProfile | None = None,
+        decisions: bool | Sequence[ClassificationDecision] = True,
+        scan_roots: Sequence[str] | None = None,
         on_progress: ProgressCallback | None = None,
         cancel_token: CancelToken | None = None,
         ai_max_failures: int | None = None,
         ai_max_documents: int | None = None,
+        persist: bool = True,
     ) -> Context:
         """Clasifica `documents` y persiste el contexto de `project`.
 
@@ -372,6 +377,12 @@ class ContextBuilder:
                 resultado se vuelve a validar y cuenta en `AiPhaseStats.cached`, no en `sent`.
             profile: Perfil del proyecto que va en el prompt de clasificación (2.0.0, G2). `None` (por defecto): el de
                 `taxonomy_manifest` con el de `<raíz>/.doc_organize/profile.md` añadido detrás (`compose_profile`).
+            decisions: Decisiones de personas (2.0.0, F6): `True` (por defecto) aplica las del proyecto
+                (`ClassificationDecisionStore`, `<raíz>/.doc_organize/decisions.json`), `False` ninguna, o una lista
+                concreta. Se aplican tras las reglas y antes de la IA, solo con `taxonomy_manifest`; lo que no se pudo
+                aplicar queda en `Context.stale_decisions`/`orphan_decisions`.
+            scan_roots: Raíces de escaneo para las claves de los documentos en las decisiones (`document_key`); por
+                defecto, la carpeta común de todos los originales.
             on_progress: Recibe un `ProgressEvent` (`operation="context_build"`, fase `classification` o `enrichment`)
                 tras cada documento de una fase de IA (L-2). Un fallo del callback se registra y no para la construcción.
             cancel_token: Si se cancela, la construcción para entre documentos con `OperationCancelledError`, **sin**
@@ -379,6 +390,7 @@ class ContextBuilder:
             ai_max_failures: Una fase de IA se detiene tras este número de errores de conexión **seguidos**
                 (`AiPhaseStats.stopped = "connection"`, L-3a); un 401/403 la detiene siempre en el acto (`"auth"`).
             ai_max_documents: Tope de documentos enviados en cada fase de IA (L-3b); al alcanzarlo, `"budget"`.
+            persist: `False` devuelve el contexto sin guardarlo ni tocar el histórico (2.0.0, G3: `dry_run_classify`).
 
             Al detenerse una fase, los documentos pendientes no se envían y la construcción termina con normalidad. Los
             recuentos y tokens quedan en `Context.ai_stats`, y el prompt y modelo de cada tarea en
@@ -400,6 +412,7 @@ class ContextBuilder:
         checkpoint(cancel_token)
         prompts = prompts if prompts is not None else PromptRegistry(project.root_path)
         cache = ai_cache if isinstance(ai_cache, AiResultCache) else (AiResultCache(project.root_path) if ai_cache and llm is not None else None)
+        human_decisions = await self._load_decisions(project, decisions)
         if profile is None:
             profile = compose_profile(taxonomy_manifest.profile if taxonomy_manifest is not None else None, project.root_path)
         profile_text = profile_prompt_text(profile)
@@ -426,6 +439,9 @@ class ContextBuilder:
             classified, unclassified = await self._classify_with_manifest(
                 documents, taxonomy_manifest, threshold, reads=reads, cancel_token=cancel_token
             )
+            decision_outcome = apply_decisions(
+                human_decisions, classified, unclassified, taxonomy_manifest, slugify=DomainClassifier._slugify, roots=scan_roots
+            )
             if llm is not None and ai_scope != "off":
                 classified = await self._classify_with_manifest_ai(
                     llm,
@@ -438,8 +454,10 @@ class ContextBuilder:
                     scope=ai_scope,
                     threshold=threshold,
                     profile=profile_text,
+                    locked=decision_outcome.locked,
                 )
         else:
+            decision_outcome = not_applied_without_manifest(human_decisions)
             classifier = DomainClassifier(candidate_domains=candidate_domains, threshold=threshold)
             classified, unclassified = await self._classify_by_rules(documents, classifier, reads, cancel_token)
             if llm is not None and ai_scope != "off" and unclassified:
@@ -481,6 +499,10 @@ class ContextBuilder:
             ai_fallback_threshold=threshold,
             built_with_version=__version__,
             domains=domains,
+            decisions_applied=decision_outcome.applied,
+            stale_decisions=decision_outcome.stale,
+            orphan_decisions=decision_outcome.orphan,
+            excluded_documents=decision_outcome.excluded,
             unclassified_documents=[document.source_path for document in unclassified],
             unclassified_details=unclassified_details,
             taxonomy_manifest_used=taxonomy_manifest is not None,
@@ -497,7 +519,8 @@ class ContextBuilder:
         )
         assign_organized_paths(context, project.root_path)  # L-8d: ruta final de cada documento, para el consumidor
         checkpoint(cancel_token)  # nunca se persiste un contexto a medias
-        await self._save_and_record(project, context)
+        if persist:
+            await self._save_and_record(project, context)
         self.logger.info(f"Contexto construido para '{project.name}': {len(domains)} dominio(s), {len(unclassified)} documento(s) sin clasificar")
         return context
 
@@ -724,6 +747,7 @@ class ContextBuilder:
         scope: AiScope = "unclassified",
         threshold: float = _DEFAULT_THRESHOLD,
         profile: str = "",
+        locked: dict[int, set[str]] | None = None,
     ) -> dict[str, list[DomainDocument]]:
         """Clasificación con IA en modo manifiesto (2.0.0, G1.4).
 
@@ -750,7 +774,8 @@ class ContextBuilder:
                 keys += [folder.key, subfolder.key]
             if scope == "missing_axes":
                 keys += [axis.key for axis in manifest.tag_axes if not document.classification.axes.get(axis.key)]
-            return keys
+            decided = (locked or {}).get(id(document), set())  # lo que decidió una persona no se pregunta (F6)
+            return [key for key in keys if key not in decided]
 
         pending = [
             (domain_slug, document, keys)
@@ -792,6 +817,19 @@ class ContextBuilder:
         # Poda buckets que quedaron vacíos (p.ej. todo "sin-clasificar" se resolvió a otros
         # dominios) — sin esto, `build()` crearía un `Domain` fantasma sin documentos.
         return {slug: documents for slug, documents in classified.items() if documents}
+
+    async def _load_decisions(self, project: Project, decisions: bool | Sequence[ClassificationDecision]) -> list[ClassificationDecision]:
+        """Las decisiones de esta construcción: las del proyecto (`True`), ninguna (`False`) o las dadas. Un fichero de
+        decisiones ilegible se registra y no para la construcción (como si no hubiera decisiones)."""
+        if decisions is False:
+            return []
+        if decisions is True:
+            try:
+                return await ClassificationDecisionStore(project.root_path).load()
+            except (OSError, ValueError) as exc:
+                self.logger.warning(f"No se pudieron leer las decisiones del proyecto: {type(exc).__name__}: {exc}")
+                return []
+        return list(decisions)
 
     async def _cache_hits[T](
         self,

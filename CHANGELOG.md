@@ -118,6 +118,25 @@ ruptura; la guía de migración completa llega con la versión.
   (`DEFAULT_MAX_TOKENS`: 1024 en `classify`, 512 en `enrich`, 4096 en `taxonomy_design`), que se envía como
   `max_tokens`. Medido en CALIDAD_VD (M5): la respuesta media de `classify` pasa de 519 a 284 tokens y la máxima de 4964
   a 693.
+- **Evaluación contra una referencia (M6, G3)**: `evaluate_classification(context, gold) -> EvaluationReport`, con
+  exactitud, cobertura, precisión y *recall* por eje, exactitud según quién clasificó y confusiones más frecuentes
+  (`to_markdown()`); `load_gold_xlsx` lee la hoja de la línea base (`dominio_ok`, `tipo_ok`, o las columnas que se
+  indiquen; `ninguno` = eje vacío correcto), `GoldStandard`/`GoldLabel` para construirla a mano. Los documentos se
+  identifican por su ruta relativa a la raíz de escaneo (`document_key`, `document_keys`).
+- **Clasificación de prueba (M6, G3)**: `dry_run_classify(project, documents, *, gold=None, only_gold=True, ...)`
+  construye el contexto sin guardarlo (`ContextBuilder.build(persist=False)`), sin caché de IA por defecto y, con una
+  referencia, solo con sus documentos; devuelve `DryRunResult` (`context`, `evaluation`, `documents`) para comparar
+  reglas, prompts, perfiles o modelos.
+- **Decisiones de personas (M6, F6)**: `ClassificationDecision` (`confirm`, `set_axis`, `exclude`, con autor, fecha,
+  motivo y huella del original) y `ClassificationDecisionStore` (`<raíz>/.doc_organize/decisions.json`, escritura atómica
+  y bloqueo; una decisión nueva sustituye a la que decidía lo mismo, que pasa al historial; `revoke`).
+  `ContextBuilder.build(decisions=True, scan_roots=None)` las aplica tras las reglas y antes de la IA, con manifiesto:
+  lo decidido queda con `classified_by="human"` y la IA no lo pregunta. `Context.decisions_applied`,
+  `stale_decisions` (original cambiado, eje o valor fuera del catálogo, sin manifiesto), `orphan_decisions` (documento
+  ausente) y `excluded_documents`. `gold_from_decisions` convierte las decisiones en una referencia para la evaluación.
+- **Cola de revisión (M6, F6)**: `review_queue(context, *, roots=None) -> list[ReviewItem]`, lo que una persona debería
+  mirar y por qué, por prioridad: decisiones desfasadas, sin clasificar, discrepancia reglas/IA en el dominio, cita de
+  la IA no verificada y confianza por debajo del umbral del eje. Lo decidido por una persona no vuelve a la cola.
 
 ### Retirado (ruptura)
 
