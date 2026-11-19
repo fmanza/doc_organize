@@ -15,7 +15,8 @@ Lo asignado queda con `classified_by="semantic"` y la similitud como confianza; 
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from doc_organize.ai.embeddings import EmbeddingIndex, cosine
@@ -34,6 +35,13 @@ logger = get_logger(__name__)
 DEFAULT_SEMANTIC_THRESHOLD = 0.75
 #: Ventaja mínima del mejor valor sobre el segundo en un eje de un valor.
 SEMANTIC_MARGIN = 0.03
+#: Ejemplos de documentos parecidos que recibe la IA por documento (G4).
+DEFAULT_AI_EXAMPLES = 3
+#: Confianza mínima en un eje que organiza para que un documento sirva de ejemplo (si no lo decidió una persona).
+EXAMPLE_MIN_CONFIDENCE = 0.9
+#: Un eje con más valores que esto se preselecciona: al modelo solo van los `PRESELECT_TOP` más parecidos.
+PRESELECT_MIN_ENTRIES = 25
+PRESELECT_TOP = 15
 
 
 def entry_text(axis: TaxonomyAxis, entry: TaxonomyEntry) -> str:
@@ -115,6 +123,100 @@ async def classify_semantic(
     return stats
 
 
+@dataclass
+class AiHints:
+    """Lo que la sub-fase semántica le pasa a la IA para un documento (2.0.0, G4).
+
+    Attributes:
+        examples (list[str]): Documentos parecidos ya clasificados con fiabilidad, una línea cada uno.
+        preselected (dict[str, list[str]]): Por eje con más de `PRESELECT_MIN_ENTRIES` valores, los
+            `PRESELECT_TOP` más parecidos al documento: solo esos van al modelo.
+    """
+
+    examples: list[str] = field(default_factory=list)
+    preselected: dict[str, list[str]] = field(default_factory=dict)
+
+
+async def ai_hints(
+    llm: LlmClient,
+    classified: dict[str, list[DomainDocument]],
+    manifest: TaxonomyManifest,
+    pending: Sequence[tuple[DomainDocument, list[str]]],
+    *,
+    project_root: str | Path,
+    examples: int = DEFAULT_AI_EXAMPLES,
+    exclude: Iterable[str] = (),
+    slugify: Callable[[str], str] = str,
+) -> dict[int, AiHints]:
+    """Ejemplos y preselección para los documentos que van a la IA (`pending`: documento y ejes que se le piden),
+    por `id()` del documento.
+
+    Los ejemplos salen de los documentos clasificados **con fiabilidad** (un valor de una persona, o confianza de al
+    menos `EXAMPLE_MIN_CONFIDENCE` en un eje que organiza), los `examples` más parecidos. **Nunca** son el propio
+    documento, sus duplicados (mismo `source_sha256`) ni los de `exclude` (al evaluar, los de la referencia: si no, el
+    modelo vería la respuesta, B16). Un fallo del modelo de embeddings deja la IA sin ayudas, sin parar nada.
+    """
+    if not pending:
+        return {}
+    index = EmbeddingIndex(project_root, model=llm.model_for("embed"), redacted=llm.settings.redact_credentials)
+    excluded = set(exclude)
+    documents = [document for docs in classified.values() for document in docs]
+    trusted = [document for document in documents if _trusted(document, manifest) and document.source_path not in excluded]
+    wanted = {id(document) for document, _ in pending} | {id(document) for document in trusted}
+    readable = [(document, excerpt) for document in documents if id(document) in wanted and (excerpt := await _excerpt(document))]
+    big = [axis for axis in manifest.axes if len(axis.entries) > PRESELECT_MIN_ENTRIES]
+    catalog = [(axis, entry) for axis in big for entry in axis.entries]
+    try:
+        vectors = await index.vectors(llm, [entry_text(axis, entry) for axis, entry in catalog] + [excerpt for _, excerpt in readable])
+    except AiError as exc:
+        logger.warning(f"Sin ejemplos ni preselección para la IA: falló el modelo de embeddings: {exc}")
+        return {}
+    by_document = {id(document): vector for (document, _), vector in zip(readable, vectors[len(catalog) :], strict=True)}
+    entry_vectors: dict[str, list[tuple[str, list[float]]]] = {}
+    for (axis, entry), vector in zip(catalog, vectors, strict=False):
+        entry_vectors.setdefault(axis.key, []).append((_slug(axis, entry, slugify), vector))
+    pool = [(document, by_document[id(document)]) for document in trusted if id(document) in by_document]
+    hints = {}
+    for document, keys in pending:
+        own = by_document.get(id(document))
+        if own is None:
+            continue
+        neighbours = sorted(
+            ((other, cosine(own, other_vector)) for other, other_vector in pool if not _same_document(document, other)),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+        lines = [line for other, _ in neighbours if (line := _example_line(other, keys))][:examples]
+        preselected = {
+            key: [slug for slug, _ in sorted(entry_vectors[key], key=lambda item: cosine(own, item[1]), reverse=True)[:PRESELECT_TOP]]
+            for key in keys
+            if key in entry_vectors
+        }
+        hints[id(document)] = AiHints(examples=lines, preselected=preselected)
+    return hints
+
+
+def _trusted(document: DomainDocument, manifest: TaxonomyManifest) -> bool:
+    values = [value for values in document.classification.axes.values() for value in values]
+    if any(value.classified_by == "human" for value in values):
+        return True
+    organizers = (manifest.folder_axis.key, manifest.subfolder_axis.key)
+    return any(value.confidence >= EXAMPLE_MIN_CONFIDENCE for key in organizers for value in document.classification.axes.get(key, []))
+
+
+def _same_document(document: DomainDocument, other: DomainDocument) -> bool:
+    """El propio documento o un duplicado suyo (mismo original): nunca puede ser su ejemplo."""
+    if other is document or other.source_path == document.source_path:
+        return True
+    return bool(document.source_sha256) and document.source_sha256 == other.source_sha256
+
+
+def _example_line(document: DomainDocument, keys: list[str]) -> str:
+    """`«Título» → eje: valor, valor; eje: valor` con los ejes pedidos que tiene el ejemplo; vacío si no tiene ninguno."""
+    parts = [f"{key}: {', '.join(value.slug for value in values)}" for key in keys if (values := document.classification.axes.get(key))]
+    return f"«{document.title}» → {'; '.join(parts)}" if parts else ""
+
+
 def _missing(domain_slug: str, document: DomainDocument, manifest: TaxonomyManifest, decided: set[str]) -> list[str]:
     keys = []
     if domain_slug == UNCLASSIFIED_SLUG:
@@ -167,4 +269,16 @@ def _apply(
     return changed
 
 
-__all__ = ["DEFAULT_SEMANTIC_THRESHOLD", "SEMANTIC_MARGIN", "best_values", "classify_semantic", "entry_text"]
+__all__ = [
+    "DEFAULT_AI_EXAMPLES",
+    "DEFAULT_SEMANTIC_THRESHOLD",
+    "EXAMPLE_MIN_CONFIDENCE",
+    "PRESELECT_MIN_ENTRIES",
+    "PRESELECT_TOP",
+    "SEMANTIC_MARGIN",
+    "AiHints",
+    "ai_hints",
+    "best_values",
+    "classify_semantic",
+    "entry_text",
+]
