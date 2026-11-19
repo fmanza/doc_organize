@@ -3,6 +3,7 @@ Sitio de contexto de un proyecto con Zensical (L-8, G10; sustituye a MkDocs desd
 """
 
 import asyncio
+import functools
 import html
 import importlib.util
 import math
@@ -17,6 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from doc_organize.context.llms_txt import render_llms_txt
 from doc_organize.context.reorganizer import Reorganizer, _remove_dir_or_link, resolve_organized_paths
 from doc_organize.core.constants import SITE_FOLDER_NAME
 from doc_organize.core.exceptions import InvalidPathError, SiteBuildError
@@ -38,6 +40,7 @@ _INDEX_MD_NAME = "index.md"
 _THEME_FEATURES: tuple[str, ...] = ("navigation.prune",)
 #: Carpeta (dentro de la reorganizada, `docs_dir`) con los recursos del sitio sin conexión; ningún dominio empieza por `_`.
 _OFFLINE_ASSETS_DIR = "_offline"
+_LLMS_TXT_NAME = "llms.txt"
 _VENDOR_DIR = Path(__file__).parent / "site_assets" / "vendor"
 _CONFIG_HEADER = "# Generado por doc_organize (SiteGenerator): se reescribe en cada reconstrucción del contexto.\n"
 #: Máximo de caracteres de la salida de error de `zensical build` que se incluyen en `SiteBuildError`.
@@ -138,6 +141,7 @@ class SiteGenerator:
         timeout: float | None = None,
         redact_credentials: bool = True,
         offline: bool = False,
+        llms_txt: bool = False,
     ) -> SiteResult:
         """Escribe `zensical.toml` (raíz del proyecto) + `<output_folder_name>/index.md` y, con `build=True`, ejecuta
         `zensical build` hacia `site_dir`.
@@ -165,6 +169,8 @@ class SiteGenerator:
                 documentos (`neutralize_untrusted_markdown`, D6): sin la CSP `sandbox` de la web, el HTML de terceros
                 no puede quedar activo. Como la redacción, solo cambia la copia de la carpeta reorganizada. Para
                 entregarlo: `check_site_offline` y `write_site_zip`.
+            llms_txt: Añade `llms.txt` en la raíz del sitio (2.0.0, F7): el índice del contexto para un chat o agente
+                de IA, con enlaces a las páginas (`render_llms_txt`; sin credenciales si `redact_credentials`).
 
         Returns:
             `SiteResult` con las rutas escritas y si se construyó el sitio.
@@ -188,6 +194,14 @@ class SiteGenerator:
         if offline:
             neutralized, neutralized_counts = await asyncio.to_thread(_neutralize_pages, output_root, document_pages)
         await asyncio.to_thread(_sync_offline_assets, output_root, offline)
+        llms_path = output_root / _LLMS_TXT_NAME
+        if llms_txt:
+            text = render_llms_txt(
+                project.name, context, functools.partial(_page_url, offline=offline), project_root=project.root_path, redact=redact_credentials
+            )
+            await asyncio.to_thread(write_text_atomic, llms_path, text)
+        else:
+            await asyncio.to_thread(llms_path.unlink, missing_ok=True)
         axis_pages = _render_axis_pages(context, project.root_path, redact=redact_credentials)
         for name, text in axis_pages.items():
             await asyncio.to_thread(write_text_atomic, output_root / name, text)
@@ -494,6 +508,13 @@ def _exclude_oversized_from_search(output_root: Path, pages: list[str]) -> tuple
             logger.info(f"'{page}' sale del buscador del sitio: una sección de ~{biggest} palabras supera el límite ({max_positions})")
             excluded.append(page)
     return tuple(excluded)
+
+
+def _page_url(organized: str, *, offline: bool) -> str:
+    """URL de la página de un `.md` de la carpeta reorganizada en el sitio: `x.html` con `offline` (sin `directory_urls`),
+    `x/` si no."""
+    stem = organized.removesuffix(".md")
+    return f"{stem}.html" if offline else f"{stem}/"
 
 
 def _neutralize_pages(output_root: Path, pages: list[str]) -> tuple[tuple[str, ...], dict[str, int]]:

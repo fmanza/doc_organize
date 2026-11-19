@@ -8,6 +8,15 @@ releases publicados antes de esa versión).
 
 ### Añadido
 
+- **Paquete para IA (M9, F7)**: `write_ai_context_bundle(destination, project, context, *, include_text=True,
+  current_only=True, redact=True, max_file_chars=None, max_full_chars=None)` escribe un ZIP para subir a un chat o
+  agente: `llms.txt` (llmstxt.org), `documentos/…/*.md` con front matter (título, dominio, tipo, ejes, versión, ruta
+  relativa del original, huella, quién clasificó), `context.json` reducido sin rutas absolutas y, con tope,
+  `llms-full.txt`. Redactado y solo vigentes por defecto; reproducible, en *streaming*, con progreso y cancelación.
+  `AiBundleStats`. Puerta de M9: ningún valor redactado llega al paquete.
+- `SiteGenerator.generate(llms_txt=True)`: el mismo `llms.txt` en la raíz del sitio, con enlaces a sus páginas;
+  `render_llms_txt` para cualquier destino.
+
 - **Sitio sin conexión (M9, F3)**: `SiteGenerator.generate(offline=True)` construye un sitio para abrirse desde el disco
   y sin nada de terceros: plugin `offline` de Zensical (enlaces a ficheros, búsqueda en `search.js`), Mermaid
   `12.2.0` y el shim `iframe-worker` `1.0.4` empaquetados (MIT, en `context/site_assets/`), y siempre la
