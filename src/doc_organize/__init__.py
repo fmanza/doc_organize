@@ -53,6 +53,8 @@ _EXPORTS: dict[str, str] = {
     "GoldLabel": "doc_organize.context.evaluation",
     "EvaluationReport": "doc_organize.context.evaluation",
     "AxisEvaluation": "doc_organize.context.evaluation",
+    "dry_run_classify": "doc_organize.context.dry_run",
+    "DryRunResult": "doc_organize.context.dry_run",
     # Decisiones de personas (2.0.0, F6)
     "ClassificationDecision": "doc_organize.core.models",
     "ClassificationDecisionStore": "doc_organize.context.decisions",
@@ -177,6 +179,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
     from doc_organize.context.context_builder import ContextBuilder
     from doc_organize.context.context_registry import ContextRegistry
     from doc_organize.context.decisions import ClassificationDecisionStore, gold_from_decisions
+    from doc_organize.context.dry_run import DryRunResult, dry_run_classify
     from doc_organize.context.evaluation import (
         AxisEvaluation,
         EvaluationReport,
