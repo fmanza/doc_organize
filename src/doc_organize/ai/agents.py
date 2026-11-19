@@ -442,6 +442,8 @@ def _calls_from_text(content: Any, known: set[str]) -> list[dict[str, Any]]:
     calls = []
     for index, item in enumerate(items):
         function = item.get("function", item) if isinstance(item, dict) else None
+        if isinstance(function, dict) and "name" not in function and "function_name" in function:
+            function = {**function, "name": function["function_name"]}  # otra forma que escriben algunos modelos
         if not isinstance(function, dict) or function.get("name") not in known:
             return []
         arguments = function.get("arguments", function.get("parameters", {}))

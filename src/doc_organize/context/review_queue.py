@@ -12,19 +12,32 @@ decidió (`classified_by="human"`) no vuelve a la cola, salvo que su decisión h
 | `unverified_evidence` | La cita de la IA no aparece en el documento (D10) |
 | `low_confidence` | Un valor por debajo del umbral de su eje |
 | `unconfirmed_version` | Un grupo de versiones cuya vigente no ha confirmado nadie (F5) |
+| `reviewer_proposal` | El revisor (`ReviewAgent`, G6) propone una decisión: aceptarla o no es de una persona |
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Literal
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, Field
 
 from doc_organize.context.evaluation import document_keys
 from doc_organize.core.models import AxisValue, Context, DomainDocument, TaxonomyAxis
 
-ReviewReason = Literal["stale_decision", "unclassified", "rules_ai_disagreement", "unverified_evidence", "low_confidence", "unconfirmed_version"]
+ReviewReason = Literal[
+    "stale_decision", "unclassified", "rules_ai_disagreement", "unverified_evidence", "low_confidence", "unconfirmed_version", "reviewer_proposal"
+]
+
+
+class ReviewProposalLike(Protocol):
+    """Lo que la cola lee de una propuesta del revisor (`ReviewProposal`)."""
+
+    document_key: str
+    action: str
+    axes: dict[str, list[str]]
+    rationale: str
+
 
 #: Orden de la cola: lo primero, lo que más urge.
 REVIEW_PRIORITY: dict[ReviewReason, int] = {
@@ -34,6 +47,7 @@ REVIEW_PRIORITY: dict[ReviewReason, int] = {
     "unverified_evidence": 3,
     "low_confidence": 4,
     "unconfirmed_version": 5,
+    "reviewer_proposal": 6,
 }
 
 
@@ -62,13 +76,14 @@ class ReviewItem(BaseModel):
     priority: int = Field(default=0, ge=0)
 
 
-def review_queue(context: Context, *, roots: Sequence[str] | None = None) -> list[ReviewItem]:
+def review_queue(context: Context, *, roots: Sequence[str] | None = None, proposals: Sequence[ReviewProposalLike] = ()) -> list[ReviewItem]:
     """Lo que habría que revisar en `context`, por prioridad (`REVIEW_PRIORITY`) y, dentro de ella, por documento.
 
     Args:
         context: El contexto (de `ContextRegistry.load_context` o recién construido).
         roots: Raíces de escaneo para las claves (por defecto, la carpeta común de todos los originales), como en
             `ContextBuilder.build(scan_roots=)`.
+        proposals: Propuestas del revisor (`ReviewResult.proposals`) que añadir a la cola (`reviewer_proposal`).
 
     Example:
         >>> from doc_organize.core.models import DecisionIssue
@@ -108,6 +123,18 @@ def review_queue(context: Context, *, roots: Sequence[str] | None = None) -> lis
         items.append(_item("unclassified", keys[detail.source_path], detail.source_path, axis=folder.key if folder else None, detail=detail.reason))
     for domain_slug, document in documents:
         items.extend(_document_items(document, domain_slug, keys[document.source_path], axes, folder, context.ai_fallback_threshold))
+    for proposal in proposals:
+        axis = next(iter(proposal.axes), None)
+        items.append(
+            _item(
+                "reviewer_proposal",
+                proposal.document_key,
+                path_by_key.get(proposal.document_key),
+                axis=axis,
+                value=", ".join(proposal.axes[axis]) if axis else None,
+                detail=f"{proposal.action}: {proposal.rationale}"[:500],
+            )
+        )
     return sorted(items, key=lambda item: (item.priority, item.document_key, item.axis or "", item.value or ""))
 
 
