@@ -6,6 +6,12 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [2.0.0rc3] - 2026-11-20
+
+Tercera versión candidata de 2.0.0: corrige una fuga del sitio sin conexión de la rc2 (encontrada por los E2E de
+doc_organize_web en W9). Mismas dependencias que la rc2. **Quien entregue sitios sin conexión con la rc1 o la rc2
+debe actualizar**: esos ZIP llevan el original y el texto completo de cada documento sin redactar.
+
 ### Corregido
 
 - **El sitio sin conexión publicaba el original y el `.json` de la conversión de cada documento sin redactar**
