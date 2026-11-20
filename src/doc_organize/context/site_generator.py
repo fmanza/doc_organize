@@ -20,7 +20,7 @@ from typing import Any
 
 from doc_organize.context.llms_txt import render_llms_txt
 from doc_organize.context.reorganizer import Reorganizer, _remove_dir_or_link, resolve_organized_paths
-from doc_organize.core.constants import SITE_FOLDER_NAME
+from doc_organize.core.constants import SITE_CONFIG_FILE_NAME, SITE_FOLDER_NAME
 from doc_organize.core.exceptions import InvalidPathError, SiteBuildError
 from doc_organize.core.models import Context, Domain, DomainDocument, Project, TaxonomyAxis
 from doc_organize.projects.layout import RESERVED_OUTPUT_FOLDER_NAMES, ProjectLayout, _folder_key, validate_output_folder_name
@@ -142,6 +142,7 @@ class SiteGenerator:
         redact_credentials: bool = True,
         offline: bool = False,
         llms_txt: bool = False,
+        work_dir: Path | None = None,
     ) -> SiteResult:
         """Escribe `zensical.toml` (raíz del proyecto) + `<output_folder_name>/index.md` y, con `build=True`, ejecuta
         `zensical build` hacia `site_dir`.
@@ -171,20 +172,38 @@ class SiteGenerator:
                 entregarlo: `check_site_offline` y `write_site_zip`.
             llms_txt: Añade `llms.txt` en la raíz del sitio (2.0.0, F7): el índice del contexto para un chat o agente
                 de IA, con enlaces a las páginas (`render_llms_txt`; sin credenciales si `redact_credentials`).
+            work_dir: Construye en esta carpeta, fuera del proyecto (2.0.0, petición de la web en W8): copia ahí la
+                carpeta reorganizada y escribe en ella `zensical.toml`, las páginas y el sitio (`<work_dir>/site`), sin
+                tocar nada del proyecto (ni su carpeta reorganizada, ni su `zensical.toml`, ni su sitio). Sirve para
+                entregar un sitio sin conexión mientras la web sigue sirviendo el suyo. Tiene que no existir o estar
+                vacía y no puede estar dentro de la raíz del proyecto; no se admite junto con `site_dir`. Los enlaces
+                simbólicos de la carpeta reorganizada no se copian. Borrarla después es cosa de quien llama.
 
         Returns:
             `SiteResult` con las rutas escritas y si se construyó el sitio.
 
         Raises:
-            InvalidPathError: `site_dir` no es válido, o la carpeta reorganizada es o pasa por un enlace simbólico
-                (antes de escribir nada).
+            InvalidPathError: `site_dir` o `work_dir` no son válidos, o la carpeta reorganizada es o pasa por un
+                enlace simbólico (antes de escribir nada).
             SiteBuildError: Falta `zensical`, el build falla o se pasa de `timeout` (la configuración ya está escrita).
         """
         layout = ProjectLayout.for_project(project)
-        target_site_dir = await asyncio.to_thread(_resolve_site_dir, layout, site_dir, context.output_folder_name)
-        output_root = layout.output_root / validate_output_folder_name(context.output_folder_name)
-        await asyncio.to_thread(Reorganizer.check_output_root, output_root)
-        await asyncio.to_thread(output_root.mkdir, parents=True, exist_ok=True)
+        folder_name = validate_output_folder_name(context.output_folder_name)
+        if work_dir is None:
+            target_site_dir = await asyncio.to_thread(_resolve_site_dir, layout, site_dir, context.output_folder_name)
+            output_root = layout.output_root / folder_name
+            config_file, build_root = layout.site_config_file, layout.output_root
+            await asyncio.to_thread(Reorganizer.check_output_root, output_root)
+            await asyncio.to_thread(output_root.mkdir, parents=True, exist_ok=True)
+        else:
+            if site_dir is not None:
+                raise InvalidPathError("work_dir y site_dir no se pueden usar a la vez: con work_dir, el sitio va a <work_dir>/site.")
+            build_root = await asyncio.to_thread(_prepare_work_dir, Path(work_dir), project.root_path)
+            source_root = layout.output_root / folder_name
+            await asyncio.to_thread(Reorganizer.check_output_root, source_root)
+            output_root = build_root / folder_name
+            await asyncio.to_thread(_copy_organized, source_root, output_root)
+            target_site_dir, config_file = build_root / SITE_FOLDER_NAME, build_root / SITE_CONFIG_FILE_NAME
         index_path = output_root / _INDEX_MD_NAME
         await asyncio.to_thread(write_text_atomic, index_path, _render_index(context))
         document_pages = [path for domain in context.domains for path in resolve_organized_paths(domain, project.root_path)]
@@ -209,15 +228,16 @@ class SiteGenerator:
         pages = [_INDEX_MD_NAME, *axis_pages, *document_pages]
         search_excluded = await asyncio.to_thread(_exclude_oversized_from_search, output_root, pages)
 
-        relative_site_dir = target_site_dir.relative_to(os.path.abspath(layout.output_root)).as_posix()
+        relative_site_dir = target_site_dir.relative_to(os.path.abspath(build_root)).as_posix()
         config = self._build_config(project, context, relative_site_dir, redact=redact_credentials, offline=offline)
-        await asyncio.to_thread(write_text_atomic, layout.site_config_file, _CONFIG_HEADER + _render_toml(config))
-        await asyncio.to_thread(layout.legacy_mkdocs_config_file.unlink, missing_ok=True)
+        await asyncio.to_thread(write_text_atomic, config_file, _CONFIG_HEADER + _render_toml(config))
+        if work_dir is None:
+            await asyncio.to_thread(layout.legacy_mkdocs_config_file.unlink, missing_ok=True)
 
         if build:
-            await self.build_site(project, timeout=timeout)
+            await self._run_build(project.name, config_file, build_root, timeout)
         return SiteResult(
-            config_path=layout.site_config_file,
+            config_path=config_file,
             index_path=index_path,
             site_dir=target_site_dir,
             site_built=build,
@@ -234,7 +254,9 @@ class SiteGenerator:
         Raises:
             SiteBuildError: Falta `zensical` (extra `site`), el build termina con error o se pasa de `timeout`.
         """
-        config_path = ProjectLayout.for_project(project).site_config_file
+        await self._run_build(project.name, ProjectLayout.for_project(project).site_config_file, Path(project.root_path), timeout)
+
+    async def _run_build(self, name: str, config_path: Path, cwd: Path, timeout: float | None) -> None:
         command = await asyncio.to_thread(self._zensical_command)
         if command is None:
             reason = "zensical no está instalado (extra 'doc_organize[site]')"
@@ -243,7 +265,7 @@ class SiteGenerator:
             result = await asyncio.to_thread(
                 subprocess.run,
                 [*command, "build", "-f", str(config_path)],
-                cwd=project.root_path,
+                cwd=cwd,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -253,16 +275,16 @@ class SiteGenerator:
             )
         except subprocess.TimeoutExpired as exc:
             reason = f"'zensical build' superó el tiempo máximo ({timeout} s)"
-            raise SiteBuildError(f"{reason} para '{project.name}'.", cause=reason) from exc
+            raise SiteBuildError(f"{reason} para '{name}'.", cause=reason) from exc
         except OSError as exc:
             reason = f"No se pudo ejecutar 'zensical build': {exc}"
-            raise SiteBuildError(f"No se pudo ejecutar 'zensical build' para '{project.name}': {exc}", cause=reason) from exc
+            raise SiteBuildError(f"No se pudo ejecutar 'zensical build' para '{name}': {exc}", cause=reason) from exc
         if result.returncode != 0:
             output = (result.stderr.strip() or result.stdout.strip())[-_STDERR_TAIL:]
             # La causa va al final (tras el traceback): la última línea, para que no se pierda si el mensaje se recorta.
             cause = next((line.strip() for line in reversed(output.splitlines()) if line.strip()), None)
             raise SiteBuildError(
-                f"'zensical build' falló para '{project.name}' (código {result.returncode}): {cause or 'sin salida'}",
+                f"'zensical build' falló para '{name}' (código {result.returncode}): {cause or 'sin salida'}",
                 cause=cause,
                 output_tail=output or None,
             )
@@ -352,6 +374,34 @@ class SiteGenerator:
             label = docs[0].material_type_name or material_type.replace("-", " ").title()
             nav.append({_label(label): entries})
         return nav
+
+
+def _prepare_work_dir(work_dir: Path, project_root: str) -> Path:
+    """Ruta absoluta de `work_dir`, validada y creada (ver `SiteGenerator.generate`)."""
+    candidate = Path(os.path.abspath(work_dir))
+    root = Path(os.path.abspath(project_root))
+    if candidate == root or root in candidate.parents or candidate in root.parents:
+        raise InvalidPathError(f"work_dir '{candidate}' no puede ser, contener ni estar dentro de la raíz del proyecto '{root}'.")
+    try:
+        ensure_no_symlinks(candidate)
+    except OSError as exc:
+        raise InvalidPathError(f"work_dir '{candidate}' no puede ser ni pasar por un enlace simbólico.") from exc
+    if candidate.exists() and (not candidate.is_dir() or any(candidate.iterdir())):
+        raise InvalidPathError(f"work_dir '{candidate}' tiene que no existir o ser una carpeta vacía.")
+    candidate.mkdir(parents=True, exist_ok=True)
+    return candidate
+
+
+def _copy_organized(source: Path, destination: Path) -> None:
+    """Copia la carpeta reorganizada sin seguir ni copiar enlaces simbólicos."""
+    if not source.is_dir():
+        destination.mkdir(parents=True)
+        return
+
+    def links(directory: str, names: list[str]) -> set[str]:
+        return {name for name in names if os.path.islink(os.path.join(directory, name))}
+
+    shutil.copytree(source, destination, ignore=links)
 
 
 def _resolve_site_dir(layout: ProjectLayout, site_dir: Path | None, output_folder_name: str | None) -> Path:

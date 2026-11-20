@@ -27,6 +27,20 @@ Igual que la redacción de credenciales, solo cambia la copia de la carpeta reor
 (`Conversión/`) y los originales no se tocan. Un `generate()` normal después quita los recursos empaquetados y la
 configuración sin conexión, pero las páginas ya neutralizadas siguen así hasta que se reorganice de nuevo.
 
+## Construir aparte (`work_dir`)
+
+Para entregar el sitio sin cambiar el que ya se sirve (por ejemplo, desde la web), pasa una carpeta de trabajo fuera
+del proyecto, vacía o que no exista:
+
+```python
+result = await SiteGenerator().generate(project, context, offline=True, llms_txt=True, work_dir=Path(tmp) / "sitio")
+write_site_zip(destination, result.site_dir)  # <work_dir>/site
+```
+
+Se copia ahí la carpeta reorganizada (sin enlaces simbólicos) y en esa copia se redacta, se neutraliza y se escriben
+`zensical.toml` y el sitio; el proyecto queda igual (ni páginas, ni `zensical.toml`, ni `site/`). No se admite junto
+con `site_dir`. Borrar `work_dir` después es cosa de quien llama.
+
 ## Contenido no confiable (D6)
 
 Los `.md` salen de documentos de terceros, y Zensical deja pasar tal cual el HTML que llevan. Abierto desde el disco no

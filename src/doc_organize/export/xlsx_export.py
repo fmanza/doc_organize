@@ -15,19 +15,22 @@ import re
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import ModuleType
 from typing import Any, BinaryIO
 
+from doc_organize.context.evaluation import document_keys
 from doc_organize.core.constants import MAX_AUTO_ERROR_RETRIES, UNCLASSIFIED_SLUG
 from doc_organize.core.exceptions import MissingDependencyError
 from doc_organize.core.models import (
+    AxisValue,
     CacheEntry,
     Context,
     ContextBuildRecord,
     ContextChange,
     ConversionStatus,
     DocumentClassification,
+    DocumentVersionGroup,
     Domain,
     DomainDocument,
     ScanErrorEntry,
@@ -247,6 +250,7 @@ def write_context_history_xlsx(
 #: que solo etiqueta, en el orden de `Context.taxonomy_axes`.
 CONTEXT_DOCUMENTS_SHEET = "Documentos"
 CONTEXT_AXES_SHEET = "Ejes"
+CONTEXT_VALUES_SHEET = "Valores"
 CONTEXT_DOCUMENTS_COLUMNS = (
     _COL_ARCHIVO,
     _COL_CARPETA,
@@ -263,7 +267,11 @@ CONTEXT_DOCUMENTS_COLUMNS = (
     "Autor",
     "Idioma",
     "Palabras clave",
+    "Grupo de versiones",
+    "Versión",
+    "Vigente",
 )
+CONTEXT_VALUES_COLUMNS = (_COL_RUTA_COMPLETA, "Eje", "Valor", "Nombre del valor", "Clasificado por", "Confianza", "Evidencia", "Evidencia verificada")
 CONTEXT_AXES_COLUMNS = ("Eje", "Nombre del eje", "Organiza", "Valor", "Nombre del valor", "Documentos")
 _ORGANIZES_LABELS = {"folder": "Carpeta (dominio)", "subfolder": "Subcarpeta (tipo de material)"}
 _UNCLASSIFIED_REASON_LABELS = {
@@ -276,25 +284,32 @@ def write_context_documents_xlsx(
     destination: str | Path | BinaryIO,
     context: Context,
     *,
+    roots: Sequence[str] | None = None,
     on_progress: ProgressCallback | None = None,
     cancel_token: CancelToken | None = None,
 ) -> int:
-    """Escribe un Excel con los documentos del contexto y sus ejes (2.0.0, D4): hojas `Documentos` y `Ejes`.
+    """Escribe un Excel con los documentos del contexto y sus ejes (2.0.0, D4): hojas `Documentos`, `Ejes` y `Valores`.
 
     `Documentos` tiene una fila por documento clasificado (en el orden de los dominios) y después una por cada
     documento sin clasificar, con su motivo; tras las columnas fijas (`CONTEXT_DOCUMENTS_COLUMNS`), una por cada eje que
     solo etiqueta, con los nombres de sus valores separados por «; ». `Ejes` tiene una fila por eje y valor del catálogo
     con el número de documentos que lo tienen (también los que no tiene ninguno): sirve para ver si un eje etiqueta de
-    más. Síncrona: un consumidor async la llama con `asyncio.to_thread`.
+    más. `Valores` tiene una fila por documento, eje y valor, con quién lo asignó, su confianza y la cita que lo
+    justifica (también de los ejes que organizan). Si el contexto agrupa versiones (`Context.version_groups`), cada
+    documento lleva su grupo, su versión y si es la vigente. Síncrona: un consumidor async la llama con
+    `asyncio.to_thread`.
 
     Args:
         destination: Ruta del `.xlsx` (se crea o sobrescribe) o fichero binario abierto para escritura.
         context: Contexto del proyecto (`ContextRegistry.load_context`).
+        roots: Raíces de escaneo (como en `document_keys`). Con ellas, las rutas de los originales se escriben como su
+            clave relativa (la misma de las decisiones y la cola de revisión) y no sale ninguna ruta absoluta. Sin
+            ellas, la ruta completa del original, como hasta ahora.
         on_progress: Recibe `ProgressEvent(operation="export")` por fila (`started`, `export`, `done`).
         cancel_token: Si se cancela, para entre dos filas.
 
     Returns:
-        Filas de datos escritas en las dos hojas (sin las cabeceras).
+        Filas de datos escritas en las tres hojas (sin las cabeceras).
 
     Raises:
         MissingDependencyError: Falta `openpyxl` (extra `export`).
@@ -308,8 +323,32 @@ def write_context_documents_xlsx(
     """
     tag_axes = [axis for axis in context.taxonomy_axes if axis.organizes is None]
     columns = (*CONTEXT_DOCUMENTS_COLUMNS, *(_excel_safe(axis.name) for axis in tag_axes))
-    rows: list[Row] = [_context_document_row(domain, document, tag_axes) for domain in context.domains for document in domain.documents]
-    rows += [_unclassified_detail_row(detail, tag_axes) for detail in context.unclassified_details]
+    pairs = [(domain, document) for domain in context.domains for document in domain.documents]
+    sources = [document.source_path for _, document in pairs] + [detail.source_path for detail in context.unclassified_details]
+    sources += [member for group in context.version_groups for member in group.members]
+    paths = document_keys(sources, roots) if roots is not None else {source: source for source in sources}
+    file_columns = _key_columns if roots is not None else _file_columns
+    versions = _versions_by_source(context.version_groups)
+    rows: list[Row] = [
+        _context_document_row(domain, document, tag_axes, file_columns(paths[document.source_path]), versions.get(document.source_path))
+        for domain, document in pairs
+    ]
+    rows += [
+        _unclassified_detail_row(detail, tag_axes, file_columns(paths[detail.source_path]), versions.get(detail.source_path))
+        for detail in context.unclassified_details
+    ]
+    value_rows: list[Row] = [
+        _value_row(paths[document.source_path], key, value)
+        for _, document in pairs
+        for key, values in document.classification.axes.items()
+        for value in values
+    ]
+    value_rows += [
+        _value_row(paths[detail.source_path], key, value)
+        for detail in context.unclassified_details
+        for key, values in detail.classification.axes.items()
+        for value in values
+    ]
     counts = Counter(
         (key, value.slug)
         for domain in context.domains
@@ -329,7 +368,11 @@ def write_context_documents_xlsx(
         for axis in context.taxonomy_axes
         for entry in axis.entries
     ]
-    sheets = [(CONTEXT_DOCUMENTS_SHEET, columns, rows), (CONTEXT_AXES_SHEET, CONTEXT_AXES_COLUMNS, axis_rows)]
+    sheets = [
+        (CONTEXT_DOCUMENTS_SHEET, columns, rows),
+        (CONTEXT_AXES_SHEET, CONTEXT_AXES_COLUMNS, axis_rows),
+        (CONTEXT_VALUES_SHEET, CONTEXT_VALUES_COLUMNS, value_rows),
+    ]
     return _write_workbook(destination, sheets, on_progress, cancel_token)
 
 
@@ -338,11 +381,46 @@ def _axis_cells(classification: DocumentClassification, tag_axes: Sequence[Taxon
     return [_excel_safe("; ".join(value.name for value in classification.axes.get(axis.key, []))) for axis in tag_axes]
 
 
-def _context_document_row(domain: Domain, document: DomainDocument, tag_axes: Sequence[TaxonomyAxis]) -> Row:
+_Version = tuple[str, str, bool]
+"""Grupo (clave), versión y si es la vigente."""
+
+
+def _versions_by_source(groups: Sequence[DocumentVersionGroup]) -> dict[str, _Version]:
+    found: dict[str, _Version] = {}
+    for group in groups:
+        for member, version in zip(group.members, group.versions, strict=False):
+            found[member] = (group.key, version, member == group.current)
+    return found
+
+
+def _version_cells(version: _Version | None) -> tuple[str, str, str]:
+    if version is None:
+        return "", "", ""
+    key, number, current = version
+    return _excel_safe(key), _excel_safe(number), "Sí" if current else "No"
+
+
+def _value_row(path: str, axis: str, value: AxisValue) -> Row:
+    verified = "" if value.evidence_verified is None else ("Sí" if value.evidence_verified else "No")
+    return (
+        _excel_safe(path),
+        _excel_safe(axis),
+        _excel_safe(value.slug),
+        _excel_safe(value.name),
+        _excel_safe(value.classified_by),
+        round(value.confidence, 4),
+        _excel_safe(value.evidence or ""),
+        verified,
+    )
+
+
+def _context_document_row(
+    domain: Domain, document: DomainDocument, tag_axes: Sequence[TaxonomyAxis], files: tuple[str, str, str], version: _Version | None
+) -> Row:
     unclassified = domain.slug == UNCLASSIFIED_SLUG
     material = None if document.material_type == UNCLASSIFIED_SLUG else document.material_type
     return (
-        *_file_columns(document.source_path),
+        *files,
         _excel_safe(document.title),
         _excel_safe(document.document_type),
         _UNCLASSIFIED_LABEL if unclassified else _excel_safe(domain.slug),
@@ -355,13 +433,16 @@ def _context_document_row(domain: Domain, document: DomainDocument, tag_axes: Se
         _excel_safe(document.author or ""),
         _excel_safe(document.language or ""),
         _excel_safe("; ".join(document.keywords)),
+        *_version_cells(version),
         *_axis_cells(document.classification, tag_axes),
     )
 
 
-def _unclassified_detail_row(detail: UnclassifiedDocument, tag_axes: Sequence[TaxonomyAxis]) -> Row:
+def _unclassified_detail_row(
+    detail: UnclassifiedDocument, tag_axes: Sequence[TaxonomyAxis], files: tuple[str, str, str], version: _Version | None
+) -> Row:
     return (
-        *_file_columns(detail.source_path),
+        *files,
         _excel_safe(detail.title or ""),
         _excel_safe(detail.document_type),
         _UNCLASSIFIED_LABEL,
@@ -374,6 +455,7 @@ def _unclassified_detail_row(detail: UnclassifiedDocument, tag_axes: Sequence[Ta
         _excel_safe(detail.author or ""),
         _excel_safe(detail.language or ""),
         _excel_safe("; ".join(detail.keywords)),
+        *_version_cells(version),
         *_axis_cells(detail.classification, tag_axes),
     )
 
@@ -388,6 +470,13 @@ def _excel_safe(value: str) -> str:
     if value.startswith(_FORMULA_TRIGGER_CHARS):
         return f"'{value}"
     return value
+
+
+def _key_columns(key: str) -> tuple[str, str, str]:
+    """Archivo, carpeta y clave relativa (`document_keys`, siempre con `/`), protegidos."""
+    path = PurePosixPath(key)
+    folder = str(path.parent)
+    return _excel_safe(path.name), _excel_safe("" if folder == "." else folder), _excel_safe(key)
 
 
 def _file_columns(file_path: str) -> tuple[str, str, str]:

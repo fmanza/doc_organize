@@ -16,6 +16,7 @@ from doc_organize.core.models import (
     AxisValue,
     Context,
     DocumentClassification,
+    DocumentVersionGroup,
     Domain,
     DomainDocument,
     Project,
@@ -149,7 +150,8 @@ def test_excel_has_a_column_per_tag_axis_and_counts_per_value(tmp_path) -> None:
     workbook = openpyxl.load_workbook(buffer)
     documents = list(workbook["Documentos"].iter_rows(values_only=True))
     axes = list(workbook["Ejes"].iter_rows(values_only=True))
-    assert written == len(documents) - 1 + len(axes) - 1 == 4 + 5
+    values = list(workbook["Valores"].iter_rows(values_only=True))
+    assert written == len(documents) - 1 + len(axes) - 1 + len(values) - 1 == 4 + 5 + 9
     header = documents[0]
     assert header[-1] == "Marcos <b>normativos</b>"
     rows = {row[0]: dict(zip(header, row, strict=True)) for row in documents[1:]}
@@ -189,3 +191,42 @@ def test_cancelled_excel_leaves_no_partial_file(tmp_path) -> None:
         write_context_documents_xlsx(destination, _context(tmp_path), cancel_token=token)
 
     assert not destination.exists()
+
+
+def test_excel_values_sheet_has_who_classified_each_axis_value(tmp_path) -> None:
+    """Petición de la web (W8): quién asignó cada valor de cada eje, con su confianza y su cita."""
+    context = _context(tmp_path)
+    soa = context.domains[0].documents[0]
+    soa.classification.axes["normative_frameworks"][1] = AxisValue(
+        slug="iso-27001", name="ISO/IEC 27001", confidence=0.7, classified_by="ai", evidence="=según ISO 27001", evidence_verified=True
+    )
+    buffer = io.BytesIO()
+
+    write_context_documents_xlsx(buffer, context)
+
+    rows = list(openpyxl.load_workbook(buffer)["Valores"].iter_rows(values_only=True))
+    assert rows[0] == ("Ruta completa", "Eje", "Valor", "Nombre del valor", "Clasificado por", "Confianza", "Evidencia", "Evidencia verificada")
+    by_value = {(row[0].rsplit("/", 1)[-1].rsplit("\\", 1)[-1], row[1], row[2]): row[4:] for row in rows[1:]}
+    assert by_value[("soa.pdf", "normative_frameworks", "iso-27001")] == ("ai", 0.7, "'=según ISO 27001", "Sí")
+    assert by_value[("soa.pdf", "domains", "calidad")] == ("rules", 0.8, None, None)
+
+
+def test_excel_with_roots_writes_relative_keys_and_versions(tmp_path) -> None:
+    """Peticiones de la web (W8): `roots=` como `write_ai_context_bundle`, y las versiones de cada documento."""
+    context = _context(tmp_path)
+    soa, clave = (str(tmp_path / "soa.pdf"), str(tmp_path / "clave.pdf"))
+    context.version_groups = [DocumentVersionGroup(key="soa.pdf", members=[clave, soa], versions=["1", "2"], current=soa)]
+    buffer = io.BytesIO()
+
+    write_context_documents_xlsx(buffer, context, roots=[str(tmp_path)])
+
+    workbook = openpyxl.load_workbook(buffer)
+    cells = [str(cell) for sheet in workbook.worksheets for row in sheet.iter_rows(values_only=True) for cell in row if cell is not None]
+    assert not any(str(tmp_path) in cell for cell in cells)  # ninguna ruta absoluta
+    documents = list(workbook["Documentos"].iter_rows(values_only=True))
+    rows = {row[0]: dict(zip(documents[0], row, strict=True)) for row in documents[1:]}
+    assert rows["soa.pdf"]["Ruta completa"] == "soa.pdf" and rows["soa.pdf"]["Carpeta"] in ("", None)
+    assert (rows["soa.pdf"]["Grupo de versiones"], rows["soa.pdf"]["Versión"], rows["soa.pdf"]["Vigente"]) == ("soa.pdf", "2", "Sí")
+    assert (rows["clave.pdf"]["Versión"], rows["clave.pdf"]["Vigente"]) == ("1", "No")
+    assert rows["otro.pdf"]["Grupo de versiones"] in ("", None)
+    assert {row[0] for row in list(workbook["Valores"].iter_rows(values_only=True))[1:]} == {"soa.pdf", "clave.pdf", "otro.pdf"}
