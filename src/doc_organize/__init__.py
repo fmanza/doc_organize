@@ -68,6 +68,8 @@ _EXPORTS: dict[str, str] = {
     "ReviewItem": "doc_organize.context.review_queue",
     # Versiones de un documento (2.0.0, F5)
     "detect_document_versions": "doc_organize.context.versions",
+    "embedding_index_info": "doc_organize.ai.embeddings",
+    "clear_embedding_index": "doc_organize.ai.embeddings",
     "DocumentVersionGroup": "doc_organize.core.models",
     # Diagnóstico del entorno (2.0.0, F2)
     "check_environment": "doc_organize.diagnostics",

@@ -188,3 +188,21 @@ async def test_semantic_needs_a_client_and_a_valid_threshold(tmp_path) -> None:
         await ContextBuilder().build(_project(tmp_path), [], semantic=True)
     with pytest.raises(ValueError, match="semantic_threshold"):
         await ContextBuilder().build(_project(tmp_path), [], llm=fake_client(), semantic=True, semantic_threshold=1.5)
+
+
+@pytest.mark.asyncio
+async def test_index_info_and_clear(tmp_path) -> None:
+    """Petición de la web (W6): ver cuánto ocupa el índice y poder vaciarlo."""
+    from doc_organize.ai.embeddings import clear_embedding_index, embedding_index_info
+
+    llm = fake_client(embed=_embedder())
+    await EmbeddingIndex(tmp_path, model="modelo-a", redacted=True).vectors(llm, ["auditoria", "red", "cifrado"])
+    await EmbeddingIndex(tmp_path, model="modelo-b", redacted=True).vectors(llm, ["proceso"])
+
+    info = {item.model: item for item in embedding_index_info(tmp_path)}
+    assert (info["modelo-a"].vectors, info["modelo-a"].dimension) == (3, len(VOCABULARY) + 1)
+    assert info["modelo-b"].vectors == 1 and all(item.size_bytes > 0 for item in info.values())
+
+    assert clear_embedding_index(tmp_path, model="modelo-a") == 1
+    assert [item.model for item in embedding_index_info(tmp_path)] == ["modelo-b"]
+    assert clear_embedding_index(tmp_path) == 1 and embedding_index_info(tmp_path) == []
