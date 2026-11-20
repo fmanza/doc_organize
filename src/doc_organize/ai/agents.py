@@ -60,6 +60,8 @@ FINISH_TOOL = "finish"
 _CHARS_PER_TOKEN = 4
 
 ToolHandler = Callable[[dict[str, Any]], Any | Awaitable[Any]]
+StepCallback = Callable[["AgentStep", int], None]
+"""Callback de progreso: el paso terminado y el tope de pasos."""
 
 
 @dataclass(frozen=True)
@@ -233,8 +235,14 @@ class AgentRunner:
             specs.append(finish.spec())
         return specs
 
-    async def run(self, messages: Sequence[Message], *, cancel_token: CancelToken | None = None) -> AgentRun:
+    async def run(self, messages: Sequence[Message], *, cancel_token: CancelToken | None = None, on_step: StepCallback | None = None) -> AgentRun:
         """Ejecuta el agente desde `messages` (sistema e instrucciones del usuario).
+
+        Args:
+            messages: Mensajes iniciales.
+            cancel_token: Para cancelar desde fuera.
+            on_step: Se llama tras cada paso (llamada al modelo y sus herramientas) con el `AgentStep` y el tope de
+                pasos, para mostrar el progreso. Un fallo del callback se registra y no para el agente.
 
         Raises:
             AiAuthError, AiConnectionError, AiError: Fallos del proxy (no se reintentan aquí: los reintentos son del
@@ -263,6 +271,7 @@ class AgentRunner:
                 run.steps.append(step)
                 requested = assistant.get("tool_calls") or []
                 done = await self._calls(run, step, requested, state, cancel_token) if requested else self._final_text(run, assistant, state)
+                _notify(on_step, step, self.limits.max_steps)
                 if done:
                     return run
             run.stop_reason = "max_steps"
@@ -389,6 +398,15 @@ class _RunState:
 _FINISH_WARNING_STEPS = 2
 _FINISH_WARNING = "Te quedan {steps} llamadas: deja de explorar y da la respuesta final con `{finish}`."
 _REPEATED_CALL = "Acabas de hacer esta misma llamada con los mismos argumentos; su resultado ya está en la conversación. Haz otra cosa o termina."
+
+
+def _notify(callback: StepCallback | None, step: AgentStep, max_steps: int) -> None:
+    if callback is None:
+        return
+    try:
+        callback(step, max_steps)
+    except Exception as exc:  # noqa: BLE001 - un callback del consumidor nunca debe parar el agente
+        logger.warning(f"El callback de progreso del agente falló: {type(exc).__name__}: {exc}")
 
 
 def _no_handler(arguments: dict[str, Any]) -> Any:  # pragma: no cover - `finish` nunca se ejecuta como herramienta

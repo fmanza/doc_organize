@@ -40,7 +40,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from doc_organize.ai.agents import AgentLimits, AgentRun, AgentRunner, AgentTool
+from doc_organize.ai.agents import AgentLimits, AgentRun, AgentRunner, AgentTool, StepCallback
 from doc_organize.ai.llm_client import LlmClient
 from doc_organize.ai.prompts import PromptRegistry
 from doc_organize.context.domain_classifier import _DEFAULT_THRESHOLD
@@ -174,6 +174,7 @@ class TaxonomyDesignAgent:
         instructions: str = "",
         roots: Sequence[str] | None = None,
         cancel_token: CancelToken | None = None,
+        on_step: StepCallback | None = None,
     ) -> TaxonomyDesignProposal:
         """Propone un manifiesto para `documents`, mejorando `base` si se da.
 
@@ -184,6 +185,7 @@ class TaxonomyDesignAgent:
             instructions: Indicaciones de la persona para el agente (p. ej. «separa calidad de medio ambiente»).
             roots: Raíces de escaneo para las claves de los documentos.
             cancel_token: Para cancelar desde fuera.
+            on_step: Progreso por paso (`AgentRunner.run`).
 
         Raises:
             ValueError: No hay ningún documento legible.
@@ -201,7 +203,7 @@ class TaxonomyDesignAgent:
             start="Partes del manifiesto de partida: es tu primer borrador." if base is not None else _NO_BASE,
             instructions=_instructions(instructions),
         )
-        run = await runner.run(messages, cancel_token=cancel_token)
+        run = await runner.run(messages, cancel_token=cancel_token, on_step=on_step)
         edits = len(tools.history)
         if not run.finished:
             return TaxonomyDesignProposal(

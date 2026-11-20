@@ -37,6 +37,7 @@ class ReviewProposalLike(Protocol):
     action: str
     axes: dict[str, list[str]]
     rationale: str
+    id: str
 
 
 #: Orden de la cola: lo primero, lo que más urge.
@@ -58,6 +59,7 @@ class ReviewItem(BaseModel):
         document_key (str): Clave del documento (`document_key`), la de las decisiones.
         source_path (str | None): Ruta del original en el contexto (`None` en una decisión desfasada de un documento
             que ya no está).
+        proposal_id (str | None): Con `reviewer_proposal`, el `id` de la propuesta del revisor.
         source_sha256 (str | None): Huella del original en el contexto (2.0.0); con ella, una decisión sobre este
             elemento se puede atar a esa versión del original (`ClassificationDecision.source_sha256`).
         reason (ReviewReason): Por qué.
@@ -71,6 +73,7 @@ class ReviewItem(BaseModel):
     document_key: str
     source_path: str | None = None
     source_sha256: str | None = None
+    proposal_id: str | None = None
     reason: ReviewReason
     axis: str | None = None
     value: str | None = None
@@ -136,6 +139,7 @@ def review_queue(context: Context, *, roots: Sequence[str] | None = None, propos
                 axis=axis,
                 value=", ".join(proposal.axes[axis]) if axis else None,
                 detail=f"{proposal.action}: {proposal.rationale}"[:500],
+                proposal_id=proposal.id,
             )
         )
     sha_by_path = {document.source_path: document.source_sha256 for _, document in documents}
@@ -196,8 +200,10 @@ def _item(
     value: str | None = None,
     confidence: float | None = None,
     detail: str | None = None,
+    proposal_id: str | None = None,
 ) -> ReviewItem:
     return ReviewItem(
+        proposal_id=proposal_id,
         document_key=key,
         source_path=source_path,
         reason=reason,

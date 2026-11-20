@@ -8,6 +8,11 @@ releases publicados antes de esa versión).
 
 ### Añadido
 
+- **Peticiones de la web en W7**: progreso por paso de los agentes (`AgentRunner.run(on_step=)`,
+  `TaxonomyDesignAgent.propose(on_step=)`, `ReviewAgent.propose(on_step=)`); `ReviewProposal.id` estable y
+  `ReviewItem.proposal_id` en los elementos `reviewer_proposal` de la cola; `AxisRulesReport.coverage` se incluye al
+  serializar el informe de `check_taxonomy_rules`.
+
 - **Peticiones de la web en W6**: `embedding_index_info(project_root)` (índices de embeddings por modelo: vectores,
   dimensión y tamaño) y `clear_embedding_index(project_root, model=None)`.
 
