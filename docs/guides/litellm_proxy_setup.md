@@ -1,4 +1,4 @@
-# Desplegar un LiteLLM Proxy (Sub-fase B: clasificación de dominios por IA)
+# Desplegar un LiteLLM Proxy (IA de doc_organize)
 
 La organización documental por dominios (`doc_organize.context`) clasifica cada
 documento por reglas primero (Sub-fase A). Si activas la clasificación asistida por
@@ -8,8 +8,8 @@ llama a un proveedor de IA directamente. Esta guía explica cómo levantar ese p
 en local con Docker.
 
 Desde 2.0.0 un solo cliente (`LlmClient`, §4) hace todas las tareas de IA contra ese proxy: clasificar (con o sin
-`taxonomy_manifest.md`; con manifiesto, una sola llamada resuelve todos los ejes pendientes), describir documentos y
-proponer una taxonomía.
+`taxonomy_manifest.md`; con manifiesto, una sola llamada resuelve todos los ejes pendientes), describir documentos,
+proponer una taxonomía, los agentes (diseñador y revisor) y, con la semántica activada, los embeddings.
 
 No necesitas esta guía si no vas a usar la Sub-fase B: la clasificación por reglas
 funciona sin ningún proxy ni credencial de IA.
@@ -88,10 +88,10 @@ python -c "import secrets; print('LITELLM_SALT_KEY=' + secrets.token_hex(32))"
 
 Pega cada valor generado en la línea correspondiente de `.env`.
 
-Edita **`config.yaml`** si quieres otro modelo/proveedor — por defecto usa
-`claude-classifier` como alias apuntando a un modelo económico
-(`anthropic/claude-haiku-4-5-20251001`), suficiente para clasificar un documento
-entre un catálogo cerrado de dominios.
+Edita **`config.yaml`** si quieres otro modelo o proveedor. El ejemplo define un alias por tarea
+(`doc-organize-classify`, `-enrich`, `-taxonomy-design`, `-agent` y `-embed`): un modelo económico para clasificar y
+describir, uno más capaz para la taxonomía y los agentes, y uno local de Ollama para los embeddings. Si usas modelos
+locales, mira antes [Modelos locales](#modelos-locales-ollama).
 
 Ni `.env` ni `config.yaml` (los reales, no los `.example`) se versionan — ya están
 en el `.gitignore` de la raíz del repo.
@@ -117,8 +117,11 @@ Genera una virtual key con permiso de `chat/completions`:
 curl -X POST http://localhost:4000/key/generate \
   -H "Authorization: Bearer <tu LITELLM_MASTER_KEY>" \
   -H "Content-Type: application/json" \
-  -d '{"models": ["claude-classifier"]}'
+  -d '{"models": ["doc-organize-classify", "doc-organize-enrich", "doc-organize-taxonomy-design", "doc-organize-agent", "doc-organize-embed"]}'
 ```
+
+Incluye solo los alias de las tareas que vayas a usar. Si quieres atribuir presupuesto aparte por tarea, genera una
+key por tarea con su alias (`DOC_ORGANIZE_LITELLM_VIRTUAL_KEY_<TAREA>`, opcional).
 
 La respuesta incluye `"key": "sk-..."` — esa es la virtual key.
 
@@ -133,16 +136,15 @@ En el entorno donde corre `doc_organize` (o en tu `.env` de la raíz del proyect
 ```bash
 DOC_ORGANIZE_LITELLM_BASE_URL=http://localhost:4000
 DOC_ORGANIZE_LITELLM_VIRTUAL_KEY=sk-...                        # la virtual key del paso 3
-DOC_ORGANIZE_LITELLM_MODEL_CLASSIFY=claude-classifier          # clasificar ejes
-DOC_ORGANIZE_LITELLM_MODEL_ENRICH=claude-classifier            # describir documentos
-DOC_ORGANIZE_LITELLM_MODEL_TAXONOMY_DESIGN=claude-classifier   # proponer una taxonomía
+# Opcional: otro modelo para una tarea (si no, el alias doc-organize-<tarea> del config.yaml)
+# DOC_ORGANIZE_LITELLM_MODEL_CLASSIFY=otro-alias
 # Opcional: una virtual key propia por tarea, para atribuir presupuesto y límites aparte en el proxy
-DOC_ORGANIZE_LITELLM_VIRTUAL_KEY_CLASSIFY=sk-...
+# DOC_ORGANIZE_LITELLM_VIRTUAL_KEY_CLASSIFY=sk-...
 ```
 
-Una tarea sin `MODEL_<TAREA>` usa el alias recomendado `doc-organize-<tarea>` (`doc-organize-classify`,
-`doc-organize-enrich`, `doc-organize-taxonomy-design`): puedes crear esos alias en el `config.yaml` del proxy o dar el
-modelo real en la variable. Sin `BASE_URL`, `settings_from_env()` devuelve `None` (sin IA); con `BASE_URL` y sin
+Una tarea sin `MODEL_<TAREA>` usa el alias `doc-organize-<tarea>` (`doc-organize-classify`, `doc-organize-enrich`,
+`doc-organize-taxonomy-design`, `doc-organize-agent`, `doc-organize-embed`), que es lo que define
+`config.yaml.example`: así el modelo se cambia en el proxy sin tocar doc_organize. Sin `BASE_URL`, `settings_from_env()` devuelve `None` (sin IA); con `BASE_URL` y sin
 `VIRTUAL_KEY`, `AiConfigurationError`.
 
 Las variables de 1.x (`DOC_ORGANIZE_LITELLM_CLASSIFICATION_*`, `_TAXONOMY_CLASSIFICATION_*`, `_ENRICHMENT_*`,
@@ -161,6 +163,22 @@ print([(check.name, check.status, check.detail) for check in report.checks if ch
 
 Requiere el extra `doc_organize[context]` instalado (`pip install doc_organize[context]`) para `pyyaml` (manifiestos,
 plantillas y prompts); el cliente en sí solo usa `httpx`, ya incluido en el extra `ai`.
+
+## Modelos locales (Ollama)
+
+Con Ollama detrás del proxy (ver el bloque comentado de `config.yaml.example`):
+
+- **Contexto**: Ollama recorta el prompt a 4096 tokens **sin dar error** si no se le pide otro contexto. Fija
+  `num_ctx` en `litellm_params` de cada alias: 8192 basta para `classify` y `enrich`; `agent` y `taxonomy_design`
+  necesitan 32768 (las herramientas y los informes ocupan mucho).
+- **Prefijo**: `ollama_chat/<modelo>` para las tareas de chat (lleva herramientas y `response_format`) y
+  `ollama/<modelo>` para los embeddings.
+- **Tiempo**: un modelo local de 14B, parte en CPU, tarda de media unos 25 s por clasificación y algunas pasan de
+  30 s. El timeout por defecto de `AiSettings` (120 s) basta para clasificar y describir; para el diseño de taxonomía
+  y los agentes sube el de la tarea (`TaskSettings(timeout_s=600)`). Un timeout corto hace que varias llamadas fallen
+  seguidas y la construcción deje de enviar documentos (`ai_stats.stopped = "connection"`).
+- **Modelo**: los que razonan antes de responder pueden agotar `max_tokens` sin llegar al JSON; si una tarea falla
+  con «no es el JSON esperado», prueba otro modelo o sube `TaskSettings.max_tokens`.
 
 ## Parar el proxy
 
@@ -201,8 +219,11 @@ arrancar LiteLLM, pero un primer arranque puede tardar unos segundos más en
 completar las migraciones internas de LiteLLM.
 
 **`401`/`403` clasificando documentos**: la virtual key no tiene permiso sobre el
-modelo `claude-classifier` (o el que hayas configurado) — repite el paso 3
-incluyendo ese modelo en `"models"`.
+alias de la tarea (`doc-organize-<tarea>`, o el que hayas configurado): repite el paso 3
+incluyendo ese alias en `"models"`.
+
+**Clasificaciones que se cortan con `stopped = "connection"`**: varias llamadas seguidas superaron el timeout o el
+proxy no respondió. Con modelos locales, revisa `num_ctx` y el timeout (ver [Modelos locales](#modelos-locales-ollama)).
 
 ## Referencias
 

@@ -1,18 +1,62 @@
 # Copiar a config.yaml (en esta misma carpeta) y adaptar model_list a tu
 # proveedor real. Nunca versionar el config.yaml real si llega a contener
-# claves en claro — usa siempre "os.environ/VAR" para referenciar credenciales,
+# claves en claro: usa siempre "os.environ/VAR" para referenciar credenciales,
 # como en el ejemplo de abajo.
+#
+# doc_organize 2.0 usa un alias por tarea, `doc-organize-<tarea>`, cuando la
+# tarea no tiene modelo propio (DOC_ORGANIZE_LITELLM_MODEL_<TAREA> o
+# `TaskSettings.model`). Definiendo aquí los alias no hace falta configurar
+# ningún modelo en doc_organize; para cambiar de modelo basta con este fichero.
 
 model_list:
-  # Alias que doc_organize usa por defecto para clasificar dominios (Sub-fase
-  # B) — coincide con LiteLLMClassificationConfig.model / la variable de
-  # entorno opcional DOC_ORGANIZE_LITELLM_CLASSIFICATION_MODEL si se define.
-  - model_name: claude-classifier
+  # Clasificar los ejes de un documento: catálogo cerrado, respuesta corta en
+  # JSON. Un modelo económico basta.
+  - model_name: doc-organize-classify
     litellm_params:
-      # Modelo económico, suficiente para clasificar un documento entre un
-      # catálogo cerrado de dominios — ajusta a lo que tengas contratado.
-      model: anthropic/claude-haiku-4-5-20251001
+      model: anthropic/claude-haiku-5-5
       api_key: os.environ/ANTHROPIC_API_KEY
+
+  # Describir un documento (título, resumen, palabras clave).
+  - model_name: doc-organize-enrich
+    litellm_params:
+      model: anthropic/claude-haiku-5-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # Proponer una taxonomía y los agentes (diseñador y revisor): conversaciones
+  # largas con herramientas. Conviene un modelo más capaz.
+  - model_name: doc-organize-taxonomy-design
+    litellm_params:
+      model: anthropic/claude-sonnet-5-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: doc-organize-agent
+    litellm_params:
+      model: anthropic/claude-sonnet-5-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # Embeddings (solo con la semántica activada, `build(semantic=...)`).
+  # Anthropic no ofrece embeddings: aquí, uno local con Ollama.
+  - model_name: doc-organize-embed
+    litellm_params:
+      model: ollama/qwen3-embedding:0.6b
+      api_base: http://host.docker.internal:11434
+
+  # --- Alternativa con modelos locales (Ollama) ---------------------------------
+  # Ollama recorta en silencio el prompt a 4096 tokens si no se le da otro
+  # contexto: fija `num_ctx` en cada modelo (8192 basta para clasificar y
+  # describir; los agentes y el diseño de taxonomía necesitan 32768). Usa
+  # `ollama_chat/` (no `ollama/`) para que lleguen las herramientas y el
+  # `response_format`. Ver docs/guides/litellm_proxy_setup.md.
+  #
+  # - model_name: doc-organize-classify
+  #   litellm_params:
+  #     model: ollama_chat/qwen2.5-coder:14b
+  #     api_base: http://host.docker.internal:11434
+  #     num_ctx: 8192
+  # - model_name: doc-organize-agent
+  #   litellm_params:
+  #     model: ollama_chat/<modelo grande>
+  #     api_base: http://host.docker.internal:11434
+  #     num_ctx: 32768
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

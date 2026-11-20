@@ -13,6 +13,15 @@ incremental para no reconvertir lo que no ha cambiado. Cada conjunto de trabajo
 se organiza como un **proyecto**: una carpeta raíz propia con su conversión, su
 caché y sus duplicados.
 
+Sobre la conversión, el **contexto documental** clasifica cada documento según una taxonomía por **ejes** (dominio y
+tipo de material, que organizan carpetas, y los que solo etiquetan, como el marco normativo), por reglas y, si se
+quiere, con embeddings e IA a través de un LiteLLM Proxy; reorganiza una copia en carpetas y genera un sitio navegable
+con Zensical, también para verlo sin conexión, y un paquete para subir a un chat o agente de IA.
+
+> **2.0.0**: taxonomía por ejes, un solo cliente de IA por tarea (`LlmClient`), decisiones humanas y cola de revisión,
+> evaluación, versiones de un documento, semántica, agentes que proponen sin aplicar, sitio sin conexión y paquete para
+> IA. Cambios incompatibles y cómo actualizar: [De 1.x a 2.0](docs/guides/migracion_2_0.md).
+
 > **1.0.0 (L-11)**: la interfaz web integrada (`doc_organize.web`, `doc_organize.auth`, los subcomandos `web`,
 > `tenant` y `user` del CLI y el extra `[web]`), obsoleta desde 0.14.0, se ha retirado. Usa [doc_organize_web](https://github.com/fmanza/doc_organize_web), que ofrece
 > lo mismo (usuarios, tenants, roles y progreso en tiempo real) sobre esta librería. El CLI de `scan`, `project`,
@@ -31,6 +40,9 @@ caché y sus duplicados.
 ```bash
 pip install doc_organize            # núcleo: CLI, OCR en CPU incluido
 pip install doc_organize[export]    # + Excel de caché y de errores (`export cache-xlsx`/`errors-xlsx`)
+pip install doc_organize[context]   # + contexto documental (manifiestos, plantillas y prompts)
+pip install doc_organize[ai]        # + IA vía LiteLLM Proxy (ver docs/guides/litellm_proxy_setup.md)
+pip install doc_organize[site]      # + sitio navegable con Zensical
 ```
 
 ### Desarrollo
@@ -118,8 +130,11 @@ doc_organize/
 │   ├── dedup/              # DeduplicationManager (Nivel 2)
 │   ├── cache/               # CacheManager, SQLite+WAL (Nivel 2)
 │   ├── projects/             # ProjectRegistry (Nivel 2)
+│   ├── security/          # redacción de credenciales, Markdown no confiable (Nivel 2)
+│   ├── ai/                 # LlmClient, AiSettings, prompts, caché, embeddings, agentes (Nivel 2)
 │   ├── scan/                   # ScanCommand: orquestación del escaneo (Nivel 3)
-│   ├── export/                 # ZIP en streaming y Excel de un proyecto (Nivel 3, Excel con extra [export])
+│   ├── context/               # contexto por ejes, reorganización, sitio, decisiones, agentes (Nivel 3)
+│   ├── export/                 # ZIP, Excel y paquete para IA de un proyecto (Nivel 3)
 │   └── main.py                   # CLI (Nivel 3)
 ├── tests/
 │   ├── unit/

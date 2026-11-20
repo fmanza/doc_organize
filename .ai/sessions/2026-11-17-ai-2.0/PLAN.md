@@ -4,6 +4,7 @@ Skill: `new-feature`. Solo PLAN y AUDIT_PLAN; sin implementar. **Una sola versi�
 con ruptura) y doc_organize_web **2.0.0**, publicadas a la vez. Se implementan por hitos internos (§Hitos), sin
 versiones intermedias.
 
+> - **2026-11-20, 2.0.0**: W2-W9 hechos. rc2 (peticiones de la web en W4-W8) y rc3 (el sitio sin conexión no publica originales ni `.json`, fuga hallada por los E2E de W9). Preproducción con datos reales en `PREPRODUCCION_W9.md` (migraciones, diagnóstico, contexto y entregas correctos; la web sube su plazo de IA a 120 s). Criterio de salida cumplido; publicación simultánea de doc_organize 2.0.0 y doc_organize_web 2.0.0.
 > - **2026-11-19, 2.0.0rc1**: M8-M10 hechos. Medición final contra M0 en `MEDICION_M10.md` (exactitud cumple; coste 1,64×, aceptado como referencia). **Puerta de M8.2 no cumplida** con los modelos locales (`MEDICION_M8.md`, `MEDICION_M10.md`): el mantenedor decide publicar el diseñador como herramienta de apoyo. `ai_settings_v1` de la web se borra en la 2.0.0 final.
 >
 > **Decisiones del mantenedor (2026-11-17)**
