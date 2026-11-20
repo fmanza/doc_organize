@@ -8,6 +8,13 @@ releases publicados antes de esa versión).
 
 ### Añadido
 
+- **Peticiones de la web en W8**: `write_context_documents_xlsx(..., roots=)` escribe las rutas como la clave relativa
+  de cada documento (sin rutas absolutas), añade a `Documentos` el grupo de versiones, la versión y si es la vigente, y
+  una hoja `Valores` con quién asignó cada valor de cada eje, su confianza y su cita.
+  `SiteGenerator.generate(..., work_dir=)` construye el sitio en una carpeta aparte, con una copia de la carpeta
+  reorganizada, sin tocar la del proyecto ni su `zensical.toml` ni su sitio. Los problemas de `check_site_offline` ya
+  iban relativos al sitio; ahora lo comprueba un test.
+
 - **Peticiones de la web en W7**: progreso por paso de los agentes (`AgentRunner.run(on_step=)`,
   `TaxonomyDesignAgent.propose(on_step=)`, `ReviewAgent.propose(on_step=)`); `ReviewProposal.id` estable y
   `ReviewItem.proposal_id` en los elementos `reviewer_proposal` de la cola; `AxisRulesReport.coverage` se incluye al

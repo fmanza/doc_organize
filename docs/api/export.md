@@ -16,7 +16,7 @@
 | `write_scan_errors_xlsx` | `(destination, entries, history, *, on_progress=None, cancel_token=None)` | filas escritas |
 | `load_context_history` | `(history_logs: Iterable[str \| Path])` | `list[ContextBuildRecord]`, más recientes primero (1.5.0); con las copias giradas de cada histórico, sin repetir (1.6.0) |
 | `write_context_history_xlsx` | `(destination, history, *, on_progress=None, cancel_token=None)` | filas escritas (1.5.0) |
-| `write_context_documents_xlsx` | `(destination, context, *, on_progress=None, cancel_token=None)` | filas escritas (2.0.0): hoja `Documentos` (una fila por documento, clasificados y sin clasificar con su motivo, y una columna por cada eje que solo etiqueta, con los nombres de sus valores separados por «; ») y hoja `Ejes` (una fila por eje y valor del catálogo con su número de documentos, también los que tienen 0) |
+| `write_context_documents_xlsx` | `(destination, context, *, roots=None, on_progress=None, cancel_token=None)` | filas escritas (2.0.0): hoja `Documentos` (una fila por documento, clasificados y sin clasificar con su motivo, su grupo de versiones, versión y si es la vigente, y una columna por cada eje que solo etiqueta, con los nombres de sus valores separados por «; »), hoja `Ejes` (una fila por eje y valor del catálogo con su número de documentos, también los que tienen 0) y hoja `Valores` (una fila por documento, eje y valor: quién lo asignó, confianza y cita). Con `roots` (las raíces de escaneo, como en `document_keys`), las rutas van como la clave relativa del documento y no sale ninguna ruta absoluta |
 | `ExportStats` | `file_count`, `total_size_bytes` (modelo Pydantic congelado) | — |
 | `MissingDependencyError` | `package`, `extra` (en `doc_organize.core.exceptions`) | — |
 

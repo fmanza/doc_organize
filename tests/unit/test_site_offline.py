@@ -170,3 +170,73 @@ async def test_acceptance_d6_hostile_document_produces_nothing_active(tmp_path) 
     assert '<img src="https://tracker.example' not in page and 'href="https://tracker.example/p.png"' in page  # enlace, no imagen
     assert "_offline/mermaid/mermaid.min.js" in page and "unpkg.com/iframe-worker" not in page
     assert (result.site_dir / "_offline" / "mermaid" / "mermaid.min.js").is_file()
+
+
+def _tree(root: Path) -> dict[str, str]:
+    return {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest() for path in sorted(root.rglob("*")) if path.is_file()}
+
+
+@pytest.mark.asyncio
+async def test_work_dir_builds_outside_the_project_without_touching_it(tmp_path) -> None:
+    """Petición de la web (W8): construir el sitio sin conexión aparte, sin neutralizar la carpeta del proyecto."""
+    project_root = tmp_path / "proyecto"
+    project_root.mkdir()
+    project, context = await _reorganized(project_root)
+    await SiteGenerator().generate(project, context, build=False)
+    before = _tree(project_root)
+    work = tmp_path / "trabajo"
+
+    result = await SiteGenerator().generate(project, context, build=False, offline=True, llms_txt=True, work_dir=work)
+
+    assert _tree(project_root) == before  # ni páginas, ni zensical.toml, ni sitio del proyecto
+    assert result.config_path == work / "zensical.toml" and result.site_dir == work / "site"
+    config = tomllib.loads(result.config_path.read_text(encoding="utf-8"))["project"]
+    assert config["docs_dir"] == "organizado" and config["site_dir"] == "site" and config["plugins"] == {"offline": {"enabled": True}}
+    page = (work / "organizado" / "calidad" / "pdf" / "informe" / "informe.md").read_text(encoding="utf-8")
+    assert "<script" not in page and result.neutralized == ("calidad/pdf/informe/informe.md",)
+    assert (work / "organizado" / "llms.txt").is_file() and (work / "organizado" / "_offline" / "mermaid" / "mermaid.min.js").is_file()
+    assert "[Informe](calidad/pdf/informe/informe.html)" in (work / "organizado" / "llms.txt").read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("where", ["dentro", "no_vacia", "con_site_dir"])
+async def test_work_dir_is_validated(tmp_path, where) -> None:
+    from doc_organize.core.exceptions import InvalidPathError
+
+    project_root = tmp_path / "proyecto"
+    project_root.mkdir()
+    project, context = await _reorganized(project_root)
+    work = {"dentro": project_root / "trabajo", "no_vacia": tmp_path / "trabajo", "con_site_dir": tmp_path / "otro"}[where]
+    if where == "no_vacia":
+        work.mkdir()
+        (work / "algo.txt").write_text("x", encoding="utf-8")
+
+    with pytest.raises(InvalidPathError):
+        await SiteGenerator().generate(
+            project, context, build=False, offline=True, work_dir=work, site_dir=Path("site") if where == "con_site_dir" else None
+        )
+
+    assert not (project_root / "trabajo").exists() and not (tmp_path / "otro").exists()
+
+
+def test_problems_never_carry_the_site_root(tmp_path) -> None:
+    """Petición de la web (W8): los problemas van relativos al sitio, sin la carpeta donde se construyó."""
+    site = _site(tmp_path / "raiz-temporal", {"a/index.html": '<img src="https://x.example/p.png"><a href="../falta.html">x</a>'}, search=False)
+
+    problems = check_site_offline(site).problems()
+
+    assert problems and not any("raiz-temporal" in line or str(tmp_path) in line for line in problems)
+    assert "Enlace roto en a/index.html: ../falta.html" in problems
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+@pytest.mark.skipif(importlib.util.find_spec("zensical") is None, reason="Requiere el extra 'site' (zensical)")
+async def test_real_build_in_work_dir_passes_the_offline_check(tmp_path) -> None:
+    project_root = tmp_path / "proyecto"
+    project_root.mkdir()
+    project, context = await _reorganized(project_root)
+
+    result = await SiteGenerator().generate(project, context, offline=True, work_dir=tmp_path / "trabajo", timeout=180)
+
+    assert check_site_offline(result.site_dir).ok and not (project_root / "site").exists() and not (project_root / "zensical.toml").exists()
