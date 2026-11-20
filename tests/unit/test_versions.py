@@ -128,6 +128,7 @@ async def test_all_is_like_1x_and_mark_annotates_every_version(tmp_path) -> None
     ]
     [group] = marked.version_groups
     assert docs["Manual_v1.docx"].version_group == group.key and group.versions == ["1", "2"] and not group.confirmed
+    assert group.key == "calidad/manual.docx"  # relativa a la raíz de escaneo, sin la ruta absoluta (petición de la web)
     assert marked.superseded_documents == []
 
 

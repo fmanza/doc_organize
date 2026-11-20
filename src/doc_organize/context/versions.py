@@ -198,7 +198,7 @@ def resolve_versions(
         outcome.applied += 1
     outcome.groups = [
         DocumentVersionGroup(
-            key=group.key,
+            key=_relative_group_key(group, keys),
             members=[member.source_path for member in group.members],
             versions=[member.version for member in group.members],
             current=group.current,
@@ -218,6 +218,15 @@ def mark_versions(documents: Iterable[DomainDocument | UnclassifiedDocument], ou
         if found is not None:
             group, version = found
             document.version, document.version_group, document.is_current = version, group.key, group.current == document.source_path
+
+
+def _relative_group_key(group: VersionGroup, keys: Mapping[str, str]) -> str:
+    """La clave del grupo con la carpeta relativa a la raíz de escaneo (como las claves de los documentos), en vez de la
+    ruta absoluta: estable entre equipos y contenedores (2.0.0, petición de la web)."""
+    folder = str(PurePosixPath(group.current.replace("\\", "/")).parent).lower()
+    suffix = group.key[len(folder) :] if group.key.startswith(folder) else "/" + group.key.rsplit("/", 1)[-1]
+    relative = str(PurePosixPath(keys.get(group.current, PurePosixPath(group.current).name)).parent).lower()
+    return suffix.lstrip("/") if relative in ("", ".") else relative + suffix
 
 
 def _version_issue(decision: ClassificationDecision, document: ConversionResult | None, grouped: set[str]) -> DecisionIssue | None:

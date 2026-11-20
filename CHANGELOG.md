@@ -8,6 +8,9 @@ releases publicados antes de esa versión).
 
 ### Añadido
 
+- **Peticiones de la web en W6**: `embedding_index_info(project_root)` (índices de embeddings por modelo: vectores,
+  dimensión y tamaño) y `clear_embedding_index(project_root, model=None)`.
+
 - **Peticiones de la web en W5**: `dry_run_classify(..., baseline=contexto_actual)` devuelve en `changes` qué
   documentos cambian de valor y en qué eje (`DocumentChange`); `ReviewItem.source_sha256` (la huella del original en
   cada elemento de la cola); `document_keys` y `common_root` exportados en `doc_organize`, con la explicación de qué
@@ -16,6 +19,12 @@ releases publicados antes de esa versión).
 - `check_environment` comprueba también modelos de embeddings: `AiEndpoint(kind="embedding")` pide un vector a
   `/embeddings` y da su dimensión; con variables de entorno, `embed` se comprueba si tiene modelo propio (como `agent`).
   Petición de doc_organize_web (W4).
+
+### Cambiado
+
+- La clave de un grupo de versiones (`DocumentVersionGroup.key`, `DomainDocument.version_group`) es relativa a la raíz
+  de escaneo (`calidad/manual.docx`), como las claves de los documentos, en vez de llevar la ruta absoluta de la
+  carpeta: estable entre equipos y contenedores. Los contextos ya construidos la cambian al reconstruir.
 
 ## [2.0.0rc1] - 2026-11-19
 

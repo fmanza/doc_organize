@@ -14,9 +14,11 @@ import asyncio
 import hashlib
 import json
 import math
+import shutil
 
 from array import array
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from doc_organize.ai.llm_client import LlmClient
@@ -110,6 +112,72 @@ class EmbeddingIndex:
             )
 
 
+@dataclass(frozen=True)
+class EmbeddingIndexInfo:
+    """Un índice de embeddings del proyecto (uno por modelo).
+
+    Attributes:
+        model (str | None): Modelo con el que se hizo (`None` si `index.json` no se puede leer).
+        folder (str): Carpeta dentro de `.doc_organize/embeddings/`.
+        vectors (int): Vectores guardados (uno por texto distinto: documentos y valores del catálogo).
+        dimension (int | None): Dimensión de los vectores.
+        size_bytes (int): Lo que ocupa en disco.
+    """
+
+    model: str | None
+    folder: str
+    vectors: int
+    dimension: int | None
+    size_bytes: int
+
+
+def embedding_index_info(project_root: str | Path) -> list[EmbeddingIndexInfo]:
+    """Los índices de embeddings del proyecto, uno por modelo, con su tamaño (para enseñarlo o decidir limpiarlo).
+
+    Las claves son huellas de texto, no rutas: el índice no dice a qué documento pertenece cada vector.
+
+    Example:
+        >>> import tempfile
+        >>> embedding_index_info(tempfile.mkdtemp())
+        []
+    """
+    root = Path(project_root) / EMBEDDINGS_DIR
+    if not root.is_dir() or root.is_symlink():
+        return []
+    found = []
+    for folder in sorted(path for path in root.iterdir() if path.is_dir() and not path.is_symlink()):
+        size = sum(file.stat().st_size for file in folder.iterdir() if file.is_file() and not file.is_symlink())
+        try:
+            index = json.loads((folder / "index.json").read_text(encoding="utf-8"))
+            model, vectors, dimension = index.get("model"), len(index.get("rows", {})), index.get("dimension")
+        except (OSError, ValueError, AttributeError):
+            model, vectors, dimension = None, 0, None
+        found.append(EmbeddingIndexInfo(model=model, folder=folder.name, vectors=vectors, dimension=dimension, size_bytes=size))
+    return found
+
+
+def clear_embedding_index(project_root: str | Path, *, model: str | None = None) -> int:
+    """Borra el índice de `model` (o todos), para liberar espacio o empezar de cero: la siguiente construcción con
+    `semantic=True` vuelve a pedir los vectores. No lo llames mientras se construye el contexto. Devuelve los índices
+    borrados. No sigue enlaces simbólicos.
+
+    Example:
+        >>> import tempfile
+        >>> clear_embedding_index(tempfile.mkdtemp())
+        0
+    """
+    root = Path(project_root) / EMBEDDINGS_DIR
+    if not root.is_dir() or root.is_symlink():
+        return 0
+    targets = [EmbeddingIndex(project_root, model=model, redacted=True).folder] if model is not None else list(root.iterdir())
+    removed = 0
+    for folder in targets:
+        if folder.is_dir() and not folder.is_symlink():
+            shutil.rmtree(folder)
+            removed += 1
+    return removed
+
+
 def cosine(a: Sequence[float], b: Sequence[float]) -> float:
     """Similitud del coseno entre dos vectores (0 si alguno es nulo).
 
@@ -122,4 +190,4 @@ def cosine(a: Sequence[float], b: Sequence[float]) -> float:
     return dot / norm if norm else 0.0
 
 
-__all__ = ["EMBEDDINGS_DIR", "EMBED_BATCH_SIZE", "EmbeddingIndex", "cosine"]
+__all__ = ["EMBEDDINGS_DIR", "EMBED_BATCH_SIZE", "EmbeddingIndex", "EmbeddingIndexInfo", "clear_embedding_index", "cosine", "embedding_index_info"]
