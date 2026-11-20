@@ -99,3 +99,25 @@ async def test_dry_run_without_reference_classifies_everything_and_refuses_persi
     assert (result.documents, result.evaluation) == (2, None)
     with pytest.raises(TypeError, match="persist"):
         await dry_run_classify(_project(tmp_path), documents, persist=True)
+
+
+@pytest.mark.asyncio
+async def test_dry_run_lists_what_changes_against_the_baseline(tmp_path) -> None:
+    """Petición de la web (W5): qué documentos cambian de valor entre el contexto actual y la prueba."""
+    documents = [_document(tmp_path, "A", "uno"), _document(tmp_path, "B", "dos")]
+    options = {"taxonomy_manifest": _manifest(), "ai_scope": "unclassified"}
+    calidad = fake_client(classify=lambda request: {request.axes[0]: "calidad", request.axes[1]: "manual"})
+    baseline = (await dry_run_classify(_project(tmp_path), documents, llm=calidad, **options)).context
+
+    def one_changes(request):
+        domain = "seguridad" if request.title == "uno" else "calidad"
+        return {request.axes[0]: domain, request.axes[1]: "manual"}
+
+    trial = await dry_run_classify(_project(tmp_path), documents, llm=fake_client(classify=one_changes), baseline=baseline, **options)
+    same = await dry_run_classify(_project(tmp_path), documents, llm=calidad, baseline=baseline, **options)
+    without = await dry_run_classify(_project(tmp_path), documents, llm=calidad, **options)
+
+    [change] = trial.changes
+    assert (change.document_key, change.axis, change.before, change.after) == ("A/uno.pdf", "domains", ["calidad"], ["seguridad"])
+    assert (change.before_by, change.after_by) == ("ai", "ai")
+    assert same.changes == [] and without.changes == []

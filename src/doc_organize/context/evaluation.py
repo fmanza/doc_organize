@@ -244,11 +244,18 @@ def _gold_values(cell: object) -> list[str] | None:
 
 
 def document_keys(source_paths: Iterable[str], roots: Sequence[str] | None = None) -> dict[str, str]:
-    """La clave de cada original (`source_path` → clave), con `roots` o, por defecto, con la carpeta común de todos.
+    """La clave de cada original (`source_path` → clave): su ruta relativa a la raíz de escaneo que la contiene.
+
+    Es la clave de las decisiones (`ClassificationDecision.document_key`), de la cola de revisión, de la referencia de
+    la evaluación y de `dry_run_classify`. Pasa como `roots` las mismas raíces que a `ContextBuilder.build(scan_roots=)`
+    (las carpetas que se escanearon): así la clave no cambia aunque cambie el corpus. Sin `roots` se usa la carpeta común
+    de todos los originales, que sí puede cambiar al añadir o quitar documentos.
 
     Example:
         >>> document_keys(["/mnt/e/ENS/a.pdf", "/mnt/e/ISO/b.pdf"])
         {'/mnt/e/ENS/a.pdf': 'ENS/a.pdf', '/mnt/e/ISO/b.pdf': 'ISO/b.pdf'}
+        >>> document_keys(["/mnt/e/ENS/a.pdf"], roots=["/mnt/e"])  # con la raíz: estable
+        {'/mnt/e/ENS/a.pdf': 'ENS/a.pdf'}
     """
     paths = list(source_paths)
     if roots is None:

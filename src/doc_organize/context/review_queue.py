@@ -58,6 +58,8 @@ class ReviewItem(BaseModel):
         document_key (str): Clave del documento (`document_key`), la de las decisiones.
         source_path (str | None): Ruta del original en el contexto (`None` en una decisión desfasada de un documento
             que ya no está).
+        source_sha256 (str | None): Huella del original en el contexto (2.0.0); con ella, una decisión sobre este
+            elemento se puede atar a esa versión del original (`ClassificationDecision.source_sha256`).
         reason (ReviewReason): Por qué.
         axis (str | None): Eje afectado, si es de uno.
         value (str | None): Valor afectado, si es de uno.
@@ -68,6 +70,7 @@ class ReviewItem(BaseModel):
 
     document_key: str
     source_path: str | None = None
+    source_sha256: str | None = None
     reason: ReviewReason
     axis: str | None = None
     value: str | None = None
@@ -135,6 +138,11 @@ def review_queue(context: Context, *, roots: Sequence[str] | None = None, propos
                 detail=f"{proposal.action}: {proposal.rationale}"[:500],
             )
         )
+    sha_by_path = {document.source_path: document.source_sha256 for _, document in documents}
+    sha_by_path.update({detail.source_path: detail.source_sha256 for detail in context.unclassified_details})
+    for item in items:
+        if item.source_path is not None:
+            item.source_sha256 = sha_by_path.get(item.source_path)
     return sorted(items, key=lambda item: (item.priority, item.document_key, item.axis or "", item.value or ""))
 
 

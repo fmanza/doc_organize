@@ -66,8 +66,8 @@ un `set_axis`, lo del mismo eje y un `exclude`. Un `confirm` anterior se conserv
 ## Cola de revisión
 
 `review_queue(context, *, roots=None)` dice qué documentos debería mirar una persona y por qué, sin cambiar nada. Cada
-`ReviewItem` trae la clave del documento (la de las decisiones), el eje y el valor afectados, su confianza y una
-explicación, ordenado por prioridad:
+`ReviewItem` trae la clave del documento (la de las decisiones), la huella del original (`source_sha256`, para atar la
+decisión a esa versión), el eje y el valor afectados, su confianza y una explicación, ordenado por prioridad:
 
 | Prioridad | `reason` | Cuándo |
 |---|---|---|

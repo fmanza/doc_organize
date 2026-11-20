@@ -120,3 +120,14 @@ def test_keys_use_the_given_roots() -> None:
 
 def test_priorities_cover_every_reason() -> None:
     assert sorted(REVIEW_PRIORITY.values()) == list(range(len(REVIEW_PRIORITY)))
+
+
+def test_items_carry_the_source_fingerprint() -> None:
+    """Petición de la web (W5): la huella del original va en cada elemento de la cola."""
+    document = _document("ENS/plan.pdf", {"domains": []}, source_sha256="a" * 64)
+    other = _document("ISO/norma.pdf", {"domains": []})
+
+    items = review_queue(_context({"calidad": [document, other]}))
+
+    by_key = {item.document_key: item.source_sha256 for item in items}
+    assert by_key == {"ENS/plan.pdf": "a" * 64, "ISO/norma.pdf": None}

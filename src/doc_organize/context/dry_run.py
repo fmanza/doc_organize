@@ -18,13 +18,34 @@ Example:
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from doc_organize.ai.cache import AiResultCache
 from doc_organize.context.context_builder import ContextBuilder
-from doc_organize.context.evaluation import EvaluationReport, GoldStandard, common_root, document_keys, evaluate_classification
+from doc_organize.context.evaluation import EvaluationReport, GoldStandard, _predictions, common_root, document_keys, evaluate_classification
 from doc_organize.core.models import Context, ConversionResult, Project
+
+
+@dataclass(frozen=True)
+class DocumentChange:
+    """Un documento cuyo valor en un eje cambia entre el contexto de partida y la prueba.
+
+    Attributes:
+        document_key (str): Clave del documento.
+        axis (str): Eje.
+        before (list[str]): Valores en el contexto de partida (vacío si no tenía o el documento no estaba).
+        after (list[str]): Valores en la prueba.
+        before_by (str | None): Quién los asignó en el de partida (`rules`, `semantic`, `ai`, `human`), o `None`.
+        after_by (str | None): Quién en la prueba, o `None`.
+    """
+
+    document_key: str
+    axis: str
+    before: list[str]
+    after: list[str]
+    before_by: str | None = None
+    after_by: str | None = None
 
 
 @dataclass(frozen=True)
@@ -35,11 +56,14 @@ class DryRunResult:
         context (Context): El contexto construido (sin guardar); `context.ai_stats` trae llamadas, tokens y tiempos.
         evaluation (EvaluationReport | None): Su evaluación contra la referencia, si se dio.
         documents (int): Documentos clasificados (los de la referencia si `only_gold`).
+        changes (list[DocumentChange]): Con `baseline`, los documentos (de los clasificados en la prueba) cuyo valor
+            cambia en algún eje, ordenados por documento y eje; vacío sin `baseline`.
     """
 
     context: Context
     evaluation: EvaluationReport | None
     documents: int
+    changes: list[DocumentChange] = field(default_factory=list)
 
 
 async def dry_run_classify(
@@ -51,6 +75,7 @@ async def dry_run_classify(
     roots: Sequence[str] | None = None,
     builder: ContextBuilder | None = None,
     ai_cache: bool | AiResultCache = False,
+    baseline: Context | None = None,
     **build_options: Any,
 ) -> DryRunResult:
     """Clasifica `documents` como lo haría `ContextBuilder.build`, sin guardar nada, y evalúa contra `gold`.
@@ -64,6 +89,8 @@ async def dry_run_classify(
             pasan a `build(scan_roots=)`.
         builder: El `ContextBuilder` (por defecto, uno nuevo).
         ai_cache: Como en `build`; por defecto `False`, para comparar con llamadas de verdad.
+        baseline: El contexto de partida (el guardado, `ContextRegistry.load_context`); con él, `DryRunResult.changes`
+            dice qué documentos cambian de valor y en qué eje.
         **build_options: El resto de opciones de `ContextBuilder.build` (`taxonomy_manifest`, `llm`, `ai_scope`,
             `prompts`, `profile`, `ai_max_documents`...). `persist` no se admite: nunca se guarda.
 
@@ -84,7 +111,31 @@ async def dry_run_classify(
         build_options["example_exclusions"] = [*build_options.get("example_exclusions", ()), *gold.by_document()]
     context = await (builder or ContextBuilder()).build(project, selected, ai_cache=ai_cache, scan_roots=roots, persist=False, **build_options)
     evaluation = evaluate_classification(context, gold, roots=roots) if gold is not None else None
-    return DryRunResult(context=context, evaluation=evaluation, documents=len(selected))
+    changes = _changes(baseline, context, roots) if baseline is not None else []
+    return DryRunResult(context=context, evaluation=evaluation, documents=len(selected), changes=changes)
 
 
-__all__ = ["DryRunResult", "dry_run_classify"]
+def _changes(baseline: Context, trial: Context, roots: Sequence[str] | None) -> list[DocumentChange]:
+    """Los valores que cambian, por documento y eje, entre `baseline` y `trial` (solo los documentos de `trial`)."""
+    before, after = _predictions(baseline, roots), _predictions(trial, roots)
+    changes = []
+    for key in sorted(after):
+        old_axes, new_axes = before.get(key, {}), after[key]
+        for axis in sorted(set(old_axes) | set(new_axes)):
+            old_values, old_by = old_axes.get(axis, ([], None))
+            new_values, new_by = new_axes.get(axis, ([], None))
+            if sorted(old_values) != sorted(new_values):
+                changes.append(
+                    DocumentChange(
+                        document_key=key,
+                        axis=axis,
+                        before=list(old_values),
+                        after=list(new_values),
+                        before_by=old_by if old_values else None,
+                        after_by=new_by if new_values else None,
+                    )
+                )
+    return changes
+
+
+__all__ = ["DocumentChange", "DryRunResult", "dry_run_classify"]

@@ -8,6 +8,11 @@ releases publicados antes de esa versión).
 
 ### Añadido
 
+- **Peticiones de la web en W5**: `dry_run_classify(..., baseline=contexto_actual)` devuelve en `changes` qué
+  documentos cambian de valor y en qué eje (`DocumentChange`); `ReviewItem.source_sha256` (la huella del original en
+  cada elemento de la cola); `document_keys` y `common_root` exportados en `doc_organize`, con la explicación de qué
+  raíz pasar para que las claves de decisiones, referencia y cola no cambien con el corpus.
+
 - `check_environment` comprueba también modelos de embeddings: `AiEndpoint(kind="embedding")` pide un vector a
   `/embeddings` y da su dimensión; con variables de entorno, `embed` se comprueba si tiene modelo propio (como `agent`).
   Petición de doc_organize_web (W4).
