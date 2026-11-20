@@ -41,6 +41,17 @@ _THEME_FEATURES: tuple[str, ...] = ("navigation.prune",)
 #: Carpeta (dentro de la reorganizada, `docs_dir`) con los recursos del sitio sin conexión; ningún dominio empieza por `_`.
 _OFFLINE_ASSETS_DIR = "_offline"
 _LLMS_TXT_NAME = "llms.txt"
+#: `exclude_docs` (sintaxis de `.gitignore`) del sitio sin originales: solo pasan las páginas, sus imágenes
+#: (`img/<stem>/`), `llms.txt` y los recursos empaquetados. Fuera quedan el original y el `.json` de la conversión que
+#: `Reorganizer` copia junto a cada página: no se pueden redactar.
+_PAGES_ONLY_EXCLUDE_DOCS = f"""
+*
+!*/
+!*.md
+!**/img/**
+!/{_LLMS_TXT_NAME}
+!/{_OFFLINE_ASSETS_DIR}/**
+"""
 _VENDOR_DIR = Path(__file__).parent / "site_assets" / "vendor"
 _CONFIG_HEADER = "# Generado por doc_organize (SiteGenerator): se reescribe en cada reconstrucción del contexto.\n"
 #: Máximo de caracteres de la salida de error de `zensical build` que se incluyen en `SiteBuildError`.
@@ -143,6 +154,7 @@ class SiteGenerator:
         offline: bool = False,
         llms_txt: bool = False,
         work_dir: Path | None = None,
+        include_originals: bool | None = None,
     ) -> SiteResult:
         """Escribe `zensical.toml` (raíz del proyecto) + `<output_folder_name>/index.md` y, con `build=True`, ejecuta
         `zensical build` hacia `site_dir`.
@@ -178,6 +190,12 @@ class SiteGenerator:
                 entregar un sitio sin conexión mientras la web sigue sirviendo el suyo. Tiene que no existir o estar
                 vacía y no puede estar dentro de la raíz del proyecto; no se admite junto con `site_dir`. Los enlaces
                 simbólicos de la carpeta reorganizada no se copian. Borrarla después es cosa de quien llama.
+            include_originals: Si el sitio publica también el original y el `.json` de la conversión que
+                `Reorganizer` deja junto a cada página. Ninguno de los dos se puede redactar: el `.json` lleva el texto
+                completo y el original es el fichero tal cual. Por defecto (`None`), sí en el sitio normal (el que sirve
+                la web tras su control de acceso, como hasta ahora) y **no** con `offline=True`, que es para
+                entregarlo fuera. Sin ellos solo pasan las páginas, sus imágenes, `llms.txt` y los recursos
+                empaquetados (`exclude_docs` de Zensical).
 
         Returns:
             `SiteResult` con las rutas escritas y si se construyó el sitio.
@@ -230,6 +248,8 @@ class SiteGenerator:
 
         relative_site_dir = target_site_dir.relative_to(os.path.abspath(build_root)).as_posix()
         config = self._build_config(project, context, relative_site_dir, redact=redact_credentials, offline=offline)
+        if not (include_originals if include_originals is not None else not offline):
+            config["project"]["exclude_docs"] = _PAGES_ONLY_EXCLUDE_DOCS
         await asyncio.to_thread(write_text_atomic, config_file, _CONFIG_HEADER + _render_toml(config))
         if work_dir is None:
             await asyncio.to_thread(layout.legacy_mkdocs_config_file.unlink, missing_ok=True)

@@ -240,3 +240,42 @@ async def test_real_build_in_work_dir_passes_the_offline_check(tmp_path) -> None
     result = await SiteGenerator().generate(project, context, offline=True, work_dir=tmp_path / "trabajo", timeout=180)
 
     assert check_site_offline(result.site_dir).ok and not (project_root / "site").exists() and not (project_root / "zensical.toml").exists()
+
+
+@pytest.mark.asyncio
+async def test_offline_site_leaves_originals_and_conversion_json_out_by_default(tmp_path) -> None:
+    """Fuga encontrada por la web (W9): el original y el `.json` de la conversión no se pueden redactar."""
+    project, context = await _reorganized(tmp_path)
+    generator = SiteGenerator()
+
+    def exclude_docs() -> str | None:
+        return tomllib.loads((tmp_path / "zensical.toml").read_text(encoding="utf-8"))["project"].get("exclude_docs")
+
+    await generator.generate(project, context, build=False, offline=True)
+    assert exclude_docs() is not None and "!*.md" in exclude_docs()  # type: ignore[operator]
+    await generator.generate(project, context, build=False, offline=True, include_originals=True)
+    assert exclude_docs() is None
+    await generator.generate(project, context, build=False)
+    assert exclude_docs() is None  # el sitio de la web, como hasta ahora
+    await generator.generate(project, context, build=False, include_originals=False)
+    assert exclude_docs() is not None
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+@pytest.mark.skipif(importlib.util.find_spec("zensical") is None, reason="Requiere el extra 'site' (zensical)")
+async def test_real_offline_build_has_no_original_nor_conversion_json(tmp_path) -> None:
+    project_root = tmp_path / "proyecto"
+    project_root.mkdir()
+    project, context = await _reorganized(project_root, "# Informe\n\n![figura](img/informe/figura.png)\n")
+    page_dir = project_root / "organizado" / "calidad" / "pdf" / "informe"
+    (page_dir / "img" / "informe").mkdir(parents=True)
+    (page_dir / "img" / "informe" / "figura.png").write_bytes(b"\x89PNG")
+    assert (page_dir / "informe.pdf").is_file() and (page_dir / "informe.json").is_file()
+
+    result = await SiteGenerator().generate(project, context, offline=True, llms_txt=True, work_dir=tmp_path / "trabajo", timeout=180)
+
+    published = {path.relative_to(result.site_dir).as_posix() for path in result.site_dir.rglob("*") if path.is_file()}
+    assert not any(name.endswith((".pdf", ".json")) and not name.startswith(("assets/", "search")) for name in published), published
+    assert {"calidad/pdf/informe/informe.html", "calidad/pdf/informe/img/informe/figura.png", "llms.txt"} <= published
+    assert "_offline/mermaid/mermaid.min.js" in published and check_site_offline(result.site_dir).ok
