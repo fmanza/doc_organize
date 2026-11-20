@@ -6,6 +6,39 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-11-20
+
+Versión MAJOR con ruptura, publicada a la vez que doc_organize_web 2.0.0. La API es la de 2.0.0rc3. El detalle de los
+cambios está en las secciones de 2.0.0a1 a 2.0.0rc3, más abajo, y cómo actualizar desde 1.x en
+[De 1.x a 2.0](docs/guides/migracion_2_0.md).
+
+**Lo principal de 2.0**:
+- Taxonomía por **ejes**, con el manifiesto v2: los ejes que organizan carpetas y los que solo etiquetan.
+- Un solo cliente de IA, `LlmClient`, con ajustes por tarea: prompts versionados, caché, `json_schema` y cita
+  verificada. Las credenciales se redactan antes de enviar nada.
+- Decisiones humanas, cola de revisión y evaluación contra una referencia.
+- Versiones de un documento y semántica con embeddings.
+- Agentes con topes que solo proponen: diseñador de taxonomía y revisor.
+- Sitio sin conexión con `llms.txt`, ZIP reproducible y paquete para IA.
+
+**Medición** (`.ai/sessions/2026-11-17-ai-2.0/MEDICION_M10.md`): frente a 1.6.0 con el mismo modelo, la exactitud de
+dominio pasa de 0,23 a 0,247, y de 0,33 a 0,39 en los documentos que van a la IA. La de tipo de material pasa de 0,22
+a 0,227. El coste de entrada es 1,64×.
+
+**Preproducción** con datos reales, junto con doc_organize_web
+(`.ai/sessions/2026-11-17-ai-2.0/PREPRODUCCION_W9.md`): migraciones, diagnóstico, contexto y las tres entregas
+correctos. La puerta del diseñador de taxonomía (M8.2) no se cumplió con los modelos locales; el diseñador se publica
+como herramienta de apoyo.
+
+### Documentación
+
+- Guía del LiteLLM Proxy al día con 2.0:
+  - alias `doc-organize-<tarea>` para las cinco tareas;
+  - sección de modelos locales (Ollama): `num_ctx`, prefijos, plazos y el corte `stopped = "connection"`.
+- `deploy/litellm/config.yaml.example` y `.env.example` reescritos para 2.0. Los anteriores usaban las variables de
+  1.x, que en 2.0 dan error si tienen valor.
+- README, instrucciones compartidas para asistentes de IA y documentos de `.ai/` al día con 2.0.
+
 ## [2.0.0rc3] - 2026-11-20
 
 Tercera versión candidata de 2.0.0: corrige una fuga del sitio sin conexión de la rc2 (encontrada por los E2E de
