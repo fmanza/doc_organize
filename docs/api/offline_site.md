@@ -22,6 +22,10 @@ if not report.ok:
   (licencia MIT; versión e integridad en `src/doc_organize/context/site_assets/README.md`) y se copian al sitio. Sin
   ellos, el tema los descargaría de unpkg.com.
 - **Contenido de terceros neutralizado, siempre** (D6): ver abajo.
+- **Sin originales ni conversión**: junto a cada página, `Reorganizer` deja el original y el `.json` de la
+  conversión, que no se pueden redactar (el `.json` lleva el texto completo). Con `offline=True` el sitio no los
+  publica (`exclude_docs` de Zensical): solo van las páginas, sus imágenes, `llms.txt` y los recursos empaquetados.
+  `include_originals=True` los vuelve a incluir; `include_originals=False` los quita también del sitio normal.
 
 Igual que la redacción de credenciales, solo cambia la copia de la carpeta reorganizada; la conversión
 (`Conversión/`) y los originales no se tocan. Un `generate()` normal después quita los recursos empaquetados y la

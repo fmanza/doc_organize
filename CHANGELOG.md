@@ -6,6 +6,14 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+### Corregido
+
+- **El sitio sin conexión publicaba el original y el `.json` de la conversión de cada documento sin redactar**
+  (encontrado por doc_organize_web en W9): `Reorganizer` los deja junto a cada página y Zensical copia al sitio todo
+  lo que no es una página, así que el ZIP de `write_site_zip` los llevaba aunque las páginas estuvieran redactadas.
+  Con `offline=True` ya no se publican (`exclude_docs`): solo las páginas, sus imágenes, `llms.txt` y los recursos
+  empaquetados. `SiteGenerator.generate(include_originals=)` lo decide a mano; el sitio normal no cambia.
+
 ## [2.0.0rc2] - 2026-11-20
 
 Segunda versión candidata de 2.0.0: lo que ha pedido doc_organize_web en W4–W8 al integrar la rc1. Todo es aditivo
