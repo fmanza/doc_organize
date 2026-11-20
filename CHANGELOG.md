@@ -6,6 +6,11 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [2.0.0rc2] - 2026-11-20
+
+Segunda versión candidata de 2.0.0: lo que ha pedido doc_organize_web en W4–W8 al integrar la rc1. Todo es aditivo
+salvo la clave de los grupos de versiones, que pasa a ser relativa (ver «Cambiado»). Mismas dependencias que la rc1.
+
 ### Añadido
 
 - **Peticiones de la web en W8**: `write_context_documents_xlsx(..., roots=)` escribe las rutas como la clave relativa
