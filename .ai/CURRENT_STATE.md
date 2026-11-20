@@ -1,5 +1,12 @@
 # CURRENT STATE — doc_organize
 
+> **Nota (2026-11-20, 2.0.0)**: lo de abajo es histórico (estado de 2026-09, antes de la 1.0: la web y la
+> autenticación ya no están en esta librería desde 1.0.0). Estado actual: **doc_organize 2.0.0**, librería pura;
+> taxonomía por ejes, IA con un solo cliente por tarea, decisiones y cola de revisión, evaluación, versiones,
+> semántica, agentes que solo proponen, sitio sin conexión y paquete para IA. Fuentes vigentes: `CHANGELOG.md`,
+> `COMPATIBILITY.md`, `.github/SHARED_INSTRUCTIONS.md` y el plan y las mediciones de
+> `.ai/sessions/2026-11-17-ai-2.0/` (`PLAN.md`, `MEDICION_M10.md`).
+
 > **Nota (2026-10-31)**: este estado es de 2026-09-11. Desde entonces: 0.9.3 (primera release con wheel, Python
 > mínimo 3.12) y 0.10.0 (API pública para doc_organize_web, documentación con Zensical). Ver `CHANGELOG.md` y
 > `.ai/sessions/2026-10-31-api-publica-0.10.0/TRACEABILITY.md`; los comandos `mkdocs` de abajo son históricos.

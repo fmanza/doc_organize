@@ -1,5 +1,12 @@
 # 🏗️ Arquitectura de doc_organize
 
+> **Nota (2026-11-20, 2.0.0)**: las secciones de autenticación web, roles, multi-tenant y el resolutor de duplicados
+> son históricas: desde 1.0.0 viven en doc_organize_web. En 2.0, `ai/` ya no tiene un cliente por tarea con su
+> `*Config` (`DomainClassificationClient`, `TaxonomyClassificationClient`…): hay un solo `LlmClient` con `AiSettings`
+> por tarea, y `context/` sigue importando de `ai/` (la excepción de abajo, con esos nombres nuevos). Además hay un
+> módulo `security/` (redacción de credenciales y neutralización de Markdown). La arquitectura vigente está en
+> `.github/SHARED_INSTRUCTIONS.md` («Arquitectura real»).
+
 **Versión:** Fase 1 (A–D2c) + organización documental (Fase 2) + rediseño Tenant/Role/User
 **Última actualización:** 2026-09-11
 **Estado:** Implementado, ver `§13` de `.github/prompts/doclink_extractor_plan.md` y

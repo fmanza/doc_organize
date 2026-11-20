@@ -18,7 +18,7 @@ Actúa como senior de ingeniería Python especializado en:
 
 ---
 
-## Proyecto: doc_organize (1.0.0, librería pura)
+## Proyecto: doc_organize (2.0.0, librería pura)
 
 `doc_organize` es una librería Python con CLI para:
 - **Escaneo**: identificar y catalogar documentos en carpetas (PDF, DOCX, XLSX, PPTX, imágenes; audio/vídeo con el extra `av`)
@@ -26,9 +26,15 @@ Actúa como senior de ingeniería Python especializado en:
 - **Deduplicación**: duplicados exactos (SHA-256), conflictos de versión y similitud aproximada de nombre
 - **Caché incremental**: SQLite (WAL), para no reconvertir lo que no ha cambiado
 - **Proyectos**: registro local (`~/.doc_organize/projects.json`) y rutas de cada proyecto (`ProjectLayout`)
-- **Contexto documental**: clasificación por dominios (reglas + IA opcional vía LiteLLM Proxy), reorganización y sitio
-  navegable con Zensical
-- **Exportación**: ZIP en streaming y Excel de caché y de errores
+- **Contexto documental** (2.0): taxonomía por **ejes** (`taxonomy_manifest.md` v2: los que organizan carpetas y los
+  que solo etiquetan), clasificación por reglas y, opcionalmente, semántica (embeddings) e IA; decisiones humanas,
+  cola de revisión, evaluación contra una referencia, versiones de un documento, historial y frescura; reorganización
+  y sitio navegable con Zensical (también sin conexión, con `llms.txt`)
+- **IA** (opcional, siempre vía LiteLLM Proxy): un solo cliente `LlmClient` con ajustes por tarea (`classify`,
+  `enrich`, `taxonomy_design`, `agent`, `embed`), prompts versionados, caché, respuestas con `json_schema` y cita
+  verificada; agentes con topes que **solo proponen** (diseñador de taxonomía y revisor); las credenciales se redactan
+  antes de enviar nada
+- **Exportación**: ZIP en streaming, Excel (caché, errores, historial y documentos del contexto) y paquete para IA
 
 **No incluye interfaz web ni autenticación** desde 1.0.0 (L-11): eso es
 [doc_organize_web](https://github.com/fmanza/doc_organize_web), un proyecto aparte que usa esta librería. No añadas
@@ -43,7 +49,7 @@ pide como API nueva (parámetros, funciones sin Docling, eventos de progreso), n
 
 ---
 
-## Arquitectura real (1.0.0)
+## Arquitectura real (2.0.0)
 
 ```text
 src/doc_organize/
@@ -56,10 +62,14 @@ src/doc_organize/
   dedup/          # Nivel 2: DeduplicationManager
   cache/          # Nivel 2: CacheManager (SQLite + WAL, también en solo lectura)
   projects/       # Nivel 2: ProjectRegistry, ProjectLayout, ScannedFoldersStore, ProjectHistoryCleaner
-  ai/             # Nivel 2: clientes HTTP de IA (LiteLLM Proxy, GitHub Copilot) con su *Config explícita
-  context/        # Nivel 3: ContextBuilder, ContextRegistry, Reorganizer, SiteGenerator, plantillas de taxonomía
+  security/       # Nivel 2: redacción de credenciales y neutralización de Markdown no confiable
+  ai/             # Nivel 2: LlmClient y AiSettings (IA por tarea vía LiteLLM), prompts, caché, embeddings,
+                  #   AgentRunner; clientes de uso y coste (LiteLLM, GitHub Copilot)
+  context/        # Nivel 3: ContextBuilder, ContextRegistry, Reorganizer, SiteGenerator, manifiesto por ejes,
+                  #   decisiones, cola de revisión, evaluación, versiones, semántica, agentes de taxonomía y revisión
   scan/           # Nivel 3: ScanCommand (escaneo + caché + conversión, deduplicación bajo demanda)
-  export/         # Nivel 3: ZIP y Excel de un proyecto (Excel con el extra `export`)
+  export/         # Nivel 3: ZIP, Excel (extra `export`) y paquete para IA de un proyecto
+  diagnostics.py  # check_environment: dependencias, modelos de Docling e IA (sin enviar documentos)
   main.py         # Nivel 3: CLI (`project`, `scan`, `deduplicate`, `export`)
 ```
 
@@ -378,4 +388,4 @@ especializaciones afectadas (copilot-instructions.md y/o CLAUDE.md).
 
 ---
 
-*Actualizado: 2026-08-30*
+*Actualizado: 2026-11-20 (2.0.0)*
