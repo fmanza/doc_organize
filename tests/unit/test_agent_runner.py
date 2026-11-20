@@ -322,3 +322,22 @@ async def test_the_model_is_told_to_finish_before_the_last_steps() -> None:
     warnings = [message for message in run.messages if message["role"] == "user" and "Te quedan 2 llamadas" in message["content"]]
     assert run.stop_reason == "max_steps" and len(warnings) == 1
     assert "Te quedan" in llm.proxy.calls("agent")[2].body["messages"][-1]["content"]  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_on_step_reports_each_step_and_a_failing_callback_does_not_stop() -> None:
+    """Petición de la web (W7): progreso por paso."""
+    seen: list[tuple[int, int, list[str]]] = []
+    llm = fake_llm(agent=agent_script(call_tools(("count", {})), say("fin")))
+
+    run = await AgentRunner(llm, [_tool()], limits=AgentLimits(max_steps=5)).run(
+        QUESTION, on_step=lambda step, total: seen.append((step.index, total, [call.name for call in step.tool_calls]))
+    )
+
+    assert run.finished and seen == [(0, 5, ["count"]), (1, 5, [])]
+
+    def broken(step: Any, total: int) -> None:
+        raise RuntimeError("fallo del consumidor")
+
+    again = await AgentRunner(fake_llm(agent=agent_script(say("fin"))), [_tool()]).run(QUESTION, on_step=broken)
+    assert again.finished

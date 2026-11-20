@@ -154,6 +154,7 @@ async def test_proposals_join_the_review_queue(tmp_path) -> None:
 
     [item] = [item for item in queue if item.reason == "reviewer_proposal"]
     assert (item.axis, item.value, item.detail, item.priority) == ("domains", "calidad", "set_axis: comité", 6)
+    assert item.proposal_id == proposal.id
     assert item.source_path is not None and item.source_path.endswith("acta.pdf")
 
 
@@ -175,3 +176,12 @@ async def test_audit(tmp_path) -> None:
     assert all(finding.kind != "dominant_entry" or finding.axis != "domains" for finding in audit.findings)
     assert "| domains | 5 | 80,0 % |" in audit.to_markdown() and "Propuestas:" in audit.to_markdown()
     assert [finding.count for finding in audit.findings] == sorted((finding.count for finding in audit.findings), reverse=True)
+
+
+def test_proposals_have_a_stable_id_that_reaches_the_queue() -> None:
+    """Petición de la web (W7): id estable de la propuesta, también en la cola."""
+    first = ReviewProposal(document_key="Otros/acta.pdf", action="set_axis", axes={"domains": ["calidad"]}, rationale="x")
+    other = ReviewProposal(document_key="Otros/acta.pdf", action="exclude", rationale="y")
+    stored = ReviewProposal.model_validate(first.model_dump())
+
+    assert first.id and first.id != other.id and stored.id == first.id

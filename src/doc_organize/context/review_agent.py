@@ -28,6 +28,8 @@ Example:
 
 from __future__ import annotations
 
+import uuid
+
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -35,7 +37,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
-from doc_organize.ai.agents import AgentLimits, AgentRun, AgentRunner, AgentTool
+from doc_organize.ai.agents import AgentLimits, AgentRun, AgentRunner, AgentTool, StepCallback
 from doc_organize.ai.llm_client import LlmClient
 from doc_organize.ai.prompts import PromptRegistry
 from doc_organize.context.domain_classifier import read_conversion_json
@@ -69,8 +71,10 @@ class ReviewProposal(BaseModel):
         rationale (str): Por qué, según el revisor.
         evidence (str | None): Cita del documento que lo apoya.
         source_sha256 (str | None): Huella del original revisado (la decisión solo valdrá para esa versión).
+        id (str): Identificador estable de la propuesta (para guardarla fuera de la librería, aceptarla o descartarla).
     """
 
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     document_key: str
     action: ProposalAction
     axes: dict[str, list[str]] = Field(default_factory=dict)
@@ -127,6 +131,7 @@ class ReviewAgent:
         roots: Sequence[str] | None = None,
         instructions: str = "",
         cancel_token: CancelToken | None = None,
+        on_step: StepCallback | None = None,
     ) -> ReviewResult:
         """Propone decisiones para los primeros `max_items` documentos de la cola.
 
@@ -138,6 +143,7 @@ class ReviewAgent:
             roots: Raíces de escaneo para las claves.
             instructions: Indicaciones de la persona.
             cancel_token: Para cancelar desde fuera.
+            on_step: Progreso por paso (`AgentRunner.run`).
 
         Raises:
             ValueError: El contexto no tiene ejes de taxonomía (sin manifiesto no hay catálogo que proponer).
@@ -152,7 +158,7 @@ class ReviewAgent:
         messages = self.prompts.get("agent", "review_agent").render(
             documents=len(selected_keys), catalog=_catalog_text(context.taxonomy_axes), instructions=_instructions(instructions)
         )
-        run = await runner.run(messages, cancel_token=cancel_token)
+        run = await runner.run(messages, cancel_token=cancel_token, on_step=on_step)
         return ReviewResult(proposals=list(tools.proposals.values()), items=selected, summary=run.answer if run.finished else None, run=run)
 
 

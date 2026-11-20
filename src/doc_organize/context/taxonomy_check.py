@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import PurePosixPath
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from doc_organize.context.axis_rules import TAG_AXIS_TEXT_CHARS, AxisRuleScorer
 from doc_organize.context.domain_classifier import _DEFAULT_THRESHOLD, DomainClassifier, MaterialTypeClassifier, fold_accents, read_conversion_json
@@ -165,9 +165,10 @@ class AxisRulesReport(BaseModel):
     conflict_terms: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
     near_misses: dict[str, NearMiss] = Field(default_factory=dict)
 
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def coverage(self) -> float:
-        """Fracción de documentos con algún valor (0 si no hay documentos)."""
+        """Fracción de documentos con algún valor (0 si no hay documentos); también al serializar (`model_dump`)."""
         return self.covered / self.documents if self.documents else 0.0
 
 

@@ -92,7 +92,9 @@ runner = AgentRunner(
 | `invalid_answer` | La respuesta no cumplía `answer_schema` tras los reintentos |
 
 `run.steps` trae cada llamada al modelo con las herramientas que pidió (y sus errores) y `run.messages` la conversación
-completa, para auditarla.
+completa, para auditarla. Para mostrar el progreso mientras trabaja, `run(..., on_step=callback)` llama a
+`callback(step, max_steps)` tras cada paso (también `TaxonomyDesignAgent.propose(on_step=)` y
+`ReviewAgent.propose(on_step=)`); un fallo del callback se registra y no para el agente.
 
 El tope de tokens de **cada respuesta** del modelo es `TaskSettings.max_tokens` de la tarea `agent` (4096 por
 defecto); `AgentLimits.max_tokens` es el del agente entero.
@@ -158,6 +160,9 @@ queue = review_queue(context, proposals=review.proposals)  # las propuestas, en 
 decision = review.proposals[0].to_decision(author="ana")  # si la persona la acepta
 await ClassificationDecisionStore(project.root_path).add(decision)
 ```
+
+Cada `ReviewProposal` tiene un `id` estable (para guardarla fuera de la librería y aceptarla o descartarla después);
+en la cola, el elemento `reviewer_proposal` lo lleva en `proposal_id`.
 
 Sus herramientas: `list_queue` (su parte de la cola, con los motivos), `get_document` (clasificación actual, con
 quién, confianza y cita, y el comienzo del texto) y `propose_decision`. Cada propuesta se valida antes de aceptarla:

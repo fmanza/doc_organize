@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from doc_organize.context.context_builder import ContextBuilder
-from doc_organize.context.taxonomy_check import RulesCorpus, TaxonomyRulesReport, check_taxonomy_rules
+from doc_organize.context.taxonomy_check import AxisRulesReport, RulesCorpus, TaxonomyRulesReport, check_taxonomy_rules
 from doc_organize.core.models import ConversionResult, Project, TaxonomyAxis, TaxonomyEntry
 from tests.unit.taxonomy_helpers import two_axis_manifest
 
@@ -179,3 +179,11 @@ async def test_conflict_terms_and_near_misses(tmp_path) -> None:
     assert domains.conflict_terms == {"auditoria.pdf": {"calidad": ["calidad", "auditoria"], "seguridad": ["seguridad"]}}
     near = domains.near_misses["revision.pdf"]
     assert (near.slug, near.score, near.matched, near.missing) == ("calidad", 0.25, ["auditoria"], ["calidad", "excelencia", "iso 9001"])
+
+
+def test_coverage_is_serialized() -> None:
+    """Petición de la web (W7): `coverage` también al serializar el informe."""
+    report = TaxonomyRulesReport(axes=[AxisRulesReport(axis="domains", documents=4, covered=3)])
+
+    assert report.model_dump()["axes"][0]["coverage"] == 0.75
+    assert TaxonomyRulesReport.model_validate(report.model_dump()).axes[0].coverage == 0.75
