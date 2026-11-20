@@ -55,6 +55,9 @@ _EXPORTS: dict[str, str] = {
     "AxisEvaluation": "doc_organize.context.evaluation",
     "dry_run_classify": "doc_organize.context.dry_run",
     "DryRunResult": "doc_organize.context.dry_run",
+    "DocumentChange": "doc_organize.context.dry_run",
+    "document_keys": "doc_organize.context.evaluation",
+    "common_root": "doc_organize.context.evaluation",
     # Decisiones de personas (2.0.0, F6)
     "ClassificationDecision": "doc_organize.core.models",
     "ClassificationDecisionStore": "doc_organize.context.decisions",

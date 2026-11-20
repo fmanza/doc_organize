@@ -69,7 +69,19 @@ print(base.context.ai_stats.classification.prompt_tokens, nuevo.context.ai_stats
 - Las decisiones, el perfil y los prompts del proyecto se leen como en una construcción normal; no se escribe nada.
 
 `DryRunResult` trae el `context` (con `ai_stats`: llamadas, tokens), la `evaluation` y cuántos `documents` se
-clasificaron.
+clasificaron. Con `baseline=` (el contexto actual, `ContextRegistry.load_context`), `changes` dice qué documentos
+cambian de valor y en qué eje (`DocumentChange`: valores antes y después y quién los asignó), para ver qué cambiaría
+al adoptar la configuración probada:
+
+```python
+actual = await ContextRegistry().load_context(project)
+prueba = await dry_run_classify(project, documents, baseline=actual, **opciones)
+for cambio in prueba.changes:
+    print(cambio.document_key, cambio.axis, cambio.before, "→", cambio.after)
+```
+
+Las claves de los documentos son su ruta relativa a la raíz de escaneo (`document_keys`): pasa como `roots` las mismas
+raíces que a `build(scan_roots=)` para que no cambien con el corpus.
 
 ::: doc_organize.context.dry_run
     options:
@@ -77,6 +89,7 @@ clasificaron.
       members:
         - dry_run_classify
         - DryRunResult
+        - DocumentChange
 
 ::: doc_organize.context.evaluation
     options:
