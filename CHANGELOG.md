@@ -6,6 +6,11 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-11-22
+
+Corrección del diagnóstico de GPU, encontrada al desplegar doc_organize_web 2.0.0. Sin cambios en la API ni en las
+dependencias.
+
 ### Corregido
 
 - `detect_gpu_status` (y la comprobación `gpu` de `check_environment`) daban «Soporte de GPU instalado, sin GPU CUDA
