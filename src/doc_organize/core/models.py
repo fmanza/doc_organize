@@ -713,7 +713,7 @@ class GpuStatus(BaseModel):
     instalado/disponible en el proceso servidor, no de quién pregunta.
     """
 
-    gpu_support_installed: bool = Field(..., description="Si `torch` (extra `ocr-gpu`) está instalado en este entorno")
+    gpu_support_installed: bool = Field(..., description="Si `torch` con CUDA (extra `ocr-gpu`) está instalado en este entorno")
     gpu_active: bool = Field(..., description="Si hay una GPU CUDA disponible y utilizable ahora mismo")
     instructions: str | None = Field(default=None, description="Instrucciones para activar la GPU, si `gpu_active` es `False`")
 

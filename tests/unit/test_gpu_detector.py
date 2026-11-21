@@ -65,13 +65,28 @@ def test_result_is_cached_across_calls(monkeypatch: pytest.MonkeyPatch) -> None:
     assert calls["count"] == 1
 
 
-def _fake_torch(*, cuda_available: bool):
+def _fake_torch(*, cuda_available: bool, cuda_build: str | None = "12.4"):
     class _Cuda:
         @staticmethod
         def is_available() -> bool:
             return cuda_available
 
+    class _Version:
+        cuda = cuda_build
+
     class _Torch:
         cuda = _Cuda()
+        version = _Version()
 
     return _Torch()
+
+
+def test_cpu_only_torch_is_not_gpu_support(monkeypatch: pytest.MonkeyPatch) -> None:
+    """La build solo CPU que trae Docling no es soporte de GPU: no hay drivers que revisar."""
+    monkeypatch.setattr(gpu_detector, "find_spec", lambda name: object())
+    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda_available=False, cuda_build=None))
+
+    status = gpu_detector.detect_gpu_status()
+
+    assert status.gpu_support_installed is False and status.gpu_active is False
+    assert status.instructions is not None and "sin CUDA" in status.instructions and "drivers" not in status.instructions

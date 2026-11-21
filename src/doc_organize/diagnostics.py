@@ -237,7 +237,7 @@ def _check_gpu() -> EnvironmentCheck:
     status = detect_gpu_status()
     if status.gpu_active:
         return EnvironmentCheck(name="gpu", status="ok", detail="GPU CUDA disponible para el OCR")
-    detail = "Soporte de GPU instalado, sin GPU CUDA activa" if status.gpu_support_installed else "Sin soporte de GPU (extra `ocr-gpu`)"
+    detail = "Soporte de GPU instalado, sin GPU CUDA activa" if status.gpu_support_installed else "Sin soporte de GPU en este proceso (PyTorch sin CUDA)"
     return EnvironmentCheck(name="gpu", status="warning", detail=f"{detail}: el OCR irá por CPU", remedy=status.instructions)
 
 

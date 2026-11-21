@@ -13,6 +13,10 @@ from importlib.util import find_spec
 from doc_organize.core.models import GpuStatus
 
 _INSTALL_INSTRUCTIONS = "El soporte de GPU no está instalado en este entorno. Instálalo con: pip install .[ocr-gpu]"
+_CPU_BUILD_INSTRUCTIONS = (
+    "PyTorch está instalado sin CUDA (la build solo CPU que trae Docling): este entorno no puede usar la GPU. "
+    "Para el OCR por GPU, instala el extra `ocr-gpu` con una build de PyTorch con CUDA en el proceso que convierte."
+)
 _ACTIVATE_INSTRUCTIONS = (
     "El soporte de GPU está instalado, pero no se detecta ninguna GPU CUDA activa. "
     "Comprueba que los drivers NVIDIA están instalados y actualizados, y que la build "
@@ -33,7 +37,8 @@ def detect_gpu_status() -> GpuStatus:
     proceso (`lru_cache`) porque no cambia mientras el servidor sigue vivo.
 
     Returns:
-        `GpuStatus` con `gpu_support_installed` (si `torch` es importable),
+        `GpuStatus` con `gpu_support_installed` (si `torch` es importable **y** está compilado con CUDA: la build
+        solo CPU que instala Docling no cuenta),
         `gpu_active` (si además hay una GPU CUDA disponible ahora mismo) e
         `instructions` (no `None` solo cuando `gpu_active` es `False`).
 
@@ -47,6 +52,8 @@ def detect_gpu_status() -> GpuStatus:
 
     import torch
 
+    if getattr(getattr(torch, "version", None), "cuda", None) is None:
+        return GpuStatus(gpu_support_installed=False, gpu_active=False, instructions=_CPU_BUILD_INSTRUCTIONS)
     gpu_active = bool(torch.cuda.is_available())
     instructions = None if gpu_active else _ACTIVATE_INSTRUCTIONS
     return GpuStatus(gpu_support_installed=True, gpu_active=gpu_active, instructions=instructions)
