@@ -6,6 +6,14 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+### Corregido
+
+- `detect_gpu_status` (y la comprobación `gpu` de `check_environment`) daban «Soporte de GPU instalado, sin GPU CUDA
+  activa» en cualquier entorno con `torch`, y pedían revisar los drivers NVIDIA. Docling instala siempre `torch`,
+  aunque sea la build solo CPU, así que el aviso salía también donde no hay GPU por diseño (p. ej. el contenedor web de
+  doc_organize_web). Ahora el soporte de GPU exige un `torch` compilado con CUDA (`torch.version.cuda`); con la build
+  solo CPU, `gpu_support_installed` es `False` y el aviso dice «Sin soporte de GPU en este proceso (PyTorch sin CUDA)».
+
 ## [2.0.0] - 2026-11-20
 
 Versión MAJOR con ruptura, publicada a la vez que doc_organize_web 2.0.0. La API es la de 2.0.0rc3. El detalle de los
