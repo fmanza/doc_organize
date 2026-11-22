@@ -90,6 +90,11 @@ Context manager async para consultar el spend de un LiteLLM Proxy externo (`GET 
 
 ### GitHubCopilotUsageClient
 
+!!! warning "Obsoleto desde 2.1.0"
+    `GitHubCopilotUsageClient`, `GitHubCopilotUsageConfig` y `github_copilot_usage_config_from_env()` emiten
+    `DeprecationWarning` y se retiran en 3.0. El uso y el coste de IA se consultan en LiteLLM
+    (`LiteLLMUsageClient`). Ver [Hacia 3.0](../guides/migracion_3_0.md).
+
 ```python
 class GitHubCopilotUsageClient:
     def __init__(self, config: GitHubCopilotUsageConfig, *, transport: httpx.AsyncBaseTransport | None = None) -> None

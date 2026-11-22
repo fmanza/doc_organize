@@ -6,6 +6,13 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+### Deprecated
+
+- **GitHub Copilot**: `GitHubCopilotUsageClient`, `GitHubCopilotUsageConfig` y `github_copilot_usage_config_from_env()`
+  emiten `DeprecationWarning` y se retiran en 3.0; el uso y el coste de IA se consultan en LiteLLM
+  (`LiteLLMUsageClient`). `UsageSourceName.GITHUB_COPILOT` también se retira en 3.0. Guía nueva:
+  [Hacia 3.0](docs/guides/migracion_3_0.md).
+
 ## [2.0.1] - 2026-11-22
 
 Corrección del diagnóstico de GPU, encontrada al desplegar doc_organize_web 2.0.0. Sin cambios en la API ni en las

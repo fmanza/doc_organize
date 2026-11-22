@@ -12,6 +12,8 @@ Modelos Pydantic v2 usados en todos los módulos:
 - ScanRunReport: duración de una ejecución de escaneo (histórico de tiempos)
 """
 
+import warnings
+
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
@@ -792,6 +794,14 @@ class OfficeStatus(BaseModel):
 # ===== Modelos de monitorización de uso/coste de IA (fase 2, `doc_organize.ai`) =====
 
 
+#: Aviso de obsolescencia de GitHub Copilot (2.1.0): todo el uso de IA pasa por LiteLLM; se retira en 3.0.
+COPILOT_DEPRECATION_MESSAGE: Final = (
+    "El soporte de GitHub Copilot (GitHubCopilotUsageClient, GitHubCopilotUsageConfig, "
+    "github_copilot_usage_config_from_env) está obsoleto desde doc_organize 2.1.0 y se retirará en 3.0: "
+    "consulta el uso y el coste de IA en LiteLLM (LiteLLMUsageClient)."
+)
+
+
 class UsageLineItem(BaseModel):
     """Una línea de consumo dentro de un `UsageSnapshot`.
 
@@ -843,6 +853,10 @@ class GitHubCopilotUsageConfig(BaseModel):
     Igual criterio que `LiteLLMUsageConfig`: usa
     `github_copilot_usage_config_from_env()` (`doc_organize.ai`) para resolver
     `DOC_ORGANIZE_GITHUB_USERNAME`/`DOC_ORGANIZE_GITHUB_PAT` explícitamente.
+
+    Deprecated:
+        Obsoleto desde 2.1.0 y se retira en 3.0: el uso y el coste de IA se consultan en LiteLLM
+        (`LiteLLMUsageClient`). Crear una instancia emite `DeprecationWarning`.
     """
 
     username: str = Field(..., description="Usuario personal de GitHub cuyo consumo de Copilot se consulta")
@@ -854,6 +868,10 @@ class GitHubCopilotUsageConfig(BaseModel):
     retry_backoff_s: float = Field(default=0.5, ge=0.0, description=_HTTP_RETRY_BACKOFF_DESC)
     rate_limit_retries: int = Field(default=3, ge=0, description=_HTTP_RATE_LIMIT_RETRIES_DESC)
     max_retry_wait_s: float = Field(default=60.0, ge=0.0, description=_HTTP_MAX_RETRY_WAIT_DESC)
+
+    def model_post_init(self, context: Any, /) -> None:
+        """Avisa de que la clase está obsoleta (2.1.0; se retira en 3.0)."""
+        warnings.warn(COPILOT_DEPRECATION_MESSAGE, DeprecationWarning, stacklevel=3)
 
 
 # ===== Modelos de contexto y dominios (organización documental, `doc_organize.context`) =====

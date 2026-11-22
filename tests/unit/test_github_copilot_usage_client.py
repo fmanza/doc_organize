@@ -1,13 +1,20 @@
 """Tests unitarios de GitHubCopilotUsageClient (fase 2 IA, monitorización de uso/coste)."""
 
+import warnings
+
 import httpx
 import pytest
 
 from doc_organize.ai import GitHubCopilotUsageClient, github_copilot_usage_config_from_env
 from doc_organize.core.exceptions import UsageSourceAuthError, UsageSourceError
-from doc_organize.core.models import GitHubCopilotUsageConfig, UsageSourceName
+from doc_organize.core.models import COPILOT_DEPRECATION_MESSAGE, GitHubCopilotUsageConfig, UsageSourceName
 
-_CONFIG = GitHubCopilotUsageConfig(username="octocat", personal_access_token="github_pat_test")
+# Obsoleto desde 2.1.0 (se retira en 3.0): estos tests cubren el comportamiento que sigue hasta entonces.
+pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
+
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", DeprecationWarning)
+    _CONFIG = GitHubCopilotUsageConfig(username="octocat", personal_access_token="github_pat_test")
 
 
 def _transport(handler) -> httpx.MockTransport:
@@ -99,3 +106,17 @@ def test_github_copilot_usage_config_from_env_reads_both_vars(monkeypatch) -> No
 
     assert config.username == "octocat"
     assert config.personal_access_token == "github_pat_from_env"
+
+
+@pytest.mark.filterwarnings("default::DeprecationWarning")
+def test_copilot_api_is_deprecated(monkeypatch) -> None:
+    """2.1.0: la configuración, el cliente y la lectura del entorno avisan de que se retiran en 3.0."""
+    monkeypatch.setenv("DOC_ORGANIZE_GITHUB_USERNAME", "octocat")
+    monkeypatch.setenv("DOC_ORGANIZE_GITHUB_PAT", "github_pat_test")
+    with pytest.warns(DeprecationWarning, match="se retirará en 3.0"):
+        GitHubCopilotUsageConfig(username="octocat", personal_access_token="github_pat_test")
+    with pytest.warns(DeprecationWarning, match="obsoleto desde doc_organize 2.1.0"):
+        GitHubCopilotUsageClient(_CONFIG)
+    with pytest.warns(DeprecationWarning) as caught:
+        github_copilot_usage_config_from_env()
+    assert all(str(item.message) == COPILOT_DEPRECATION_MESSAGE for item in caught)
