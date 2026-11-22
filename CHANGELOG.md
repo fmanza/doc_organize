@@ -27,6 +27,8 @@ releases publicados antes de esa versión).
   documento descartado.
 - `LlmClient.embed(texts, task=...)` y `EmbeddingIndex.vectors(..., task=...)`: la tarea de embeddings, `embed` por
   defecto. Nuevo `EmbeddingIndex.matrix()`, que devuelve una matriz `float32` sin pasar por listas de Python.
+- `LlmResult.served_model` y `LlmClient.embed_detailed()` (`EmbeddingResult`: vectores, modelo pedido, modelo que
+  contestó y dimensión): para que un consumidor diga qué modelo respondió al probarlo.
 - `check_environment`:
     - prueba `dedup` cuando tiene modelo propio y avisa si el modelo corta el texto antes de unas 1.500 palabras;
     - `EnvironmentCheck` incluye `model`, `served_model` (el modelo que dice la respuesta que contestó) y `dimension`.

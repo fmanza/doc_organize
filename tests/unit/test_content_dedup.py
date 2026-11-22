@@ -344,3 +344,38 @@ def test_settings_from_env_reads_the_dedup_model(monkeypatch) -> None:
 
     assert settings is not None
     assert (settings.model_for("dedup"), settings.key_for("dedup"), settings.model_for("embed")) == ("bge-m3-local", "sk-dedup", "doc-organize-embed")
+
+
+# --- Modelo que contesta (para probar un modelo desde un consumidor) ---------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_results_say_which_model_answered() -> None:
+    import json
+
+    from doc_organize.core.models import AiSettings, TaskSettings
+
+    def embeddings(request: FakeRequest) -> httpx.Response:
+        return httpx.Response(200, json={"model": "ollama/bge-m3", "data": [{"index": 0, "embedding": [0.1, 0.2, 0.3]}]})
+
+    def chat(request: FakeRequest) -> httpx.Response:
+        return httpx.Response(200, json={"model": "qwen2.5:14b", "choices": [{"message": {"content": json.dumps({"ok": True})}}]})
+
+    settings = AiSettings(
+        base_url="https://proxy.test",
+        virtual_key="sk-test",
+        rate_limit_retries=0,
+        tasks={"dedup": TaskSettings(model="doc-organize-dedup"), "agent": TaskSettings(model="doc-organize-agent")},
+    )
+    llm = fake_client(settings=settings, dedup=embeddings, agent=chat)
+
+    embedded = await llm.embed_detailed(["texto"], task="dedup")
+    answered = await llm.complete_json(
+        "agent",
+        [{"role": "user", "content": "ok"}],
+        schema={"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"], "additionalProperties": False},
+        parse=lambda data: bool(data["ok"]),
+    )
+
+    assert (embedded.model, embedded.served_model, embedded.dimension) == ("doc-organize-dedup", "ollama/bge-m3", 3)
+    assert (answered.value, answered.model, answered.served_model) == (True, "doc-organize-agent", "qwen2.5:14b")
