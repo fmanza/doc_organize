@@ -165,8 +165,15 @@ _WRITER = textwrap.dedent(
     """
     import asyncio, sys
     from pathlib import Path
+    import functools
+    from doc_organize.context import context_history
     from doc_organize.context.context_history import append_context_build
     from doc_organize.core.models import ContextBuildRecord, ContextChange
+    from doc_organize.utils.file_lock import exclusive_lock
+
+    # La prueba es de que no se intercalen líneas, no del plazo: con cuatro procesos en un runner de Windows cargado,
+    # uno puede pasar más de los 120 s sin conseguir el bloqueo (se sondea, no hay cola). Python 3.14 en Windows aún más.
+    context_history.exclusive_lock = functools.partial(exclusive_lock, timeout=180)
 
     history, writer, count = Path(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
 
