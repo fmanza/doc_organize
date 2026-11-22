@@ -11,6 +11,7 @@ Copilot Individual/Pro comprado por el propio usuario, sin organización).
 
 import calendar
 import os
+import warnings
 
 from datetime import date
 from typing import Any
@@ -19,7 +20,7 @@ import httpx
 
 from doc_organize.ai._http_client_base import AiHttpClientBase
 from doc_organize.core.exceptions import UsageSourceAuthError, UsageSourceConnectionError, UsageSourceError
-from doc_organize.core.models import GitHubCopilotUsageConfig, UsageLineItem, UsageSnapshot, UsageSourceName
+from doc_organize.core.models import COPILOT_DEPRECATION_MESSAGE, GitHubCopilotUsageConfig, UsageLineItem, UsageSnapshot, UsageSourceName
 from doc_organize.utils.logging import get_logger
 
 _ENV_VAR_USERNAME = "DOC_ORGANIZE_GITHUB_USERNAME"
@@ -43,9 +44,13 @@ def github_copilot_usage_config_from_env() -> GitHubCopilotUsageConfig:
     Raises:
         ValueError: Si alguna de las dos variables de entorno no está definida.
 
+    Deprecated:
+        Obsoleto desde 2.1.0 y se retira en 3.0 (emite `DeprecationWarning`): usa LiteLLM.
+
     Example:
         >>> config = github_copilot_usage_config_from_env()  # doctest: +SKIP
     """
+    warnings.warn(COPILOT_DEPRECATION_MESSAGE, DeprecationWarning, stacklevel=2)
     username = os.environ.get(_ENV_VAR_USERNAME)
     pat = os.environ.get(_ENV_VAR_PAT)
     if not username or not pat:
@@ -61,6 +66,10 @@ class GitHubCopilotUsageClient(AiHttpClientBase):
     confirmar empíricamente contra una cuenta real antes de dar el cliente por
     cerrado; recomendado usar un fine-grained PAT limitado a permiso de
     facturación de solo lectura si el endpoint lo admite.
+
+    Deprecated:
+        Obsoleto desde 2.1.0 y se retira en 3.0 (crear el cliente emite `DeprecationWarning`): el uso y el coste de
+        IA se consultan en LiteLLM (`LiteLLMUsageClient`).
 
     Attributes:
         config (GitHubCopilotUsageConfig): Usuario y PAT de acceso a Billing Usage.
@@ -84,6 +93,7 @@ class GitHubCopilotUsageClient(AiHttpClientBase):
                 el transporte HTTP real por defecto.
         """
         self.config = config
+        warnings.warn(COPILOT_DEPRECATION_MESSAGE, DeprecationWarning, stacklevel=2)
         super().__init__(
             base_url=_GITHUB_API_BASE_URL,
             timeout_s=config.timeout_s,

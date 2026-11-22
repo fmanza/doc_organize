@@ -1,5 +1,10 @@
 # Monitorización de Uso/Coste de IA — Fase 2
 
+!!! warning "Obsoleto desde 2.1.0"
+    `GitHubCopilotUsageClient`, `GitHubCopilotUsageConfig` y `github_copilot_usage_config_from_env()` emiten
+    `DeprecationWarning` y se retiran en 3.0. El uso y el coste de IA se consultan en LiteLLM
+    (`LiteLLMUsageClient`). Lo de Copilot de esta página queda como referencia hasta entonces. Ver [Hacia 3.0](../guides/migracion_3_0.md).
+
 Visibilidad de consumo de IA de dos fuentes externas: gasto en Anthropic enrutado a
 través de un **LiteLLM Proxy**, y consumo de **GitHub Copilot Pro** (premium requests).
 
