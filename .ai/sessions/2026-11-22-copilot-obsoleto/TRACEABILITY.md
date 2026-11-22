@@ -5,7 +5,7 @@
 - fecha: 2026-11-22
 - rama: feature/2.1-copilot-deprecation
 - skill: new_feature (parte L1 del plan de la web `doc_organize_web/.ai/sessions/2026-11-22-ia-uso-copilot/PLAN.md`)
-- fase: IMPLEMENT + AUDIT_CODE (PLAN y AUDIT_PLAN en la sesión de la web)
+- fase: IMPLEMENT + AUDIT_CODE + VERSION (PLAN y AUDIT_PLAN en la sesión de la web)
 
 ## Prompt issued
 «En configuración de la IA ya no es necesario el Uso de GitHub Copilot, todo se gestionará sobre LiteLLM.» Decisión
@@ -37,8 +37,22 @@ D1 del mantenedor: obsoleto en 2.1, fuera en 3.0.
   `COPILOT_DEPRECATION_MESSAGE`, `UsageSourceName.GITHUB_COPILOT` y sus tests y docs, y se actualiza
   `docs/guides/migracion_3_0.md`.
 - **[repo]**: los ficheros del repo usan CRLF; al editar con scripts, conservarlo.
+- **[release]**: `main` avanza por fast-forward (`git push origin <sha>:main`) al commit `release:` de `develop` con su
+  CI en verde; GitHub avisa «Bypassed rule violations» por la excepción de administrador, es lo previsto. La etiqueta
+  va sobre ese commit y `release.yml` publica wheel, sdist y `.sha256`; las notas se completan después con la tabla de
+  SHA-256 y la URL del wheel (`gh release edit --notes-file`), con los enlaces a `docs/` como URL absoluta a la etiqueta.
+
+## VERSION (2026-11-22)
+
+- PR #98 (`feat(ai)`) y #99 (`release: v2.1.0`) fusionados en `develop` con squash; CI de `develop` en verde en
+  `6a2d4f4`; `main` por fast-forward a `6a2d4f4`; etiqueta `v2.1.0`; `release.yml` en verde.
+- `pyproject.toml` 2.1.0, CHANGELOG `[2.1.0] - 2026-11-22`, COMPATIBILITY: 2.1.0 activa y 2.0.1 EOL.
+- Artefactos: `doc_organize-2.1.0-py3-none-any.whl` (`77bd1e2319ea18e85f25728237b3d2d731a61e430bda4d4c0d5254bd436608ac`)
+  y `doc_organize-2.1.0.tar.gz` (`65d28e31d955507f60787a99056bc6bfd40783cdabf6c7ed6b8f1b9675267ea2`), en las notas
+  de la release.
+- doc_organize_web 2.1.0 sigue con doc_organize 2.0.1 (este cambio solo marca Copilot como obsoleto).
 
 ## Veredicto final
-Veredicto: GO
+Veredicto: CLOSED
 Pendientes al cierre:
-- Versión 2.1.0 (VERSION) cuando el mantenedor lo pida; no bloquea a la web (que ya no importa Copilot).
+- Ninguno. En 3.0: retirar Copilot (ver Directrices).
