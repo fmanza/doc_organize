@@ -6,6 +6,11 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-22
+
+GitHub Copilot queda obsoleto: el uso y el coste de IA se consultan en LiteLLM, que enruta todas las tareas desde la
+2.0. Sin cambios de comportamiento ni de dependencias; doc_organize_web 2.1 ya no lo usa.
+
 ### Deprecated
 
 - **GitHub Copilot**: `GitHubCopilotUsageClient`, `GitHubCopilotUsageConfig` y `github_copilot_usage_config_from_env()`

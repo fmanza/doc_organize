@@ -22,7 +22,8 @@ instalables desde fuera.
 
 | Versión | Python | Dependencias clave | Estado |
 |---|---|---|---|
-| 2.0.1 | `>=3.12` | Mismas dependencias que 2.0.0. Sin cambios en la API: `detect_gpu_status` ya no cuenta la build de PyTorch solo CPU como soporte de GPU | ✅ Activa |
+| 2.1.0 | `>=3.12` | Mismas dependencias que 2.0.1. Sin cambios de comportamiento: `GitHubCopilotUsageClient`, `GitHubCopilotUsageConfig` y `github_copilot_usage_config_from_env()` emiten `DeprecationWarning` y se retiran en 3.0 ([Hacia 3.0](docs/guides/migracion_3_0.md)) | ✅ Activa |
+| 2.0.1 | `>=3.12` | Mismas dependencias que 2.0.0. Sin cambios en la API: `detect_gpu_status` ya no cuenta la build de PyTorch solo CPU como soporte de GPU | ❌ EOL |
 | 2.0.0 | `>=3.12` | Mismas dependencias que 2.0.0rc3 (la rueda lleva Mermaid e `iframe-worker`, MIT). **MAJOR con ruptura**: taxonomía por ejes, `LlmClient`/`AiSettings` por tarea, decisiones y cola de revisión, evaluación, versiones, semántica, agentes, sitio sin conexión y paquete para IA. Guía: [De 1.x a 2.0](docs/guides/migracion_2_0.md) | ❌ EOL |
 | 2.0.0rc3 | `>=3.12` | Mismas dependencias que 2.0.0rc2. **Versión candidata MAJOR con ruptura**: el sitio sin conexión ya no publica el original ni el `.json` de la conversión de cada documento (`generate(include_originals=)`) | 🧪 Prerrelease |
 | 2.0.0rc2 | `>=3.12` | Mismas dependencias que 2.0.0rc1. **Versión candidata MAJOR con ruptura**: peticiones de la web en W4–W8 (`check_environment` con modelos de embeddings, `dry_run_classify(baseline=)`, `document_keys`/`common_root` públicos, `embedding_index_info`/`clear_embedding_index`, progreso por paso de los agentes, `ReviewProposal.id`, `write_context_documents_xlsx(roots=)` con versiones y hoja `Valores`, `SiteGenerator.generate(work_dir=)`); la clave de `DocumentVersionGroup` pasa a ser relativa | 🧪 Prerrelease |
