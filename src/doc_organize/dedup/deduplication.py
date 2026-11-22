@@ -202,18 +202,30 @@ class DeduplicationManager:
 
     async def _move_conversion(self, conversion: ConversionResult, duplicates_dir: Path, sha256_hash: str, conversion_dir: Path | None) -> list[str]:
         """Mueve los artefactos de `conversion` que existan a `duplicates_dir/Conversión/` (2.2.0); devuelve los que no
-        se pudieron mover."""
+        se pudieron mover.
+
+        La carpeta de imágenes se mueve fichero a fichero con la misma transferencia que los originales (en POSIX solo
+        mueve ficheros normales, sin seguir enlaces): un enlace dentro de ella no se sigue y cuenta como fallido. La
+        carpeta, ya vacía, se borra al final.
+        """
         target = duplicate_conversions_dir(duplicates_dir)
         extra: dict[str, Any] = {"relative_to": conversion_dir} if conversion_dir is not None else {}
         failed: list[str] = []
-        for artifact in (conversion.markdown_path, conversion.json_path, conversion.images_dir):
-            if not artifact or not os.path.lexists(artifact):
-                continue
+
+        async def move(path: Path) -> None:
             try:
-                await self._move_to_duplicates(Path(artifact), target, sha256_hash, **extra)
+                await self._move_to_duplicates(path, target, sha256_hash, **extra)
             except OSError as exc:
-                self.logger.warning(f"No se pudo mover la conversión '{artifact}' a duplicados: {exc}")
-                failed.append(artifact)
+                self.logger.warning(f"No se pudo mover la conversión '{path}' a duplicados: {exc}")
+                failed.append(str(path))
+
+        for artifact in (conversion.markdown_path, conversion.json_path):
+            if artifact and os.path.lexists(artifact):
+                await move(Path(artifact))
+        if conversion.images_dir and os.path.lexists(conversion.images_dir):
+            for path in await asyncio.to_thread(_files_without_links, Path(conversion.images_dir), failed):
+                await move(path)
+            await asyncio.to_thread(_remove_empty_dirs, Path(conversion.images_dir))
         return failed
 
     async def finalize_report(
@@ -525,6 +537,40 @@ class DeduplicationManager:
 _O_NOFOLLOW: int = getattr(os, "O_NOFOLLOW", 0)
 _O_DIRECTORY: int = getattr(os, "O_DIRECTORY", 0)
 _NOFOLLOW_DIR_FD = bool(_O_NOFOLLOW and _O_DIRECTORY) and {os.open, os.rename, os.unlink, os.stat} <= os.supports_dir_fd
+
+
+def _files_without_links(folder: Path, failed: list[str]) -> list[Path]:
+    """Los ficheros normales de `folder` y sus subcarpetas, sin entrar en enlaces: un enlace (o la propia `folder`, si
+    lo es) va a `failed` y no se sigue."""
+    if not stat.S_ISDIR(os.lstat(folder).st_mode):  # un enlace o un fichero suelto en lugar de la carpeta
+        failed.append(str(folder))
+        return []
+    files: list[Path] = []
+    with os.scandir(folder) as entries:
+        for entry in sorted(entries, key=lambda item: item.name):
+            if entry.is_symlink():
+                failed.append(entry.path)
+            elif entry.is_dir(follow_symlinks=False):
+                files.extend(_files_without_links(Path(entry.path), failed))
+            elif entry.is_file(follow_symlinks=False):
+                files.append(Path(entry.path))
+            else:
+                failed.append(entry.path)
+    return files
+
+
+def _remove_empty_dirs(folder: Path) -> None:
+    """Borra `folder` y sus subcarpetas si se quedaron vacías (nunca sigue enlaces ni borra ficheros)."""
+    if not stat.S_ISDIR(os.lstat(folder).st_mode):
+        return
+    with os.scandir(folder) as entries:
+        for entry in entries:
+            if entry.is_dir(follow_symlinks=False) and not entry.is_symlink():
+                _remove_empty_dirs(Path(entry.path))
+    try:
+        folder.rmdir()
+    except OSError:
+        pass  # queda algo que no se movió (un enlace, un fallo): la carpeta se queda
 
 
 def _transfer_nofollow(source: Path, target: Path, *, copy: bool) -> None:

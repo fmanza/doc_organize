@@ -6,6 +6,7 @@ from __future__ import annotations
 import doctest
 import hashlib
 import math
+import os
 
 from pathlib import Path
 
@@ -279,7 +280,35 @@ async def test_moving_a_discarded_document_moves_its_conversion_too(tmp_path) ->
     assert (duplicates / "Conversión" / "plan.docx.md").is_file()
     assert (duplicates / "Conversión" / "plan.docx.json").is_file()
     assert (duplicates / "Conversión" / "img" / "plan.docx" / "imagen.png").is_file()
+    assert not (tmp_path / "Conversión" / "img" / "plan.docx").exists()  # la carpeta de imágenes, ya vacía, se borra
     assert Path(keep.conversion.markdown_path or "").is_file()  # lo que se conserva no se toca
+
+
+@pytest.mark.skipif(os.name == "nt", reason="crear enlaces simbólicos exige privilegios en Windows")
+@pytest.mark.asyncio
+async def test_a_link_inside_the_images_folder_is_never_followed(tmp_path) -> None:
+    keep = _document(tmp_path, "plan.pdf", _text("alfa"), modified=1.0)
+    drop = _document(tmp_path, "plan.docx", _text("alfa"), modified=2.0)
+    conversion = _with_conversion_artifacts(drop, tmp_path)
+    secret = tmp_path / "secreto.txt"
+    secret.write_text("no se mueve", encoding="utf-8")
+    link = Path(conversion.images_dir or "") / "enlace.png"
+    link.symlink_to(secret)
+    group = (await ContentDuplicateFinder(tmp_path).find([keep, drop])).groups[0]
+    duplicates = tmp_path / "duplicados"
+
+    _, _, failed = await DeduplicationManager().move_group(
+        group,
+        duplicates,
+        relative_to=tmp_path / "origen",
+        conversions={drop.metadata.full_path: conversion},
+        conversion_dir=tmp_path / "Conversión",
+    )
+
+    assert failed == [str(link)]
+    assert (duplicates / "Conversión" / "img" / "plan.docx" / "imagen.png").is_file()
+    assert link.is_symlink() and secret.read_text(encoding="utf-8") == "no se mueve"
+    assert not list(duplicates.rglob("enlace.png"))
 
 
 @pytest.mark.asyncio
