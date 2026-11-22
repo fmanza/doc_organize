@@ -332,6 +332,17 @@ def resolve_images_dir(markdown_path: Path) -> Path:
     return markdown_path.parent / "img" / markdown_path.stem
 
 
+def duplicate_conversions_dir(duplicates_dir: Path) -> Path:
+    """Carpeta a la que van las conversiones de los documentos descartados (2.2.0): ``<duplicados>/Conversión/``.
+
+    Example:
+        >>> from pathlib import Path
+        >>> duplicate_conversions_dir(Path("out/duplicados")).as_posix()
+        'out/duplicados/Conversión'
+    """
+    return duplicates_dir / CONVERSION_FOLDER_NAME
+
+
 def relative_source_path(full_path: str, scan_roots: Sequence[str] = ()) -> str:
     """Ruta de ``full_path`` relativa a la raíz de ``scan_roots`` de la que cuelga (POSIX), sin datos del servidor.
 
@@ -385,6 +396,7 @@ __all__ = [
     "SITE_FOLDER_NAME",
     "ProjectLayout",
     "context_history_files",
+    "duplicate_conversions_dir",
     "relative_source_path",
     "resolve_images_dir",
     "resolve_output_paths",

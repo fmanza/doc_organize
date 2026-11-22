@@ -40,6 +40,16 @@ model_list:
       model: ollama/qwen3-embedding:0.6b
       api_base: http://host.docker.internal:11434
 
+  # Duplicados por contenido (2.2.0, `ContentDuplicateFinder`, tarea `dedup`):
+  # va el texto COMPLETO de cada documento, así que conviene un modelo local.
+  # bge-m3 es multilingüe y lee hasta 8192 tokens; sin `num_ctx`, Ollama corta
+  # a 4096 (`check_environment` lo detecta y avisa).
+  - model_name: doc-organize-dedup
+    litellm_params:
+      model: ollama/bge-m3
+      api_base: http://host.docker.internal:11434
+      num_ctx: 8192
+
   # --- Alternativa con modelos locales (Ollama) ---------------------------------
   # Ollama recorta en silencio el prompt a 4096 tokens si no se le da otro
   # contexto: fija `num_ctx` en cada modelo (8192 basta para clasificar y

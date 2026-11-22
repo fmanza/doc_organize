@@ -24,7 +24,7 @@ import httpx
 from doc_organize.ai._http_client_base import AiHttpClientBase
 from doc_organize.ai.cache import AiResultCache, cache_key
 from doc_organize.core.exceptions import AiAuthError, AiConnectionError, AiError, AiResponseError
-from doc_organize.core.models import AiSettings, AiTask
+from doc_organize.core.models import EMBEDDING_TASKS, AiSettings, AiTask
 from doc_organize.security.credentials import redact_credentials
 from doc_organize.utils.logging import get_logger
 
@@ -215,16 +215,24 @@ class LlmClient:
             raise AiResponseError(f"La respuesta de '{task}' no trae mensaje") from exc
         return message, _usage(payload)
 
-    async def embed(self, texts: Sequence[str]) -> list[list[float]]:
-        """Embeddings de `texts` (tarea `embed`), redactados antes de enviarlos y en el mismo orden.
+    async def embed(self, texts: Sequence[str], *, task: AiTask = "embed") -> list[list[float]]:
+        """Embeddings de `texts`, redactados antes de enviarlos y en el mismo orden.
+
+        Args:
+            texts: Textos.
+            task: Tarea de embeddings (`EMBEDDING_TASKS`): `embed` (contexto, por defecto) o `dedup` (2.2.0, duplicados
+                por contenido, con su propio modelo y clave).
 
         Raises:
+            ValueError: `task` no es de embeddings.
             AiAuthError, AiConnectionError, AiError: Como `complete_json`; `AiResponseError` si faltan vectores.
         """
+        if task not in EMBEDDING_TASKS:
+            raise ValueError(f"'{task}' no es una tarea de embeddings")
         if not texts:
             return []
         inputs = [redact_credentials(text).text if self.settings.redact_credentials else text for text in texts]
-        payload = await self._post("embed", "/embeddings", {"model": self.model_for("embed"), "input": inputs})
+        payload = await self._post(task, "/embeddings", {"model": self.model_for(task), "input": inputs})
         try:
             data = sorted(payload["data"], key=lambda item: item["index"])
             vectors = [[float(value) for value in item["embedding"]] for item in data]

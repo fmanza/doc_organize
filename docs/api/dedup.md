@@ -56,6 +56,8 @@ class DeduplicationManager:
         report_dir: Path | None = None,
         mode: DedupMode = "move",
         relative_to: Path | None = None,
+        conversions: Mapping[str, ConversionResult] | None = None,  # 2.2.0
+        conversion_dir: Path | None = None,  # 2.2.0
     ) -> DeduplicationReport
 
     async def move_group(
@@ -65,6 +67,8 @@ class DeduplicationManager:
         *,
         mode: DedupMode = "move",
         relative_to: Path | None = None,
+        conversions: Mapping[str, ConversionResult] | None = None,  # 2.2.0
+        conversion_dir: Path | None = None,  # 2.2.0
     ) -> tuple[int, int, list[str]]
 ```
 
@@ -153,8 +157,11 @@ class DuplicateGroup:
     group_id: str
     canonical_doc: DocumentMetadata
     duplicates: list[DocumentMetadata]
-    reason: DuplicateReason  # exact_duplicate | version_conflict | fuzzy_name_match
+    reason: DuplicateReason  # exact_duplicate | version_conflict | fuzzy_name_match | same_content | semantic_content_match
     user_choice: DocumentMetadata | None = None
+    similarity: float | None = None  # 2.2.0, grupos por contenido parecido
+    lexical_similarity: float | None = None  # 2.2.0
+    contained: bool = False  # 2.2.0
 
 @dataclass
 class DeduplicationReport:
@@ -176,7 +183,7 @@ class DeduplicationReport:
 | `utils.path_utils.ensure_no_symlinks()` | Rutas absolutas sin resolver ni seguir enlaces |
 | `utils.logging` | Logging |
 | `rapidfuzz.process.cdist`, `rapidfuzz.fuzz.WRatio`, `rapidfuzz.utils.default_process` | Matriz de scores de similitud de nombre (3ª pasada, vectorizado, con normalización previa) |
-| `numpy` (transitivo vía `pandas`) | Extrae, vectorizado, los pares de la matriz de scores por encima del umbral |
+| `numpy` (dependencia directa desde 2.2.0) | Extrae, vectorizado, los pares de la matriz de scores por encima del umbral; similitudes por bloques de `ContentDuplicateFinder` |
 
 ## Notas Internas
 
@@ -192,6 +199,23 @@ class DeduplicationReport:
 - **Histórico incremental**: `DEDUP_HISTORY.jsonl` (una línea JSON por ejecución de
   `resolve_duplicates()`, formato JSON Lines) acumula todas las ejecuciones, a
   diferencia de `DEDUP_REPORT.json` (que solo refleja la última)
+
+## Duplicados por contenido (2.2.0)
+
+`ContentDuplicateFinder` busca duplicados sobre el texto convertido: el mismo contenido en ficheros distintos
+(`same_content`, sin IA) y, con la tarea de IA `dedup`, contenido parecido (`semantic_content_match`). Sus grupos llevan
+`similarity`, `lexical_similarity` y `contained`, y se resuelven con `move_group`/`resolve_duplicates` pasando
+`conversions` (y `conversion_dir`): en modo `move`, la conversión del descartado se mueve con él a
+`duplicados/Conversión/`. Guía: [Duplicados por contenido](../guides/duplicados_por_contenido.md).
+
+::: doc_organize.dedup.content
+    options:
+      show_root_heading: false
+      members:
+        - ContentDuplicateFinder
+        - ContentDocument
+        - ContentDuplicateReport
+        - exclude_from_context
 
 ## Ejemplos Relacionados
 

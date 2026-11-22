@@ -24,7 +24,7 @@ from typing import Literal
 import httpx
 
 from doc_organize.core.exceptions import AiConfigurationError
-from doc_organize.core.models import EnvironmentCheck, EnvironmentReport
+from doc_organize.core.models import EMBEDDING_TASKS, AiTask, EnvironmentCheck, EnvironmentReport
 
 #: Versiones de Zensical con las que se ha probado el sitio del contexto: [mínima, máxima). Fuera del rango puede
 #: funcionar, pero el formato de `zensical.toml` y el límite del buscador se comprobaron con estas.
@@ -99,7 +99,8 @@ async def check_environment(
         if not endpoints and not any(check.name == "ai" for check in checks):
             checks.append(EnvironmentCheck(name="ai", status="ok", detail="Ningún modelo de IA configurado: la IA no se usará"))
         for endpoint in endpoints:
-            checks.append(await _check_ai(endpoint, transport))
+            check = await _check_ai(endpoint, transport)
+            checks.append(check.model_copy(update={"model": endpoint.model}))  # 2.2.0: qué modelo se probó
     return EnvironmentReport(checks=checks, checked_at=datetime.now(UTC).isoformat())
 
 
@@ -237,7 +238,9 @@ def _check_gpu() -> EnvironmentCheck:
     status = detect_gpu_status()
     if status.gpu_active:
         return EnvironmentCheck(name="gpu", status="ok", detail="GPU CUDA disponible para el OCR")
-    detail = "Soporte de GPU instalado, sin GPU CUDA activa" if status.gpu_support_installed else "Sin soporte de GPU en este proceso (PyTorch sin CUDA)"
+    detail = (
+        "Soporte de GPU instalado, sin GPU CUDA activa" if status.gpu_support_installed else "Sin soporte de GPU en este proceso (PyTorch sin CUDA)"
+    )
     return EnvironmentCheck(name="gpu", status="warning", detail=f"{detail}: el OCR irá por CPU", remedy=status.instructions)
 
 
@@ -260,8 +263,18 @@ def _check_av() -> EnvironmentCheck:
 
 
 #: Tareas de texto que se comprueban siempre que la IA esté configurada (con su alias recomendado si no tienen modelo);
-#: `agent` y `embed` solo si tienen modelo propio (`embed`, con una petición a `/embeddings`).
-_CHECKED_TASKS = ("classify", "enrich", "taxonomy_design")
+#: `agent`, `embed` y `dedup` (2.2.0) solo si tienen modelo propio (las de embeddings, con una petición a `/embeddings`).
+_CHECKED_TASKS: tuple[AiTask, ...] = ("classify", "enrich", "taxonomy_design")
+_OPTIONAL_TASKS: tuple[AiTask, ...] = ("agent", "embed", "dedup")
+
+#: Prueba de corte del texto de `dedup` (2.2.0): dos textos con el mismo relleno largo y un final distinto. Si los
+#: vectores salen iguales, el modelo (o el proxy) no llegó al final: corta antes de unas `_PROBE_WORDS` palabras.
+_PROBE_WORDS = 1500
+_TRUNCATION_FILLER = " ".join(["Texto de relleno para comprobar hasta dónde lee el modelo de embeddings."] * (_PROBE_WORDS // 11))
+_TRUNCATION_ENDINGS = (
+    "El contrato regula el suministro eléctrico del edificio de oficinas y sus penalizaciones.",
+    "La receta de la tarta lleva harina, huevos, azúcar y una pizca de canela.",
+)
 
 
 def _endpoints_from_env() -> list[AiEndpoint]:
@@ -275,17 +288,42 @@ def _endpoints_from_env() -> list[AiEndpoint]:
     settings = settings_from_env()
     if settings is None:
         return []
-    tasks = [*_CHECKED_TASKS, *(task for task in ("agent", "embed") if task in settings.tasks)]
+    tasks: list[AiTask] = [*_CHECKED_TASKS, *(task for task in _OPTIONAL_TASKS if task in settings.tasks)]
     return [
         AiEndpoint(
             name=task,
             base_url=settings.base_url,
-            virtual_key=settings.key_for(task),  # type: ignore[arg-type]
-            model=settings.model_for(task),  # type: ignore[arg-type]
-            kind="embedding" if task == "embed" else "chat",
+            virtual_key=settings.key_for(task),
+            model=settings.model_for(task),
+            kind="embedding" if task in EMBEDDING_TASKS else "chat",
         )
         for task in tasks
     ]
+
+
+def _served_model(response: httpx.Response) -> str | None:
+    """El modelo que dice la respuesta que contestó (campo `model` del formato OpenAI), si lo dice (2.2.0)."""
+    try:
+        model = response.json().get("model")
+    except (ValueError, AttributeError):
+        return None
+    return model if isinstance(model, str) and model.strip() else None
+
+
+def _with_served(detail: str, requested: str, served: str | None) -> str:
+    return f"{detail} (responde {served})" if served and served != requested else detail
+
+
+async def _truncates(client: httpx.AsyncClient, endpoint: AiEndpoint, headers: Mapping[str, str]) -> bool | None:
+    """Si el modelo corta el texto antes de `_PROBE_WORDS` palabras (`None` si no se pudo saber)."""
+    texts = [f"{_TRUNCATION_FILLER} {ending}" for ending in _TRUNCATION_ENDINGS]
+    try:
+        response = await client.post("/embeddings", json={"model": endpoint.model, "input": texts}, headers=dict(headers))
+        data = sorted(response.json()["data"], key=lambda item: item["index"])
+        first, second = (list(map(float, item["embedding"])) for item in data[:2])
+    except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError):
+        return None
+    return first == second
 
 
 _PROBE_MESSAGES = [
@@ -337,7 +375,21 @@ async def _check_embedding(endpoint: AiEndpoint, transport: httpx.AsyncBaseTrans
         return EnvironmentCheck(
             name=name, status="error", detail=f"{endpoint.model}: la respuesta no trae un vector", remedy="¿Es un modelo de embeddings?"
         )
-    return EnvironmentCheck(name=name, status="ok", detail=f"{endpoint.model} da vectores de dimensión {dimension}")
+    served = _served_model(response)
+    detail = _with_served(f"{endpoint.model} da vectores de dimensión {dimension}", endpoint.model, served)
+    if endpoint.name == "dedup":
+        async with httpx.AsyncClient(base_url=endpoint.base_url, timeout=_AI_TIMEOUT_S, transport=transport) as client:
+            truncates = await _truncates(client, endpoint, headers)
+        if truncates:
+            return EnvironmentCheck(
+                name=name,
+                status="warning",
+                detail=f"{detail}, pero corta el texto antes de unas {_PROBE_WORDS} palabras",
+                remedy="Usa bloques más pequeños en la búsqueda por contenido (`chunk_words`) o sube el contexto del modelo en el proxy",
+                served_model=served,
+                dimension=dimension,
+            )
+    return EnvironmentCheck(name=name, status="ok", detail=detail, served_model=served, dimension=dimension)
 
 
 async def _check_ai(endpoint: AiEndpoint, transport: httpx.AsyncBaseTransport | None) -> EnvironmentCheck:
@@ -374,14 +426,21 @@ async def _check_ai(endpoint: AiEndpoint, transport: httpx.AsyncBaseTransport | 
         return EnvironmentCheck(
             name=name, status="error", detail=f"{endpoint.model}: HTTP {response.status_code}", remedy="Comprueba que el alias existe en el proxy"
         )
+    served = _served_model(response)
     if plain is not None:
         return EnvironmentCheck(
             name=name,
             status="warning",
-            detail=f"{endpoint.model} responde, pero no admite la salida `json_schema` estricta",
+            detail=_with_served(f"{endpoint.model} responde, pero no admite la salida `json_schema` estricta", endpoint.model, served),
             remedy="2.0 usará `json_object` con validación; con un modelo que admita `json_schema` las respuestas son más fiables",
+            served_model=served,
         )
-    return EnvironmentCheck(name=name, status="ok", detail=f"{endpoint.model} responde y admite `json_schema` estricto")
+    return EnvironmentCheck(
+        name=name,
+        status="ok",
+        detail=_with_served(f"{endpoint.model} responde y admite `json_schema` estricto", endpoint.model, served),
+        served_model=served,
+    )
 
 
 def _payload(model: str, response_format: Mapping[str, object]) -> dict[str, object]:
