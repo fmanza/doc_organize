@@ -18,14 +18,15 @@ classDiagram
     }
     
     class ConversionResult {
-        +source_path: Path
-        +markdown_path: Path
-        +json_path: Path
+        +source_path: str
+        +markdown_path: str | None
+        +json_path: str | None
         +success: bool
         +error: str | None
+        +source_sha256: str | None
         +ocr_required: bool
         +duration_seconds: float
-        +images_dir: Path | None
+        +images_dir: str | None
         +picture_description_applied: bool
     }
     
@@ -40,8 +41,8 @@ classDiagram
 ```python
 class DocumentConverter:
     def __init__(self, *, artifacts_path: Path | str | None = None, allow_model_downloads: bool = True) -> None
-    async def __aenter__(self) -> 'DocumentConverter'
-    async def __aexit__(self, *args) -> None
+    async def __aenter__(self) -> Self
+    async def __aexit__(self, *exc_info: object) -> None
     
     async def convert_document(
         self,
@@ -60,7 +61,9 @@ class DocumentConverter:
     
     # Alias de doc_organize.projects.layout (desde 0.12.0, sin Docling)
     @staticmethod
-    def resolve_output_paths(full_path, output_dir, scan_roots=(), *, include_root_name=False) -> tuple[Path, Path]
+    def resolve_output_paths(
+        full_path: str, output_dir: Path, scan_roots: Sequence[str] = (), *, include_root_name: bool = False
+    ) -> tuple[Path, Path]
     @staticmethod
     def resolve_images_dir(markdown_path: Path) -> Path
 ```
@@ -88,18 +91,20 @@ Context manager para conversión de documentos.
 
 | Retorno | Tipo | Descripción |
 |---|---|---|
-| `source_path` | `Path` | Ruta del documento original |
-| `markdown_path` | `Path` | Ruta del .md generado (si éxito) |
-| `json_path` | `Path` | Ruta del .json generado (si éxito) |
+| `source_path` | `str` | Ruta del documento original |
+| `markdown_path` | `str \| None` | Ruta del .md generado (si éxito) |
+| `json_path` | `str \| None` | Ruta del .json generado (si éxito) |
 | `success` | `bool` | `True` si conversión completó |
 | `error` | `str \| None` | Mensaje de error (si falló) |
 | `ocr_required` | `bool` | `True` si necesita segunda pasada con OCR |
 | `duration_seconds` | `float` | Duración de conversión |
-| `images_dir` | `Path \| None` | Carpeta con las imágenes extraídas (`img/<stem>/`), si `extract_images=True` y el documento tenía alguna |
+| `source_sha256` | `str \| None` | 2.0.0. SHA-256 del original según la caché, para `check_context_freshness`; no lo rellena `convert_document` |
+| `images_dir` | `str \| None` | Carpeta con las imágenes extraídas (`img/<stem>/`), si `extract_images=True` y el documento tenía alguna |
 | `picture_description_applied` | `bool` | `True` si `use_picture_description=True` tuvo efecto real (solo PDF/imagen) |
 
 **Excepciones**:
 - No relanza los fallos de un documento; devuelve resultado con `success=False`
+- `ConversionError` si se usa fuera de `async with` (error de programación, se propaga)
 - `ModelsNotAvailableError` con `allow_model_downloads=False` si faltan modelos (0.12.0)
 
 ---
@@ -156,23 +161,23 @@ Reconvierte batch de documentos con OCR.
 
 | Parámetro | Validación | Impacto si falla |
 |---|---|---|
-| Documento válido | Verificación previa (Scanner) | `ConversionError` en resultado |
-| Formato soportado | Validación en Docling | `success=False` en resultado |
-| Directorio existe | No se valida; usuario responsable | `ConversionError` |
+| Uso como `async with` | `_get_docling` | `ConversionError` (se propaga) |
+| Documento legible y formato soportado | Docling | `success=False` y `error` en el resultado |
+| Tiempo por documento | `timeout_s` | `success=False` con la causa del límite |
 
 ### Salida
 
 ```python
-@dataclass
-class ConversionResult:
-    source_path: Path
-    markdown_path: Path | None = None
-    json_path: Path | None = None
-    success: bool = False
+class ConversionResult(BaseModel):  # doc_organize.core.models
+    source_path: str
+    markdown_path: str | None = None
+    json_path: str | None = None
+    success: bool
     error: str | None = None
+    source_sha256: str | None = None  # 2.0.0
     ocr_required: bool = False
     duration_seconds: float = 0.0
-    images_dir: Path | None = None
+    images_dir: str | None = None
     picture_description_applied: bool = False
 ```
 
@@ -185,7 +190,7 @@ class ConversionResult:
 | `docling_core.types.doc.base.ImageRefMode` | Modo de referencia de imágenes al exportar Markdown |
 | `docling_core.types.doc.document.PictureItem`, `PictureDescriptionData` | Extracción de descripciones de imagen para el `.json` |
 | `core.models.ConversionResult`, `DocumentMetadata` | Modelos |
-| `core.exceptions.ConversionError` | Excepciones |
+| `core.exceptions.ConversionError`, `ModelsNotAvailableError` | Excepciones |
 | `utils.logging` | Logging |
 
 ## Notas Internas

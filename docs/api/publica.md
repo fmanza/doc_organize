@@ -1,9 +1,11 @@
 # API pública y compatibilidad
 
 Desde la 0.10.0, la API pública de doc_organize son los nombres de `doc_organize.__all__`. Siguen
-[SemVer](https://semver.org/lang/es/): una versión MINOR (0.x.0) puede añadir nombres o parámetros opcionales y marcar
+[SemVer](https://semver.org/lang/es/): una versión MINOR (x.Y.0) puede añadir nombres o parámetros opcionales y marcar
 cosas como obsoletas (`DeprecationWarning`), pero no romperlas; los cambios incompatibles se reservan para una MAJOR
-(1.0.0). Lo que no está en `__all__` (módulos internos) puede cambiar sin aviso.
+(X.0.0, como 1.0.0 y 2.0.0). Lo que no está en `__all__` (módulos internos) puede cambiar sin aviso. `__all__` es
+`["__version__", *sorted(_EXPORTS)]`: `_EXPORTS`, en `doc_organize/__init__.py`, asocia cada nombre con el módulo que lo
+define.
 
 ```python
 import doc_organize
@@ -34,6 +36,9 @@ solo lectura).
 
 | Versión | Cambio |
 |---|---|
+| 2.2.0 | Sin cambios incompatibles: los parámetros nuevos tienen valor por defecto y los campos nuevos son opcionales. Nuevos `ContentDocument`, `ContentDuplicateFinder`, `ContentDuplicateReport` y `exclude_from_context` (duplicados por contenido, también en `doc_organize.dedup`; ver [Deduplicación](dedup.md#duplicados-por-contenido-220)); `DuplicateGroup.similarity`, `lexical_similarity` y `contained`; `DeduplicationManager.move_group`/`resolve_duplicates(conversions=, conversion_dir=)`; `LlmClient.embed(task=)` y `embed_detailed()`; `EnvironmentCheck.model`, `served_model` y `dimension`. **Valores nuevos** en tipos existentes: `DuplicateReason.SAME_CONTENT`/`SEMANTIC_CONTENT_MATCH` y la tarea de IA `"dedup"` en `AiTask`/`AI_TASKS` (un `match` exhaustivo tiene casos nuevos). `numpy` pasa a dependencia directa |
+| 2.1.0 | Sin cambios en `__all__`. **Obsoletos** (se retiran en 3.0): `GitHubCopilotUsageClient`, `GitHubCopilotUsageConfig`, `github_copilot_usage_config_from_env()` y `UsageSourceName.GITHUB_COPILOT` (de `doc_organize.ai`; emiten `DeprecationWarning`). Ver [Hacia 3.0](../guides/migracion_3_0.md) |
+| 2.0.1 | Sin cambios de API. **Cambio de comportamiento**: `detect_gpu_status` solo da soporte de GPU con un `torch` compilado con CUDA |
 | 2.0.0 | **MAJOR con ruptura**: taxonomía por ejes, cliente único de IA (`LlmClient`, `AiSettings`, `settings_from_env`) en lugar de los cuatro clientes de 1.x, `ContextBuilder.build(llm=, ai_scope=, enrich=)` y `Context.ai_stats`/`ai_provenance`. Ver [De 1.x a 2.0](../guides/migracion_2_0.md) |
 | 1.7.1 | Sin cambios en la API. **Cambio de comportamiento**: `zensical.toml` generado por `SiteGenerator` incluye `features = ["navigation.prune"]` en `theme` (cada página lleva solo la sección abierta del `nav`; el sitio de 2600 documentos pasa de ~1,9 GB a ~170 MB) |
 | 1.7.0 | Sin cambios incompatibles en las firmas: todo lo nuevo tiene valor por defecto y los contextos anteriores se siguen leyendo (`ai_redact_credentials=False`, `credential_findings=[]`). Nuevos `redact_credentials`, `scan_credentials`, `RedactionResult`, `CredentialFinding` y `DocumentCredentialFindings` (también en `doc_organize.security` y `core.models`); `ContextBuilder(ai_redact_credentials=)` *keyword-only*; `Context.ai_redact_credentials` y `Context.credential_findings`; `SiteGenerator.generate(redact_credentials=)` y `SiteResult.credentials_redacted`; `LiteLLMTaxonomyManifestDraftConfig.redact_credentials`. **Cambios de comportamiento** (activados por defecto): el texto que se envía a la IA y las páginas y títulos del sitio salen con las credenciales redactadas (`«REDACTADO»`); la carpeta reorganizada, que es la que publica el sitio, queda redactada |
@@ -59,15 +64,25 @@ solo lectura).
 | Escaneo y conversión | `ScanCommand`, `ScanOptions`, `ScanSummary`, `DocumentScanner`, `DocumentConverter`, `OCRScheduler`, `CacheManager`, `CancelToken`, `ProgressEvent` |
 | Rutas de salida (0.12.0) | `resolve_output_paths`, `resolve_images_dir`, `relative_source_path` (también en `doc_organize.projects`; no cargan Docling) |
 | Carpeta reorganizada (0.13.0) | `RESERVED_OUTPUT_FOLDER_NAMES`, `validate_output_folder_name` (también en `doc_organize.projects.layout`) |
-| Duplicados | `DeduplicationManager`, `DeduplicationSummary`, `DuplicateGroup`, `DuplicateReason`, `DeduplicationReport` |
-| Contexto | `ContextBuilder`, `ContextRegistry`, `Reorganizer`, `SiteGenerator`, `SiteResult`, `TaxonomyTemplateRegistry`, `Context`, `TaxonomyManifest` |
+| Duplicados | `DeduplicationManager`, `DeduplicationSummary`, `DuplicateGroup`, `DuplicateReason`, `DedupMode`, `DeduplicationReport` |
+| Duplicados por contenido (2.2.0) | `ContentDocument`, `ContentDuplicateFinder`, `ContentDuplicateReport`, `exclude_from_context` (también en `doc_organize.dedup`; ver [Deduplicación](dedup.md)) |
+| Contexto | `ContextBuilder`, `ContextRegistry`, `Reorganizer`, `resolve_organized_paths` (0.14.0), `SiteGenerator`, `SiteResult`, `TaxonomyTemplateRegistry`, `Context`, `TaxonomyManifest` (ver [Organización documental](context.md)) |
 | Plantillas de taxonomía como texto (0.13.0) | `parse_taxonomy_template`, `render_taxonomy_template`, `list_builtin_templates`, `load_builtin_template` (también en `doc_organize.context`) |
-| Exportación (0.11.0) | `write_project_zip`, `preview_project_zip`, `ExportStats`, `write_cache_xlsx`, `write_scan_errors_xlsx`, `load_cache_entries`, `load_scan_error_history` (también en `doc_organize.export`; ver [Exportación](export.md)). En `doc_organize.export` desde 1.5.0: `load_context_history`, `write_context_history_xlsx` |
+| Taxonomía por ejes (2.0.0) | `TaxonomyAxis`, `TaxonomyEntry`, `AxisValue`, `DocumentClassification`, `TaxonomyFrontMatterReport`, `inspect_taxonomy_front_matter`, `migrate_manifest_v1`, `check_context_freshness`, `FreshnessReport` (ver [Organización documental](context.md)) |
+| Evaluación contra una referencia (2.0.0) | `evaluate_classification`, `load_gold_xlsx`, `GoldStandard`, `GoldLabel`, `EvaluationReport`, `AxisEvaluation`, `dry_run_classify`, `DryRunResult`, `DocumentChange`, `document_keys`, `common_root` (ver [Evaluación](evaluation.md)) |
+| Decisiones de personas y revisión (2.0.0) | `ClassificationDecision`, `ClassificationDecisionStore`, `DecisionIssue`, `gold_from_decisions`, `review_queue`, `ReviewItem` (ver [Decisiones](decisions.md)) |
+| Versiones y embeddings (2.0.0) | `detect_document_versions`, `DocumentVersionGroup` (ver [Versiones](versions.md)); `embedding_index_info`, `clear_embedding_index` (ver [Clasificación semántica](semantic.md)) |
+| Cliente único de IA (2.0.0) | `LlmClient`, `AiSettings`, `TaskSettings`, `settings_from_env`, `default_model_alias`, `PromptRegistry`, `AiResultCache`, `prune_ai_cache` (ver [Cliente único de IA](llm_client.md)) |
+| Agentes (2.0.0) | `AgentRunner`, `AgentTool`, `AgentLimits`, `AgentRun`, `TaxonomyDesignAgent`, `TaxonomyDesignProposal`, `check_taxonomy_rules`, `RulesCorpus`, `TaxonomyRulesReport`, `ReviewAgent`, `ReviewProposal`, `ReviewResult`, `audit_taxonomy`, `TaxonomyAudit` (ver [Agentes](agents.md)) |
+| Credenciales (1.7.0) | `redact_credentials`, `scan_credentials`, `RedactionResult`, `CredentialFinding`, `DocumentCredentialFindings` |
+| Sitio sin conexión (2.0.0) | `neutralize_untrusted_markdown`, `NeutralizeResult`, `check_site_offline`, `OfflineSiteReport`, `write_site_zip`, `SiteZipResult` (ver [Sitio sin conexión](offline_site.md)) |
+| Exportación (0.11.0) | `write_project_zip`, `preview_project_zip`, `ExportStats`, `write_cache_xlsx`, `write_scan_errors_xlsx`, `load_cache_entries`, `load_scan_error_history`; desde 2.0.0, `write_context_documents_xlsx` (también en `doc_organize.export`; ver [Exportación](export.md)). En `doc_organize.export` desde 1.5.0: `load_context_history`, `write_context_history_xlsx` |
+| Paquete para IA (2.0.0) | `write_ai_context_bundle`, `render_llms_txt`, `AiBundleStats` (también en `doc_organize.export`; ver [Paquete para IA](ai_bundle.md)) |
 | Proyectos (CLI) | `ProjectRegistry`, `ProjectLayout`, `ProjectHistoryCleaner`, `ScannedFoldersStore`, `Project`, `ScannedFolder`, `FolderValidator`, `ProjectValidator` |
 | Eventos de progreso | `ScanEvent`/`ScanEventType`, `DedupEvent`/`DedupEventType`, `ContextBuildEvent`/`ContextBuildEventType`, `ContextDeleteEvent`/`ContextDeleteEventType` |
 | Modelos | `DocumentMetadata`, `ConversionResult`, `CacheEntry`, `ConversionStatus`, `DocumentStatus`, `ScanResult`, `ScanErrorEntry`, `ScanErrorReport`, `ScanRunReport` |
-| Diagnóstico | `detect_gpu_status`, `detect_av_status`, `detect_office_status`, `GpuStatus`, `AvStatus`, `OfficeStatus` |
-| Errores | `DocOrganizeError` (base), `OperationCancelledError`, `InvalidPathError`, `MissingDependencyError`, `ConversionError`, `ModelsNotAvailableError`, `CacheError`, `CacheNotFoundError`, `ProjectError`, `ProjectNotFoundError`, `ContextError`, `SiteBuildError` |
+| Diagnóstico | `detect_gpu_status`, `detect_av_status`, `detect_office_status`, `GpuStatus`, `AvStatus`, `OfficeStatus`; desde 2.0.0, `check_environment`, `AiEndpoint`, `EnvironmentCheck`, `EnvironmentReport` (ver [Diagnóstico del entorno](diagnostics.md)) |
+| Errores | `DocOrganizeError` (base), `OperationCancelledError`, `InvalidPathError`, `MissingDependencyError`, `ConversionError`, `ModelsNotAvailableError`, `CacheError`, `CacheNotFoundError`, `ProjectError`, `ProjectNotFoundError`, `ContextError`, `SiteBuildError`, `OfflineSiteError` (2.0.0) |
 
 El paquete incluye `py.typed`: los tipos son utilizables por `mypy` en el código que lo consume.
 

@@ -18,6 +18,8 @@
 | `write_context_history_xlsx` | `(destination, history, *, on_progress=None, cancel_token=None)` | filas escritas (1.5.0) |
 | `write_context_documents_xlsx` | `(destination, context, *, roots=None, on_progress=None, cancel_token=None)` | filas escritas (2.0.0): hoja `Documentos` (una fila por documento, clasificados y sin clasificar con su motivo, su grupo de versiones, versión y si es la vigente, y una columna por cada eje que solo etiqueta, con los nombres de sus valores separados por «; »), hoja `Ejes` (una fila por eje y valor del catálogo con su número de documentos, también los que tienen 0) y hoja `Valores` (una fila por documento, eje y valor: quién lo asignó, confianza y cita). Con `roots` (las raíces de escaneo, como en `document_keys`), las rutas van como la clave relativa del documento y no sale ninguna ruta absoluta |
 | `ExportStats` | `file_count`, `total_size_bytes` (modelo Pydantic congelado) | — |
+| `CACHE_SNAPSHOT_NAME` | constante `"cache_export.json"` (nombre de la instantánea de la caché en el ZIP) | — |
+| `write_ai_context_bundle`, `render_llms_txt`, `AiBundleStats`, `BUNDLE_DOCUMENTS_FOLDER` | Paquete del contexto para IA (2.0.0); ver [Paquete para IA](ai_bundle.md) | — |
 | `MissingDependencyError` | `package`, `extra` (en `doc_organize.core.exceptions`) | — |
 
 - `destination`: ruta (se crea o sobrescribe) o fichero binario abierto para escritura. El ZIP admite flujos sin

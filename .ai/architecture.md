@@ -1,218 +1,183 @@
 # 🏗️ Arquitectura de doc_organize
 
-> **Nota (2026-11-20, 2.0.0)**: las secciones de autenticación web, roles, multi-tenant y el resolutor de duplicados
-> son históricas: desde 1.0.0 viven en doc_organize_web. En 2.0, `ai/` ya no tiene un cliente por tarea con su
-> `*Config` (`DomainClassificationClient`, `TaxonomyClassificationClient`…): hay un solo `LlmClient` con `AiSettings`
-> por tarea, y `context/` sigue importando de `ai/` (la excepción de abajo, con esos nombres nuevos). Además hay un
-> módulo `security/` (redacción de credenciales y neutralización de Markdown). La arquitectura vigente está en
-> `.github/SHARED_INSTRUCTIONS.md` («Arquitectura real»).
+**Versión:** 2.2.0 (`pyproject.toml`) — librería pura desde 1.0.0
+**Última actualización:** 2026-11-24
+**Fuentes vigentes:** `.github/SHARED_INSTRUCTIONS.md` («Arquitectura real»),
+`.github/instructions/architecture.instructions.md` (regla #6), `src/doc_organize/__init__.py` (`_EXPORTS`)
 
-**Versión:** Fase 1 (A–D2c) + organización documental (Fase 2) + rediseño Tenant/Role/User
-**Última actualización:** 2026-09-11
-**Estado:** Implementado, ver `§13` de `.github/prompts/doclink_extractor_plan.md` y
-`.ai/sessions/2026-09-11-tenant-role-user-redesign/` (rediseño de auth más reciente)
-
-> Este documento reemplaza una versión anterior que describía una librería de acceso a múltiples
-> motores de base de datos (`_drivers/`, `connection/`, `metadata/`, `bulk/`, `migrate/`,
-> `comparar/`) — esa era la **encarnación anterior de este mismo repositorio**, antes de un pivote
-> completo de dominio. Ese historial se conserva localmente en `.ai/doc_old/` (gitignored, nunca
-> entró en el historial de este proyecto) por si hace falta contexto arqueológico, pero **no
-> describe `doc_organize` tal como existe hoy**.
+> Historial: una versión muy anterior describía otra librería (motores de base de datos: `_drivers/`, `connection/`,
+> `metadata/`…), la encarnación previa de este repositorio, conservada solo en `.ai/doc_old/` (gitignored). La versión
+> de 2026-09-11 describía la web integrada, `auth/`, roles y multi-tenant: **todo eso se retiró en 1.0.0** y vive en
+> doc_organize_web (ver «Histórico» al final y `docs/guides/migracion_web.md`).
 
 ---
 
 ## Visión general
 
-`doc_organize` escanea, convierte (Docling), deduplica y cachea documentos — por CLI o por una
-interfaz web opcional con autenticación multi-usuario/multi-tenant. Se organiza en **3 niveles**,
-regla de oro: un módulo de Nivel N solo importa de Nivel N y N-1 (nunca de otro módulo de su mismo
-nivel, nunca "hacia arriba").
+`doc_organize` escanea, convierte (Docling), deduplica, cachea y organiza documentos en un contexto documental, con
+IA opcional vía LiteLLM. Se usa como librería (API pública = `doc_organize.__all__`, importada bajo demanda con
+PEP 562 para no cargar Docling hasta usarlo) o con el CLI. No tiene interfaz web ni autenticación:
+`tests/unit/test_library_architecture.py` lo garantiza.
+
+Se organiza en **3 niveles**; las dependencias fluyen solo hacia abajo (regla #6): Nivel 3 importa de 2 y 1; Nivel 2
+solo de Nivel 1 (salvo excepciones documentadas abajo); Nivel 1 de nada del paquete.
 
 ```
 📦 doc_organize
 │
-├─── NIVEL 1: FUNDACIONAL (sin dependencias del resto del paquete)
+├── __init__.py      # API pública (_EXPORTS, PEP 562)
+│
+├─── NIVEL 1: FUNDACIONAL
 │    core/
-│    ├── models.py        # Modelos Pydantic v2 (DocumentMetadata, Project, Tenant, Role, User,
-│    │                     #   Session, CacheEntry, ScanEvent, DuplicateGroup, ...)
-│    ├── exceptions.py     # DocOrganizeError y su jerarquía
-│    └── constants.py      # Extensiones soportadas, límites de nombre, parámetros scrypt
+│    ├── models.py        # Modelos Pydantic v2 (DocumentMetadata, Project, CacheEntry, DuplicateGroup, ScanEvent,
+│    │                    #   DedupEvent, ContextBuildEvent, Context, TaxonomyManifest, AiSettings, TaskSettings…)
+│    ├── exceptions.py    # DocOrganizeError y su jerarquía
+│    ├── constants.py     # Extensiones soportadas, límites…
+│    └── progress.py      # CancelToken, ProgressEvent, Phase
 │
-│    utils/
-│    ├── hash_utils.py     # hash_file() — única fuente de verdad SHA-256, async
-│    ├── path_utils.py     # safe_path_join() — anti path-traversal
-│    ├── logging.py        # get_logger()/configure_logging() — logging estructurado
-│    ├── date_format.py    # format_datetime()/format_duration() — filtros Jinja
-│    ├── gpu_detector.py   # detect_gpu_status() — soporte de GPU del entorno
-│    └── av_detector.py    # detect_av_status() — soporte de audio/vídeo del entorno
+│    utils/               # hash_utils (hash_file), path_utils (safe_path_join), logging, date_format,
+│                         #   detectores gpu/av/office/metadata, atomic_write, file_lock, io_retry, memory,
+│                         #   folding, text_clean
 │
-├─── NIVEL 2: SERVICIOS INDEPENDIENTES (cada uno resuelve una responsabilidad, sin depender
-│    │        de sus pares de Nivel 2 — solo de Nivel 1)
-│    validators/    # FolderValidator (REQ-001), ProjectValidator (REQ-008)
-│    scanner/       # DocumentScanner (REQ-002)
-│    converter/     # DocumentConverter + OCRScheduler (REQ-003/004)
-│    dedup/         # DeduplicationManager (REQ-005)
-│    cache/         # CacheManager, SQLite+WAL (REQ-006)
-│    projects/      # ProjectRegistry (REQ-008), JSON + asyncio.Lock
-│    auth/          # AuthStore, SQLite+WAL (tenants/roles globales/usuarios/sesiones)
-│    ai/            # Clientes IA (LiteLLM Proxy, GitHub Copilot Pro) — clasificación y uso/coste
-│    context/       # ContextBuilder/ContextRegistry/Reorganizer/MkDocsGenerator (organización
-│                    #   documental por dominios) — único módulo de Nivel 2 que importa OTRO
-│                    #   módulo de Nivel 2 (`ai/`, inyección de cliente, ver excepción más abajo)
+├─── NIVEL 2: SERVICIOS INDEPENDIENTES
+│    validators/   # FolderValidator (REQ-001), ProjectValidator (REQ-008)
+│    scanner/      # DocumentScanner (REQ-002)
+│    converter/    # DocumentConverter (adaptador de Docling) + OCRScheduler (REQ-003/004)
+│    dedup/        # DeduplicationManager (REQ-005); content.py: ContentDuplicateFinder (2.2.0)
+│    cache/        # CacheManager, SQLite+WAL (REQ-006)
+│    projects/     # ProjectRegistry (REQ-008), ProjectLayout, ScannedFoldersStore, ProjectHistoryCleaner
+│    security/     # redact_credentials, scan_credentials, neutralize_untrusted_markdown
+│    ai/           # LlmClient, settings (settings_from_env), prompts, cache, embeddings, agents (AgentRunner),
+│                  #   services, uso: litellm_usage_client; github_copilot_usage_client (obsoleto desde 2.1.0)
 │
-└─── NIVEL 3: ORQUESTACIÓN (coordina Nivel 2, sin cambiar sus contratos)
-     scan/          # ScanCommand — compartido por CLI y web, no pertenece a ninguno de los dos
-     web/           # FastAPI, extra [web] — nunca importado desde el núcleo
-     main.py        # CLI (python -m doc_organize ...)
+└─── NIVEL 3: ORQUESTACIÓN
+     context/      # ContextBuilder, ContextRegistry, Reorganizer, SiteGenerator, manifiesto por ejes, decisiones,
+                   #   cola de revisión, evaluación, dry run, versiones, semántica, frescura, historial,
+                   #   offline_site, llms_txt, agentes de taxonomía y revisión, plantillas
+     scan/         # ScanCommand, scan_history_store
+     export/       # ZIP (streaming), Excel (extra `export`), paquete para IA
+     diagnostics.py  # check_environment
+     main.py       # CLI (project, scan, deduplicate, export)
 ```
+
+> `security/` figura como Nivel 2 en `.github/SHARED_INSTRUCTIONS.md`, pero no aparece en la lista de la regla #6 de
+> `architecture.instructions.md`; `diagnostics.py` no está asignado a ningún nivel en ninguno de los dos
+> (**pendiente** de fijar).
 
 ```mermaid
 graph TB
     subgraph L3["Nivel 3 — Orquestación"]
         CLI["main.py (CLI)"]
         ScanCmd["scan/ScanCommand"]
-        Web["web/ (FastAPI)"]
+        Context["context/"]
+        Export["export/"]
     end
-    subgraph L2["Nivel 2 — Servicios independientes"]
+    subgraph L2["Nivel 2 — Servicios"]
         Validators["validators/"]
         Scanner["scanner/DocumentScanner"]
         Converter["converter/DocumentConverter + OCRScheduler"]
-        Dedup["dedup/DeduplicationManager"]
+        Dedup["dedup/ (DeduplicationManager, ContentDuplicateFinder)"]
         Cache["cache/CacheManager"]
-        Projects["projects/ProjectRegistry"]
-        Auth["auth/AuthStore"]
-        Ai["ai/ (clientes LiteLLM/GitHub Copilot)"]
-        Context["context/ContextBuilder + Registry"]
+        Projects["projects/"]
+        Security["security/"]
+        Ai["ai/ (LlmClient vía LiteLLM)"]
     end
     subgraph L1["Nivel 1 — Fundacional"]
         Core["core/"]
         Utils["utils/"]
     end
     CLI --> ScanCmd
-    Web --> ScanCmd
     CLI --> Projects
-    Web --> Projects
-    Web --> Auth
-    CLI --> Auth
-    Web --> Context
+    CLI --> Export
     ScanCmd --> Validators
     ScanCmd --> Scanner
     ScanCmd --> Converter
     ScanCmd --> Dedup
     ScanCmd --> Cache
-    Validators --> Core
-    Scanner --> Utils
-    Dedup --> Utils
-    Cache --> Utils
-    Projects --> Utils
+    Context --> Ai
+    Context --> Projects
+    Context --> Security
+    Export --> Context
+    Export --> Cache
+    Export --> Projects
+    Export --> Security
     Projects --> Validators
     Ai --> Core
-    Ai --> Utils
-    Context --> Core
-    Context --> Ai
+    Dedup --> Core
+    Scanner --> Utils
+    Cache --> Utils
+    Validators --> Core
 ```
+
+Los consumidores (el CLI y doc_organize_web) reciben progreso por callbacks o iteradores de eventos (`ScanEvent`,
+`DedupEvent`, `ContextBuildEvent`, `ContextDeleteEvent`, `ProgressEvent`) y cancelan con `CancelToken`; la librería no
+sabe si detrás hay un terminal, un WebSocket o SSE.
 
 ## Excepción documentada: `projects/` importa de `validators/` (Nivel 2 → Nivel 2)
 
-`ProjectRegistry.create_project()` (`projects/project_registry.py`) usa
-`ProjectValidator.validate_name()` (`validators/project_validator.py`) para
-validar el nombre de proyecto antes de crear la carpeta. Es una excepción
-deliberada a "un módulo de Nivel 2 nunca depende de otro módulo de Nivel 2":
-`ProjectValidator` es una validación pura de cadena (sin estado, sin I/O,
-mismo perfil que `FolderValidator`, su par natural en `validators/`) — no
-genera dependencia circular (`validators/` no depende de `projects/`) ni
-acoplamiento real de comportamiento. La alternativa (mover la validación a
-`core/`) cambiaría el rol de `core/` (hoy solo modelos/excepciones/constantes,
-sin lógica de negocio) por evitar una violación que no causa ningún problema
-concreto — se documenta la excepción en vez de forzar ese cambio
+`ProjectRegistry.create_project()` (`projects/project_registry.py`) usa `ProjectValidator.validate_name()`
+(`validators/project_validator.py`) para validar el nombre de proyecto antes de crear la carpeta. Es una excepción
+deliberada: `ProjectValidator` es una validación pura de cadena (sin estado, sin I/O); no hay dependencia circular
+(`validators/` no depende de `projects/`). Mover la validación a `core/` cambiaría el rol de `core/` (modelos,
+excepciones, constantes, sin lógica de negocio) por evitar una violación que no causa ningún problema concreto
 (maturity-assessment, sesión 2026-09-03).
 
-## Excepción documentada: `context/` importa de `ai/` (Nivel 2 → Nivel 2)
+## `context/` importa de `ai/` (Nivel 3 → Nivel 2, permitido)
 
-`context/context_builder.py` y `context/taxonomy_manifest_sampler.py` importan tipos de
-`ai/` (`DomainClassificationClient`, `TaxonomyClassificationClient`, `SampledDocument`) para
-tipar el parámetro de cliente IA que `ContextBuilder.build()` recibe **inyectado** (DIP: quien
-llama construye el cliente a partir de la config resuelta y se lo pasa; `context/` nunca
-resuelve credenciales ni construye el cliente por su cuenta). Mismo criterio que la excepción
-`projects/`→`validators/` de arriba: sin dependencia circular (`ai/` no importa de `context/`),
-y la Sub-fase B (IA) de la clasificación por dominios/taxonomía es opcional — `ContextBuilder`
-funciona igual de bien sin ningún cliente IA (Sub-fase A, solo reglas).
+Antes `context/` figuraba como Nivel 2 y su import de `ai/` era una excepción; hoy `context/` es Nivel 3 (regla #6) y
+el import es normal. `ContextBuilder`, `semantic`, `dry_run` y `review_agent` reciben un `LlmClient` **inyectado** (DIP:
+quien llama construye el cliente con `AiSettings`, p. ej. desde `settings_from_env()`; `context/` nunca resuelve
+credenciales). La IA es opcional: sin cliente, la clasificación por reglas funciona igual.
+
+## Dependencias observadas fuera de la regla (pendiente de decisión)
+
+Verificado en el código a 2.2.0, sin justificación documentada encontrada:
+
+- `dedup/content.py` (Nivel 2) importa `doc_organize.context.decisions` y `doc_organize.context.evaluation`
+  (Nivel 3) **de forma perezosa**, dentro de `exclude_from_context()`. Y `doc_organize.ai.llm_client` (Nivel 2) solo
+  bajo `TYPE_CHECKING`.
+- Imports horizontales entre módulos de Nivel 3: `export/` → `context/` (`llms_txt`, `context_history`,
+  `evaluation`) y `context/offline_site.py` → `export/_progress.py`. La regla #6 dice «nunca en horizontal»; no hay
+  ciclo de import a nivel de módulo, pero falta decidir si se documentan como excepción o se mueven.
+
+## Por qué `scan/` es su propio módulo (no vive en `main.py`)
+
+`ScanCommand` orquesta escaneo + caché + conversión + OCR (la deduplicación es una acción aparte,
+`deduplicate_streaming()`). Nació en `main.py`; se extrajo a `scan/scan_command.py` cuando hubo un segundo consumidor
+(entonces la web integrada, hoy doc_organize_web), para no acoplar dos puntos de entrada. `run()` delega en
+`run_streaming()` (generador async de `ScanEvent`): mismo pipeline, dos formas de consumirlo.
+
+## IA: un solo cliente (2.0)
+
+`ai/` ya no tiene un cliente por tarea con su `*Config` (1.x): hay un `LlmClient` con `AiSettings` (proxy + clave
+general) y `TaskSettings` por tarea (`classify`, `enrich`, `taxonomy_design`, `agent`, `embed`, `dedup`). Siempre a
+través de un LiteLLM Proxy; una tarea sin modelo propio usa el alias `doc-organize-<tarea>` (salvo `dedup`, que sin
+modelo propio no ejecuta la búsqueda por contenido parecido, CHANGELOG 2.2.0). Las credenciales se redactan antes de
+enviar (`security/`). `tests/unit/test_ai_architecture.py` impide que `ai/` importe `auth`/`web`.
 
 ---
 
-## Por qué `scan/` es su propio módulo (no vive en `main.py` ni en `web/`)
+## Histórico (retirado en 1.0.0, vive en doc_organize_web)
 
-`ScanCommand` orquesta escaneo+caché+dedup+conversión+OCR. Nació dentro de `main.py` (Fase D-1, solo
-CLI); al construir el equivalente web (Fase D-2b), habría exigido que `web/` importara de `main.py`
-(o viceversa), acoplando dos entry points de orquestación que deben ser independientes. Se extrajo a
-`scan/scan_command.py` — módulo Nivel 3 compartido, sin dueño único. `run()` (contrato CLI, Fase
-D-1) delega en `run_streaming()` (generador async de `ScanEvent`, Fase D-2b) — mismo pipeline, dos
-formas de consumirlo.
+- **Autenticación web**: sesión por cookie (`HttpOnly`, `SameSite=Strict`), `AuthMiddleware`, WebSocket autenticado en
+  el handler.
+- **Roles, usuarios y multi-tenant**: rediseño Tenant/Role/User (2026-09-11, `DECISIONS_LOG.md` Revisión 16),
+  `is_instance_admin`, `require_project_access`, `tenant_id` resuelto desde la sesión. Desde 1.0.0 `Project` no tiene
+  `tenant_id` (L-12; un `projects.json` antiguo con ese campo se sigue leyendo y se ignora).
+- **Duplicates Resolver web** (`web/routes/duplicates.py::_group_key()`): recalculaba los grupos en el servidor antes
+  de aplicar la elección del usuario.
+- `MkDocsGenerator` (sustituido por `SiteGenerator`) y los clientes IA por tarea de 1.x (`DomainClassificationClient`,
+  `TaxonomyClassificationClient`…).
 
-## Autenticación web (host no-loopback)
-
-Sesión por cookie (`HttpOnly`, `SameSite=Strict`) tras `POST /login` (usuario+contraseña+tenant) —
-**no** un bearer token compartido (diseño descartado, ver `DECISIONS_LOG.md`). `AuthMiddleware`
-exige sesión en toda ruta salvo `/login`/`/logout`. Las conexiones WebSocket (`web/routes/scan.py`)
-**no** pasan por ese middleware (Starlette no lo intercepta para el scope `"websocket"`) y
-autentican la sesión explícitamente en el propio handler
-(`web/auth.py::authenticate_session()`/`requires_auth()`).
-
-## Roles y gestión de usuarios (rediseño Tenant/Role/User, sesión 2026-09-11)
-
-> Sustituye por completo la revisión 9 (bootstrap por tenant vía `create_tenant()`). Ver
-> `.ai/sessions/2026-09-11-tenant-role-user-redesign/` para el PLAN/AUDIT_PLAN completos y
-> `.ai/DECISIONS_LOG.md` (Revisión 16) para el registro de la decisión.
-
-`Role` ya **no** está ligado a un tenant (`name` único **globalmente**, no por tenant) — un
-mismo rol puede asignarse a usuarios de tenants distintos. `AuthStore.__aenter__()` (no
-`create_tenant()`) aprovisiona de fábrica, en una única transacción y solo para el tenant
-`DEFAULT_TENANT_ID` ("default"), un rol global `admin` (`is_admin=True`) y un usuario
-`admin`/`admin` con `must_change_password=True` **e** `is_instance_admin=True` — sin
-aprovisionamiento manual previo por CLI. `create_tenant()` (tenants adicionales) ya no crea
-ningún rol/usuario: los da de alta un `is_instance_admin` desde "Tenants y usuarios" o
-`user create` por CLI.
-
-Mientras la cuenta de fábrica conserve su contraseña, `AuthMiddleware` bloquea toda ruta salvo
-`/change-password`/`/logout`; además, esa identidad exacta (`tenant="default"`+`username="admin"`)
-ni siquiera puede completar `POST /login` en modo no-loopback mientras conserve esa contraseña
-(`is_factory_admin_account()`, `auth/auth_store.py`) — se rechaza el login en sí, no solo el
-resto de rutas tras entrar.
-
-Dos niveles de administración, ortogonales: `Role.is_admin` (ve todos los proyectos del
-tenant *del usuario que lo tiene*) y `User.is_instance_admin` (gestiona *cualquier* tenant,
-crea/elimina tenants, y es el único que toca recursos de instancia — `InstanceSecretsStore`,
-`TaxonomyTemplateRegistry`). Un rol no-admin solo ve los proyectos de su `project_names`;
-`require_project_access` (`web/dependencies.py`), declarada por firma en cada ruta
-`{name}`-scoped (`projects`, `scan`, `cache`, `downloads`, `duplicates`, más el handler
-WebSocket a mano), es la única puerta de esa comprobación — `AuthStore.can_access_project()`
-es la fuente de verdad, nunca reimplementada por ruta. Su acceso de escaneo es implícito (la
-carpeta de cada proyecto en `project_names`, `Role.allowed_scan_roots` se retiró). `/api/roles`
-y `/api/users` (`web/routes/admin.py`) exigen `require_admin_or_instance_admin`;
-`/api/tenants*` (`web/routes/tenants.py`, nuevo) exige `require_instance_admin` — ambas a
-nivel de router, no por endpoint. `User` gana `is_blocked` (bloquear invalida todas sus
-sesiones activas en la misma transacción, no solo impide logins futuros).
-
-## Multi-tenant
-
-Cada proyecto pertenece a un `tenant_id` (default `"default"` para CLI/loopback). `tenant_id`
-**nunca** se lee de un parámetro que el cliente controle — siempre de `get_tenant_id(request)`, que
-resuelve desde la sesión ya autenticada. Un usuario del tenant A nunca puede ver/tocar datos del
-tenant B, ni manipulando la petición.
-
-## Duplicates Resolver — por qué recalcula en el servidor
-
-`POST /api/projects/{name}/duplicates/resolve` nunca acepta una ruta de archivo directamente del
-cliente: recalcula los grupos de duplicados en el propio servidor (re-escaneo vía `folders.json`) y
-solo aplica la elección del usuario si coincide con un miembro real de un grupo recién detectado
-(correlacionado por una clave derivada del contenido, no por un ID que el cliente controle). Ver
-`web/routes/duplicates.py::_group_key()`.
+`src/doc_organize/web` y `src/doc_organize/auth` pueden existir en un checkout local solo con `__pycache__` sin
+versionar; no forman parte del paquete.
 
 ---
 
 ## Referencias
 
-- Especificación completa y auditada: `.github/prompts/doclink_extractor_plan.md`
-- Referencia técnica generada desde docstrings: `docs/api/index.md`
+- Instrucciones compartidas: `.github/SHARED_INSTRUCTIONS.md`
+- Regla de niveles: `.github/instructions/architecture.instructions.md`
+- API pública: `docs/api/publica.md`; referencia generada: `docs/api/`
 - Registro de decisiones: `.ai/DECISIONS_LOG.md`
-- Convención de niveles: `.github/instructions/architecture.instructions.md`
+- Especificación original (histórica, Fase 1): `.github/prompts/doclink_extractor_plan.md`

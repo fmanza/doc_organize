@@ -1,64 +1,70 @@
 # 🎯 Standards & Quality Gate — doc_organize
 
-> Reemplaza una versión anterior ("line-length 120", "Python ≥3.12") de la encarnación previa de
-> este repositorio. Valores verificados contra `pyproject.toml` real.
+> Reemplaza una versión anterior ("line-length 120") de la encarnación previa de este repositorio. Valores
+> verificados contra `pyproject.toml`, `pytest.ini` y `.github/workflows/tests.yml` reales (2.2.0).
 
 ## Code Style
 
-- **Formatter**: `ruff format` (`quote-style = "double"`, `indent-style = "space"`)
-- **Linter**: `ruff check` (`extend-select = ["E", "W", "F", "I", "B", "C4", "UP", "N"]`,
-  `ignore = ["E501"]` — línea larga permitida, `line-length = 150`)
-- **Type checker**: `mypy` (`python_version = "3.11"`, `plugins = ["pydantic.mypy"]`,
-  `warn_return_any = true`, `strict = false`). `docling.*` con `follow_imports = "skip"`
-  deliberadamente — sus stubs (vía `scipy-stubs`) usan sintaxis de Python 3.12+ que rompería el
-  type-check de código compatible con 3.11.
-- **Import sort**: `ruff` isort (`known-first-party = ["doc_organize"]`,
-  `combine-as-imports = true`)
-- **Python**: `>=3.11` (declarado en `requires-python` y en `classifiers` hasta 3.14); CI testea
-  3.11–3.14 en Ubuntu y Windows (`tests.yml`)
+- **Formatter**: `ruff format` (`quote-style = "double"`, `indent-style = "space"`, `line-ending = "auto"`)
+- **Linter**: `ruff check` (`target-version = "py312"`, `extend-select = ["E", "W", "F", "I", "B", "C4", "UP", "N"]`,
+  `ignore = ["E501"]` — línea larga permitida, `line-length = 150`). `ruff` acotado a `<0.18` en el extra `dev`.
+- **Type checker**: `mypy` (`python_version = "3.12"`, `plugins = ["pydantic.mypy"]`, `warn_return_any = true`,
+  `warn_unused_configs = true`, `strict = false`). `docling.*` con `follow_imports = "skip"` e `ignore_errors = true`;
+  `pypdfium2` y `py3langid.*` con `ignore_missing_imports`. (El motivo original del `skip` de Docling era mantener
+  compatibilidad con 3.11, que ya no se soporta; **pendiente** confirmar si sigue haciendo falta.)
+- **Import sort**: `ruff` isort (`known-first-party = ["doc_organize"]`, `combine-as-imports = true`,
+  `lines-between-types = 1`)
+- **Python**: `>=3.12` (`requires-python`; classifiers 3.12–3.14); CI testea 3.12–3.14 en Ubuntu y Windows
+  (`tests.yml`)
 
 ## Tipado
 
-- Type hints en el 100% de funciones públicas (verificado: `mypy src` limpio en 40 ficheros)
-- `# type: ignore` solo con comentario explicando el porqué en la línea anterior (no texto libre
-  tras el código en la misma línea — confunde a herramientas de análisis de suppression comments)
-- Modelos de dominio: Pydantic v2 (`core/models.py`), no dataclasses salvo estructuras internas de
-  uso exclusivamente local (p.ej. `ScanSummary` en `scan/scan_command.py`)
+- Type hints en todas las funciones públicas (`mypy src` limpio, ver «Verificación»)
+- `# type: ignore` solo con comentario explicando el porqué en la línea anterior
+- Modelos de dominio: Pydantic v2 (`core/models.py`); dataclasses solo para estructuras internas o de resultado
+  (p. ej. `ScanSummary` en `scan/scan_command.py`, `ContentDocument` en `dedup/content.py`)
 
 ## Testing
 
-- `pytest` + `pytest-asyncio` (modo `strict`, marcador `@pytest.mark.asyncio` explícito)
-- `@pytest.mark.slow` para tests que ejercitan Docling real (conversión/OCR) — excluibles con
-  `-k "not slow"` para iteración rápida
-- Cobertura objetivo: ≥80% (real actual: 97%)
-- Patrón establecido: operaciones síncronas/bloqueantes (I/O, `hashlib.scrypt`, `getpass`) se
-  ejecutan vía `asyncio.to_thread()` desde código async — nunca bloquean el event loop directamente
+- `pytest` + `pytest-asyncio` (`pytest.ini` no fija `asyncio_mode`: modo `strict` por defecto, marcador
+  `@pytest.mark.asyncio` explícito)
+- `pytest.ini`: `--strict-markers`; marcadores `unit`, `integration`, `contract`, `slow`, `sqlite`, `flaky`;
+  cobertura activada por defecto (`--cov=src`)
+- `@pytest.mark.slow` para tests que ejercitan Docling real — excluibles con `-m "not slow"` (lo que hace CI)
+- CI ejecuta también los doctests de `src` (`pytest --doctest-modules src`)
+- Tests de arquitectura que no se relajan: `tests/unit/test_library_architecture.py` (sin FastAPI/Starlette/uvicorn/
+  Jinja2/`python-multipart`, sin `doc_organize.web`/`auth`, sin extra `web`) y `tests/unit/test_ai_architecture.py`
+- Sin APIs externas ni descargas reales en los tests unitarios
+- Cobertura objetivo: ≥80% (la cifra real actual no se ha vuelto a medir en esta revisión: **pendiente**)
+- Patrón: operaciones bloqueantes (I/O, Docling) se ejecutan vía `asyncio.to_thread()` desde código async
 
-## Seguridad (patrones ya establecidos, replicar para código nuevo)
+## Seguridad (patrones establecidos, replicar para código nuevo)
 
-- Cualquier construcción de ruta a partir de un segmento elegido por el usuario pasa por
-  `utils/path_utils.safe_path_join()` — nunca concatenación manual
-- Cualquier valor que llegue del cliente y determine qué recurso se lee/mueve/borra se valida contra
-  un conjunto calculado en el servidor — nunca se confía en el valor crudo (ver
-  `web/routes/duplicates.py::_group_key()` como patrón de referencia)
-- `tenant_id` siempre resuelto server-side desde la sesión, nunca de un parámetro de query/body
-- Contraseñas: `hashlib.scrypt` (parámetros OWASP) + salt aleatorio por usuario, comparación con
-  `secrets.compare_digest` — nunca `==` directo ni almacenamiento en claro
-- Cookies de sesión: `HttpOnly` + `SameSite=Strict` siempre; `Secure` solo si hay TLS real (nunca
-  por defecto, para no dar una falsa sensación de seguridad)
+- Cualquier ruta construida a partir de un segmento elegido por el usuario pasa por
+  `utils/path_utils.safe_path_join()` — nunca concatenación manual; los nombres de carpeta de salida se validan con
+  `validate_output_folder_name()` (`RESERVED_OUTPUT_FOLDER_NAMES`)
+- Antes de enviar texto a la IA o de publicarlo (sitio, `llms.txt`, paquete para IA) se redactan credenciales
+  (`security/credentials.redact_credentials`); el Markdown no confiable se neutraliza con
+  `security/untrusted_markdown.neutralize_untrusted_markdown`
+- Las credenciales de IA solo llegan por `AiSettings` (inyectado o vía `settings_from_env()`); `context/` nunca las
+  resuelve por su cuenta
+- La deduplicación nunca borra: mueve a `duplicados/` o, en modo `copy`, registra decisiones `exclude`
+- Los patrones de sesión, contraseñas, cookies y `tenant_id` de versiones anteriores ya no aplican: la librería no
+  tiene autenticación desde 1.0.0 (doc_organize_web)
 
 ## Documentación
 
-- Docstrings Google-style con ejemplo de uso en todo módulo público
-- `zensical build --strict` debe pasar sin errores ni warnings de links rotos — comando de validación
-  real desde 0.10.0 (`zensical.toml`; ver `.ai/DECISIONS_LOG.md` revisión 17)
-- `docs/api/index.md` genera referencia desde los docstrings vía `mkdocstrings`, no se duplica a mano
+- Docstrings Google-style con ejemplo de uso en todo módulo/clase pública
+- `zensical build --strict` debe pasar sin errores ni warnings de links rotos (`zensical.toml`; ver
+  `.ai/DECISIONS_LOG.md` revisión 17)
+- La referencia de API sale de los docstrings vía `mkdocstrings`, no se duplica a mano; la API pública (SemVer) está
+  en `docs/api/publica.md`
 
-## Verificación de este documento
+## Verificación de este documento (2026-11-24)
 
 ```
-python -m ruff check src tests   → All checks passed
-python -m mypy src                → Success: no issues found in 40 source files
-python -m pytest                   → 182 passed, 97% cobertura
-zensical build --strict             → exit 0
+python -m ruff check src tests   → All checks passed!
+python -m mypy src                → Success: no issues found in 97 source files
+python -m pytest                   → pendiente (no ejecutado en esta revisión)
+zensical build --strict             → pendiente (no ejecutado en esta revisión)
 ```

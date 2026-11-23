@@ -45,15 +45,16 @@ respuesta y la evaluación saldría inflada (B16). El prefijo `system` no cambia
 
 ## El índice
 
-`EmbeddingIndex(project_root, model=, redacted=)` guarda los vectores en `<raíz>/.doc_organize/embeddings/<modelo>/`
-(`vectors.bin`, números `float32` del módulo `array`, sin numpy, e `index.json`). La clave de cada texto es la huella
+`EmbeddingIndex(project_root, *, model, redacted)` guarda los vectores en
+`<raíz>/.doc_organize/embeddings/<huella del modelo>/` (los 16 primeros caracteres del SHA-256 del nombre; `vectors.bin`, números `float32` del módulo `array`, sin numpy, e `index.json`). La clave de cada texto es la huella
 del modelo, de si se redactó y del texto: cambiar de modelo o de texto da vectores nuevos. Los textos se redactan antes
 de enviarlos (`LlmClient.embed`); aun así, el índice deriva del contenido de los documentos: trátalo como `Conversión/`.
 
 `embedding_index_info(project_root)` dice qué índices hay (uno por modelo), cuántos vectores guarda cada uno, su
 dimensión y cuánto ocupa; `clear_embedding_index(project_root, model=None)` borra el de un modelo o todos (la siguiente
 construcción con `semantic=True` vuelve a pedir los vectores; no lo llames mientras se construye). Las claves son
-huellas de texto: el índice no dice a qué documento pertenece cada vector.
+huellas de texto: el índice no dice a qué documento pertenece cada vector. Los duplicados por contenido (tarea `dedup`,
+2.2.0) guardan sus vectores en el mismo sitio, en el índice de su propio modelo.
 
 ::: doc_organize.ai.embeddings
     options:

@@ -227,7 +227,8 @@ class ContentDuplicateFinder:
             llm: Cliente de IA para la pasada semántica (tarea `dedup`, con modelo propio); sin él solo «mismo
                 contenido».
             semantic_threshold: Similitud mínima (0-1] para «contenido parecido».
-            chunk_words, chunk_overlap: Tamaño y solape de los bloques que van al modelo.
+            chunk_words: Palabras de cada bloque que va al modelo.
+            chunk_overlap: Palabras que se solapan entre bloques consecutivos.
             neighbours: Vecinos de cada documento que se comparan bloque a bloque.
             min_words: Palabras mínimas para comparar un documento.
             batch_size: Bloques por llamada a `/embeddings`.

@@ -46,7 +46,8 @@ equipo y al revés.
 
 ## Clasificación de prueba
 
-`dry_run_classify(project, documents, *, gold=None, only_gold=True, roots=None, **opciones_de_build)` construye el
+`dry_run_classify(project, documents, *, gold=None, only_gold=True, roots=None, builder=None, ai_cache=False,
+baseline=None, **opciones_de_build) -> DryRunResult` construye el
 contexto como `ContextBuilder.build`, **sin guardarlo** (`build(persist=False)`: ni `context.json` ni histórico) y lo
 evalúa contra `gold`. Sirve para comparar reglas, prompts, perfiles o modelos antes de adoptarlos:
 
@@ -67,6 +68,7 @@ print(base.context.ai_stats.classification.prompt_tokens, nuevo.context.ai_stats
 - Los documentos de la referencia nunca sirven de ejemplo a la IA (`example_exclusions`): con `only_gold=True` no
   habrá ejemplos; con `only_gold=False`, los del resto del proyecto sí pueden serlo.
 - Las decisiones, el perfil y los prompts del proyecto se leen como en una construcción normal; no se escribe nada.
+  Pasar `persist` lanza `TypeError`.
 
 `DryRunResult` trae el `context` (con `ai_stats`: llamadas, tokens), la `evaluation` y cuántos `documents` se
 clasificaron. Con `baseline=` (el contexto actual, `ContextRegistry.load_context`), `changes` dice qué documentos
@@ -102,5 +104,5 @@ raíces que a `build(scan_roots=)` para que no cambien con el corpus.
         - EvaluationReport
         - AxisEvaluation
         - LabelConfusion
-        - document_key
+        - document_keys
         - common_root

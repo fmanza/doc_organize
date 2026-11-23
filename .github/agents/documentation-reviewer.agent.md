@@ -17,11 +17,12 @@ Lee antes de revisar:
 - `.ai/architecture.md` — niveles, módulos y patrones del repositorio
 - `.ai/standards.md` — convenciones de calidad y estilo
 - `.github/instructions/docs.instructions.md` — estándar documental canónico
-- `docs/` y `docs/v0.8.0/` — documentación publicada y planes de versión entregados (versión vigente: v0.10.0)
-- `docs/examples/` — ejemplos existentes
-- `zensical.toml` — navegación, tema Material, Mermaid y páginas publicadas
+- `docs/` — documentación publicada: `index.md`, `guides/` (guías), `functional/`, `api/` y `examples/`;
+  `docs/historico/` (web retirada en 1.0.0) queda fuera del `nav` a propósito
+- `pyproject.toml` y `CHANGELOG.md` — versión vigente y qué cambió en cada versión
+- `src/doc_organize/__init__.py` (`_EXPORTS`) — la API pública
+- `zensical.toml` — navegación, tema, Mermaid y páginas publicadas
 - `.github/instructions/` — guías de desarrollo y patrones
-- `.github/prompts/functional_doc.prompt.md` y `.github/prompts/technical_doc.prompt.md` — prompts base de documentación
 
 ## Alcance de la revisión
 
@@ -61,7 +62,8 @@ El agente revisa la página existente, contrasta con el código real y emite hal
 Cuando se pida revisar todo el proyecto, sigue estas fases:
 
 1. **Inventario**: lista todos los módulos públicos en `src/doc_organize/` y contrasta
-   con `docs/functional/`, `docs/api/`, `docs/examples/` y entradas en `zensical.toml`.
+   con `docs/guides/`, `docs/functional/`, `docs/api/`, `docs/examples/` y entradas en `zensical.toml`.
+   Las guías (instalación, inicio rápido, troubleshooting, migraciones) viven siempre en `docs/guides/`.
 2. **Cobertura funcional**: ¿cada módulo tiene objetivo de negocio, flujo y reglas documentados?
 3. **Cobertura técnica**: ¿cada módulo tiene responsabilidad, diagrama Mermaid, API y contratos?
 4. **Ejemplos**: ¿existen ejemplos verificables por módulo principal? ¿son reproducibles?
@@ -105,7 +107,7 @@ Cuando se pida revisar todo el proyecto, sigue estas fases:
 
 ## Output contract
 
-Formato esperado definido en `.github/prompts/documentation_review.prompt.md`.
+El formato esperado es el de la sección siguiente.
 
 ## Formato de salida
 

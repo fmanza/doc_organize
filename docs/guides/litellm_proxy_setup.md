@@ -148,6 +148,11 @@ Una tarea sin `MODEL_<TAREA>` usa el alias `doc-organize-<tarea>` (`doc-organize
 `config.yaml.example`: así el modelo se cambia en el proxy sin tocar doc_organize. Sin `BASE_URL`, `settings_from_env()` devuelve `None` (sin IA); con `BASE_URL` y sin
 `VIRTUAL_KEY`, `AiConfigurationError`.
 
+La tarea `dedup` (2.2.0) es la excepción: solo se activa si defines `DOC_ORGANIZE_LITELLM_MODEL_DEDUP` (o
+`DOC_ORGANIZE_LITELLM_VIRTUAL_KEY_DEDUP`, y entonces usa el alias `doc-organize-dedup`). Sin ninguna de las dos,
+la búsqueda de [duplicados por contenido](duplicados_por_contenido.md) parecido lanza `AiConfigurationError`; no
+reutiliza el modelo de `embed`.
+
 Las variables de 1.x (`DOC_ORGANIZE_LITELLM_CLASSIFICATION_*`, `_TAXONOMY_CLASSIFICATION_*`, `_ENRICHMENT_*`,
 `_TAXONOMY_MANIFEST_DRAFT_*`) ya no se leen: si alguna está definida, `settings_from_env()` lanza
 `AiConfigurationError` con su equivalente (ver [De 1.x a 2.0](migracion_2_0.md)).

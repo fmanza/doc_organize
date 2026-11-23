@@ -7,8 +7,8 @@ API Reference para registro y gestión de proyectos.
 ```mermaid
 classDiagram
     class ProjectRegistry {
-        -logger: Logger
-        -projects_json_path: Path
+        +logger: Logger
+        +registry_path: Path
         +create_project(name: str, base_location: str|Path) Project
         +list_projects() list[Project]
         +get_project(name: str) Project
@@ -18,8 +18,8 @@ classDiagram
     
     class Project {
         +name: str
-        +root_path: Path
-        +created_at: datetime
+        +root_path: str
+        +created_at: str
     }
     
     ProjectRegistry --> Project
@@ -31,8 +31,9 @@ classDiagram
 
 ```python
 class ProjectRegistry:
-    async def __aenter__(self) -> 'ProjectRegistry'
-    async def __aexit__(self, *args) -> None
+    def __init__(self, registry_path: str | Path = Path.home() / ".doc_organize" / "projects.json") -> None
+    async def __aenter__(self) -> Self
+    async def __aexit__(self, *exc_info: object) -> None
     
     async def create_project(self, name: str, base_location: str | Path) -> Project
     async def list_projects(self) -> list[Project]
@@ -41,7 +42,10 @@ class ProjectRegistry:
     async def move_project_root(self, name: str, destination_parent: str | Path) -> Project
 ```
 
-Context manager para gestión de proyectos (registro + disk).
+Context manager para gestión de proyectos (registro + disco). `__aenter__` crea la carpeta padre de `registry_path`.
+Las excepciones `ProjectNameError`, `ProjectAlreadyExistsError`, `ScannedFolderNotFoundError` y
+`ScannedFolderInUseError` viven en `doc_organize.core.exceptions` (no se exportan en la raíz); las dos primeras heredan
+de `ProjectError`.
 
 Desde 1.0.0 no hay `tenant_id` (L-12): el nombre es único en todo el registro. Un `projects.json` antiguo con
 `tenant_id` se sigue leyendo (el campo se ignora y desaparece en la siguiente escritura).
@@ -57,20 +61,20 @@ Crea nuevo proyecto (carpeta + registro).
 
 | Retorno | Tipo | Descripción |
 |---|---|---|
-| | `Project` | Proyecto creado con `name`, `root_path`, `created_at` |
+| | `Project` | Proyecto creado con `name` (normalizado), `root_path`, `created_at` |
 
 **Proceso**:
 1. Valida nombre vía `ProjectValidator.validate_name()`
 2. Verifica no existe en registro
 3. Crea carpeta `base_location/<name>/`
 4. Escribe `project.json` dentro
-5. Registra en `~/.doc_organize/projects.json`
-6. Rollback si falla en cualquier punto
+5. Registra en `registry_path` (por defecto `~/.doc_organize/projects.json`)
+6. Si falla después de crear la carpeta, la borra y relanza el error
 
 **Excepciones**:
 - `ProjectNameError` — Nombre inválido
 - `ProjectAlreadyExistsError` — Nombre ya registrado (sin distinguir mayúsculas)
-- `ProjectError` — Errores de I/O
+- `ProjectError` — `base_location` no existe o no es carpeta, ya hay una carpeta con ese nombre, o falla la creación
 
 ---
 
@@ -116,11 +120,10 @@ Recupera proyecto por nombre.
 ### Salida
 
 ```python
-@dataclass
-class Project:
+class Project(BaseModel):  # doc_organize.core.models
     name: str
-    root_path: Path
-    created_at: datetime
+    root_path: str    # ruta absoluta
+    created_at: str   # ISO 8601
 ```
 
 ## Registro de Proyectos
@@ -227,6 +230,32 @@ def relative_source_path(full_path: str, scan_roots: Sequence[str] = ()) -> str 
   mueve las salidas (usa `force`).
 - `relative_source_path` es el `source_path` del JSON de cada documento desde 0.12.0.
 
+## Raíz de salidas y raíz de estado (`ProjectLayout`)
+
+```python
+@dataclass(frozen=True)
+class ProjectLayout:
+    output_root: Path
+    state_root: Path | None = None
+
+    @classmethod
+    def for_project(cls, project: Project, *, state_root: Path | None = None) -> ProjectLayout
+```
+
+`output_root` es `project.root_path`; `state_root` separa el estado (caché, historiales, informes) de las salidas. Sin
+él, `state_dir` es `output_root`. `separate_state` indica si el estado vive aparte.
+
+| Propiedad | Raíz | Ruta |
+|---|---|---|
+| `conversion_dir` | salidas | `Conversión/` |
+| `duplicates_dir` | salidas | `duplicados/` |
+| `cache_db` | estado | `cache.db` |
+| `folders_json` | estado | `folders.json` (árbol del último escaneo) |
+| `scanned_folders_json` | estado | `scanned_folders.json` |
+| `scan_errors_log` | estado | `errores_escaneo/SCAN_ERRORS_HISTORY.jsonl` |
+| `scan_history_log` | estado | `historial_escaneo/SCAN_HISTORY.jsonl` |
+| `dedup_report_dir` | estado | `duplicados/` (`dedup_report`: `DEDUP_REPORT.json`; `dedup_history`: `DEDUP_HISTORY.jsonl`) |
+
 ## Rutas del contexto y del sitio (`ProjectLayout`, 0.13.0)
 
 Todas cuelgan de la raíz de salidas (`project.root_path`), también con un `state_root` aparte:
@@ -253,7 +282,7 @@ def validate_output_folder_name(name: str) -> str   # InvalidPathError; devuelve
 `RESERVED_OUTPUT_FOLDER_NAMES` son los nombres de la raíz que no puede usar `Context.output_folder_name`, porque la
 carpeta reorganizada se borra entera al reconstruir o eliminar el contexto: `Conversión`, `duplicados`,
 `errores_escaneo`, `historial_escaneo`, `historial_contexto` (1.5.0), `domains`, `site`, `.cache` y los ficheros de la raíz (`context.json`,
-`zensical.toml`, `mkdocs.yml`, `taxonomy_manifest.md`, `cache.db`, `folders.json`, `scanned_folders.json`).
+`unclassified.json` (1.6.0), `zensical.toml`, `mkdocs.yml`, `taxonomy_manifest.md`, `cache.db`, `folders.json`, `scanned_folders.json`).
 `validate_output_folder_name` exige además un nombre simple (letras, dígitos, `_`, `.`, `-` y espacios; ni `.` ni `..`)
 y compara sin distinguir mayúsculas, sin puntos ni espacios finales (Windows los quita) y en forma Unicode NFC. doc_organize_web
 usa estas rutas y esta validación.
@@ -270,14 +299,15 @@ layout.reorganized_dir("site")          # InvalidPathError: reservado
 
 ```python
 class ProjectHistoryCleaner:
-    async def clear(self, project: Project) -> None
+    async def clear(self, project: Project, *, state_root: Path | None = None) -> None
 ```
 
 Vacía por completo `<project.root_path>` (caché, historial de escaneo/errores/
 deduplicación, carpetas guardadas, salida de conversión) y regenera únicamente
 `project.json`, dejando el proyecto como recién creado. No toca el registro
 (`projects.json`) — a diferencia de `ProjectRegistry.delete_project`, el
-proyecto sigue existiendo con el mismo nombre y ubicación.
+proyecto sigue existiendo con el mismo nombre y ubicación. Con `state_root` (raíz de estado separada,
+`ProjectLayout.state_root`) también vacía su contenido.
 
 **Excepciones**: `ProjectError` si `root_path` no existe o algún elemento no se pudo borrar.
 
@@ -289,13 +319,15 @@ proyecto sigue existiendo con el mismo nombre y ubicación.
 
 ```python
 class ScannedFoldersStore:
+    def __init__(self, registry_path: Path | None = None) -> None  # None: <project.root_path>/scanned_folders.json
     async def list_folders(self, project: Project) -> list[ScannedFolder]
     async def add_folder(self, project: Project, path: str) -> ScannedFolder
     async def remove_folder(self, project: Project, path: str) -> None
     async def mark_used(self, project: Project, paths: list[str]) -> None
 ```
 
-Lista persistente por proyecto (`<project.root_path>/scanned_folders.json`) de
+Lista persistente por proyecto (`<project.root_path>/scanned_folders.json`, o `registry_path`, p. ej.
+`ProjectLayout.scanned_folders_json` si el estado vive aparte) de
 las carpetas guardadas para escanear (p. ej. desde el menú Escaneo de doc_organize_web). Mismo patrón de
 concurrencia que `ProjectRegistry` (lock en proceso + escritura atómica).
 
@@ -306,9 +338,8 @@ concurrencia que `ProjectRegistry` (lock en proceso + escritura atómica).
 | `mark_used` | Marca `paths` como usadas (crea la entrada si no existía); lo llama el consumidor tras un escaneo correcto | — |
 
 ```python
-@dataclass
-class ScannedFolder:
-    path: str
+class ScannedFolder(BaseModel):  # doc_organize.core.models
+    path: str      # ruta absoluta
     added_at: str  # ISO 8601
-    used: bool  # permanente una vez True
+    used: bool = False  # permanente una vez True
 ```

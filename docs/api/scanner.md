@@ -16,18 +16,18 @@ classDiagram
     class ScanResult {
         +documents: list[DocumentMetadata]
         +tree: DirectoryTree
-        +summary: dict
+        +summary: dict[str, int]
         +scan_duration_seconds: float
         +unreadable_dirs: list[str]
         +unreadable_files: dict[str, str]
     }
     
     class DocumentMetadata {
-        +full_path: Path
+        +full_path: str
         +display_name: str
         +extension: str
         +size_bytes: int
-        +modified_time: datetime
+        +modified_time: float
         +sha256_hash: str
         +created_time: float
         +mime_type: str
@@ -103,31 +103,29 @@ Escanea carpetas recursivamente y calcula el SHA-256 de forma concurrente (hasta
 
 | Parámetro | Validación | Impacto si falla |
 |---|---|---|
-| Carpeta debe existir | Validación previa (FolderValidator) | `DocumentError` |
-| Carpeta debe ser directorio | Validación previa | `DocumentError` |
+| Carpeta debe existir | Validación previa con `FolderValidator` | `InvalidPathError` (de `FolderValidator`; `scan_folders` no valida) |
+| Carpeta debe ser directorio | Validación previa con `FolderValidator` | `InvalidPathError` (ídem) |
 | Extensiones soportadas | Validación en `constants.SUPPORTED_EXTENSIONS` | Documento ignorado |
 
 ### Salida
 
 ```python
-@dataclass
-class DocumentMetadata:
-    full_path: Path
+class DocumentMetadata(BaseModel):  # doc_organize.core.models
+    full_path: str                         # ruta absoluta
     display_name: str
     extension: str
     size_bytes: int
-    modified_time: datetime
+    modified_time: float                   # timestamp Unix
     sha256_hash: str
     created_time: float | None = None      # 1.5.0
     mime_type: str | None = None           # 1.5.0
     file_permissions: str | None = None    # 1.5.0
     owner_name: str | None = None          # 1.5.0, solo con capture_owner=True
 
-@dataclass
-class ScanResult:
+class ScanResult(BaseModel):  # doc_organize.core.models
     documents: list[DocumentMetadata]
+    summary: dict[str, int]
     tree: DirectoryTree
-    summary: dict
     scan_duration_seconds: float
     unreadable_dirs: list[str]  # 0.12.0: carpetas que no se pudieron listar
     unreadable_files: dict[str, str]  # 1.1.0: ficheros que no se pudieron leer (ruta → error)
@@ -192,7 +190,7 @@ antigua.
 
 ## Rendimiento
 
-- **Hashing concurrente**: Usa `asyncio.TaskGroup` para paralelizar cálculo de SHA-256
+- **Hashing concurrente**: `asyncio.gather` acotado por un `asyncio.Semaphore` de `max_concurrent_hashes` (8 por defecto)
 - **Memoria**: Carga metadatos en memoria (escalable hasta ~100k documentos)
 - **Disk I/O**: Lectura secuencial + paralelización solo de hash
 

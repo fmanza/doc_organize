@@ -38,9 +38,18 @@ por sí solo — para eso está `deduplicate`.
 Flags útiles de `scan`:
 
 ```bash
---use-ocr        # reprocesa con OCR los documentos sin capa de texto nativa
---use-gpu        # OCR acelerado por GPU (requiere el extra ocr-gpu), solo con --use-ocr
+--use-ocr                   # reprocesa con OCR los documentos sin capa de texto nativa
+--use-gpu                   # OCR acelerado por GPU (requiere el extra ocr-gpu), solo con --use-ocr
+--force                     # vacía la caché y reconvierte todos los documentos
+--include-audio-video       # incluye audio/vídeo (requiere el extra av y ffmpeg)
+--extract-images            # extrae las imágenes embebidas a img/<nombre> junto al .md
+--use-picture-description   # describe las imágenes en el .json (solo PDF e imágenes)
 ```
+
+Con los documentos ya convertidos puedes buscar también **duplicados por contenido**
+(el mismo texto en un `.docx` y su `.pdf`, versiones reescritas, un anexo contenido
+en otro informe). No hay subcomando de CLI: se hace desde Python con
+`ContentDuplicateFinder`, ver [Duplicados por contenido](duplicados_por_contenido.md).
 
 ## 3. Desde Python
 

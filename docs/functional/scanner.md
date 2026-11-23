@@ -10,7 +10,9 @@ Inventariar todos los documentos en una carpeta (respetando extensiones soportad
 
 - Carpetas válidas (verificadas por `FolderValidator`)
 - Permisos de lectura en directorios y archivos
-- Extensiones soportadas: PDF, DOCX, XLSX, PPTX, PNG, JPG, TIFF, BMP
+- Extensiones soportadas: las de `SUPPORTED_EXTENSIONS` (PDF, Office, imágenes, HTML, CSV,
+  OpenDocument, AsciiDoc, EPUB, correo y texto; ver [Converter](converter.md)); audio y vídeo solo con
+  `include_audio_video`
 
 ## Flujo Principal
 
@@ -42,14 +44,14 @@ sequenceDiagram
 | Regla | Descripción |
 |---|---|
 | **Extensiones soportadas** | Matriz definida en `constants.SUPPORTED_EXTENSIONS` |
-| **Ignorar nombres** | `.git/`, `__pycache__/`, `.DS_Store` |
+| **Ignorar nombres** | `.git/`, `__pycache__/`, `.DS_Store`, más las rutas excluidas y los patrones de nombre que indique el usuario (`exclude_paths`, `ignore_patterns`, 1.3.0) |
 | **Hash determinista** | Mismo archivo = mismo SHA-256 siempre |
 | **Concurrencia segura** | Hashing paralelo sin bloqueos en archivos |
 
 ## Límites y Restricciones
 
 ❌ No modifica archivos  
-❌ No sigue symlinks que creen ciclos  
+❌ No sigue symlinks ni *junctions* de Windows (se muestran como nodo opaco, sin recorrerlos ni calcular su hash)  
 ❌ No valida contenido de documentos (escanea solo metadatos)  
 
 ## Casos Especiales

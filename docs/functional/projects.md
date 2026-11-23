@@ -93,7 +93,9 @@ proyecto cambia entre la estimación y la escritura, puede no coincidir. Ver [Ex
 ## Detección de GPU (entorno, no permisos)
 
 `detect_gpu_status()` detecta si el entorno donde corre doc_organize tiene
-soporte de GPU para OCR acelerado (`torch` instalado + `torch.cuda.is_available()`)
+soporte de GPU para OCR acelerado (`torch` compilado con CUDA + `torch.cuda.is_available()`)
 y muestra un mensaje con instrucciones si el soporte no está instalado o no está
 activo. Es una detección puramente de entorno software — no depende de rol ni
-usuario — ver [Resolución de problemas](../guides/troubleshooting.md#ocr-muy-lento-en-documentos-grandes).
+usuario. Desde 2.0.1, un `torch` solo CPU (el que instala Docling por defecto) cuenta como «sin soporte de GPU en
+este proceso», no como un problema de drivers. Forma parte también del [diagnóstico del entorno](diagnostics.md) — ver
+[Resolución de problemas](../guides/troubleshooting.md#ocr-muy-lento-en-documentos-grandes).

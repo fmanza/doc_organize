@@ -90,7 +90,7 @@ jobs:
             ### 📦 Contents
 
             - ✅ Complete HTML documentation with search
-            - ✅ Mermaid diagrams (rendered)
+            - ✅ Mermaid diagrams (need an internet connection to render; offline they show as text)
             - ✅ Code examples and API reference
             - ✅ Offline search capability
             - ✅ Responsive design (mobile-friendly)
@@ -117,7 +117,7 @@ jobs:
             - 🌐 [Online Documentation](https://fmanza.github.io/doc_organize/)
             - 📦 [PyPI Package](https://pypi.org/project/doc-organize/)
             - 💻 [Source Code](https://github.com/fmanza/doc_organize)
-            - 📋 [Downloads Page](https://fmanza.github.io/doc_organize/downloads)
+            - 📋 [Downloads Page](https://fmanza.github.io/doc_organize/guides/downloads/)
           artifacts: dist/doc_organize-docs-*.zip,dist/*.sha256,dist/CHECKSUMS.txt
           draft: false
           prerelease: false

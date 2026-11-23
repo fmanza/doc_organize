@@ -70,6 +70,9 @@ caso, sube `num_ctx` o usa bloques más pequeños (`chunk_words`).
 
 ## Uso
 
+Hay un ejemplo completo y reproducible, sin modelo real, en
+[Deduplicación › Duplicados por contenido](../examples/dedup-resolve.md#duplicados-por-contenido-220).
+
 ```python
 from doc_organize import ContentDocument, ContentDuplicateFinder, DeduplicationManager, LlmClient
 from doc_organize.ai import settings_from_env

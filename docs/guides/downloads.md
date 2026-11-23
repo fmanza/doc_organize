@@ -19,10 +19,11 @@ Descarga el ZIP más reciente:
 
 **Contenido del ZIP:**
 - ✅ Documentación HTML completa (compilada con Zensical)
-- ✅ Diagramas Mermaid (renderizados como SVG)
+- ⚠️ Diagramas Mermaid: el tema carga Mermaid desde un CDN (`unpkg.com`) al abrir la página, así que sin conexión
+  se ven como texto
 - ✅ Ejemplos de código ejecutables
 - ✅ Referencia API completa
-- ✅ **Búsqueda offline** (`search_index.json` incluido)
+- ✅ **Búsqueda offline** (`search.json` incluido)
 - ✅ Diseño responsive (funciona en móvil, tablet, desktop)
 
 **Tamaño:** ~0.9 MB (comprimido)
@@ -39,7 +40,7 @@ Cada release incluye un archivo SHA256 para validar que el ZIP no fue alterado:
 # Descargar ambos archivos (ZIP + .sha256)
 # Verificar integridad
 sha256sum -c doc_organize-docs-*.zip.sha256
-# Salida esperada: doc_organize-docs-0.4.0.zip: OK
+# Salida esperada: doc_organize-docs-2.2.0.zip: OK
 ```
 
 ### En Windows
@@ -76,9 +77,9 @@ Luego compara el resultado con el contenido del archivo `.sha256`.
 # Descargar desde GitHub Releases
 # (el navegador típicamente lo guarda en ~/Downloads)
 
-# Extraer
-unzip doc_organize-docs-*.zip
-cd doc_organize-docs-*/
+# Extraer (el ZIP no trae carpeta raíz: el contenido de site/ va directamente dentro)
+unzip doc_organize-docs-*.zip -d doc_organize-docs
+cd doc_organize-docs
 
 # Abrir en navegador
 # Linux/macOS:
@@ -96,7 +97,7 @@ start index.html
 1. Abre `index.html` en tu navegador
 2. Haz clic en el ícono de búsqueda (lupa 🔍)
 3. Escribe tu término de búsqueda
-4. Los resultados se cargan instantáneamente desde `search_index.json`
+4. Los resultados se cargan instantáneamente desde `search.json`
 
 **Nota:** La búsqueda funciona sin conexión a internet una vez descargada.
 
@@ -111,12 +112,11 @@ start index.html
 
 ## 📋 Histórico de Builds
 
-Para auditoría y trazabilidad, el archivo `CHECKSUMS.txt` en Releases contiene el histórico de todas las builds:
+`scripts/build_docs_zip.py` añade una línea a `dist/CHECKSUMS.txt` en cada build, así que en local acumula el histórico. El que se publica en cada Release sale de un `dist/` recién creado por CI y solo trae la línea de esa build:
 
 ```
-SHA256                                                  Filename               Timestamp
-a1b2c3d4e5f6...                                         doc_organize-docs-0.4.0.zip  2026-09-01T12:34:56.789123
-b2c3d4e5f6a7...                                         doc_organize-docs-0.3.1.zip  2026-08-30T10:20:30.123456
+a1b2c3d4e5f6...  doc_organize-docs-2.2.0.zip  (2026-11-23T12:34:56.789123)
+b2c3d4e5f6a7...  doc_organize-docs-2.1.0.zip  (2026-11-22T10:20:30.123456)
 ```
 
 Descarga desde el mismo Release o accede al archivo de histórico.
@@ -147,7 +147,7 @@ Si prefieres consultar en línea sin descargar:
 **→ [Documentación Online](https://fmanza.github.io/doc_organize/)**
 
 - ✅ Siempre actualizada
-- ✅ Búsqueda más rápida (indexada en el servidor)
+- ✅ Diagramas Mermaid renderizados
 - ✅ Requiere conexión a internet
 
 ### Construir Localmente
@@ -184,7 +184,7 @@ start site/index.html  # Windows
   - Descarga nuevamente desde Releases
 
 ### La búsqueda no funciona
-- **Causa:** `search_index.json` no cargó
+- **Causa:** `search.json` no cargó
 - **Solución:**
   - Asegúrate de que el servidor HTTP esté ejecutándose:
     ```bash

@@ -29,13 +29,14 @@ classDiagram
     class ContextRegistry {
         +load_context(project) Context
         +save_context(project, context) None
+        +delete_context(project) None
         +get_domain(project, slug) Domain
     }
     class Reorganizer {
         +reorganize(project, context, on_document_copied, on_document_failed) Path
     }
     class SiteGenerator {
-        +generate(project, context, build, site_dir, timeout) SiteResult
+        +generate(project, context, build, site_dir, timeout, redact_credentials, offline, llms_txt, work_dir, include_originals) SiteResult
         +build_site(project, timeout) None
         +delete_site(project, site_dir) None
     }
@@ -127,8 +128,8 @@ detiene la fase en el acto, con o sin `ai_max_failures`: con la clave rechazada 
 toda la fase. Al detenerse (`"auth"`, `"connection"` o `"budget"`), los documentos pendientes no se leen ni se envían y
 quedan sin clasificar (o en `sin-clasificar`); siguen emitiendo su evento de progreso, el `cancel_token` se sigue
 comprobando entre ellos y el contexto se construye y persiste con normalidad. Desde 2.0.0 los recuentos van en
-`Context.ai_stats` (`classification` y `enrichment`: `sent`, `assigned`, `failed`, `stopped`, `prompt_tokens`,
-`completion_tokens`, `response_format`), con `sent = assigned + failed + enviados sin asignación`. Una respuesta del
+`Context.ai_stats` (`classification`, `enrichment` y `semantic_classification`: `sent`, `assigned`, `failed`, `stopped`,
+`prompt_tokens`, `completion_tokens`, `response_format`, `cached`), con `sent = assigned + failed + enviados sin asignación`. Una respuesta del
 servidor (incluido un 5xx) corta la racha de errores de conexión.
 
 **Reglas**: el catálogo de la Sub-fase B es `candidate_domains` si se dio uno, o los
@@ -176,7 +177,7 @@ de guardar el nuevo y añade una línea (`ContextBuildRecord`) a `historial_cont
 | `built_at`, `previous_built_at` | Esta construcción y la anterior con la que se compara (`None` si es la primera o la anterior no se pudo leer: entonces todo cuenta como `added`) |
 | `built_with_version`, `ai_classification_model`, `ai_enrichment_model`, `taxonomy_manifest_used` | Con qué se construyó (los modelos salen de `Context.ai_provenance` desde 2.0.0) |
 | `classified`, `unclassified` | Recuentos |
-| `changes` | Un `ContextChange` por documento que entra (`added`), sale (`removed`) o cambia de dominio o de tipo de material (`reclassified`, también de clasificado a sin clasificar y al revés), con el antes, el después y `classified_by` |
+| `changes` | Un `ContextChange` por documento que entra (`added`), sale (`removed`) o cambia de dominio o de tipo de material (`reclassified`, también de clasificado a sin clasificar y al revés), con el antes, el después y `classified_by`. Desde 2.0.0, uno que sale por ser una versión antigua es `superseded` y uno que excluyó una persona, `excluded` |
 
 Un documento que solo cambia de quién lo clasificó (reglas o IA) sin cambiar de sitio no es un cambio. Un contexto
 anterior dañado no impide construir (se avisa y se compara con nada), y un fallo al escribir el historial tampoco: el
@@ -583,6 +584,7 @@ assert parse_taxonomy_template(text) == manifest
 class ContextRegistry:
     async def load_context(self, project: Project) -> Context
     async def save_context(self, project: Project, context: Context) -> None
+    async def delete_context(self, project: Project) -> None
     async def get_domain(self, project: Project, slug: str) -> Domain
 ```
 
@@ -681,10 +683,20 @@ class SiteResult:
     site_dir: Path       # destino de zensical build
     site_built: bool
     search_excluded: tuple[str, ...] = ()  # 1.4.0: páginas fuera del buscador (rutas relativas a la carpeta reorganizada)
+    credentials_redacted: tuple[str, ...] = ()  # 1.7.0: páginas con credenciales redactadas antes de publicar
+    offline: bool = False                       # 2.0.0: generate(offline=True)
+    neutralized: tuple[str, ...] = ()           # 2.0.0: con offline, páginas con contenido activo neutralizado
+    neutralized_counts: dict[str, int] = {}     # 2.0.0: con offline, lo neutralizado por tipo
 
 class SiteGenerator:
     async def generate(self, project: Project, context: Context, *, build: bool = True,
-                       site_dir: Path | None = None, timeout: float | None = None) -> SiteResult
+                       site_dir: Path | None = None, timeout: float | None = None,
+                       redact_credentials: bool = True,          # 1.7.0
+                       offline: bool = False,                    # 2.0.0
+                       llms_txt: bool = False,                   # 2.0.0
+                       work_dir: Path | None = None,             # 2.0.0
+                       include_originals: bool | None = None,    # 2.0.0
+                       ) -> SiteResult
     async def build_site(self, project: Project, *, timeout: float | None = None) -> None
     async def delete_site(self, project: Project, *, site_dir: Path | None = None) -> None
 ```
@@ -713,7 +725,7 @@ la carpeta física de `Reorganizer`). Con `build=True` ejecuta `zensical build` 
   reorganizada ni otra carpeta reservada (`RESERVED_OUTPUT_FOLDER_NAMES`), ni pasar por un enlace:
   `InvalidPathError` antes de escribir nada.
 - **Configuración mínima**: nombre, carpetas, `nav`, `theme.language = "es"` y `theme.font = false` (sin peticiones a
-  Google Fonts). Sin JavaScript propio, `extra_javascript`, plugins ni extensiones Markdown distintas de las de
+  Google Fonts). Sin `offline` (ver [Sitio sin conexión](offline_site.md)) y sin `llms_txt`, ni JavaScript propio, `extra_javascript`, plugins ni extensiones Markdown distintas de las de
   Zensical por defecto.
 - **Contenido no confiable**: ver [Funcionalidad → Seguridad del sitio](../functional/context.md#seguridad-del-sitio).
   Los textos que escribe esta clase (títulos de documento, nombres de dominio y de proyecto) se escriben sin `<`/`>`
@@ -773,7 +785,7 @@ class DomainDocument(BaseModel):
     document_type: str
     material_type: str | None  # slug del tipo de material (modo manifiesto), o None
     confidence: float
-    classified_by: str  # "rules" | "ai"
+    classified_by: str  # "rules" | "ai" (el dominio; quién asignó cada eje, en classification)
     rules_domain: str | None              # 1.5.0: propuesta de las reglas, aunque decidiera la IA
     rules_confidence: float | None        # 1.5.0
     ai_domain: str | None                 # 1.5.0: propuesta de la IA, aplicada o no
@@ -786,6 +798,10 @@ class DomainDocument(BaseModel):
     keywords: list[str]         # 1.5.0: declaradas, o de la IA si faltan
     language: str | None        # 1.5.0: ISO 639-1 detectado en el texto convertido; None si no es seguro
     ai_filled: list[Literal["description", "keywords"]]  # 1.5.0: lo que rellenó la IA
+    source_sha256: str | None   # 2.0.0: huella del original al construir (check_context_freshness, decisiones)
+    version: str | None         # 2.0.0: versión en su grupo (ver versions.md)
+    version_group: str | None   # 2.0.0
+    is_current: bool | None     # 2.0.0
     classification: DocumentClassification  # 2.0.0: valores de todos los ejes
 
 class AxisValue(BaseModel):  # 2.0.0
@@ -814,6 +830,10 @@ class UnclassifiedDocument(BaseModel):  # 1.6.0
     keywords: list[str]       # nunca de la IA
     language: str | None
     classification: DocumentClassification  # 2.0.0; vacía en 2.0 (los sin clasificar del modo manifiesto van a «sin-clasificar»)
+    source_sha256: str | None  # 2.0.0
+    version: str | None        # 2.0.0
+    version_group: str | None  # 2.0.0
+    is_current: bool | None    # 2.0.0
 
 class Domain(BaseModel):
     slug: str
@@ -840,6 +860,13 @@ class Context(BaseModel):
     taxonomy_manifest_used: bool  # default False
     taxonomy_template_name: str | None  # default None — nombre de la plantilla usada, o None (fichero local / sin manifiesto)
     ai_stats: AiStats                    # 2.0.0: alcance, recuentos y tokens (antes ai_documents_*, ai_enrichment_*...)
+    decisions_applied: int               # 2.0.0: decisiones de personas aplicadas (ver decisions.md)
+    stale_decisions: list[DecisionIssue]   # 2.0.0
+    orphan_decisions: list[DecisionIssue]  # 2.0.0
+    excluded_documents: list[str]        # 2.0.0
+    versions_mode: Literal["all", "mark", "current_only"]  # 2.0.0 (ver versions.md)
+    version_groups: list[DocumentVersionGroup]  # 2.0.0
+    superseded_documents: list[str]      # 2.0.0
     ai_provenance: list[PromptProvenance]  # 2.0.0: prompt y modelo por tarea (antes ai_classification_model...)
     ai_redact_credentials: bool          # 1.7.0
     credential_findings: list[DocumentCredentialFindings]  # 1.7.0
@@ -855,16 +882,20 @@ class AiPhaseStats(BaseModel):  # 2.0.0
     prompt_tokens: int
     completion_tokens: int
     response_format: Literal["json_schema", "json_object"] | None
+    cached: int                  # resueltos con la caché de resultados, sin llamar al modelo
 
 class AiStats(BaseModel):  # 2.0.0
-    scope: Literal["off", "unclassified"]
+    scope: Literal["off", "unclassified", "missing_axes"]
     enrich: bool
     classification: AiPhaseStats
     enrichment: AiPhaseStats
+    semantic: bool               # si se usó la sub-fase semántica
+    semantic_classification: AiPhaseStats
 
 class TaxonomyManifestDraftResult(BaseModel):
     domains: list[TaxonomyEntry]        # min 1
     material_types: list[TaxonomyEntry]  # min 1
+    profile: ProjectProfile | None       # 2.0.0: perfil inicial propuesto
     reasoning: str | None
     def to_manifest(self) -> TaxonomyManifest   # 2.0.0: ejes domains (folder) y material_types (subfolder)
 
@@ -894,6 +925,7 @@ class TaxonomyManifest(BaseModel):           # 2.0.0: por ejes
     title: str | None            # solo relevante en una plantilla compartida
     description: str | None      # solo relevante en una plantilla compartida
     axes: list[TaxonomyAxis]     # 1-10; exactamente un folder y un subfolder
+    profile: ProjectProfile | None  # 2.0.0: secciones del perfil en el cuerpo del manifiesto
     folder_axis: TaxonomyAxis    # propiedad: el dominio
     subfolder_axis: TaxonomyAxis # propiedad: el tipo de material
     tag_axes: list[TaxonomyAxis] # propiedad: los que solo etiquetan

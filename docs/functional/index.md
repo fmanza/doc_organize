@@ -43,12 +43,14 @@ en CPU (RapidOCR) o GPU (EasyOCR, extra `ocr-gpu`).
 
 ### `dedup/`
 
-`DeduplicationManager` (REQ-005): detecta duplicados exactos (mismo hash) y
-conflictos de versión (mismo nombre base, hash distinto), y mueve los documentos
+`DeduplicationManager` (REQ-005): detecta duplicados exactos (mismo hash),
+conflictos de versión (mismo nombre base, hash distinto) y, opcionalmente, nombres parecidos, y mueve los documentos
 descartados a una carpeta separada preservando su estructura, con una auditoría
 (`DEDUP_REPORT.json`). Soporta que el llamante elija qué documento conservar por
 grupo (`DuplicateGroup.user_choice`) — una interfaz (p. ej. doc_organize_web) lo usa para dar control al
-usuario antes de mover nada.
+usuario antes de mover nada. `ContentDuplicateFinder` (2.2.0) busca duplicados por contenido sobre el texto ya
+convertido (mismo contenido y, con la tarea de IA `dedup`, contenido parecido); esos grupos nunca se resuelven solos.
+Ver [Deduplicación](dedup.md).
 
 ### `cache/`
 
@@ -79,8 +81,41 @@ doc_organize_web — no pertenece a ninguno de los dos.
   usuario (subcomando `deduplicate` en el CLI), emitiendo progreso por grupo
   (mismo criterio que `run_streaming()`).
 
+### `export/`
+
+ZIP y Excel de un proyecto, Excel de documentos del contexto y paquete para IA — ver [Exportación](export.md).
+
 ### `main.py` (CLI)
 
 Punto de entrada (`python -m doc_organize ...`): subcomandos `project`, `scan`,
 `deduplicate` y `export`. Los subcomandos `web`, `tenant` y `user` se retiraron en
 1.0.0 (L-11): ver [doc_organize_web](https://github.com/fmanza/doc_organize_web).
+
+## Organización documental, IA y diagnóstico (2.x)
+
+Módulos que no figuran en el diagrama de capas de la [Arquitectura](../api/index.md).
+
+### `context/`
+
+`ContextBuilder`, `Reorganizer` y `SiteGenerator`: clasifican los documentos convertidos por ejes (reglas, decisiones
+de personas, semántica e IA), los copian a una carpeta reorganizada y generan un sitio navegable, también sin conexión —
+ver [Organización documental](context.md). Decisiones, cola de revisión, evaluación, agentes y versiones (2.0.0): ver
+[Revisión y calidad de la clasificación](revision_clasificacion.md).
+
+### `ai/`
+
+`LlmClient` (2.0.0): cliente único de IA a través de un LiteLLM Proxy, con ajustes por tarea (`classify`, `enrich`,
+`taxonomy_design`, `agent`, `embed` y, desde 2.2.0, `dedup`), prompts versionados, caché de resultados y redacción de
+credenciales antes de enviar nada. `AgentRunner`: agentes con herramientas y topes. `LiteLLMUsageClient`: consulta del
+gasto (GitHub Copilot, obsoleto desde 2.1.0) — ver [Monitorización de uso IA](ai_usage_monitoring.md).
+
+### `security/`
+
+`redact_credentials`/`scan_credentials` (1.7.0): redactan contraseñas, tokens y claves del texto antes de que salga
+hacia la IA, el sitio o el paquete para IA. `neutralize_untrusted_markdown` (2.0.0): desactiva el contenido activo de
+las páginas del sitio sin conexión.
+
+### `diagnostics`
+
+`check_environment` (2.0.0): diagnóstico del entorno (Python, Docling y sus modelos, extras, GPU, LibreOffice,
+Zensical y, opcionalmente, los modelos de IA) — ver [Diagnóstico del entorno](diagnostics.md).

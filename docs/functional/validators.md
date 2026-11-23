@@ -40,7 +40,7 @@ sequenceDiagram
 |---|---|
 | **Sin redundancia** | Si `/repo` y `/repo/docs` se seleccionan, solo `/repo` |
 | **Carpetas existentes** | Todas las rutas deben existir como directorios |
-| **Nombres normalizados** | Sin caracteres `<>:"\\/\|?*`, max 255 caracteres |
+| **Nombres normalizados** | Normalizados a NFC; sin caracteres `<>:"\\/\|?*` ni de control, máximo 100 caracteres, sin espacio al principio o al final y sin terminar en punto |
 | **Nombres únicos** | No duplicar nombres en el registro de proyectos |
 
 ## Límites y Restricciones
@@ -53,7 +53,7 @@ sequenceDiagram
 
 - **Carpeta no existe**: Lanza `InvalidPathError`
 - **Ruta es un archivo**: Lanza `InvalidPathError`
-- **Nombres reservados Windows** (CON, PRN, LPT1): Lanza `InvalidNameError`
+- **Nombres reservados Windows** (CON, PRN, AUX, NUL, COM1-9, LPT1-9): `is_valid=False` con el motivo en `warnings` (no lanza excepción; tampoco el resto de nombres inválidos)
 - **Lista vacía**: Retorna `is_valid=False`
 
 ## Criterios de Aceptación

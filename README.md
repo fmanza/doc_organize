@@ -18,6 +18,11 @@ tipo de material, que organizan carpetas, y los que solo etiquetan, como el marc
 quiere, con embeddings e IA a través de un LiteLLM Proxy; reorganiza una copia en carpetas y genera un sitio navegable
 con Zensical, también para verlo sin conexión, y un paquete para subir a un chat o agente de IA.
 
+> **2.2.0**: duplicados por **contenido** (`ContentDuplicateFinder`) sobre el Markdown ya convertido: mismo texto
+> sin IA y, opcionalmente, contenido parecido con embeddings de la tarea de IA `dedup`. Guía:
+> [Duplicados por contenido](docs/guides/duplicados_por_contenido.md). **2.1.0**: GitHub Copilot queda obsoleto (se
+> retira en 3.0); el uso de IA se consulta en LiteLLM: [Hacia 3.0](docs/guides/migracion_3_0.md).
+
 > **2.0.0**: taxonomía por ejes, un solo cliente de IA por tarea (`LlmClient`), decisiones humanas y cola de revisión,
 > evaluación, versiones de un documento, semántica, agentes que proponen sin aplicar, sitio sin conexión y paquete para
 > IA. Cambios incompatibles y cómo actualizar: [De 1.x a 2.0](docs/guides/migracion_2_0.md).
@@ -39,10 +44,12 @@ con Zensical, también para verlo sin conexión, y un paquete para subir a un ch
 
 ```bash
 pip install doc_organize            # núcleo: CLI, OCR en CPU incluido
-pip install doc_organize[export]    # + Excel de caché y de errores (`export cache-xlsx`/`errors-xlsx`)
+pip install doc_organize[export]    # + Excel de caché, de errores y del contexto (`export cache-xlsx`/`errors-xlsx`/`context-xlsx`)
 pip install doc_organize[context]   # + contexto documental (manifiestos, plantillas y prompts)
 pip install doc_organize[ai]        # + IA vía LiteLLM Proxy (ver docs/guides/litellm_proxy_setup.md)
 pip install doc_organize[site]      # + sitio navegable con Zensical
+pip install doc_organize[ocr-gpu]   # + OCR acelerado por GPU NVIDIA (EasyOCR)
+pip install doc_organize[av]        # + audio/vídeo (Whisper; requiere ffmpeg y Python 3.12-3.13)
 ```
 
 ### Desarrollo
@@ -57,8 +64,9 @@ pip install -e ".[dev,docs]"
 ## Uso básico
 
 ```bash
-# Crear un proyecto y escanear una carpeta
+# Crear un proyecto, apartar duplicados por fichero y escanear una carpeta
 python -m doc_organize project create "Mi Proyecto" --location /ruta/a/workspaces
+python -m doc_organize deduplicate --project "Mi Proyecto" --paths /ruta/a/documentos
 python -m doc_organize scan --project "Mi Proyecto" --paths /ruta/a/documentos
 
 # Exportar: ZIP de Conversión/ + cache_export.json, y Excel de caché o de errores (extra [export])
@@ -114,7 +122,7 @@ python scripts/build_docs_zip.py
 **Verificación de integridad:**
 ```bash
 sha256sum -c doc_organize-docs-*.zip.sha256
-# Output: doc_organize-docs-0.3.0.zip: OK
+# Output: doc_organize-docs-2.2.0.zip: OK
 ```
 
 ## Estructura del proyecto
@@ -127,7 +135,7 @@ doc_organize/
 │   ├── validators/       # FolderValidator, ProjectValidator (Nivel 2)
 │   ├── scanner/           # DocumentScanner (Nivel 2)
 │   ├── converter/         # DocumentConverter, OCRScheduler (Nivel 2)
-│   ├── dedup/              # DeduplicationManager (Nivel 2)
+│   ├── dedup/              # DeduplicationManager, ContentDuplicateFinder (Nivel 2)
 │   ├── cache/               # CacheManager, SQLite+WAL (Nivel 2)
 │   ├── projects/             # ProjectRegistry (Nivel 2)
 │   ├── security/          # redacción de credenciales, Markdown no confiable (Nivel 2)
@@ -135,6 +143,7 @@ doc_organize/
 │   ├── scan/                   # ScanCommand: orquestación del escaneo (Nivel 3)
 │   ├── context/               # contexto por ejes, reorganización, sitio, decisiones, agentes (Nivel 3)
 │   ├── export/                 # ZIP, Excel y paquete para IA de un proyecto (Nivel 3)
+│   ├── diagnostics.py            # check_environment: diagnóstico del entorno
 │   └── main.py                   # CLI (Nivel 3)
 ├── tests/
 │   ├── unit/

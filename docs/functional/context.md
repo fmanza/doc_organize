@@ -16,6 +16,12 @@ Opcionalmente, si el proyecto tiene un **manifiesto de taxonomía**
 (dominio + tipo de material de origen) y `<tipo>` deja de ser la extensión del
 fichero para ser ese tipo de material semántico.
 
+Desde 2.0.0 la clasificación con manifiesto pasa por fases, cada una solo rellena lo que la anterior dejó vacío:
+**reglas** → **decisiones de personas** → **semántica** con embeddings (opcional) → **IA** (opcional). También se
+pueden marcar o filtrar las **versiones** de un mismo documento y **describir** con IA los documentos que no declaran
+descripción. La revisión por personas, la evaluación contra una referencia y los agentes que proponen están en
+[Revisión y calidad de la clasificación](revision_clasificacion.md).
+
 ## Precondiciones
 
 - El proyecto tiene documentos ya convertidos con éxito (`cache.db` con entradas
@@ -27,7 +33,9 @@ fichero para ser ese tipo de material semántico.
   convertidos sin títulos, como hojas de cálculo grandes) se construyen y se navegan, pero se sacan del buscador del
   sitio; `SiteResult.search_excluded` dice cuáles (ver [API → SiteGenerator](../api/context.md#sitegenerator-0130-l-8)).
 - Sub-fase B (opcional): un LiteLLM Proxy desplegado — ver
-  [Desplegar un LiteLLM Proxy](../guides/litellm_proxy_setup.md).
+  [Desplegar un LiteLLM Proxy](../guides/litellm_proxy_setup.md) — y un `LlmClient` configurado (variables
+  `DOC_ORGANIZE_LITELLM_*` de 2.0, `settings_from_env()`).
+- Sub-fase semántica (opcional, 2.0.0): un modelo de embeddings para la tarea `embed` del mismo proxy.
 
 ## Flujo Principal
 
@@ -45,6 +53,12 @@ sequenceDiagram
     API->>Builder: build(documentos, ...)
     Builder->>RulesA: classify(documentos)
     RulesA-->>Builder: clasificados, sin_clasificar
+    opt Con manifiesto
+        Builder->>Builder: aplicar decisiones de personas
+    end
+    opt semantic=True (con manifiesto)
+        Builder->>IA: embeddings de los ejes vacíos
+    end
     opt IA activada y hay catálogo
         Builder->>IA: classify(sin_clasificar, catálogo)
         IA-->>Builder: dominio o null (nunca fuera del catálogo)
@@ -102,8 +116,8 @@ manifiesto de 1.x (`domains:` y `material_types:` en el nivel superior, con o si
 fichero (`migrate_manifest_v1` lo reescribe si se quiere). Formato completo en la
 [API del contexto](../api/context.md#taxonomymanifest-manifiesto-de-taxonomia).
 
-Si el fichero existe, `POST .../context` lo carga automáticamente (no hace falta
-activar nada en el formulario) y clasifica cada documento en los dos ejes, por
+Si el fichero existe, el consumidor lo carga (`load_taxonomy_manifest`, que devuelve `None` si no hay
+fichero) y lo pasa a la construcción, que clasifica cada documento en los dos ejes, por
 reglas — mismo criterio de puntuación que el modo de un eje (palabras del slug
 encontradas en título+contenido, con bonus si la carpeta contenedora coincide). La
 copia física y el sitio reflejan el segundo eje:
@@ -122,11 +136,9 @@ lleva su cita; si la cita no está en el documento, el valor queda por debajo de
 Si no existe `taxonomy_manifest.md`, todo el comportamiento (clasificación de un
 eje, `<tipo>`=extensión, nav plano por dominio) queda exactamente igual que antes.
 
-`GET /projects/{name}/context` refleja el modo manifiesto en la tabla "Contexto": un aviso
-"Modo manifiesto de taxonomía activo" cuando `Context.taxonomy_manifest_used`, y cada fila de
-dominio se puede desplegar para ver el tipo de material de cada documento
-(`DomainDocument.material_type_name`, o una etiqueta derivada del slug si el documento cayó
-en el placeholder `sin-clasificar` por no alcanzar el umbral en ese eje).
+El contexto dice si se construyó en modo manifiesto (`Context.taxonomy_manifest_used`) y el tipo de material de
+cada documento (`DomainDocument.material_type_name`, o una etiqueta derivada del slug si el documento cayó en el
+placeholder `sin-clasificar` por no alcanzar el umbral en ese eje), para que una interfaz lo muestre.
 
 ## Plantillas de Manifiesto (biblioteca compartida entre proyectos)
 
@@ -138,24 +150,33 @@ Además del `taxonomy_manifest.md` propio de un proyecto, `doc_organize` mantien
 **biblioteca de plantillas** reutilizables entre proyectos — mismo formato de fichero
 (front matter YAML + prosa libre), pero fuera de cualquier `project.root_path`:
 `~/.doc_organize/taxonomy_templates/<nombre>.md` (gestionada por el usuario; ruta
-alternativa con `TaxonomyTemplateRegistry(templates_dir)`), más un par de plantillas de
-ejemplo empaquetadas con la propia librería ("sgi-iso27001", "calidad") que sirven de
+alternativa con `TaxonomyTemplateRegistry(templates_dir)`), más tres plantillas de
+ejemplo empaquetadas con la propia librería ("sgi-iso27001", "sgi-integrado", "calidad") que sirven de
 fallback de solo lectura cuando no hay una plantilla de usuario con ese nombre.
 
-Un proyecto referencia una plantilla por nombre al construir el contexto
-(`POST .../context` con `taxonomy_template_name`), sin necesidad de copiar el fichero:
+Un proyecto usa una plantilla por nombre al construir el contexto, sin necesidad de copiar el fichero: el
+consumidor la carga (`TaxonomyTemplateRegistry.load_template(nombre)`) y la pasa como manifiesto, con
+`taxonomy_template_name` para que el contexto recuerde de dónde vino:
 
 ```yaml
 ---
+schema: 2
 title: SGI ISO 27001
 description: Catálogo de dominios y tipos de material de un SGSI (ISO/IEC 27001).
-domains:
-  - slug: gobierno-seguridad
-    name: Gobierno de la Seguridad
-    keywords: [politica, gobierno, roles, objetivos]
-material_types:
-  - slug: politica
-    name: Política
+axes:
+  - key: domains
+    name: Dominios
+    organizes: folder
+    entries:
+      - slug: gobierno-seguridad
+        name: Gobierno de la Seguridad
+        keywords: [politica, gobierno, roles, objetivos]
+  - key: material_types
+    name: Tipos de material
+    organizes: subfolder
+    entries:
+      - slug: politica
+        name: Política
 ---
 ```
 
@@ -163,8 +184,8 @@ material_types:
 propio `taxonomy_manifest.md`, ese fichero local **siempre gana** — es el override
 sin tocar la plantilla compartida. `taxonomy_template_name` solo se usa cuando no hay
 fichero local. Combinar un manifiesto (local o de plantilla) con `candidate_domains`,
-o un fichero local con `taxonomy_template_name`, se rechaza con `400` explícito — mismo
-criterio de "nunca precedencia silenciosa" que ya aplica a `candidate_domains`.
+o un fichero local con `taxonomy_template_name`, lo debe rechazar el consumidor con un error explícito — criterio de
+"nunca precedencia silenciosa" (ver Reglas de Negocio).
 
 `taxonomy_template_name` no es "sticky": a diferencia de `output_folder_name`, cada
 reconstrucción debe repetirlo para seguir usando la misma plantilla (una interfaz
@@ -214,6 +235,13 @@ Los `.md` del sitio salen de documentos de terceros: son **contenido no confiabl
 - **El tema por defecto** usa su propio JavaScript (navegación, búsqueda) y carga Mermaid desde `unpkg.com` cuando una
   página tiene un bloque de código `mermaid`.
 
+**Sitio sin conexión (2.0.0)**: `SiteGenerator.generate(offline=True)` construye un sitio para abrirse desde el disco
+sin nada de terceros (Mermaid y el resto de recursos van empaquetados), **siempre neutraliza** las páginas de los
+documentos (HTML escapado, enlaces `javascript:` e imágenes remotas desactivados) y, desde 2.0.0rc3, no publica los
+originales ni el `.json` de cada documento. `check_site_offline()` lo comprueba y `write_site_zip()` lo empaqueta en un
+ZIP reproducible (rechaza un sitio que no pase la comprobación). El sitio normal no cambia. Con `llms_txt=True` el
+sitio lleva también un `llms.txt` para herramientas de IA.
+
 Quien sirva el sitio debe tratarlo como contenido de terceros: servirlo desde **otro origen** que la aplicación (sin
 sus cookies), o con una cabecera `Content-Security-Policy` restrictiva (por ejemplo `sandbox`, que deja el sitio en un
 origen opaco).
@@ -226,8 +254,9 @@ diciendo que había una contraseña):
 
 | Dónde | Qué se redacta | Cómo se desactiva |
 |---|---|---|
-| Todo lo que sale hacia la IA (`LlmClient`: clasificación, descripción, borrador de taxonomía) | Texto de cada mensaje | `AiSettings(redact_credentials=False)` |
+| Todo lo que sale hacia la IA (`LlmClient`: clasificación, descripción, diseño de taxonomía, agentes y embeddings) | Texto de cada mensaje | `AiSettings(redact_credentials=False)` |
 | Sitio (`SiteGenerator.generate`) | Páginas de la carpeta reorganizada y títulos del `nav` | `generate(redact_credentials=False)` |
+| Paquete para IA (`write_ai_context_bundle`, 2.0.0) | Títulos, descripciones y textos | `write_ai_context_bundle(redact=False)` |
 
 Está **activado por defecto** en los tres. `Conversión/` y los originales no se tocan; `context.json` guarda el título
 y el texto originales (lo que se publica en el sitio sale redactado). El contexto resume lo redactado en
@@ -257,9 +286,14 @@ deduplicación desde 0.12.1:
 |---|---|
 | **Fuente de clasificación** | El `.json` de conversión (`chunks`/`title`), nunca el `.md` — ya troceado por sección, sin reparsear Markdown |
 | **Nunca inventa dominios** | Con catálogo predefinido, un documento solo se asigna a un dominio de ese catálogo — ni las reglas ni la IA crean uno nuevo |
-| **IA es fallback, nunca primera pasada** | Sub-fase B solo se intenta con documentos que la Sub-fase A deja por debajo del umbral de confianza, y opt-in explícito (`ai_scope="unclassified"`; por defecto `"off"`) |
+| **IA es fallback, nunca primera pasada** | Sub-fase B solo se intenta con documentos que la Sub-fase A deja por debajo del umbral de confianza, y opt-in explícito (`ai_scope="unclassified"`, o `"missing_axes"` para rellenar también los ejes que solo etiquetan; por defecto `"off"`). La IA solo rellena ejes vacíos |
+| **Las personas mandan (2.0.0)** | Con manifiesto, las decisiones de personas (`decisions.json`) se aplican tras las reglas y antes de la semántica y la IA; la que no se puede aplicar queda en `Context.stale_decisions`/`orphan_decisions` |
+| **Semántica opcional (2.0.0)** | Con `semantic=True` y manifiesto, los ejes vacíos se rellenan por parecido con embeddings (`classified_by="semantic"`), antes de la IA |
+| **Versiones (2.0.0)** | `versions="all"` (por defecto) no cambia nada; `"mark"` marca versión y vigente; `"current_only"` solo clasifica, publica y envía a la IA la vigente (la más alta o la que decidió una persona) |
+| **Caché de IA (2.0.0)** | Reconstruir sin cambios (mismo documento, prompt, modelo, catálogo y redacción) no vuelve a llamar al modelo |
+| **Cita verificada (2.0.0)** | Cada valor que asigna la IA lleva su cita; si no aparece en el documento, el valor queda por debajo del umbral para revisarlo |
 | **Copiar, nunca mover** | `Reorganizer` copia los tres artefactos (original + `.md` + `.json`); la fuente original nunca se toca |
-| **Reconstrucción limpia** | Cada `POST` reconstruye desde cero: dominios/documentos ya no vigentes se eliminan de `context.json` y de `organizado/`, sin copias huérfanas |
+| **Reconstrucción limpia** | Cada construcción reconstruye desde cero: dominios/documentos ya no vigentes se eliminan de `context.json` y de `organizado/`, sin copias huérfanas |
 | **Estado honesto ante fallo parcial** | Si la reorganización o la generación del sitio fallan a mitad, `context.json` persiste `reorganized`/`site_generated=false` — nunca se reporta éxito falso. `SiteGenerator` lanza `SiteBuildError` si no puede construir el sitio, nunca lo deja sin construir en silencio |
 | **Una operación a la vez** | La librería no bloquea: evitar un escaneo, una deduplicación u otra construcción de contexto simultáneos sobre el mismo proyecto es responsabilidad del consumidor (doc_organize_web encola las ejecuciones) |
 | **Manifiesto y catálogo simple son excluyentes** | Con `taxonomy_manifest`, `ContextBuilder.build()` clasifica por el manifiesto; rechazar que además llegue `candidate_domains` (en vez de ignorarlo en silencio) es responsabilidad del consumidor |
@@ -282,23 +316,24 @@ deduplicación desde 0.12.1:
   la Sub-fase A lo manda a "sin clasificar" sin interrumpir el resto del lote;
   si de algún modo llega a `Reorganizer` con un artefacto ausente, se levanta
   `IncompleteConversionArtifactsError` (no se reorganiza a medias).
-- **IA activada sin proxy configurado**: `POST` devuelve `400` con un mensaje
-  explícito — `DOC_ORGANIZE_LITELLM_CLASSIFICATION_BASE_URL`/`_VIRTUAL_KEY` sin
-  definir (modo de 1 eje), o `DOC_ORGANIZE_LITELLM_TAXONOMY_CLASSIFICATION_BASE_URL`/
-  `_VIRTUAL_KEY` sin definir (modo manifiesto, 2 ejes) — nunca un error genérico.
+- **IA sin configurar**: `settings_from_env()` devuelve `None` si no hay `DOC_ORGANIZE_LITELLM_BASE_URL` (sin IA), y
+  lanza `AiConfigurationError` si falta `DOC_ORGANIZE_LITELLM_VIRTUAL_KEY` o si quedan variables de 1.x definidas
+  (el mensaje da la equivalente de 2.0), para que una actualización sin reconfigurar no deje la IA desactivada en
+  silencio. Pedir IA, descripción o semántica sin cliente de IA (`llm`) lanza `ValueError`.
 - **IA sugiere un dominio o tipo de material fuera del catálogo**: se descarta y se
   trata como "no encaja en ninguno" en ese eje — validado en
   los servicios de `doc_organize.ai` (`classify_document`), no solo por
   instrucción al modelo.
 - **Fallo de red/autenticación con el proxy** durante la Sub-fase B: el
   documento afectado queda sin clasificar (en el eje que la IA no llegó a
-  resolver); no interrumpe el resto del lote.
+  resolver). Un 401/403 detiene la fase de IA en el acto (`stopped="auth"`); con `ai_max_failures`, también tras
+  ese número de errores de conexión seguidos (`stopped="connection"`), y con `ai_max_documents` al llegar al tope
+  (`stopped="budget"`). Los pendientes no se envían y la construcción termina con normalidad.
 - **`taxonomy_manifest.md` con front matter inválido** (no empieza/cierra con
   `---`, YAML roto, sin eje de dominio o de tipo de material, o fuera de los límites):
-  `POST` devuelve `400` con el motivo exacto, no un error genérico.
+  `TaxonomyManifestError` con el motivo exacto, no un error genérico.
 - **`taxonomy_template_name` que no existe, con nombre inválido, o cuya plantilla de
-  usuario tiene el front matter roto**: `POST` devuelve `400` con el motivo exacto
-  (`TaxonomyTemplateError`) — un fichero de plantilla de usuario roto nunca cae en
+  usuario tiene el front matter roto**: `TaxonomyTemplateError` con el motivo exacto — un fichero de plantilla de usuario roto nunca cae en
   silencio a la plantilla empaquetada del mismo nombre (enmascararía el error).
 
 ## Criterios de Aceptación

@@ -28,8 +28,11 @@ print("Sin errores" if report.ok else "Hay errores")
 | `libreoffice` | LibreOffice para los formatos de Office antiguos | `warning` |
 | `extra:av` | Transcripción de audio y vídeo | `warning` |
 | `ai:<nombre>` | Con `check_ai=True`, cada modelo de IA configurado | ver abajo |
+| `ai` | Con `check_ai=True`, si no hay ningún modelo configurado (`ok`: la IA no se usará) o la configuración no vale (p. ej. variables de 1.x) | `error` |
 
-`report.ok` es `False` si alguna comprobación dio `error`; los `warning` no cuentan. Los detalles no llevan rutas ni
+Cada `EnvironmentCheck` trae `name`, `status` (`ok`, `warning` o `error`), `detail` y `remedy`; las de IA, además,
+`model` (el alias pedido) y `served_model` (el modelo que dice la respuesta que contestó, si lo dice), y las de
+embeddings, `dimension` (2.2.0). `report.ok` es `False` si alguna comprobación dio `error`; los `warning` no cuentan. Los detalles no llevan rutas ni
 claves. Sin `check_ai` no se usa la red y nada toca ningún proyecto.
 
 ## Modelos de IA (`check_ai=True`)
@@ -41,11 +44,13 @@ Una llamada por modelo con **texto sintético** (nunca nada de un documento) pid
 - clave rechazada (401/403), alias que no existe, error de red o sin respuesta en 60 s: `error`.
 
 Un modelo de **embeddings** (`AiEndpoint(kind="embedding")`) se comprueba pidiendo un vector a `/embeddings`: `ok` con
-su dimensión, o `error` si la clave, el alias o la respuesta fallan.
+su dimensión, o `error` si la clave, el alias o la respuesta fallan. El de `dedup` (2.2.0) se prueba además con dos
+textos largos que solo difieren al final: si los vectores salen iguales, `warning` (el modelo corta el texto antes de
+unas 1500 palabras; usa bloques más pequeños, `chunk_words`, o sube el contexto del modelo en el proxy).
 
 Por defecto se comprueban los modelos configurados por variables de entorno: clasificar, describir y diseñar la
-taxonomía siempre, y agentes y embeddings si tienen modelo propio (`DOC_ORGANIZE_LITELLM_MODEL_AGENT`,
-`_MODEL_EMBED`). Para otros:
+taxonomía siempre, y agentes, embeddings y duplicados por contenido si tienen modelo (o clave) propio
+(`DOC_ORGANIZE_LITELLM_MODEL_AGENT`, `_MODEL_EMBED`, `_MODEL_DEDUP`). Para otros:
 
 ```python
 from doc_organize import AiEndpoint, check_environment
