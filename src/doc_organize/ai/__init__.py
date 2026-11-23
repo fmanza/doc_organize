@@ -8,7 +8,7 @@ from doc_organize.ai.github_copilot_usage_client import (
     github_copilot_usage_config_from_env,
 )
 from doc_organize.ai.litellm_usage_client import LiteLLMUsageClient, litellm_usage_config_from_env
-from doc_organize.ai.llm_client import LlmClient, LlmResult, LlmUsage
+from doc_organize.ai.llm_client import EmbeddingResult, LlmClient, LlmResult, LlmUsage
 from doc_organize.ai.prompts import PromptRegistry, PromptTemplate
 from doc_organize.ai.services import (
     AxisAnswer,
@@ -32,6 +32,7 @@ __all__ = [
     "AxisRequest",
     "ClassificationAnswer",
     "EmbeddingIndex",
+    "EmbeddingResult",
     "GitHubCopilotUsageClient",
     "LiteLLMUsageClient",
     "LlmClient",

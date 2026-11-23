@@ -24,7 +24,7 @@ import httpx
 from doc_organize.ai._http_client_base import AiHttpClientBase
 from doc_organize.ai.cache import AiResultCache, cache_key
 from doc_organize.core.exceptions import AiAuthError, AiConnectionError, AiError, AiResponseError
-from doc_organize.core.models import AiSettings, AiTask
+from doc_organize.core.models import EMBEDDING_TASKS, AiSettings, AiTask
 from doc_organize.security.credentials import redact_credentials
 from doc_organize.utils.logging import get_logger
 
@@ -53,6 +53,8 @@ class LlmResult[T]:
         usage (LlmUsage): Tokens de la llamada.
         redacted (dict[str, int]): Credenciales redactadas por regla en lo enviado (sin valores).
         cached (bool): Si salió de la caché de resultados (`AiResultCache`), sin llamar al modelo.
+        served_model (str | None): Modelo que dice la respuesta que contestó (campo `model`; el que hay detrás del alias,
+            según el proxy), 2.2.0; `None` si no lo dice o salió de la caché.
     """
 
     value: T
@@ -61,6 +63,27 @@ class LlmResult[T]:
     usage: LlmUsage = field(default_factory=LlmUsage)
     redacted: dict[str, int] = field(default_factory=dict)
     cached: bool = False
+    served_model: str | None = None
+
+
+@dataclass(frozen=True)
+class EmbeddingResult:
+    """Resultado de `LlmClient.embed_detailed` (2.2.0).
+
+    Attributes:
+        vectors (list[list[float]]): Un vector por texto, en el mismo orden.
+        model (str): Modelo pedido para la tarea.
+        served_model (str | None): Modelo que dice la respuesta que contestó, si lo dice.
+    """
+
+    vectors: list[list[float]]
+    model: str
+    served_model: str | None = None
+
+    @property
+    def dimension(self) -> int | None:
+        """Dimensión de los vectores (`None` sin vectores)."""
+        return len(self.vectors[0]) if self.vectors else None
 
 
 class LlmClient:
@@ -160,7 +183,9 @@ class LlmClient:
         value = self._parse(task, data, parse)
         if cache is not None and key is not None:
             cache.put(key, data, response_format=response_format)
-        return LlmResult(value=value, model=model, response_format=response_format, usage=_usage(payload), redacted=redacted)
+        return LlmResult(
+            value=value, model=model, response_format=response_format, usage=_usage(payload), redacted=redacted, served_model=_served_model(payload)
+        )
 
     def _from_cache[T](self, task: AiTask, model: str, cache: AiResultCache, key: str, parse: Callable[[Any], T]) -> LlmResult[T] | None:
         """El resultado guardado para `key`, validado otra vez; `None` si no está o ya no es válido."""
@@ -215,16 +240,33 @@ class LlmClient:
             raise AiResponseError(f"La respuesta de '{task}' no trae mensaje") from exc
         return message, _usage(payload)
 
-    async def embed(self, texts: Sequence[str]) -> list[list[float]]:
-        """Embeddings de `texts` (tarea `embed`), redactados antes de enviarlos y en el mismo orden.
+    async def embed(self, texts: Sequence[str], *, task: AiTask = "embed") -> list[list[float]]:
+        """Embeddings de `texts`, redactados antes de enviarlos y en el mismo orden.
+
+        Args:
+            texts: Textos.
+            task: Tarea de embeddings (`EMBEDDING_TASKS`): `embed` (contexto, por defecto) o `dedup` (2.2.0, duplicados
+                por contenido, con su propio modelo y clave).
 
         Raises:
+            ValueError: `task` no es de embeddings.
             AiAuthError, AiConnectionError, AiError: Como `complete_json`; `AiResponseError` si faltan vectores.
         """
+        return (await self.embed_detailed(texts, task=task)).vectors
+
+    async def embed_detailed(self, texts: Sequence[str], *, task: AiTask = "embed") -> EmbeddingResult:
+        """Como `embed`, con el modelo pedido y el que dice la respuesta que contestó (2.2.0, para probar un modelo).
+
+        Raises:
+            Como `embed`.
+        """
+        if task not in EMBEDDING_TASKS:
+            raise ValueError(f"'{task}' no es una tarea de embeddings")
+        model = self.model_for(task)
         if not texts:
-            return []
+            return EmbeddingResult(vectors=[], model=model)
         inputs = [redact_credentials(text).text if self.settings.redact_credentials else text for text in texts]
-        payload = await self._post("embed", "/embeddings", {"model": self.model_for("embed"), "input": inputs})
+        payload = await self._post(task, "/embeddings", {"model": model, "input": inputs})
         try:
             data = sorted(payload["data"], key=lambda item: item["index"])
             vectors = [[float(value) for value in item["embedding"]] for item in data]
@@ -232,7 +274,7 @@ class LlmClient:
             raise AiResponseError("La respuesta de embeddings no tiene el formato esperado") from exc
         if len(vectors) != len(texts):
             raise AiResponseError(f"Se pidieron {len(texts)} embeddings y llegaron {len(vectors)}")
-        return vectors
+        return EmbeddingResult(vectors=vectors, model=model, served_model=_served_model(payload))
 
     # --- Internos ------------------------------------------------------------------------------------------------------
 
@@ -311,4 +353,10 @@ def _usage(payload: Any) -> LlmUsage:
     return LlmUsage(prompt_tokens=usage.get("prompt_tokens"), completion_tokens=usage.get("completion_tokens"))
 
 
-__all__ = ["LlmClient", "LlmResult", "LlmUsage", "ResponseFormat"]
+def _served_model(payload: Any) -> str | None:
+    """El campo `model` de una respuesta del proxy (formato OpenAI), si viene y no está vacío."""
+    model = payload.get("model") if isinstance(payload, dict) else None
+    return model if isinstance(model, str) and model.strip() else None
+
+
+__all__ = ["EmbeddingResult", "LlmClient", "LlmResult", "LlmUsage", "ResponseFormat"]

@@ -10,6 +10,7 @@ import shutil
 import stat
 import uuid
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
@@ -21,7 +22,8 @@ from rapidfuzz import fuzz, process, utils
 
 from doc_organize.core.constants import DEDUP_HISTORY_JSONL_NAME, DEDUP_REPORT_JSON_NAME, VERSION_SUFFIX_PATTERN
 from doc_organize.core.exceptions import InvalidPathError
-from doc_organize.core.models import DeduplicationReport, DedupMode, DocumentMetadata, DuplicateGroup, DuplicateReason
+from doc_organize.core.models import ConversionResult, DeduplicationReport, DedupMode, DocumentMetadata, DuplicateGroup, DuplicateReason
+from doc_organize.projects.layout import duplicate_conversions_dir
 from doc_organize.utils.io_retry import retry_io_async
 from doc_organize.utils.logging import get_logger
 from doc_organize.utils.path_utils import _copy_nofollow, _open_dir_nofollow, ensure_no_symlinks
@@ -128,7 +130,14 @@ class DeduplicationManager:
         return groups
 
     async def move_group(
-        self, group: DuplicateGroup, duplicates_dir: Path, *, mode: DedupMode = "move", relative_to: Path | None = None
+        self,
+        group: DuplicateGroup,
+        duplicates_dir: Path,
+        *,
+        mode: DedupMode = "move",
+        relative_to: Path | None = None,
+        conversions: Mapping[str, ConversionResult] | None = None,
+        conversion_dir: Path | None = None,
     ) -> tuple[int, int, list[str]]:
         """Mueve los documentos descartados de un único `group` a `duplicates_dir`.
 
@@ -152,6 +161,13 @@ class DeduplicationManager:
         para orígenes de solo lectura) o `report_only` (no toca ningún fichero; los descartados solo se cuentan).
 
         `relative_to` (L-11a): ver `_move_to_duplicates`; un documento que no cuelgue de esa carpeta cuenta como fallido.
+
+        `conversions` (2.2.0): la conversión de cada original, por `full_path`. En modo `move`, la del descartado (su
+        `.md`, su `.json` y su carpeta de imágenes) se mueve con él a `duplicates_dir/Conversión/`, replicando su ruta
+        relativa a `conversion_dir`: así deja de entrar en el contexto y se puede devolver a su sitio sin volver a
+        convertir. Si un artefacto no se puede mover, su ruta va a `rutas_fallidas` (el original ya se movió). En `copy`
+        y `report_only` la conversión no se toca (en `copy`, ver `exclude_from_context`). Los grupos por contenido
+        (`SAME_CONTENT`, `SEMANTIC_CONTENT_MATCH`) cuentan, como los de nombre parecido, en el segundo valor.
         """
         keep = group.user_choice or group.canonical_doc
         # Sin `relative_to`, la misma llamada que antes de L-11a (compatibilidad con quien sustituye _move_to_duplicates).
@@ -178,9 +194,39 @@ class DeduplicationManager:
                 failed_paths.append(doc.full_path)
                 continue
             moved += 1
+            if mode == "move" and conversions and doc.full_path in conversions:
+                failed_paths.extend(await self._move_conversion(conversions[doc.full_path], duplicates_dir, doc.sha256_hash, conversion_dir))
         if group.reason == DuplicateReason.EXACT_DUPLICATE:
             return moved, 0, failed_paths
         return 0, moved, failed_paths
+
+    async def _move_conversion(self, conversion: ConversionResult, duplicates_dir: Path, sha256_hash: str, conversion_dir: Path | None) -> list[str]:
+        """Mueve los artefactos de `conversion` que existan a `duplicates_dir/Conversión/` (2.2.0); devuelve los que no
+        se pudieron mover.
+
+        La carpeta de imágenes se mueve fichero a fichero con la misma transferencia que los originales (en POSIX solo
+        mueve ficheros normales, sin seguir enlaces): un enlace dentro de ella no se sigue y cuenta como fallido. La
+        carpeta, ya vacía, se borra al final.
+        """
+        target = duplicate_conversions_dir(duplicates_dir)
+        extra: dict[str, Any] = {"relative_to": conversion_dir} if conversion_dir is not None else {}
+        failed: list[str] = []
+
+        async def move(path: Path) -> None:
+            try:
+                await self._move_to_duplicates(path, target, sha256_hash, **extra)
+            except OSError as exc:
+                self.logger.warning(f"No se pudo mover la conversión '{path}' a duplicados: {exc}")
+                failed.append(str(path))
+
+        for artifact in (conversion.markdown_path, conversion.json_path):
+            if artifact and os.path.lexists(artifact):
+                await move(Path(artifact))
+        if conversion.images_dir and os.path.lexists(conversion.images_dir):
+            for path in await asyncio.to_thread(_files_without_links, Path(conversion.images_dir), failed):
+                await move(path)
+            await asyncio.to_thread(_remove_empty_dirs, Path(conversion.images_dir))
+        return failed
 
     async def finalize_report(
         self,
@@ -246,6 +292,8 @@ class DeduplicationManager:
         report_dir: Path | None = None,
         mode: DedupMode = "move",
         relative_to: Path | None = None,
+        conversions: Mapping[str, ConversionResult] | None = None,
+        conversion_dir: Path | None = None,
     ) -> DeduplicationReport:
         """Mueve los documentos descartados de cada grupo a `duplicates_dir`,
         preservando su estructura de directorios original (la ruta absoluta, o
@@ -263,7 +311,8 @@ class DeduplicationManager:
 
         Aplica **solo** los `groups` recibidos (p. ej. los confirmados de una vista previa de `find_duplicates`, que se
         identifican por su `group_id` estable). `mode`: ver `move_group` (L-6); con `report_only` no se crea
-        `duplicates_dir` ni se toca ningún fichero, solo se escribe el informe.
+        `duplicates_dir` ni se toca ningún fichero, solo se escribe el informe. `conversions` y `conversion_dir`
+        (2.2.0): ver `move_group`.
         """
         duplicates_dir = Path(duplicates_dir)
         self.check_duplicates_dir(duplicates_dir)
@@ -273,6 +322,10 @@ class DeduplicationManager:
             group_kwargs["mode"] = mode
         if relative_to is not None:
             group_kwargs["relative_to"] = relative_to
+        if conversions:
+            group_kwargs["conversions"] = conversions
+            if conversion_dir is not None:
+                group_kwargs["conversion_dir"] = conversion_dir
         if mode != "report_only":
             await asyncio.to_thread(duplicates_dir.mkdir, parents=True, exist_ok=True)
 
@@ -484,6 +537,40 @@ class DeduplicationManager:
 _O_NOFOLLOW: int = getattr(os, "O_NOFOLLOW", 0)
 _O_DIRECTORY: int = getattr(os, "O_DIRECTORY", 0)
 _NOFOLLOW_DIR_FD = bool(_O_NOFOLLOW and _O_DIRECTORY) and {os.open, os.rename, os.unlink, os.stat} <= os.supports_dir_fd
+
+
+def _files_without_links(folder: Path, failed: list[str]) -> list[Path]:
+    """Los ficheros normales de `folder` y sus subcarpetas, sin entrar en enlaces: un enlace (o la propia `folder`, si
+    lo es) va a `failed` y no se sigue."""
+    if not stat.S_ISDIR(os.lstat(folder).st_mode):  # un enlace o un fichero suelto en lugar de la carpeta
+        failed.append(str(folder))
+        return []
+    files: list[Path] = []
+    with os.scandir(folder) as entries:
+        for entry in sorted(entries, key=lambda item: item.name):
+            if entry.is_symlink():
+                failed.append(entry.path)
+            elif entry.is_dir(follow_symlinks=False):
+                files.extend(_files_without_links(Path(entry.path), failed))
+            elif entry.is_file(follow_symlinks=False):
+                files.append(Path(entry.path))
+            else:
+                failed.append(entry.path)
+    return files
+
+
+def _remove_empty_dirs(folder: Path) -> None:
+    """Borra `folder` y sus subcarpetas si se quedaron vacías (nunca sigue enlaces ni borra ficheros)."""
+    if not stat.S_ISDIR(os.lstat(folder).st_mode):
+        return
+    with os.scandir(folder) as entries:
+        for entry in entries:
+            if entry.is_dir(follow_symlinks=False) and not entry.is_symlink():
+                _remove_empty_dirs(Path(entry.path))
+    try:
+        folder.rmdir()
+    except OSError:
+        pass  # queda algo que no se movió (un enlace, un fallo): la carpeta se queda
 
 
 def _transfer_nofollow(source: Path, target: Path, *, copy: bool) -> None:

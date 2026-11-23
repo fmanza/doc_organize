@@ -89,9 +89,10 @@ python -c "import secrets; print('LITELLM_SALT_KEY=' + secrets.token_hex(32))"
 Pega cada valor generado en la línea correspondiente de `.env`.
 
 Edita **`config.yaml`** si quieres otro modelo o proveedor. El ejemplo define un alias por tarea
-(`doc-organize-classify`, `-enrich`, `-taxonomy-design`, `-agent` y `-embed`): un modelo económico para clasificar y
-describir, uno más capaz para la taxonomía y los agentes, y uno local de Ollama para los embeddings. Si usas modelos
-locales, mira antes [Modelos locales](#modelos-locales-ollama).
+(`doc-organize-classify`, `-enrich`, `-taxonomy-design`, `-agent`, `-embed` y, desde 2.2.0, `-dedup`): un modelo
+económico para clasificar y describir, uno más capaz para la taxonomía y los agentes, y modelos locales de Ollama para
+los embeddings del contexto y para los [duplicados por contenido](duplicados_por_contenido.md) (`bge-m3`). Si usas
+modelos locales, mira antes [Modelos locales](#modelos-locales-ollama).
 
 Ni `.env` ni `config.yaml` (los reales, no los `.example`) se versionan — ya están
 en el `.gitignore` de la raíz del repo.
@@ -117,7 +118,7 @@ Genera una virtual key con permiso de `chat/completions`:
 curl -X POST http://localhost:4000/key/generate \
   -H "Authorization: Bearer <tu LITELLM_MASTER_KEY>" \
   -H "Content-Type: application/json" \
-  -d '{"models": ["doc-organize-classify", "doc-organize-enrich", "doc-organize-taxonomy-design", "doc-organize-agent", "doc-organize-embed"]}'
+  -d '{"models": ["doc-organize-classify", "doc-organize-enrich", "doc-organize-taxonomy-design", "doc-organize-agent", "doc-organize-embed", "doc-organize-dedup"]}'
 ```
 
 Incluye solo los alias de las tareas que vayas a usar. Si quieres atribuir presupuesto aparte por tarea, genera una

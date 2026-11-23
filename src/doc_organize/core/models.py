@@ -47,11 +47,18 @@ class ConversionStatus(str, Enum):
 
 
 class DuplicateReason(str, Enum):
-    """Motivo por el que se agrupan documentos como duplicados."""
+    """Motivo por el que se agrupan documentos como duplicados.
+
+    `SAME_CONTENT` y `SEMANTIC_CONTENT_MATCH` (2.2.0) salen de `ContentDuplicateFinder`, sobre el texto ya convertido:
+    el mismo texto normalizado en ficheros distintos (p. ej. un `.docx` y su `.pdf`) y un contenido parecido según los
+    embeddings. Como `FUZZY_NAME_MATCH`, nunca se resuelven sin que una persona elija qué conservar.
+    """
 
     EXACT_DUPLICATE = "exact_duplicate"
     VERSION_CONFLICT = "version_conflict"
     FUZZY_NAME_MATCH = "fuzzy_name_match"
+    SAME_CONTENT = "same_content"
+    SEMANTIC_CONTENT_MATCH = "semantic_content_match"
 
 
 class OcrMode(str, Enum):
@@ -277,6 +284,25 @@ class DuplicateGroup(BaseModel):
     duplicates: list[DocumentMetadata] = Field(..., description="Documentos a descartar")
     reason: DuplicateReason = Field(..., description="Motivo por el que se agrupan")
     user_choice: DocumentMetadata | None = Field(default=None, description="Selección del usuario si sobrescribe la elección por defecto")
+    similarity: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Similitud semántica del grupo (2.2.0): la menor entre sus miembros; None si no es por contenido parecido",
+    )
+    lexical_similarity: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Similitud de texto (Jaccard de trozos de 5 palabras, 2.2.0): la menor entre sus miembros. Alta = casi el mismo"
+            " texto; baja con similitud semántica alta = reescrito o la misma plantilla con otros datos"
+        ),
+    )
+    contained: bool = Field(
+        default=False,
+        description="Algún miembro está contenido en otro (2.2.0): el parecido es alto en un sentido y no en el otro",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -749,12 +775,19 @@ class EnvironmentCheck(BaseModel):
         status (str): `ok`, `warning` (funciona con limitaciones) o `error` (algo no funcionará).
         detail (str): Qué se encontró (versiones, sin rutas ni claves).
         remedy (str | None): Qué hacer si no es `ok`.
+        model (str | None): En las de IA (2.2.0), el modelo que se pidió (alias del proxy).
+        served_model (str | None): En las de IA (2.2.0), el modelo que dice la respuesta que contestó, si lo dice
+            (el que hay detrás del alias, según el proxy); `None` si no lo dice.
+        dimension (int | None): En las de embeddings (2.2.0), la dimensión de los vectores.
     """
 
     name: str
     status: EnvironmentCheckStatus
     detail: str
     remedy: str | None = None
+    model: str | None = None
+    served_model: str | None = None
+    dimension: int | None = None
 
 
 class EnvironmentReport(BaseModel):
@@ -1869,10 +1902,14 @@ class TaxonomyTemplateSummary(BaseModel):
     )
 
 
-AiTask = Literal["classify", "enrich", "taxonomy_design", "agent", "embed"]
-"""Tareas del cliente único de IA (2.0.0, G1): clasificar ejes, enriquecer, diseñar la taxonomía, agentes y embeddings."""
+AiTask = Literal["classify", "enrich", "taxonomy_design", "agent", "embed", "dedup"]
+"""Tareas del cliente único de IA (2.0.0, G1): clasificar ejes, enriquecer, diseñar la taxonomía, agentes, embeddings del
+contexto y (2.2.0) embeddings de la búsqueda de duplicados por contenido, con su propio modelo y clave."""
 
-AI_TASKS: Final[tuple[AiTask, ...]] = ("classify", "enrich", "taxonomy_design", "agent", "embed")
+AI_TASKS: Final[tuple[AiTask, ...]] = ("classify", "enrich", "taxonomy_design", "agent", "embed", "dedup")
+
+#: Tareas que piden vectores a `/embeddings` (no `/chat/completions`).
+EMBEDDING_TASKS: Final[frozenset[AiTask]] = frozenset({"embed", "dedup"})
 
 
 #: Tope de tokens de la respuesta de cada tarea si no se configura otro (`TaskSettings.max_tokens`). Holgado para la
@@ -2062,6 +2099,7 @@ __all__ = [
     "AI_TASKS",
     "CONTEXT_SCHEMA_VERSION",
     "DEFAULT_MAX_TOKENS",
+    "EMBEDDING_TASKS",
     "LEGACY_FOLDER_AXIS_KEY",
     "LEGACY_SUBFOLDER_AXIS_KEY",
     "AiClassificationStopReason",

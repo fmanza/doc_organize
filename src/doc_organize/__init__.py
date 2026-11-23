@@ -24,6 +24,11 @@ _EXPORTS: dict[str, str] = {
     "DocumentConverter": "doc_organize.converter.converter",
     "OCRScheduler": "doc_organize.converter.ocr_scheduler",
     "DeduplicationManager": "doc_organize.dedup.deduplication",
+    # Duplicados por contenido (2.2.0)
+    "ContentDocument": "doc_organize.dedup.content",
+    "ContentDuplicateFinder": "doc_organize.dedup.content",
+    "ContentDuplicateReport": "doc_organize.dedup.content",
+    "exclude_from_context": "doc_organize.dedup.content",
     "DocumentScanner": "doc_organize.scanner.document_scanner",
     "ScanCommand": "doc_organize.scan.scan_command",
     "ScanOptions": "doc_organize.core.models",
@@ -299,6 +304,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         TaxonomyManifest,
     )
     from doc_organize.core.progress import CancelToken, ProgressEvent
+    from doc_organize.dedup.content import ContentDocument, ContentDuplicateFinder, ContentDuplicateReport, exclude_from_context
     from doc_organize.dedup.deduplication import DeduplicationManager
     from doc_organize.diagnostics import AiEndpoint, check_environment
     from doc_organize.export.sources import load_cache_entries, load_scan_error_history

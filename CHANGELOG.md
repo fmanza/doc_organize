@@ -6,6 +6,42 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+### Added
+
+- **Duplicados por contenido** (`ContentDuplicateFinder`, `doc_organize.dedup.content`): sobre el Markdown ya
+  convertido.
+    - **Mismo contenido** (`DuplicateReason.SAME_CONTENT`, sin IA): el mismo texto normalizado en ficheros distintos.
+    - **Contenido parecido** (`DuplicateReason.SEMANTIC_CONTENT_MATCH`, opcional): embeddings por bloques. Primero se
+      eligen los vecinos de cada documento y después se comparan bloque a bloque en los dos sentidos, de modo que
+      también se detecta un documento contenido en otro.
+    - Los grupos exigen que todos sus miembros se parezcan entre sí: no forman cadenas A~B~C.
+    - Nunca se resuelven solos. Guía: [Duplicados por contenido](docs/guides/duplicados_por_contenido.md).
+- **Tarea de IA `dedup`**, independiente de `embed`: su propio modelo y su propia clave
+  (`DOC_ORGANIZE_LITELLM_MODEL_DEDUP`, `..._VIRTUAL_KEY_DEDUP`). Sin modelo propio, la búsqueda por contenido parecido
+  no se ejecuta. El ejemplo de LiteLLM añade `doc-organize-dedup` con `ollama/bge-m3` y `num_ctx: 8192`.
+- `DuplicateGroup.similarity`, `lexical_similarity` (Jaccard de trozos de 5 palabras) y `contained`. Son opcionales
+  y solo se rellenan en los grupos por contenido.
+- `move_group` y `resolve_duplicates` aceptan `conversions` y `conversion_dir`. En modo `move`, el `.md`, el `.json` y
+  las imágenes del descartado se mueven con él a `duplicados/Conversión/`. Nunca se borra nada.
+- `exclude_from_context(project_root, groups, roots=...)`: para el modo `copy`, guarda una decisión `exclude` por cada
+  documento descartado.
+- `LlmClient.embed(texts, task=...)` y `EmbeddingIndex.vectors(..., task=...)`: la tarea de embeddings, `embed` por
+  defecto. Nuevo `EmbeddingIndex.matrix()`, que devuelve una matriz `float32` sin pasar por listas de Python.
+- `LlmResult.served_model` y `LlmClient.embed_detailed()` (`EmbeddingResult`: vectores, modelo pedido, modelo que
+  contestó y dimensión): para que un consumidor diga qué modelo respondió al probarlo.
+- `check_environment`:
+    - prueba `dedup` cuando tiene modelo propio y avisa si el modelo corta el texto antes de unas 1.500 palabras;
+    - `EnvironmentCheck` incluye `model`, `served_model` (el modelo que dice la respuesta que contestó) y `dimension`.
+
+### Changed
+
+- **Nuevos valores en tipos ya existentes**: `AiTask` y `AI_TASKS` incluyen `"dedup"`, y `DuplicateReason` incluye
+  `same_content` y `semantic_content_match`. Si tu código recorre todos los valores (`match` o tablas por valor),
+  añade los nuevos.
+- **Índice de embeddings**: se lee con numpy como una matriz. El formato en disco no cambia y los índices existentes
+  siguen valiendo.
+- **numpy pasa a ser dependencia directa**. Ya llegaba a través de pandas y Docling.
+
 ## [2.1.0] - 2026-11-22
 
 GitHub Copilot queda obsoleto: el uso y el coste de IA se consultan en LiteLLM, que enruta todas las tareas desde la

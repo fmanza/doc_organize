@@ -71,7 +71,7 @@ class FakeProxy:
         answer = responder(fake)
         if isinstance(answer, httpx.Response):
             return answer
-        if task == "embed":  # la función devuelve un vector por texto de `request.body["input"]`
+        if task in ("embed", "dedup"):  # la función devuelve un vector por texto de `request.body["input"]`
             return httpx.Response(200, json={"data": [{"index": index, "embedding": vector} for index, vector in enumerate(answer)]})
         if "tools" in body:  # agentes: la función devuelve el mensaje del asistente (`say`, `call_tools`)
             usage = answer.pop("_usage", {"prompt_tokens": 100, "completion_tokens": 10}) if isinstance(answer, dict) else None
