@@ -6,6 +6,13 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-11-23
+
+Duplicados por contenido (`ContentDuplicateFinder`) con una tarea de IA propia, `dedup`, y qué modelo contesta en cada
+prueba. Versión menor: los parámetros nuevos tienen valores por defecto y los campos nuevos son opcionales. `AiTask` y
+`DuplicateReason` tienen valores nuevos (ver «Changed»). `numpy` pasa a ser dependencia directa (ya llegaba con pandas y
+Docling).
+
 ### Added
 
 - **Duplicados por contenido** (`ContentDuplicateFinder`, `doc_organize.dedup.content`): sobre el Markdown ya
