@@ -18,6 +18,7 @@ from pydantic import ValidationError
 from doc_organize.ai.cache import AiResultCache
 from doc_organize.ai.excerpt import MAX_EXCERPT_CHARS
 from doc_organize.ai.llm_client import LlmClient, LlmResult
+from doc_organize.ai.profile_text import profile_prompt_text
 from doc_organize.ai.prompts import PromptRegistry
 from doc_organize.core.models import (
     AiTask,
@@ -364,8 +365,6 @@ def render_prompt_preview(
         >>> "- calidad: Calidad" in messages[0]["content"], messages[1]["content"].startswith(DOCUMENT_START)
         (True, True)
     """
-    from doc_organize.context.project_profile import profile_prompt_text
-
     request = classification_request(
         prompts or PromptRegistry(),
         axes=[AxisRequest.from_axis(axis) for axis in manifest.axes],

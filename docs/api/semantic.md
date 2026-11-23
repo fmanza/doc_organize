@@ -60,16 +60,9 @@ huellas de texto: el índice no dice a qué documento pertenece cada vector. Los
     options:
       show_root_heading: false
       members:
-        - EmbeddingIndex
         - EmbeddingIndexInfo
         - embedding_index_info
         - clear_embedding_index
-        - cosine
 
-::: doc_organize.context.semantic
-    options:
-      show_root_heading: false
-      members:
-        - classify_semantic
-        - best_values
-        - entry_text
+La fase semántica (`doc_organize.context.semantic`) y el índice (`EmbeddingIndex`) son internos: se usan a través
+de `ContextBuilder.build(semantic=True)` y de los duplicados por contenido, y pueden cambiar sin aviso.

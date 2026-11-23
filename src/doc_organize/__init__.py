@@ -144,6 +144,20 @@ _EXPORTS: dict[str, str] = {
     "ContextBuildEventType": "doc_organize.core.models",
     "ContextDeleteEvent": "doc_organize.core.models",
     "ContextDeleteEventType": "doc_organize.core.models",
+    # Tipos que devuelve la API pública y que no estaban exportados (2.3.0)
+    "VersionGroup": "doc_organize.context.versions",
+    "VersionMember": "doc_organize.context.versions",
+    "AgentStep": "doc_organize.ai.agents",
+    "AgentToolCall": "doc_organize.ai.agents",
+    "AxisRulesReport": "doc_organize.context.taxonomy_check",
+    "NearMiss": "doc_organize.context.taxonomy_check",
+    "AuditFinding": "doc_organize.context.review_agent",
+    "LabelConfusion": "doc_organize.context.evaluation",
+    "OfflineIssue": "doc_organize.context.offline_site",
+    "EmbeddingIndexInfo": "doc_organize.ai.embeddings",
+    "LlmResult": "doc_organize.ai.llm_client",
+    "legacy_variables": "doc_organize.ai.settings",
+    "REDACTED": "doc_organize.security.credentials",
     # Modelos
     "DocumentMetadata": "doc_organize.core.models",
     "ConversionResult": "doc_organize.core.models",
@@ -217,23 +231,39 @@ def __dir__() -> list[str]:
 
 
 if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy, IDE)
+    # Uno por nombre de _EXPORTS (lo comprueba tests/unit/test_public_api.py): sin esto, mypy y el IDE no ven el
+    # tipo de lo que se importa bajo demanda.
+    from doc_organize.ai.agents import AgentLimits, AgentRun, AgentRunner, AgentStep, AgentTool, AgentToolCall
+    from doc_organize.ai.cache import AiResultCache, prune_ai_cache
+    from doc_organize.ai.embeddings import EmbeddingIndexInfo, clear_embedding_index, embedding_index_info
+    from doc_organize.ai.llm_client import LlmClient, LlmResult
+    from doc_organize.ai.prompts import PromptRegistry
+    from doc_organize.ai.settings import legacy_variables, settings_from_env
     from doc_organize.cache.cache_manager import CacheManager
     from doc_organize.context.context_builder import ContextBuilder
     from doc_organize.context.context_registry import ContextRegistry
     from doc_organize.context.decisions import ClassificationDecisionStore, gold_from_decisions
-    from doc_organize.context.dry_run import DryRunResult, dry_run_classify
+    from doc_organize.context.dry_run import DocumentChange, DryRunResult, dry_run_classify
     from doc_organize.context.evaluation import (
         AxisEvaluation,
         EvaluationReport,
         GoldLabel,
         GoldStandard,
+        LabelConfusion,
+        common_root,
+        document_keys,
         evaluate_classification,
         load_gold_xlsx,
     )
     from doc_organize.context.freshness import check_context_freshness
+    from doc_organize.context.llms_txt import render_llms_txt
+    from doc_organize.context.offline_site import OfflineIssue, OfflineSiteReport, SiteZipResult, check_site_offline, write_site_zip
     from doc_organize.context.reorganizer import Reorganizer, resolve_organized_paths
+    from doc_organize.context.review_agent import AuditFinding, ReviewAgent, ReviewProposal, ReviewResult, TaxonomyAudit, audit_taxonomy
     from doc_organize.context.review_queue import ReviewItem, review_queue
     from doc_organize.context.site_generator import SiteGenerator, SiteResult
+    from doc_organize.context.taxonomy_agent import TaxonomyDesignAgent, TaxonomyDesignProposal
+    from doc_organize.context.taxonomy_check import AxisRulesReport, NearMiss, RulesCorpus, TaxonomyRulesReport, check_taxonomy_rules
     from doc_organize.context.taxonomy_front_matter import inspect_taxonomy_front_matter, migrate_manifest_v1
     from doc_organize.context.taxonomy_template_registry import TaxonomyTemplateRegistry
     from doc_organize.context.taxonomy_templates import (
@@ -242,7 +272,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         parse_taxonomy_template,
         render_taxonomy_template,
     )
-    from doc_organize.context.versions import detect_document_versions
+    from doc_organize.context.versions import VersionGroup, VersionMember, detect_document_versions
     from doc_organize.converter.converter import DocumentConverter
     from doc_organize.converter.ocr_scheduler import OCRScheduler
     from doc_organize.core.exceptions import (
@@ -254,6 +284,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         InvalidPathError,
         MissingDependencyError,
         ModelsNotAvailableError,
+        OfflineSiteError,
         OperationCancelledError,
         ProjectError,
         ProjectNotFoundError,
@@ -286,6 +317,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         DuplicateReason,
         EnvironmentCheck,
         EnvironmentReport,
+        FreshnessReport,
         GpuStatus,
         OfficeStatus,
         Project,
@@ -302,11 +334,13 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         TaxonomyEntry,
         TaxonomyFrontMatterReport,
         TaxonomyManifest,
+        default_model_alias,
     )
     from doc_organize.core.progress import CancelToken, ProgressEvent
     from doc_organize.dedup.content import ContentDocument, ContentDuplicateFinder, ContentDuplicateReport, exclude_from_context
     from doc_organize.dedup.deduplication import DeduplicationManager
     from doc_organize.diagnostics import AiEndpoint, check_environment
+    from doc_organize.export.ai_bundle import AiBundleStats, write_ai_context_bundle
     from doc_organize.export.sources import load_cache_entries, load_scan_error_history
     from doc_organize.export.xlsx_export import write_cache_xlsx, write_context_documents_xlsx, write_scan_errors_xlsx
     from doc_organize.export.zip_export import ExportStats, preview_project_zip, write_project_zip
@@ -323,7 +357,8 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
     from doc_organize.projects.scanned_folders_store import ScannedFoldersStore
     from doc_organize.scan.scan_command import DeduplicationSummary, ScanCommand, ScanSummary
     from doc_organize.scanner.document_scanner import DocumentScanner
-    from doc_organize.security.credentials import CredentialFinding, RedactionResult, redact_credentials, scan_credentials
+    from doc_organize.security.credentials import REDACTED, CredentialFinding, RedactionResult, redact_credentials, scan_credentials
+    from doc_organize.security.untrusted_markdown import NeutralizeResult, neutralize_untrusted_markdown
     from doc_organize.utils.av_detector import detect_av_status
     from doc_organize.utils.gpu_detector import detect_gpu_status
     from doc_organize.utils.office_detector import detect_office_status

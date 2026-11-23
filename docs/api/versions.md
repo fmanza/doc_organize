@@ -48,7 +48,6 @@ porque no depende del catálogo. Si el documento no está en ningún grupo, la d
       show_root_heading: false
       members:
         - detect_document_versions
-        - parse_version
         - VersionGroup
         - VersionMember
 

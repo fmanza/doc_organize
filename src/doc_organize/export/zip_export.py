@@ -27,8 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from doc_organize.core.exceptions import InvalidPathError
 from doc_organize.core.models import CacheEntry, DocumentStatus
-from doc_organize.core.progress import CancelToken, ProgressCallback, checkpoint
-from doc_organize.export._progress import ExportProgress
+from doc_organize.core.progress import CancelToken, ExportProgress, ProgressCallback, checkpoint
 from doc_organize.projects.layout import ProjectLayout
 from doc_organize.utils.logging import get_logger
 

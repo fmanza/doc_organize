@@ -49,31 +49,33 @@ pide como API nueva (parámetros, funciones sin Docling, eventos de progreso), n
 
 ---
 
-## Arquitectura real (2.0.0)
+## Arquitectura real (2.2.0)
 
 ```text
 src/doc_organize/
   __init__.py     # API pública, importada bajo demanda (PEP 562): no carga Docling hasta usarlo
-  core/           # Nivel 1: modelos Pydantic, excepciones, constantes, progreso (CancelToken, ProgressEvent)
+  core/           # Nivel 1: modelos Pydantic, excepciones, constantes, progreso (CancelToken, ProgressEvent),
+                  #   nombre de la carpeta reorganizada (output_folder)
   utils/          # Nivel 1: hashing, rutas seguras, logging, detectores de GPU/AV/Office, formato de fechas
   validators/     # Nivel 2: FolderValidator, ProjectValidator
   scanner/        # Nivel 2: DocumentScanner
   converter/      # Nivel 2: DocumentConverter (adaptador de Docling), OCRScheduler
-  dedup/          # Nivel 2: DeduplicationManager
+  dedup/          # Nivel 2: DeduplicationManager, ContentDuplicateFinder (duplicados por contenido, 2.2.0)
   cache/          # Nivel 2: CacheManager (SQLite + WAL, también en solo lectura)
   projects/       # Nivel 2: ProjectRegistry, ProjectLayout, ScannedFoldersStore, ProjectHistoryCleaner
-  security/       # Nivel 2: redacción de credenciales y neutralización de Markdown no confiable
+  security/       # Nivel 1: redacción de credenciales y neutralización de Markdown no confiable (sin dependencias)
   ai/             # Nivel 2: LlmClient y AiSettings (IA por tarea vía LiteLLM), prompts, caché, embeddings,
                   #   AgentRunner; clientes de uso y coste (LiteLLM, GitHub Copilot)
   context/        # Nivel 3: ContextBuilder, ContextRegistry, Reorganizer, SiteGenerator, manifiesto por ejes,
                   #   decisiones, cola de revisión, evaluación, versiones, semántica, agentes de taxonomía y revisión
   scan/           # Nivel 3: ScanCommand (escaneo + caché + conversión, deduplicación bajo demanda)
   export/         # Nivel 3: ZIP, Excel (extra `export`) y paquete para IA de un proyecto
-  diagnostics.py  # check_environment: dependencias, modelos de Docling e IA (sin enviar documentos)
+  diagnostics.py  # Nivel 3: check_environment: dependencias, modelos de Docling e IA (sin enviar documentos)
   main.py         # Nivel 3: CLI (`project`, `scan`, `deduplicate`, `export`)
 ```
 
-Las dependencias van solo hacia abajo (ver `.github/instructions/architecture.instructions.md`, regla #6). Los
+Las dependencias van solo hacia abajo (ver `.github/instructions/architecture.instructions.md`, regla #6, con sus
+excepciones explícitas; `tests/unit/test_library_architecture.py` lo comprueba). Los
 consumidores (el CLI y doc_organize_web) reciben progreso por callbacks o iteradores de eventos (`ScanEvent`,
 `DedupEvent`, `ContextBuildEvent`, `ProgressEvent`) y cancelan con `CancelToken`; la librería no sabe si detrás hay un
 terminal, un WebSocket o SSE.

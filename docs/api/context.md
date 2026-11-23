@@ -326,7 +326,6 @@ que **sale**: las reglas, el idioma y lo que se guarda en `context.json` usan el
         - RedactionResult
         - CredentialFinding
         - REDACTED
-        - CREDENTIAL_RULES
 
 ## DomainClassifier (Sub-fase A)
 

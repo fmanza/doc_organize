@@ -23,7 +23,8 @@ from doc_organize.context.reorganizer import Reorganizer, _remove_dir_or_link, r
 from doc_organize.core.constants import SITE_CONFIG_FILE_NAME, SITE_FOLDER_NAME
 from doc_organize.core.exceptions import InvalidPathError, SiteBuildError
 from doc_organize.core.models import Context, Domain, DomainDocument, Project, TaxonomyAxis
-from doc_organize.projects.layout import RESERVED_OUTPUT_FOLDER_NAMES, ProjectLayout, _folder_key, validate_output_folder_name
+from doc_organize.core.output_folder import folder_key
+from doc_organize.projects.layout import RESERVED_OUTPUT_FOLDER_NAMES, ProjectLayout, validate_output_folder_name
 from doc_organize.security import credentials
 from doc_organize.security.untrusted_markdown import neutralize_untrusted_markdown
 from doc_organize.utils.atomic_write import write_text_atomic
@@ -437,10 +438,10 @@ def _resolve_site_dir(layout: ProjectLayout, site_dir: Path | None, output_folde
         raise InvalidPathError(f"site_dir '{candidate}' tiene que estar dentro de la raíz del proyecto '{root}' (lo exige Zensical).") from exc
     if not relative.parts:
         raise InvalidPathError("site_dir no puede ser la raíz del proyecto: Zensical vacía site_dir al construir.")
-    first = _folder_key(relative.parts[0])
-    forbidden = {_folder_key(name) for name in RESERVED_OUTPUT_FOLDER_NAMES if name != SITE_FOLDER_NAME}
+    first = folder_key(relative.parts[0])
+    forbidden = {folder_key(name) for name in RESERVED_OUTPUT_FOLDER_NAMES if name != SITE_FOLDER_NAME}
     if output_folder_name is not None:
-        forbidden.add(_folder_key(output_folder_name))
+        forbidden.add(folder_key(output_folder_name))
     if first in forbidden:
         raise InvalidPathError(f"site_dir '{candidate}' no puede ser ni estar dentro de '{relative.parts[0]}': Zensical vacía site_dir al construir.")
     try:

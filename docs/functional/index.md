@@ -93,7 +93,8 @@ Punto de entrada (`python -m doc_organize ...`): subcomandos `project`, `scan`,
 
 ## Organización documental, IA y diagnóstico (2.x)
 
-Módulos que no figuran en el diagrama de capas de la [Arquitectura](../api/index.md).
+`context/` y `diagnostics` son Nivel 3 (orquestación), `ai/` Nivel 2 y `security/` Nivel 1; ver el diagrama de la
+[Arquitectura](../api/index.md).
 
 ### `context/`
 
