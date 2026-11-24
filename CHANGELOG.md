@@ -6,6 +6,20 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-11-24
+
+Dos correcciones: el progreso final del escaneo llega con sus unidades y el documento que la deduplicación propone
+conservar ya no depende del orden del escaneo. Sin cambios de API ni de dependencias.
+
+### Fixed
+
+- **Progreso final del escaneo**: el `ProgressEvent` de la fase `done` de `ScanCommand` llegaba como `processed=0,
+  total=None`; ahora cierra con las unidades de la última fase y `processed == total` (`0/0` si no había nada que
+  convertir), como al terminar una exportación (`scan/scan_command.py`, `_ProgressTracker`).
+- **Canónico estable en la deduplicación**: con la misma `modified_time`, `DeduplicationManager.find_duplicates`
+  conservaba el primero según el orden del escaneo, que no es fijo; ahora desempata por la ruta menor, el mismo criterio
+  que ya usaba la búsqueda por contenido (`dedup/deduplication.py`, `_build_group`).
+
 ## [2.4.0] - 2026-11-24
 
 API pública para lo que doc_organize_web importaba de submódulos: excepciones, modelos del contexto, perfil, manifiesto,

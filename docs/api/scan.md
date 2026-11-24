@@ -77,6 +77,11 @@ otro. Mezclarlos, o no pasar `options` ni `use_ocr` y `use_gpu`, lanza `TypeErro
 `OCR_STARTED` y un `OCR_FILE_STARTED`/`OCR_PROCESSED` por documento. Termina con `COMPLETED` (resumen) o con
 `CANCELLED`.
 
+`on_progress` recibe un `ProgressEvent(operation="scan")` por evento: fases `started`, `conversion` y, con OCR, `ocr`,
+con `processed`/`total` en documentos y `current` = la ruta en curso. Cierra con `done`, que lleva las unidades de la
+última fase con `processed == total` (`0/0` si no había nada que convertir), como al terminar una exportación. Hasta
+2.4.0, `done` llegaba como `0/None`. Un fallo del callback se registra y no para el escaneo.
+
 `deduplicate_streaming` emite `STARTED`, `DUPLICATES_FOUND` (`groups_found`, `warnings`), un
 `GROUP_STARTED`/`GROUP_RESOLVED` por grupo y termina con `COMPLETED` (los campos de `DeduplicationSummary`) o con
 `CANCELLED` (para entre grupos; los ya movidos quedan en `DEDUP_REPORT.json`).

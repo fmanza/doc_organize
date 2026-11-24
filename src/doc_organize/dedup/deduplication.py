@@ -457,7 +457,8 @@ class DeduplicationManager:
 
     @staticmethod
     def _build_group(docs: list[DocumentMetadata], reason: DuplicateReason) -> DuplicateGroup:
-        canonical = min(docs, key=lambda d: d.modified_time)
+        # Empate de fecha → ruta menor (2.4.1), como `same_content`: el canónico no depende del orden del escaneo.
+        canonical = min(docs, key=lambda d: (d.modified_time, d.full_path))
         duplicates = [doc for doc in docs if doc.full_path != canonical.full_path]
         return DuplicateGroup(
             group_id=DeduplicationManager.stable_group_id(docs, reason),

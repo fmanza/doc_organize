@@ -152,7 +152,8 @@ aproximada de nombre.
    interactivo de "Revisar Duplicados" (elección manual del usuario por grupo).
 
 **Selección de canónico**:
-- Documento más antiguo (mínimo `modified_time`) — en grupos `fuzzy_name_match` es una propuesta,
+- Documento más antiguo (mínimo `modified_time`; con la misma fecha, la ruta menor desde 2.4.1, para que no dependa
+  del orden del escaneo) — en grupos `fuzzy_name_match` es una propuesta,
   no se aplica sin que el usuario la confirme (o la sobrescriba) explícitamente
 
 ---

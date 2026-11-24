@@ -31,7 +31,7 @@ Resolver moviendo documentos descartados a carpeta de duplicados (o copiándolos
 
 | Regla | Descripción | Impacto si se viola |
 |---|---|---|
-| **Canónico = antiguo** | Conserva documento más antiguo por `modified_time` (propuesta, no aplicada sola, en grupos `fuzzy_name_match`, `same_content` y `semantic_content_match`) | Pendiente de verificación |
+| **Canónico = antiguo** | Conserva documento más antiguo por `modified_time`, y con la misma fecha la ruta menor (2.4.1) (propuesta, no aplicada sola, en grupos `fuzzy_name_match`, `same_content` y `semantic_content_match`) | Se apartaría la primera copia y se conservaría una posterior; sin un criterio fijo (antes de 2.4.1, con fechas iguales) la propuesta cambiaba entre ejecuciones |
 | **Elección del usuario** | Si el grupo trae `user_choice`, se conserva ese documento en lugar del canónico | Se movería el documento que la persona decidió conservar |
 | **Replica estructura** | Duplicados se mueven a `duplicates_dir/original/path` | No se sabría de dónde venía cada duplicado para devolverlo a su sitio |
 | **Auditable** | `DEDUP_REPORT.json` con timestamps y decisiones | No quedaría constancia de qué se movió ni por qué |

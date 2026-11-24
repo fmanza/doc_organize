@@ -52,7 +52,7 @@ Ver [Instalación](guides/installation.md) para el detalle de cada extra, y
 
 ## Compatibilidad
 
-- Versión actual: **2.4.0**. Python 3.12 o superior (probado en 3.12, 3.13 y 3.14;
+- Versión actual: **2.4.1**. Python 3.12 o superior (probado en 3.12, 3.13 y 3.14;
   el extra `[av]` necesita 3.12 o 3.13).
 - La API pública estable son los nombres de `doc_organize.__all__`, con SemVer:
   ver [API pública y compatibilidad](api/publica.md).
