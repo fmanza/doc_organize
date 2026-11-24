@@ -6,6 +6,11 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-11-24
+
+Dos correcciones: el progreso final del escaneo llega con sus unidades y el documento que la deduplicación propone
+conservar ya no depende del orden del escaneo. Sin cambios de API ni de dependencias.
+
 ### Fixed
 
 - **Progreso final del escaneo**: el `ProgressEvent` de la fase `done` de `ScanCommand` llegaba como `processed=0,
