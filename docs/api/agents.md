@@ -142,7 +142,8 @@ runner = AgentRunner(
 | `invalid_answer` | La respuesta no cumplía `answer_schema` tras los reintentos |
 
 `run.steps` trae cada llamada al modelo con las herramientas que pidió (y sus errores) y `run.messages` la conversación
-completa, para auditarla. Para mostrar el progreso mientras trabaja, `run(..., on_step=callback)` llama a
+completa, para auditarla. Guarda el texto **sin redactar** (lo que se envió al modelo sí iba redactado): no lo registres
+ni lo guardes donde no guardarías los documentos. Para mostrar el progreso mientras trabaja, `run(..., on_step=callback)` llama a
 `callback(step, max_steps)` tras cada paso (también `TaxonomyDesignAgent.propose(on_step=)` y
 `ReviewAgent.propose(on_step=)`); un fallo del callback se registra y no para el agente.
 

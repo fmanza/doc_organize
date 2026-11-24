@@ -15,7 +15,7 @@ import sys
 import tempfile
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from importlib.util import find_spec
 from pathlib import Path
@@ -49,7 +49,7 @@ class AiEndpoint:
 
     name: str
     base_url: str
-    virtual_key: str
+    virtual_key: str = field(repr=False)  # 2.4.2: ni en el informe ni en el repr
     model: str
     kind: Literal["chat", "embedding"] = "chat"
 

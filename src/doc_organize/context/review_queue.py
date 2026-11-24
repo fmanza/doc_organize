@@ -112,7 +112,8 @@ def review_queue(context: Context, *, roots: Sequence[str] | None = None, propos
             path_by_key.get(issue.document_key),
             detail=f"{issue.reason}" + (f": {issue.detail}" if issue.detail else ""),
         )
-        for issue in context.stale_decisions
+        # 2.4.2: también las huérfanas (el documento ya no está), con el mismo motivo: la web tiene una lista cerrada
+        for issue in [*context.stale_decisions, *context.orphan_decisions]
     ]
     for group in context.version_groups:
         if not group.confirmed:

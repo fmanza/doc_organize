@@ -82,7 +82,9 @@ porque no depende del catálogo. Si el documento no está en ningún grupo, la d
 
 ## 4. Dependencias y Requisitos
 
-*No aplica para este módulo.*
+| Dependencia | Para qué | Obligatoria |
+|---|---|---|
+| Extra `[context]` (PyYAML) | Cualquier import de `doc_organize.context`, también solo `detect_document_versions`: el paquete carga `ContextBuilder` y sus prompts | Sí |
 
 ## 5. Ejemplos Relacionados
 

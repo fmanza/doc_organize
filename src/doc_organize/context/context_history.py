@@ -31,6 +31,9 @@ _O_NOFOLLOW: int = getattr(os, "O_NOFOLLOW", 0)
 _O_BINARY: int = getattr(os, "O_BINARY", 0)  # Windows: sin traducir "\n" a "\r\n"
 
 _REPLACE_ATTEMPTS = 3
+#: Espera máxima por el bloqueo del historial (2.4.2; antes los 5 s de `exclusive_lock`): quien lo tiene puede estar
+#: girando, que renombra hasta `backups` copias una a una, y en Windows o en una carpeta de red eso pasa de 5 s.
+_LOCK_TIMEOUT_S = 30.0
 _REPLACE_BACKOFF_S = 0.1
 
 
@@ -206,14 +209,14 @@ async def append_context_build(history_path: Path, record: ContextBuildRecord, p
 
     Raises:
         OSError: Si no se puede escribir, o `TimeoutError` (un `OSError`) si otro proceso mantiene el bloqueo más de
-            unos segundos. `ContextBuilder` lo registra como aviso y la construcción no falla.
+            30 s. `ContextBuilder` lo registra como aviso y la construcción no falla.
     """
     policy = policy or ContextHistoryPolicy()
     await asyncio.to_thread(history_path.parent.mkdir, parents=True, exist_ok=True)
     line = (record.model_dump_json() + "\n").encode("utf-8")
 
     def _append() -> None:
-        with exclusive_lock(history_path):
+        with exclusive_lock(history_path, timeout=_LOCK_TIMEOUT_S):
             _refuse_symlink(history_path)
             if _needs_rotation(history_path, len(line), policy):
                 try:

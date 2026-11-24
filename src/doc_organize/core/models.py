@@ -871,7 +871,9 @@ class LiteLLMUsageConfig(BaseModel):
 
     base_url: str = Field(..., description="URL base del LiteLLM Proxy, p.ej. 'https://litellm.example.com'")
     virtual_key: str = Field(
-        ..., description="Virtual key del proxy: se usa como Bearer de autenticación y, por defecto, como key consultada en `get_usage()`"
+        ...,
+        repr=False,  # 2.4.2: fuera de logs y trazas, como en `AiSettings`; `model_dump()` la sigue incluyendo
+        description="Virtual key del proxy: se usa como Bearer de autenticación y, por defecto, como key consultada en `get_usage()`",
     )
     timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
     retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
@@ -894,7 +896,9 @@ class GitHubCopilotUsageConfig(BaseModel):
 
     username: str = Field(..., description="Usuario personal de GitHub cuyo consumo de Copilot se consulta")
     personal_access_token: str = Field(
-        ..., description="PAT con permiso de lectura de facturación personal (scope exacto sin confirmar, ver AUDIT_PLAN)"
+        ...,
+        repr=False,  # 2.4.2: fuera de logs y trazas
+        description="PAT con permiso de lectura de facturación personal (scope exacto sin confirmar, ver AUDIT_PLAN)",
     )
     timeout_s: float = Field(default=30.0, description=_HTTP_TIMEOUT_DESC)
     retries: int = Field(default=0, ge=0, description=_HTTP_RETRIES_DESC)
