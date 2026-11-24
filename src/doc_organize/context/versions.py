@@ -155,6 +155,8 @@ class VersionOutcome:
 
     groups: list[DocumentVersionGroup] = field(default_factory=list)
     superseded: list[str] = field(default_factory=list)
+    #: La vigente de cada grupo y sus gemelos en otro formato (2.5.0).
+    current_members: set[str] = field(default_factory=set)
     applied: int = 0
     stale: list[DecisionIssue] = field(default_factory=list)
     orphan: list[DecisionIssue] = field(default_factory=list)
@@ -173,13 +175,17 @@ def resolve_versions(
     decisions: Sequence[ClassificationDecision] = (),
     *,
     roots: Sequence[str] | None = None,
+    across_extensions: bool = False,
 ) -> VersionOutcome:
     """Los grupos de versiones de `documents` con la vigente (la más alta o la que decidió una persona con
-    `set_current_version`) y, con `current_only`, las versiones antiguas que no entran. Con `all` no hace nada."""
+    `set_current_version`) y, con `current_only`, las versiones antiguas que no entran. Con `all` no hace nada.
+
+    Con `across_extensions` (2.5.0) agrupa también entre formatos; los ficheros con la misma versión que la vigente (sus
+    gemelos en otro formato) también son vigentes: no se descartan ni se marcan como antiguos."""
     outcome = VersionOutcome()
     if mode == "all":
         return outcome
-    groups = detect_document_versions(document.source_path for document in documents)
+    groups = detect_document_versions((document.source_path for document in documents), across_extensions=across_extensions)
     keys = document_keys([document.source_path for document in documents], roots)
     by_key = {keys[document.source_path]: document for document in documents}
     grouped = {member.source_path for group in groups for member in group.members}
@@ -206,9 +212,22 @@ def resolve_versions(
         )
         for group in groups
     ]
+    outcome.current_members = {path for group in groups for path in _current_members(group)}
     if mode == "current_only":
-        outcome.superseded = sorted(path for group in outcome.groups for path in group.members if path != group.current)
+        outcome.superseded = sorted(path for group in outcome.groups for path in group.members if path not in outcome.current_members)
     return outcome
+
+
+def _current_members(group: VersionGroup) -> list[str]:
+    """La vigente y los ficheros con su misma versión (la misma en otro formato, 2.5.0)."""
+    current = next(member for member in group.members if member.source_path == group.current)
+    level = _padded(_member_numbers(current))
+    return [member.source_path for member in group.members if _padded(_member_numbers(member)) == level]
+
+
+def _member_numbers(member: VersionMember) -> tuple[int, ...]:
+    parsed = parse_version(PurePosixPath(member.source_path.replace("\\", "/")).name)
+    return parsed[1] if parsed is not None else ()
 
 
 def mark_versions(documents: Iterable[DomainDocument | UnclassifiedDocument], outcome: VersionOutcome) -> None:
@@ -217,7 +236,8 @@ def mark_versions(documents: Iterable[DomainDocument | UnclassifiedDocument], ou
         found = outcome.member(document.source_path)
         if found is not None:
             group, version = found
-            document.version, document.version_group, document.is_current = version, group.key, group.current == document.source_path
+            is_current = document.source_path in outcome.current_members or group.current == document.source_path
+            document.version, document.version_group, document.is_current = version, group.key, is_current
 
 
 def _relative_group_key(group: VersionGroup, keys: Mapping[str, str]) -> str:

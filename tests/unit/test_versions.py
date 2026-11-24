@@ -180,3 +180,59 @@ async def test_unconfirmed_groups_go_to_the_review_queue(tmp_path) -> None:
 def test_set_current_version_carries_no_values() -> None:
     with pytest.raises(ValueError, match="no lleva valores"):
         ClassificationDecision(document_key="a_v1.pdf", action="set_current_version", axes={"domains": ["x"]})
+
+
+# --- Entre formatos (2.5.0) --------------------------------------------------------------------------------------------
+
+
+def _file(tmp_path, name: str, sha: str = "sha") -> ConversionResult:
+    """Como `_document`, pero con el `.md`/`.json` por nombre completo: `Manual_v3.docx` y `Manual_v3.pdf` no se pisan."""
+    folder = tmp_path / "entrada" / "Calidad"
+    folder.mkdir(parents=True, exist_ok=True)
+    stem = name.replace(".", "_")
+    json_path = tmp_path / f"{stem}.json"
+    json_path.write_text(json.dumps({"title": "Manual de calidad", "chunks": [{"text": TEXT}]}), encoding="utf-8")
+    (tmp_path / f"{stem}.md").write_text(stem, encoding="utf-8")
+    return ConversionResult(
+        source_path=str(folder / name), markdown_path=str(tmp_path / f"{stem}.md"), json_path=str(json_path), success=True, source_sha256=sha
+    )
+
+
+@pytest.mark.asyncio
+async def test_versions_across_formats_are_grouped_only_when_asked(tmp_path) -> None:
+    documents = [_file(tmp_path, "Manual_v2.docx"), _file(tmp_path, "Manual_v3.pdf")]
+
+    default = await _build(tmp_path, documents, versions="mark")
+    across = await _build(tmp_path, documents, versions="mark", version_across_extensions=True)
+
+    assert default.version_groups == [] and default.versions_across_extensions is False
+    [group] = across.version_groups
+    assert across.versions_across_extensions is True
+    assert [path.rsplit("Calidad", 1)[-1][1:] for path in group.members] == ["Manual_v2.docx", "Manual_v3.pdf"]
+    assert group.current.endswith("Manual_v3.pdf")
+
+
+@pytest.mark.asyncio
+async def test_current_only_keeps_every_format_of_the_current_version(tmp_path) -> None:
+    """Gemelos: la misma versión en dos formatos no es una versión antigua; solo sale la v2."""
+    documents = [_file(tmp_path, "Manual_v2.docx"), _file(tmp_path, "Manual_v3.docx"), _file(tmp_path, "Manual_v3.pdf")]
+
+    current_only = await _build(tmp_path, documents, versions="current_only", version_across_extensions=True)
+    marked = await _build(tmp_path, documents, versions="mark", version_across_extensions=True)
+
+    assert sorted(_documents(current_only)) == ["Manual_v3.docx", "Manual_v3.pdf"]
+    assert [path.rsplit("Calidad", 1)[-1][1:] for path in current_only.superseded_documents] == ["Manual_v2.docx"]
+    docs = _documents(marked)
+    assert {name: docs[name].is_current for name in docs} == {"Manual_v2.docx": False, "Manual_v3.docx": True, "Manual_v3.pdf": True}
+
+
+@pytest.mark.asyncio
+async def test_a_person_chooses_a_current_version_in_another_format(tmp_path) -> None:
+    documents = [_file(tmp_path, "Manual_v2.docx", sha="s2"), _file(tmp_path, "Manual_v3.pdf")]
+    decision = ClassificationDecision(id="v2", document_key="Calidad/Manual_v2.docx", action="set_current_version", source_sha256="s2")
+
+    context = await _build(tmp_path, documents, versions="current_only", version_across_extensions=True, decisions=[decision], taxonomy_manifest=None)
+
+    assert sorted(_documents(context)) == ["Manual_v2.docx"]
+    assert context.version_groups[0].confirmed is True and context.decisions_applied == 1
+    assert context.stale_decisions == []

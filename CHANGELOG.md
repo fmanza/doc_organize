@@ -6,6 +6,21 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+### Added
+
+- **Versiones entre formatos**: `ContextBuilder.build(..., version_across_extensions=True)` agrupa versiones aunque cambie
+  la extensión (`Manual_v2.docx` con `Manual_v3.pdf`); por defecto no. `Context.versions_across_extensions` lo registra.
+  Una decisión `set_current_version` sobre una versión en otro formato ya se aplica (antes, `not_versioned`).
+
+### Changed
+
+- **La misma versión en varios formatos es vigente entera**: con `versions="current_only"` solo salen las versiones
+  menores que la vigente, y con `"mark"` todos los ficheros de la versión vigente llevan `is_current=True`. Hasta 2.4.x,
+  dos ficheros de la misma versión en un grupo (`Manual_v3.docx` y `Manual v3.docx`) dejaban uno fuera.
+- **Consumo de LiteLLM**: `LiteLLMUsageClient.get_usage` devuelve `product="litellm"` (antes siempre `"anthropic"`) y
+  `period_start` desde que cuenta el gasto acumulado: el último reinicio del presupuesto (`budget_reset_at -
+  budget_duration`) o la creación de la clave (`created_at`); sin esas fechas, hoy como antes.
+
 ## [2.4.2] - 2026-11-24
 
 Seguridad y correcciones: las claves de `LiteLLMUsageConfig`, `GitHubCopilotUsageConfig` y `AiEndpoint` ya no salen en

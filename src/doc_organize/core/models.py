@@ -844,7 +844,7 @@ class UsageLineItem(BaseModel):
     """
 
     date: str = Field(..., description="Fecha (ISO 8601) de la línea de consumo")
-    product: str = Field(..., description="Producto facturado, p.ej. 'copilot' o 'anthropic'")
+    product: str = Field(..., description="Producto facturado: 'litellm' (2.5.0) o 'copilot'")
     sku: str | None = Field(default=None, description="SKU/identificador de tarifa, si la fuente lo reporta")
     quantity: float = Field(..., description="Cantidad consumida (tokens, requests o premium requests, según `unit_type`)")
     unit_type: str = Field(..., description="Unidad de `quantity`, p.ej. 'tokens', 'requests', 'premium_requests', 'usd'")
@@ -1404,6 +1404,9 @@ class Context(BaseModel):
     )
     excluded_documents: list[str] = Field(default_factory=list, description="Originales que una persona sacó del contexto (`exclude`, 2.0.0 F6)")
     versions_mode: VersionsMode = Field(default="all", description="Qué se hizo con las versiones de un documento (2.0.0, F5)")
+    versions_across_extensions: bool = Field(
+        default=False, description="Si las versiones se agruparon también entre formatos (`version_across_extensions`, 2.5.0)"
+    )
     version_groups: list[DocumentVersionGroup] = Field(
         default_factory=list, description="Grupos de versiones detectados (con `versions` `mark` o `current_only`, 2.0.0 F5)"
     )

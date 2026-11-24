@@ -66,8 +66,16 @@ Sobre los 213 nombres de CALIDAD_VD: un grupo, correcto, y ningún falso positiv
 | `"mark"` | Todos se clasifican; cada uno lleva `version`, `version_group` e `is_current` |
 | `"current_only"` | Solo la vigente se clasifica, se publica y va a la IA; las demás quedan en `Context.superseded_documents` |
 
+**Entre formatos (2.5.0)**: `build(..., version_across_extensions=True)` agrupa también versiones con distinta extensión
+(`Manual_v2.docx` con `Manual_v3.pdf`); por defecto no, porque dos ficheros con el mismo nombre en otro formato pueden
+no ser el mismo documento (`Informe_v2.xlsx` con los datos e `Informe_v3.pdf` con el informe). La misma versión en
+varios formatos (`Manual_v3.docx` y `Manual_v3.pdf`) cuenta **entera** como vigente: con `current_only` ninguno de los
+dos sale y con `mark` los dos llevan `is_current=True`; `Context.version_groups[].current` es uno de ellos (el último por
+ruta). Hasta 2.4.x, dos ficheros de la misma versión en un grupo (`Manual_v3.docx` y `Manual v3.docx`) dejaban uno de
+ellos fuera con `current_only`.
+
 `Context.version_groups` lista los grupos (`DocumentVersionGroup`: miembros, versiones, vigente y si una persona la
-confirmó) y `Context.versions_mode`, el modo. En el historial, un documento que sale por ser una versión antigua es
+confirmó), `Context.versions_mode`, el modo, y `Context.versions_across_extensions` (2.5.0), si se agrupó entre formatos. En el historial, un documento que sale por ser una versión antigua es
 `superseded`, no `removed`.
 
 ## 3. Componentes y Clases

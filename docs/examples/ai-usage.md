@@ -124,9 +124,11 @@ if __name__ == "__main__":
 3. **La propia clave**: `get_usage()` sin `key` manda la clave solo en `Authorization` y **no** añade `?key=`: LiteLLM
    consulta entonces la clave de la cabecera, y la clave no queda en la URL que `httpx` registra
 4. **`UsageSnapshot`**: `source` es `litellm` y trae **una sola línea** (LiteLLM no desglosa por fecha ni modelo):
-   `sku` es el alias de la clave, `quantity` y `cost_usd` el gasto acumulado en USD (`unit_type="usd"`). Las fechas
-   (`period_start`, `period_end` y la de la línea) son las del día de la consulta, por eso el ejemplo no las imprime;
-   `product` es siempre `"anthropic"` en esta versión, sea cual sea el modelo. La respuesta completa queda en `raw`
+   `sku` es el alias de la clave, `quantity` y `cost_usd` el gasto acumulado en USD (`unit_type="usd"`) y `product`,
+   `"litellm"` (2.5.0; antes siempre `"anthropic"`). `period_end` y la fecha de la línea son las del día de la consulta, y
+   `period_start` es desde cuándo cuenta el gasto: el último reinicio del presupuesto o la creación de la clave
+   (`created_at`); el proxy falso no manda esas fechas, así que aquí también es hoy (`hoy=True`) y el ejemplo no las
+   imprime. La respuesta completa queda en `raw`
 5. **Otra clave**: `get_usage(key=...)` añade `?key=`, que sí queda en los logs; por eso se pasa el hash SHA-256 de la
    clave (LiteLLM lo acepta). Ver otra clave exige ser su dueño, de su equipo o administrador del proxy: aquí el proxy
    contesta 403 y sale `UsageSourceAuthError`
@@ -143,7 +145,7 @@ if __name__ == "__main__":
 $ python ai_usage_example.py 2>/dev/null
 ¿Clave en el repr de la config? False
 source=litellm líneas=1 hoy=True
-sku=calidad quantity=12.3456 unit_type=usd cost_usd=12.3456 product=anthropic
+sku=calidad quantity=12.3456 unit_type=usd cost_usd=12.3456 product=litellm
 raw: max_budget=50.0
 Otra clave -> UsageSourceAuthError: LiteLLM Proxy rechazó la credencial (HTTP 403)
 Clave revocada -> UsageSourceAuthError: LiteLLM Proxy rechazó la credencial (HTTP 401) | ¿clave en el mensaje? False
