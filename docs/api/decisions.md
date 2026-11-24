@@ -135,4 +135,4 @@ Lo que decidió una persona (`classified_by="human"`) no vuelve a la cola. Al re
 
 ## 5. Ejemplos Relacionados
 
-Pendiente — crear ejemplo en docs/examples/decisions.md
+- [Ejemplo: Decisiones de personas y cola de revisión](../examples/decisions-review.md): registra decisiones, las aplica en la siguiente construcción, muestra una decisión obsoleta (`source_changed`) y una huérfana, y la cola de revisión antes y después

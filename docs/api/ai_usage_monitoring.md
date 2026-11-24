@@ -203,4 +203,4 @@ Context manager async para consultar el consumo de premium requests de Copilot P
 
 ## 5. Ejemplos Relacionados
 
-Pendiente — crear ejemplo en docs/examples/ai_usage_monitoring.md (sin consumidor real todavía que ejemplificar; ver Alcance en la documentación funcional).
+- [Ejemplo: Consultar el gasto de IA en LiteLLM](../examples/ai-usage.md): `LiteLLMUsageClient` contra un proxy falso (`httpx.MockTransport`): el gasto de la propia clave, otra clave por su hash, y los errores `UsageSourceAuthError` (401/403) y `UsageSourceConnectionError` tras los reintentos.

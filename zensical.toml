@@ -79,6 +79,13 @@ nav = [
     { "Paquete para IA" = "examples/ai-bundle.md" },
     { "Cliente de IA" = "examples/llm-client.md" },
     { "Diagnóstico" = "examples/diagnostics-check.md" },
+    { "Decisiones y revisión" = "examples/decisions-review.md" },
+    { "Evaluación" = "examples/evaluation-gold.md" },
+    { "Versiones" = "examples/versions.md" },
+    { "Semántica" = "examples/semantic.md" },
+    { "Agentes" = "examples/agents.md" },
+    { "Sitio sin conexión" = "examples/offline-site.md" },
+    { "Gasto de IA" = "examples/ai-usage.md" },
   ] },
 ]
 

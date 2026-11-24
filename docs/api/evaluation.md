@@ -137,4 +137,4 @@ raíces que a `build(scan_roots=)` para que no cambien con el corpus.
 
 ## 5. Ejemplos Relacionados
 
-Pendiente — crear ejemplo en docs/examples/evaluation.md
+- [Ejemplo: Evaluar la clasificación contra una referencia](../examples/evaluation-gold.md): referencia a partir de decisiones (`gold_from_decisions`), métricas y confusiones, y comparación de dos umbrales con `dry_run_classify` sin guardar nada
