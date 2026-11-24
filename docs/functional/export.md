@@ -1,10 +1,14 @@
 # Exportación — ZIP y Excel de un proyecto
 
+## 1. Descripción General
+
 Empaqueta lo que ha producido un proyecto para llevárselo fuera: un ZIP con los documentos convertidos y la
 instantánea de la caché, un Excel con todas las entradas de la caché y un Excel con los errores de escaneo.
 Disponible como biblioteca (`doc_organize.export`) y como subcomando del CLI (`doc_organize export`).
 
-## Qué contiene cada exportación
+Referencia técnica: [API de exportación](../api/export.md).
+
+### Qué contiene cada exportación
 
 | Exportación | Contenido | Requisitos |
 |---|---|---|
@@ -18,7 +22,57 @@ El ZIP no incluye logs ni la caché SQLite: es lo que el usuario consulta, no el
 
 El ZIP del sitio sin conexión (`write_site_zip`) se describe en [Organización documental](context.md#seguridad-del-sitio).
 
-## Flujo
+## 2. Reglas de Negocio
+
+| Regla | Descripción |
+|---|---|
+| **Rutas explícitas** | Las rutas salen de un `ProjectLayout` (raíz de salidas y, si está aparte, raíz del estado) o se indican sueltas; nunca del registro de proyectos |
+| **Varias cachés** | Un proyecto puede tener una caché por carpeta de origen: se cargan todas y se exportan juntas. Una caché que no existe se omite y no se crea |
+| **Vista previa exacta** | La vista previa (ficheros y bytes sin comprimir) recorre lo mismo que el ZIP y genera el mismo `cache_export.json`; coincide con el ZIP mientras el proyecto no cambie entre las dos operaciones |
+| **Streaming** | El ZIP se escribe directamente en el destino, fichero a fichero y por bloques de 1 MiB: sirve para proyectos de ~100 000 documentos y ~1 TB sin cargar nada entero en memoria ni crear temporales |
+| **Orden estable** | Ficheros en orden alfabético por carpeta, entradas de caché por ruta |
+| **Fórmulas neutralizadas** | En el Excel, un texto que empieza por `=`, `+`, `-`, `@`, tabulador o retorno de carro se escribe con un `'` delante, para que Excel o LibreOffice no lo ejecuten como fórmula. Se quitan los caracteres de control que el formato no admite |
+| **Enlaces simbólicos** | No se siguen: un enlace dentro de `Conversión/` no puede meter en el ZIP ficheros de fuera |
+| **Progreso y cancelación** | Igual que el escaneo: `on_progress` recibe `ProgressEvent(operation="export")` y un `CancelToken` para la exportación entre dos bloques o dos filas. Al cancelar se borra el fichero parcial |
+
+## 3. Casos de Uso
+
+### Flujo principal
+
+```mermaid
+sequenceDiagram
+    actor Usuario
+    participant Export as doc_organize.export (biblioteca o CLI)
+    participant Estado as Proyecto (cache.db, Conversión/, históricos)
+    participant Destino
+
+    Usuario->>Export: exportar (zip, cache-xlsx o errors-xlsx)
+    Export->>Estado: load_cache_entries (una o varias cache.db)
+    opt Vista previa (--preview)
+        Export->>Estado: preview_project_zip: recorre Conversión/ y DEDUP_REPORT.json
+        Export-->>Usuario: ficheros y bytes, sin escribir nada
+    end
+    alt ZIP
+        Export->>Destino: write_project_zip, fichero a fichero
+    else Excel de caché
+        Export->>Destino: write_cache_xlsx
+    else Excel de errores
+        Export->>Estado: load_scan_error_history
+        Export->>Destino: write_scan_errors_xlsx
+    end
+    Export-->>Usuario: fichero escrito (se sobrescribe si existía)
+```
+
+### Flujos alternativos y de error
+
+| Situación | Resultado |
+|---|---|
+| Falta `openpyxl` al pedir un Excel | `MissingDependencyError` (`pip install doc_organize[export]`) |
+| Cancelación | `OperationCancelledError`; el fichero parcial se borra |
+| Destino dentro de `Conversión/` | `InvalidPathError` (el ZIP se incluiría a sí mismo) |
+| Carpeta de destino inexistente (CLI) | `InvalidPathError` |
+
+### Flujo de datos
 
 ```mermaid
 flowchart LR
@@ -36,25 +90,7 @@ flowchart LR
     X2 --> D3[(.xlsx)]
 ```
 
-## Reglas
-
-- **Rutas explícitas.** Las rutas salen de un `ProjectLayout` (raíz de salidas y, si está aparte, raíz del estado) o
-  se indican sueltas; nunca del registro de proyectos.
-- **Varias cachés.** Un proyecto puede tener una caché por carpeta de origen: se cargan todas y se exportan juntas.
-  Una caché que no existe se omite y no se crea.
-- **Vista previa exacta.** La vista previa (ficheros y bytes sin comprimir) recorre lo mismo que el ZIP y genera el
-  mismo `cache_export.json`; coincide con el ZIP mientras el proyecto no cambie entre las dos operaciones.
-- **Streaming.** El ZIP se escribe directamente en el destino, fichero a fichero y por bloques de 1 MiB: sirve para
-  proyectos de ~100 000 documentos y ~1 TB sin cargar nada entero en memoria ni crear temporales.
-- **Orden estable.** Ficheros en orden alfabético por carpeta, entradas de caché por ruta.
-- **Fórmulas neutralizadas.** En el Excel, un texto que empieza por `=`, `+`, `-`, `@`, tabulador o retorno de carro
-  se escribe con un `'` delante, para que Excel o LibreOffice no lo ejecuten como fórmula. Se quitan los caracteres de
-  control que el formato no admite.
-- **Enlaces simbólicos.** No se siguen: un enlace dentro de `Conversión/` no puede meter en el ZIP ficheros de fuera.
-- **Progreso y cancelación.** Igual que el escaneo: `on_progress` recibe `ProgressEvent(operation="export")` y un
-  `CancelToken` para la exportación entre dos bloques o dos filas. Al cancelar se borra el fichero parcial.
-
-## CLI
+### CLI
 
 ```bash
 # ¿Cuánto ocuparía? (no escribe nada)
@@ -85,13 +121,10 @@ python -m doc_organize export context-xlsx --project "Mi Proyecto" -o historial_
 | `-o`, `--output` | Fichero a escribir (se sobrescribe) |
 | `--preview` | Solo `zip`: muestra ficheros y bytes sin escribir |
 
-## Errores
+## 4. Criterios de Aceptación
 
-| Situación | Resultado |
-|---|---|
-| Falta `openpyxl` al pedir un Excel | `MissingDependencyError` (`pip install doc_organize[export]`) |
-| Cancelación | `OperationCancelledError`; el fichero parcial se borra |
-| Destino dentro de `Conversión/` | `InvalidPathError` (el ZIP se incluiría a sí mismo) |
-| Carpeta de destino inexistente (CLI) | `InvalidPathError` |
+*Pendiente de QA: esta sección se completará cuando el equipo QA valide los criterios.*
 
-Referencia técnica: [API de exportación](../api/export.md).
+## 5. Glosario y Términos
+
+*No aplica para este módulo.*

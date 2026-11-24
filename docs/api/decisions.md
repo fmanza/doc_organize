@@ -4,6 +4,57 @@ Las reglas y la IA se equivocan; una persona que conoce los documentos puede cor
 `ClassificationDecision` dice qué decidió alguien sobre un documento, y `ContextBuilder.build` la aplica en cada
 construcción.
 
+## 1. Arquitectura y Diseño
+
+```mermaid
+flowchart TD
+    Store["ClassificationDecisionStore<br/>.doc_organize/decisions.json"] --> Apply
+    Rules["Reglas"] --> Apply{"Decisiones de personas<br/>(con manifiesto)"}
+    Apply -->|aplicada: classified_by=human| AI["IA: solo ejes no decididos"]
+    Apply -->|no se puede aplicar| Stale["Context.stale_decisions"]
+    Apply -->|documento ausente| Orphan["Context.orphan_decisions"]
+    AI --> Ctx["Context"]
+    Ctx --> Queue["review_queue → ReviewItem"]
+    Store --> Gold["gold_from_decisions → evaluate_classification"]
+```
+
+### Cómo se aplican
+
+- **Después de las reglas y antes de la IA**: lo decidido queda con `classified_by="human"` y confianza 1, el documento
+  cambia de dominio si se decidió su carpeta, y la IA no pregunta por los ejes decididos. Lo no decidido sigue
+  saliendo de las reglas y la IA.
+- Solo con manifiesto de taxonomía; sin él, las decisiones quedan en `Context.stale_decisions` con `no_manifest`.
+- `build(decisions=True)` (por defecto) usa las del proyecto, `decisions=False` ninguna, o se pasa una lista.
+- Los documentos se identifican por su ruta relativa a la raíz de escaneo (`scan_roots`; por defecto, la carpeta común
+  de todos los originales), como en la [evaluación](evaluation.md).
+
+## 2. API Reference
+
+### Autodoc
+
+::: doc_organize.context.review_queue
+    options:
+      show_root_heading: false
+      members:
+        - review_queue
+        - ReviewItem
+
+::: doc_organize.context.decisions
+    options:
+      show_root_heading: false
+      members:
+        - ClassificationDecisionStore
+        - gold_from_decisions
+
+::: doc_organize.core.models
+    options:
+      show_root_heading: false
+      members:
+        - ClassificationDecision
+        - DecisionIssue
+
+### Contratos
+
 | Acción | Qué hace | `axes` |
 |---|---|---|
 | `set_axis` | Fija los valores de un eje | Un eje: `{"domains": ["seguridad"]}` |
@@ -29,17 +80,8 @@ await store.add(ClassificationDecision(
 context = await ContextBuilder().build(project, documents, taxonomy_manifest=manifest, scan_roots=["/mnt/entrada"])
 ```
 
-## Cómo se aplican
-
-- **Después de las reglas y antes de la IA**: lo decidido queda con `classified_by="human"` y confianza 1, el documento
-  cambia de dominio si se decidió su carpeta, y la IA no pregunta por los ejes decididos. Lo no decidido sigue
-  saliendo de las reglas y la IA.
-- Solo con manifiesto de taxonomía; sin él, las decisiones quedan en `Context.stale_decisions` con `no_manifest`.
-- `build(decisions=True)` (por defecto) usa las del proyecto, `decisions=False` ninguna, o se pasa una lista.
-- Los documentos se identifican por su ruta relativa a la raíz de escaneo (`scan_roots`; por defecto, la carpeta común
-  de todos los originales), como en la [evaluación](evaluation.md).
-
-Una decisión que no se puede aplicar no rompe la construcción: queda en el contexto para revisarla.
+**Errores y casos especiales.** Una decisión que no se puede aplicar no rompe la construcción: queda en el contexto
+para revisarla.
 
 | Dónde | `reason` | Por qué |
 |---|---|---|
@@ -51,7 +93,9 @@ Una decisión que no se puede aplicar no rompe la construcción: queda en el con
 
 `Context.decisions_applied` cuenta las aplicadas y `Context.excluded_documents` lista los originales excluidos.
 
-## El almacén
+## 3. Componentes y Clases
+
+### El almacén
 
 `ClassificationDecisionStore(project_root)` guarda las decisiones en `<raíz>/.doc_organize/decisions.json`, con
 escritura atómica y bloqueo entre procesos. Una decisión nueva sustituye a las que decidían lo mismo, que pasan al
@@ -59,12 +103,12 @@ historial (`revoked()`, con `revoke_reason="replaced"`). Un `confirm` o un `excl
 un `set_axis`, lo del mismo eje y un `exclude`. Un `confirm` anterior se conserva y el `set_axis` gana en su eje.
 `revoke(decision_id, *, author=None, reason=None) -> bool` retira una decisión.
 
-## Referencia a partir de decisiones
+### Referencia a partir de decisiones
 
 `gold_from_decisions(decisions)` convierte los `confirm` y `set_axis` en una referencia para
 [`evaluate_classification`](evaluation.md): lo que decidieron las personas es la clasificación correcta.
 
-## Cola de revisión
+### Cola de revisión
 
 `review_queue(context, *, roots=None, proposals=()) -> list[ReviewItem]` dice qué documentos debería mirar una persona y por qué, sin cambiar nada. Cada
 `ReviewItem` trae la clave del documento (la de las decisiones), la huella del original (`source_sha256`, para atar la
@@ -83,23 +127,12 @@ decisión a esa versión), el eje y el valor afectados, su confianza y una expli
 Lo que decidió una persona (`classified_by="human"`) no vuelve a la cola. Al resolver un elemento con una decisión
 (`ClassificationDecisionStore.add`), desaparece en la siguiente construcción.
 
-::: doc_organize.context.review_queue
-    options:
-      show_root_heading: false
-      members:
-        - review_queue
-        - ReviewItem
+## 4. Dependencias y Requisitos
 
-::: doc_organize.context.decisions
-    options:
-      show_root_heading: false
-      members:
-        - ClassificationDecisionStore
-        - gold_from_decisions
+| Dependencia | Propósito | Requerida | Comportamiento sin ella |
+|---|---|---|---|
+| Manifiesto de taxonomía | Ejes y valores sobre los que se aplican las decisiones | Sí (salvo `set_current_version`) | Las decisiones quedan en `Context.stale_decisions` con `no_manifest` |
 
-::: doc_organize.core.models
-    options:
-      show_root_heading: false
-      members:
-        - ClassificationDecision
-        - DecisionIssue
+## 5. Ejemplos Relacionados
+
+Pendiente — crear ejemplo en docs/examples/decisions.md

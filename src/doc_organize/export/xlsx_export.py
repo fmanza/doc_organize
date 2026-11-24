@@ -38,8 +38,7 @@ from doc_organize.core.models import (
     TaxonomyAxis,
     UnclassifiedDocument,
 )
-from doc_organize.core.progress import CancelToken, ProgressCallback, checkpoint
-from doc_organize.export._progress import ExportProgress
+from doc_organize.core.progress import CancelToken, ExportProgress, ProgressCallback, checkpoint
 from doc_organize.utils.logging import get_logger
 
 logger = get_logger(__name__)

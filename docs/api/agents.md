@@ -4,6 +4,21 @@ Un **agente** es una conversación con el modelo (tarea `agent` de `AiSettings`)
 **herramientas**: el runner las ejecuta y le devuelve el resultado, hasta que el modelo da su respuesta o se llega a un
 tope. `AgentRunner` es el bucle que usan los agentes de doc_organize y sirve también para los tuyos.
 
+## 1. Arquitectura y Diseño
+
+```mermaid
+flowchart TD
+    M[messages] --> R[AgentRunner.run]
+    R --> C["LlmClient.complete_with_tools (tarea agent)"]
+    C --> Q{¿Qué pide el modelo?}
+    Q -->|herramienta de la lista| T[AgentTool.handler]
+    T -->|resultado, recortado a max_tool_result_chars| R
+    Q -->|finish o texto| F[AgentRun: answer, steps, messages]
+    R -->|tope o CancelToken| F
+    D[TaxonomyDesignAgent] --> R
+    V[ReviewAgent] --> R
+```
+
 ```python
 from doc_organize import AgentLimits, AgentRunner, AgentTool
 
@@ -21,7 +36,7 @@ run = await runner.run([
 print(run.stop_reason, run.answer, run.total_tokens)
 ```
 
-## Seguridad
+### Seguridad
 
 Los agentes leen texto que viene de los documentos, y un documento puede intentar dar instrucciones al modelo
 (inyección). Por eso el bucle está acotado:
@@ -51,19 +66,54 @@ Dos ayudas para modelos pequeños, que tienden a quedarse en bucle o a no termin
 Si una herramienta lanza `ValueError`, `TypeError` o `KeyError`, el error vuelve al modelo como resultado (puede
 corregir los argumentos). Cualquier otra excepción es un fallo del programa y se propaga.
 
-## Contexto del modelo
+## 2. API Reference
 
-Un agente reenvía la conversación entera en cada llamada, así que necesita un modelo con **contexto amplio**
-(16 000 tokens o más; el diseñador de la taxonomía, unos 32 000). Ollama usa por defecto un contexto de 4096 tokens y
-**recorta el principio** de lo que no cabe (las instrucciones), sin error: el modelo responde, pero sin saber qué
-tiene que hacer. Con Ollama, sube el contexto del modelo que use la tarea `agent`: `num_ctx` en `litellm_params` del
-modelo en la configuración del LiteLLM Proxy, o `OLLAMA_CONTEXT_LENGTH` en el servidor de Ollama.
+### Autodoc
 
-`AgentLimits.keep_tool_results` reenvía enteros solo los últimos resultados de herramientas y sustituye los anteriores
-por un aviso breve, para que cada llamada no crezca sin límite (el diseñador usa 3). `run.messages` los guarda
-siempre enteros.
+::: doc_organize.context.taxonomy_agent
+    options:
+      show_root_heading: false
+      members:
+        - TaxonomyDesignAgent
+        - TaxonomyDesignProposal
 
-## Respuesta estructurada
+::: doc_organize.context.taxonomy_check
+    options:
+      show_root_heading: false
+      members:
+        - check_taxonomy_rules
+        - RulesCorpus
+        - TaxonomyRulesReport
+        - AxisRulesReport
+        - NearMiss
+
+::: doc_organize.context.review_agent
+    options:
+      show_root_heading: false
+      members:
+        - ReviewAgent
+        - ReviewProposal
+        - ReviewResult
+        - audit_taxonomy
+        - TaxonomyAudit
+        - AuditFinding
+
+#### Referencia del runner
+
+::: doc_organize.ai.agents
+    options:
+      show_root_heading: false
+      members:
+        - AgentRunner
+        - AgentTool
+        - AgentLimits
+        - AgentRun
+        - AgentStep
+        - AgentToolCall
+
+### Contratos
+
+#### Respuesta estructurada
 
 Con `answer_schema`, el runner añade la herramienta `finish`: el modelo da su respuesta llamándola, y sus argumentos son
 la respuesta. `parse_answer` la valida; si lanza `ValueError`, `TypeError` o `KeyError`, se le pide al modelo que la
@@ -82,7 +132,7 @@ runner = AgentRunner(
 )
 ```
 
-## Motivos de parada
+#### Motivos de parada
 
 | `stop_reason` | Qué pasó |
 |---|---|
@@ -99,7 +149,9 @@ completa, para auditarla. Para mostrar el progreso mientras trabaja, `run(..., o
 El tope de tokens de **cada respuesta** del modelo es `TaskSettings.max_tokens` de la tarea `agent` (4096 por
 defecto); `AgentLimits.max_tokens` es el del agente entero.
 
-## Diseñador de la taxonomía
+## 3. Componentes y Clases
+
+### Diseñador de la taxonomía
 
 `TaxonomyDesignAgent` mejora un manifiesto (el del proyecto o una plantilla) o diseña uno desde cero. Mira los
 documentos y **prueba** cada variante con las reglas contra todos ellos, hasta proponer la que más documentos cubre con
@@ -143,7 +195,7 @@ agente llama a `finish` con un borrador que no mejora habiendo tenido uno que s�
 (`restore_best`) o corrija el actual. El prompt es `taxonomy_agent` de la tarea `agent`, sustituible en
 `<raíz>/.doc_organize/prompts/taxonomy_agent.md`.
 
-## Revisor de la clasificación
+### Revisor de la clasificación
 
 `ReviewAgent` recorre la cola de revisión (`review_queue`) y, para cada documento, **propone** una decisión:
 confirmar la clasificación, cambiar un eje, excluir el documento o confirmar la versión vigente, con su justificación y
@@ -170,7 +222,7 @@ el documento tiene que estar en su parte de la cola, los valores en el catálogo
 en los de un valor) y la acción ser una decisión válida. Las propuestas valen aunque el agente no termine. El prompt es
 `review_agent` de la tarea `agent`.
 
-## Auditor de la taxonomía
+### Auditor de la taxonomía
 
 `audit_taxonomy(context)` resume, **sin IA**, cómo ha quedado clasificado un contexto: por eje, documentos con valor,
 recuento por valor, quién clasificó, valores de confianza baja y citas sin verificar. Y propone qué revisar en el
@@ -188,7 +240,7 @@ catálogo, de más a menos documentos afectados:
 print(audit_taxonomy(context).to_markdown())
 ```
 
-## Comprobar un manifiesto por reglas
+### Comprobar un manifiesto por reglas
 
 `check_taxonomy_rules(manifest, corpus)` clasifica los documentos con un manifiesto candidato igual que la fase de
 reglas de `ContextBuilder.build` (mismos puntuadores, umbral y texto), sin guardar nada ni llamar a la IA. Por eje da:
@@ -211,43 +263,25 @@ corpus = await RulesCorpus.load(documents)
 print(check_taxonomy_rules(manifest, corpus).to_markdown())
 ```
 
-::: doc_organize.context.taxonomy_agent
-    options:
-      show_root_heading: false
-      members:
-        - TaxonomyDesignAgent
-        - TaxonomyDesignProposal
+## 4. Dependencias y Requisitos
 
-::: doc_organize.context.taxonomy_check
-    options:
-      show_root_heading: false
-      members:
-        - check_taxonomy_rules
-        - RulesCorpus
-        - TaxonomyRulesReport
-        - AxisRulesReport
-        - NearMiss
+| Dependencia | Propósito | Requerida | Comportamiento sin ella |
+|---|---|---|---|
+| `LlmClient` con la tarea `agent` de `AiSettings` | Cada llamada al modelo del bucle | Sí (salvo `audit_taxonomy` y `check_taxonomy_rules`, que no usan IA) | — |
+| Modelo con contexto amplio (16 000 tokens o más) | Reenviar la conversación entera en cada llamada | Sí | Con Ollama (4096 por defecto), se recorta el principio sin error y el modelo responde sin las instrucciones (ver abajo) |
 
-::: doc_organize.context.review_agent
-    options:
-      show_root_heading: false
-      members:
-        - ReviewAgent
-        - ReviewProposal
-        - ReviewResult
-        - audit_taxonomy
-        - TaxonomyAudit
-        - AuditFinding
+### Contexto del modelo
 
-## Referencia del runner
+Un agente reenvía la conversación entera en cada llamada, así que necesita un modelo con **contexto amplio**
+(16 000 tokens o más; el diseñador de la taxonomía, unos 32 000). Ollama usa por defecto un contexto de 4096 tokens y
+**recorta el principio** de lo que no cabe (las instrucciones), sin error: el modelo responde, pero sin saber qué
+tiene que hacer. Con Ollama, sube el contexto del modelo que use la tarea `agent`: `num_ctx` en `litellm_params` del
+modelo en la configuración del LiteLLM Proxy, o `OLLAMA_CONTEXT_LENGTH` en el servidor de Ollama.
 
-::: doc_organize.ai.agents
-    options:
-      show_root_heading: false
-      members:
-        - AgentRunner
-        - AgentTool
-        - AgentLimits
-        - AgentRun
-        - AgentStep
-        - AgentToolCall
+`AgentLimits.keep_tool_results` reenvía enteros solo los últimos resultados de herramientas y sustituye los anteriores
+por un aviso breve, para que cada llamada no crezca sin límite (el diseñador usa 3). `run.messages` los guarda
+siempre enteros.
+
+## 5. Ejemplos Relacionados
+
+Pendiente — crear ejemplo en docs/examples/agents.md

@@ -39,6 +39,8 @@ solo de Nivel 1 (salvo excepciones documentadas abajo); Nivel 1 de nada del paqu
 │                         #   detectores gpu/av/office/metadata, atomic_write, file_lock, io_retry, memory,
 │                         #   folding, text_clean
 │
+│    security/     # redact_credentials, scan_credentials, neutralize_untrusted_markdown (sin dependencias)
+│
 ├─── NIVEL 2: SERVICIOS INDEPENDIENTES
 │    validators/   # FolderValidator (REQ-001), ProjectValidator (REQ-008)
 │    scanner/      # DocumentScanner (REQ-002)
@@ -46,7 +48,6 @@ solo de Nivel 1 (salvo excepciones documentadas abajo); Nivel 1 de nada del paqu
 │    dedup/        # DeduplicationManager (REQ-005); content.py: ContentDuplicateFinder (2.2.0)
 │    cache/        # CacheManager, SQLite+WAL (REQ-006)
 │    projects/     # ProjectRegistry (REQ-008), ProjectLayout, ScannedFoldersStore, ProjectHistoryCleaner
-│    security/     # redact_credentials, scan_credentials, neutralize_untrusted_markdown
 │    ai/           # LlmClient, settings (settings_from_env), prompts, cache, embeddings, agents (AgentRunner),
 │                  #   services, uso: litellm_usage_client; github_copilot_usage_client (obsoleto desde 2.1.0)
 │
@@ -60,9 +61,8 @@ solo de Nivel 1 (salvo excepciones documentadas abajo); Nivel 1 de nada del paqu
      main.py       # CLI (project, scan, deduplicate, export)
 ```
 
-> `security/` figura como Nivel 2 en `.github/SHARED_INSTRUCTIONS.md`, pero no aparece en la lista de la regla #6 de
-> `architecture.instructions.md`; `diagnostics.py` no está asignado a ningún nivel en ninguno de los dos
-> (**pendiente** de fijar).
+> `security/` es Nivel 1 (no depende de nada del paquete) y `diagnostics.py` Nivel 3 (usa `ai/`), fijados en 2.3.0 en
+> la regla #6. `tests/unit/test_library_architecture.py` comprueba los niveles y las excepciones.
 
 ```mermaid
 graph TB
@@ -71,6 +71,7 @@ graph TB
         ScanCmd["scan/ScanCommand"]
         Context["context/"]
         Export["export/"]
+        Diagnostics["diagnostics.py"]
     end
     subgraph L2["Nivel 2 — Servicios"]
         Validators["validators/"]
@@ -79,12 +80,12 @@ graph TB
         Dedup["dedup/ (DeduplicationManager, ContentDuplicateFinder)"]
         Cache["cache/CacheManager"]
         Projects["projects/"]
-        Security["security/"]
         Ai["ai/ (LlmClient vía LiteLLM)"]
     end
     subgraph L1["Nivel 1 — Fundacional"]
         Core["core/"]
         Utils["utils/"]
+        Security["security/"]
     end
     CLI --> ScanCmd
     CLI --> Projects
@@ -102,6 +103,8 @@ graph TB
     Export --> Projects
     Export --> Security
     Projects --> Validators
+    Diagnostics --> Ai
+    Ai --> Security
     Ai --> Core
     Dedup --> Core
     Scanner --> Utils
@@ -129,16 +132,25 @@ el import es normal. `ContextBuilder`, `semantic`, `dry_run` y `review_agent` re
 quien llama construye el cliente con `AiSettings`, p. ej. desde `settings_from_env()`; `context/` nunca resuelve
 credenciales). La IA es opcional: sin cliente, la clasificación por reglas funciona igual.
 
-## Dependencias observadas fuera de la regla (pendiente de decisión)
+## Resto de excepciones a la regla #6 (decididas en 2.3.0)
 
-Verificado en el código a 2.2.0, sin justificación documentada encontrada:
+La tabla completa está en la regla #6 de `.github/instructions/architecture.instructions.md`, y
+`test_dependencies_follow_the_level_hierarchy` falla ante cualquier dependencia nueva fuera de ella. Además de
+`projects/` → `validators/`:
 
-- `dedup/content.py` (Nivel 2) importa `doc_organize.context.decisions` y `doc_organize.context.evaluation`
-  (Nivel 3) **de forma perezosa**, dentro de `exclude_from_context()`. Y `doc_organize.ai.llm_client` (Nivel 2) solo
-  bajo `TYPE_CHECKING`.
-- Imports horizontales entre módulos de Nivel 3: `export/` → `context/` (`llms_txt`, `context_history`,
-  `evaluation`) y `context/offline_site.py` → `export/_progress.py`. La regla #6 dice «nunca en horizontal»; no hay
-  ciclo de import a nivel de módulo, pero falta decidir si se documentan como excepción o se mueven.
+- `utils/` → `core/`: `core/` es la base del Nivel 1.
+- `converter/` y `dedup/` → `projects/layout.py`: el contrato de rutas de salida.
+- `dedup/` → `ai/`: duplicados por contenido (2.2.0), embeddings de la tarea `dedup`.
+- `dedup/` → `context/`: `exclude_from_context()` (2.2.0), import diferido. Se moverá a `context/` en 3.0; moverlo
+  antes rompería `doc_organize.dedup.exclude_from_context`, publicado en 2.2.0.
+- `ai/` → `context/`: `ai/excerpt.py`, solo bajo `TYPE_CHECKING`.
+- `export/` → `context/` (Nivel 3 → Nivel 3): `export/` exporta el contexto; `context/` nunca importa `export/`.
+
+Lo que sí se corrigió en 2.3.0, bajando el código compartido de nivel: el progreso de las exportaciones
+(`ExportProgress`) pasó de `export/_progress.py` a `core/progress.py` (lo usaba `context/offline_site.py`); el texto del
+perfil (`profile_prompt_text`, `render_profile_sections`) pasó de `context/project_profile.py` a `ai/profile_text.py`
+(lo usaba `ai/services.py`); y la validación de la carpeta reorganizada pasó de `projects/layout.py` a
+`core/output_folder.py` (la importaba `core/models.py`). Los nombres públicos no cambian.
 
 ## Por qué `scan/` es su propio módulo (no vive en `main.py`)
 

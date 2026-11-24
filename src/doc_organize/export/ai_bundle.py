@@ -40,8 +40,7 @@ from pydantic import BaseModel
 from doc_organize import __version__
 from doc_organize.context.llms_txt import LlmsEntry, llms_entries, one_line, render_llms_txt
 from doc_organize.core.models import Context, DomainDocument, Project
-from doc_organize.core.progress import CancelToken, ProgressCallback, checkpoint
-from doc_organize.export._progress import ExportProgress
+from doc_organize.core.progress import CancelToken, ExportProgress, ProgressCallback, checkpoint
 from doc_organize.security.credentials import redact_credentials
 from doc_organize.utils.logging import get_logger
 

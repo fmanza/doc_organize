@@ -24,8 +24,9 @@ import re
 
 from pathlib import Path
 
+from doc_organize.ai.profile_text import profile_prompt_text, render_profile_sections
 from doc_organize.context.axis_rules import fold
-from doc_organize.core.models import PROFILE_MAX_CHARS, PROFILE_MAX_EXAMPLES, ProjectProfile
+from doc_organize.core.models import PROFILE_MAX_EXAMPLES, ProjectProfile
 
 #: Fichero del perfil propio de un proyecto, relativo a su raíz.
 PROJECT_PROFILE_FILE = Path(".doc_organize") / "profile.md"
@@ -38,7 +39,6 @@ _SECTIONS = {
 }
 _HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*#*\s*$")
 _LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*\S)\s*$")
-_TITLES = {"context": "Contexto del proyecto", "tie_breakers": "Reglas de desempate", "glossary": "Glosario", "examples": "Ejemplos"}
 
 
 def parse_profile(body: str) -> ProjectProfile | None:
@@ -75,20 +75,6 @@ def parse_profile(body: str) -> ProjectProfile | None:
     )
 
 
-def render_profile_sections(profile: ProjectProfile) -> str:
-    """Las secciones de `profile` en Markdown (lo que `parse_profile` vuelve a leer igual)."""
-    blocks = []
-    for field, title in _TITLES.items():
-        if field == "examples":
-            if profile.examples:
-                blocks.append(f"## {title}\n\n" + "\n".join(f"- {example}" for example in profile.examples))
-        else:
-            value = getattr(profile, field)
-            if value:
-                blocks.append(f"## {title}\n\n{value}")
-    return "\n\n".join(blocks) + ("\n" if blocks else "")
-
-
 def load_project_profile(project_root: Path | str) -> ProjectProfile | None:
     """El perfil propio del proyecto (`<raíz>/.doc_organize/profile.md`), o `None` si no lo tiene o no se puede leer."""
     path = Path(project_root) / PROJECT_PROFILE_FILE
@@ -122,16 +108,6 @@ def compose_profile_text(template: ProjectProfile | None, project_text: str | No
     if template is None:
         return project
     return template.merged(project)
-
-
-def profile_prompt_text(profile: ProjectProfile | None) -> str:
-    """El perfil tal como va en el prompt: secciones con su título, sin caracteres de control y con el tope de
-    `PROFILE_MAX_CHARS` (S3)."""
-    if profile is None or profile.is_empty:
-        return ""
-    text = render_profile_sections(profile)
-    cleaned = "".join(char if char.isprintable() or char == "\n" else " " for char in text)
-    return cleaned[:PROFILE_MAX_CHARS].strip()
 
 
 def _text(lines: list[str] | None) -> str | None:

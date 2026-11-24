@@ -143,13 +143,13 @@ abajo**; nunca hacia arriba ni en horizontal entre módulos de nivel equivalente
 
 ```
 Level 1 — Foundation
-  core/         utils/
+  core/         utils/        security/
 
 Level 2 — Core Services (independientes entre sí, solo dependen de Level 1)
   validators/   scanner/      converter/    dedup/    cache/    projects/    ai/
 
 Level 3 — Orquestación
-  scan/   context/   export/   main.py (CLI)
+  scan/   context/   export/   diagnostics.py   main.py (CLI)
 ```
 
 **Reglas explícitas:**
@@ -159,6 +159,25 @@ Level 3 — Orquestación
   establecida (p.ej. `converter/ocr_scheduler.py` importa `converter/converter.py`, mismo paquete).
 - Level 1 **NUNCA** importa de Level 2 ni Level 3.
 - No importaciones circulares dentro del mismo nivel.
+- Los imports diferidos (dentro de una función) y los de `TYPE_CHECKING` también cuentan.
+
+**Excepciones aceptadas** (las únicas; `tests/unit/test_library_architecture.py`,
+`test_dependencies_follow_the_level_hierarchy`, falla ante cualquier otra y ante una excepción que ya no haga falta):
+
+| Importa | Importado | Motivo |
+|---|---|---|
+| `utils/` | `core/` | `core/` es la base del Nivel 1: constantes, modelos y excepciones |
+| `projects/` | `validators/` | `ProjectRegistry` valida el nombre con `ProjectValidator` |
+| `converter/` | `projects/` | `projects/layout.py` es el contrato de rutas de salida (`resolve_output_paths`) |
+| `dedup/` | `projects/` | `projects/layout.py`: carpeta de conversiones de los duplicados |
+| `dedup/` | `ai/` | Duplicados por contenido (2.2.0): embeddings de la tarea `dedup` |
+| `dedup/` | `context/` | `exclude_from_context` (2.2.0), import diferido; se moverá a `context/` en 3.0 (moverlo antes rompería `doc_organize.dedup.exclude_from_context`) |
+| `ai/` | `context/` | `ai/excerpt.py`, solo bajo `TYPE_CHECKING` (tipo `ConversionDocument`) |
+| `export/` | `context/` | `export/` exporta el contexto; `context/` nunca importa `export/` |
+
+Una excepción nueva necesita motivo, fila en esta tabla y entrada en `ALLOWED_EXCEPTIONS` del test. Antes de añadirla,
+intenta bajar el código compartido de nivel (como en 2.3.0: el progreso de las exportaciones a `core/progress.py`, el
+texto del perfil a `ai/profile_text.py` y la validación de la carpeta reorganizada a `core/output_folder.py`).
 - `__init__.py` de cada módulo solo re-exporta; no contiene lógica que genere ciclos.
 
 **En auditoría (AUDIT_CODE):** rechaza cualquier import donde un módulo de Level 1 (`core/`,

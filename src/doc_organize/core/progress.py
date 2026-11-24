@@ -5,6 +5,7 @@ entre dos documentos (o grupos de duplicados). El documento en curso termina sie
 hilo, termina el documento que esté procesando.
 """
 
+import logging
 import threading
 
 from collections.abc import Callable
@@ -80,6 +81,27 @@ def checkpoint(token: CancelToken | None) -> None:
     """Punto seguro de parada: sin token no hace nada."""
     if token is not None:
         token.raise_if_cancelled()
+
+
+class ExportProgress:
+    """Emite `ProgressEvent(operation="export")` con `total` unidades (ficheros del ZIP o filas del Excel).
+
+    Un fallo del callback se registra y no interrumpe la exportación, igual que `_ProgressTracker` en
+    `scan/scan_command.py`.
+    """
+
+    def __init__(self, callback: ProgressCallback | None, total: int, logger: logging.Logger) -> None:
+        self._callback = callback
+        self._total = total
+        self._logger = logger
+
+    def emit(self, phase: Phase, processed: int, current: str | None = None) -> None:
+        if self._callback is None:
+            return
+        try:
+            self._callback(ProgressEvent(operation="export", phase=phase, processed=processed, total=self._total, current=current))
+        except Exception as exc:  # noqa: BLE001 - un callback del consumidor nunca debe parar la operación
+            self._logger.warning(f"El callback de progreso falló: {type(exc).__name__}: {exc}")
 
 
 __all__ = ["CancelToken", "Phase", "ProgressCallback", "ProgressEvent", "checkpoint"]

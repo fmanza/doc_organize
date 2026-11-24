@@ -2,7 +2,7 @@
 
 API Reference para detección y resolución de duplicados.
 
-## Arquitectura
+## 1. Arquitectura y Diseño
 
 ```mermaid
 classDiagram
@@ -40,9 +40,30 @@ classDiagram
     DeduplicationManager --> DeduplicationReport
 ```
 
-## API Pública
+## 2. API Reference
 
-### DeduplicationManager
+### Autodoc
+
+#### Duplicados por contenido (2.2.0)
+
+`ContentDuplicateFinder` busca duplicados sobre el texto convertido: el mismo contenido en ficheros distintos
+(`same_content`, sin IA) y, con la tarea de IA `dedup`, contenido parecido (`semantic_content_match`). Sus grupos llevan
+`similarity`, `lexical_similarity` y `contained`, y se resuelven con `move_group`/`resolve_duplicates` pasando
+`conversions` (y `conversion_dir`): en modo `move`, la conversión del descartado se mueve con él a
+`duplicados/Conversión/`. Guía: [Duplicados por contenido](../guides/duplicados_por_contenido.md).
+
+::: doc_organize.dedup.content
+    options:
+      show_root_heading: false
+      members:
+        - ContentDuplicateFinder
+        - ContentDocument
+        - ContentDuplicateReport
+        - exclude_from_context
+
+### Contratos
+
+#### DeduplicationManager
 
 ```python
 class DeduplicationManager:
@@ -106,7 +127,7 @@ fichero en los dos sitios. Lo que agota los reintentos queda en `failed_paths`.
 `find_duplicates` solo necesita `DocumentMetadata`; desde 1.1.0 se pueden construir desde la caché sin rehashear el
 origen con `DocumentMetadata.from_cache_entry` (ver [Scanner](scanner.md#documentmetadata-desde-la-cache-110-g25)).
 
-#### find_duplicates (Síncrono)
+##### find_duplicates (Síncrono)
 
 Agrupa documentos por duplicado exacto, conflicto de versión y, opcionalmente, similitud
 aproximada de nombre.
@@ -136,7 +157,7 @@ aproximada de nombre.
 
 ---
 
-#### resolve_duplicates (Async)
+##### resolve_duplicates (Async)
 
 Mueve documentos descartados a carpeta de duplicados.
 
@@ -167,18 +188,14 @@ Mueve documentos descartados a carpeta de duplicados.
 - `InvalidPathError` — `duplicates_dir` es (o pasa por) un enlace simbólico (desde 0.12.1)
 - Un fallo de E/S al mover un fichero no se lanza: la ruta va a `failed_paths` y el lote sigue
 
----
-
-## Contratos
-
-### Entrada
+#### Entrada
 
 | Parámetro | Validación | Impacto si falla |
 |---|---|---|
 | Documento con SHA-256 | Validación previa (Scanner) | Documento no se agrupa |
 | Carpeta de duplicados sin enlaces | `check_duplicates_dir()` en `resolve_duplicates()` (se crea si no existe, salvo `report_only`) | `InvalidPathError` |
 
-### Salida
+#### Salida
 
 ```python
 class DuplicateGroup(BaseModel):  # doc_organize.core.models
@@ -204,19 +221,16 @@ class DeduplicationReport(BaseModel):  # doc_organize.core.models
     failed_paths: list[str] = []
 ```
 
-## Dependencias
+## 3. Componentes y Clases
 
-| Dependencia | Propósito |
+| Clase | Responsabilidad |
 |---|---|
-| `core.constants.VERSION_SUFFIX_PATTERN` | Detecta sufijos de versión |
-| `core.models.DuplicateGroup`, `DeduplicationReport` | Modelos |
-| `core.exceptions.InvalidPathError` | `duplicates_dir` enlazado |
-| `utils.path_utils.ensure_no_symlinks()` | Rutas absolutas sin resolver ni seguir enlaces |
-| `utils.logging` | Logging |
-| `rapidfuzz.process.cdist`, `rapidfuzz.fuzz.WRatio`, `rapidfuzz.utils.default_process` | Matriz de scores de similitud de nombre (3ª pasada, vectorizado, con normalización previa) |
-| `numpy` (dependencia directa desde 2.2.0) | Extrae, vectorizado, los pares de la matriz de scores por encima del umbral; similitudes por bloques de `ContentDuplicateFinder` |
+| `DeduplicationManager` | Detección (`find_duplicates`) y resolución (`move_group`, `finalize_report`, `resolve_duplicates`) de duplicados. |
+| `DuplicateGroup` | Un grupo de duplicados con su canónico, su motivo (`reason`) y la elección del usuario. |
+| `DeduplicationReport` | Informe de una resolución (`DEDUP_REPORT.json`). |
+| `ContentDuplicateFinder` | Duplicados por contenido sobre el texto convertido (2.2.0); ver [Autodoc](#autodoc). |
 
-## Notas Internas
+### Notas Internas
 
 - **Naming**: `_extract_base_name()` normaliza nombres (strip extensión, sufijo versión, lowercase)
 - **Movimiento seguro**: las rutas se normalizan sin resolver enlaces (nunca contienen `..`) y no se siguen enlaces
@@ -231,24 +245,19 @@ class DeduplicationReport(BaseModel):  # doc_organize.core.models
   `resolve_duplicates()`, formato JSON Lines) acumula todas las ejecuciones, a
   diferencia de `DEDUP_REPORT.json` (que solo refleja la última)
 
-## Duplicados por contenido (2.2.0)
+## 4. Dependencias y Requisitos
 
-`ContentDuplicateFinder` busca duplicados sobre el texto convertido: el mismo contenido en ficheros distintos
-(`same_content`, sin IA) y, con la tarea de IA `dedup`, contenido parecido (`semantic_content_match`). Sus grupos llevan
-`similarity`, `lexical_similarity` y `contained`, y se resuelven con `move_group`/`resolve_duplicates` pasando
-`conversions` (y `conversion_dir`): en modo `move`, la conversión del descartado se mueve con él a
-`duplicados/Conversión/`. Guía: [Duplicados por contenido](../guides/duplicados_por_contenido.md).
+| Dependencia | Propósito | Requerida | Comportamiento sin ella |
+|---|---|---|---|
+| `core.constants.VERSION_SUFFIX_PATTERN` | Detecta sufijos de versión | Sí | — |
+| `core.models.DuplicateGroup`, `DeduplicationReport` | Modelos | Sí | — |
+| `core.exceptions.InvalidPathError` | `duplicates_dir` enlazado | Sí | — |
+| `utils.path_utils.ensure_no_symlinks()` | Rutas absolutas sin resolver ni seguir enlaces | Sí | — |
+| `utils.logging` | Logging | Sí | — |
+| `rapidfuzz.process.cdist`, `rapidfuzz.fuzz.WRatio`, `rapidfuzz.utils.default_process` | Matriz de scores de similitud de nombre (3ª pasada, vectorizado, con normalización previa) | Sí | — |
+| `numpy` (dependencia directa desde 2.2.0) | Extrae, vectorizado, los pares de la matriz de scores por encima del umbral; similitudes por bloques de `ContentDuplicateFinder` | Sí | — |
 
-::: doc_organize.dedup.content
-    options:
-      show_root_heading: false
-      members:
-        - ContentDuplicateFinder
-        - ContentDocument
-        - ContentDuplicateReport
-        - exclude_from_context
-
-## Ejemplos Relacionados
+## 5. Ejemplos Relacionados
 
 - [Deduplicar documentos](../examples/dedup-resolve.md)
 - [Duplicados por contenido (2.2.0)](../examples/dedup-resolve.md#duplicados-por-contenido-220): ejemplo reproducible sin IA real

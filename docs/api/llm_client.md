@@ -4,6 +4,23 @@
 clientes de 1.x (clasificación, clasificación por manifiesto, enriquecimiento y borrador de taxonomía); ver
 [De 1.x a 2.0](../guides/migracion_2_0.md).
 
+## 1. Arquitectura y Diseño
+
+```mermaid
+flowchart TD
+    A[settings_from_env / AiSettings] --> C[LlmClient]
+    B[PromptRegistry: prompt de la tarea] --> C
+    S[Servicios: classify_document, enrich_document, draft_taxonomy] --> C
+    C --> R[Redacción de credenciales]
+    R --> K{¿Está en AiResultCache?}
+    K -->|sí| V[Validación con parse]
+    K -->|no| P[LiteLLM Proxy: json_schema estricto]
+    P -->|HTTP 400| J[Una vez: json_object]
+    P --> V
+    J --> V
+    V --> L[LlmResult]
+```
+
 ```python
 from doc_organize.ai import LlmClient, PromptRegistry, settings_from_env
 
@@ -13,7 +30,43 @@ async with LlmClient(settings) as client:
     result = await client.complete_json("enrich", messages, schema=esquema, parse=validar)
 ```
 
-## Configuración
+### Qué hace en cada llamada
+
+- **Redacta** las credenciales de cada mensaje antes de enviarlo (`AiSettings.redact_credentials`, por defecto
+  activado) y devuelve el recuento por regla en `LlmResult.redacted`.
+- Pide **`json_schema` estricto** con el esquema de la tarea. Si el proxy lo rechaza (HTTP 400), cae **una vez** a
+  `json_object` y lo recuerda para ese modelo. La respuesta se **valida siempre** con `parse`; si no vale,
+  `AiResponseError`.
+- Reintentos de transporte y ante 429/503 con `Retry-After` (D5); `metadata.tags` con `doc_organize`, `task:<tarea>` y
+  las de `AiSettings.tags`.
+- Errores: `AiAuthError` (clave rechazada), `AiConnectionError` (red o timeout), `AiResponseError` (respuesta no válida)
+  y `AiError` (cualquier otro).
+
+`complete_with_tools` (una vuelta de conversación con herramientas, para los agentes) y `embed(texts, *, task="embed")`
+(embeddings; `task="dedup"` para los duplicados por contenido, cualquier otra tarea lanza `ValueError`) siguen las
+mismas reglas. `embed_detailed` (2.2.0) devuelve además el modelo pedido y el que contestó (`EmbeddingResult`).
+
+## 2. API Reference
+
+### Autodoc
+
+::: doc_organize.ai.llm_client
+    options:
+      show_root_heading: false
+      members:
+        - LlmClient
+        - LlmResult
+
+::: doc_organize.ai.settings
+    options:
+      show_root_heading: false
+      members:
+        - settings_from_env
+        - legacy_variables
+
+### Contratos
+
+#### Configuración
 
 `AiSettings`: un LiteLLM Proxy, una clave general y un modelo (y si se quiere una clave propia, D12) por **tarea**:
 `classify`, `enrich`, `taxonomy_design`, `agent`, `embed` y `dedup` (2.2.0, duplicados por contenido; `embed` y `dedup`
@@ -35,23 +88,31 @@ Las variables de 1.x (`DOC_ORGANIZE_LITELLM_CLASSIFICATION_*`, `_TAXONOMY_CLASSI
 `AiConfigurationError` con la equivalente de cada una (D15). Así una actualización sin reconfigurar no deja la IA
 desactivada en silencio.
 
-## Qué hace en cada llamada
+#### Ajustes por tarea
 
-- **Redacta** las credenciales de cada mensaje antes de enviarlo (`AiSettings.redact_credentials`, por defecto
-  activado) y devuelve el recuento por regla en `LlmResult.redacted`.
-- Pide **`json_schema` estricto** con el esquema de la tarea. Si el proxy lo rechaza (HTTP 400), cae **una vez** a
-  `json_object` y lo recuerda para ese modelo. La respuesta se **valida siempre** con `parse`; si no vale,
-  `AiResponseError`.
-- Reintentos de transporte y ante 429/503 con `Retry-After` (D5); `metadata.tags` con `doc_organize`, `task:<tarea>` y
-  las de `AiSettings.tags`.
-- Errores: `AiAuthError` (clave rechazada), `AiConnectionError` (red o timeout), `AiResponseError` (respuesta no válida)
-  y `AiError` (cualquier otro).
+Cada tarea puede tener, en `TaskSettings`, además de su modelo y su clave:
 
-`complete_with_tools` (una vuelta de conversación con herramientas, para los agentes) y `embed(texts, *, task="embed")`
-(embeddings; `task="dedup"` para los duplicados por contenido, cualquier otra tarea lanza `ValueError`) siguen las
-mismas reglas. `embed_detailed` (2.2.0) devuelve además el modelo pedido y el que contestó (`EmbeddingResult`).
+| Campo | Para qué |
+|---|---|
+| `max_tokens` | Tope de tokens de la respuesta (por defecto, `DEFAULT_MAX_TOKENS`) |
+| `timeout_s` | Timeout de cada llamada de la tarea (por defecto, el de `AiSettings`): un borrador de taxonomía o un agente con un modelo local tardan más que una clasificación |
+| `retries` | Reintentos de transporte de la tarea (por defecto, los de `AiSettings`) |
+| `max_documents` | Documentos como mucho por construcción en la fase de la tarea (`classify`, `enrich`); con `ContextBuilder.build(ai_max_documents=)`, manda el menor |
 
-## Servicios por tarea
+`default_model_alias(task)` da el alias que se usa si la tarea no tiene modelo configurado (`doc-organize-<tarea>`).
+
+```python
+settings = AiSettings(
+    base_url="http://localhost:4000", virtual_key=clave,
+    tasks={
+        "classify": TaskSettings(model="clasificador", max_documents=200),
+        "enrich": TaskSettings(model="clasificador", max_documents=50),
+        "taxonomy_design": TaskSettings(model="grande", timeout_s=600, retries=1),
+    },
+)
+```
+
+#### Servicios por tarea
 
 | Servicio | Tarea | Devuelve |
 |---|---|---|
@@ -64,7 +125,9 @@ Todos devuelven `LlmResult` (`value`, `model`, `response_format`, `usage`, `reda
 dentro. La clasificación envía el catálogo con nombres y descripciones, el perfil del proyecto y el extracto (ver
 abajo); el enriquecimiento, el perfil y un extracto más corto (4000 caracteres, como en 1.x).
 
-## Caché de resultados
+## 3. Componentes y Clases
+
+### Caché de resultados
 
 `AiResultCache(project_root)` guarda cada respuesta en `<raíz>/.doc_organize/ai_cache/`, bajo la huella de **lo que se
 enviaría**: tarea, modelo, mensajes ya redactados (prompt, catálogo y documento), esquema y si se redactó. Con
@@ -81,7 +144,7 @@ que llevan ese tiempo sin usarse (leer una entrada renueva su fecha).
 La caché guarda respuestas derivadas del contenido (justificaciones, descripciones), del texto ya redactado, nunca las
 claves: trátala como `Conversión/`.
 
-## Lo que recibe el modelo (2.0.0, M5)
+### Lo que recibe el modelo (2.0.0, M5)
 
 Para que el modelo clasifique como lo haría alguien del proyecto, M5 cambia lo que se le envía en la tarea `classify`
 (prompt versión 2):
@@ -110,7 +173,7 @@ por debajo del umbral del eje se descartan.
 `render_prompt_preview(manifest)` devuelve los mensajes que recibiría el modelo con ese manifiesto, sin llamar a nadie:
 para revisar el catálogo y el perfil antes de gastar llamadas.
 
-## Prompts
+### Prompts
 
 `PromptRegistry` da el prompt de cada tarea: un `.md` empaquetado con front matter (`id`, `version`) y las secciones
 `## system` y `## user`, con marcadores `$nombre`. Un proyecto puede sustituirlo con
@@ -118,41 +181,13 @@ para revisar el catálogo y el perfil antes de gastar llamadas.
 origen, SHA-256 y modelo) que se guardará en el contexto. Las instrucciones y el catálogo van en `system` y el documento
 en `user`: el prefijo es el mismo entre documentos y el proveedor puede cachearlo.
 
-::: doc_organize.ai.llm_client
-    options:
-      show_root_heading: false
-      members:
-        - LlmClient
-        - LlmResult
+## 4. Dependencias y Requisitos
 
-::: doc_organize.ai.settings
-    options:
-      show_root_heading: false
-      members:
-        - settings_from_env
-        - legacy_variables
+| Dependencia | Propósito | Requerida | Comportamiento sin ella |
+|---|---|---|---|
+| `httpx` (extra `ai`) | Cliente HTTP async de `LlmClient` | Sí | `doc_organize.ai` no se puede importar |
+| LiteLLM Proxy (`DOC_ORGANIZE_LITELLM_BASE_URL`, `DOC_ORGANIZE_LITELLM_VIRTUAL_KEY`) | Enrutar cada tarea a su modelo | Sí, para llamar a un modelo | Sin `DOC_ORGANIZE_LITELLM_BASE_URL`, `settings_from_env()` devuelve `None`: la IA no está configurada |
 
+## 5. Ejemplos Relacionados
 
-## Ajustes por tarea
-
-Cada tarea puede tener, en `TaskSettings`, además de su modelo y su clave:
-
-| Campo | Para qué |
-|---|---|
-| `max_tokens` | Tope de tokens de la respuesta (por defecto, `DEFAULT_MAX_TOKENS`) |
-| `timeout_s` | Timeout de cada llamada de la tarea (por defecto, el de `AiSettings`): un borrador de taxonomía o un agente con un modelo local tardan más que una clasificación |
-| `retries` | Reintentos de transporte de la tarea (por defecto, los de `AiSettings`) |
-| `max_documents` | Documentos como mucho por construcción en la fase de la tarea (`classify`, `enrich`); con `ContextBuilder.build(ai_max_documents=)`, manda el menor |
-
-`default_model_alias(task)` da el alias que se usa si la tarea no tiene modelo configurado (`doc-organize-<tarea>`).
-
-```python
-settings = AiSettings(
-    base_url="http://localhost:4000", virtual_key=clave,
-    tasks={
-        "classify": TaskSettings(model="clasificador", max_documents=200),
-        "enrich": TaskSettings(model="clasificador", max_documents=50),
-        "taxonomy_design": TaskSettings(model="grande", timeout_s=600, retries=1),
-    },
-)
-```
+Pendiente — crear ejemplo en docs/examples/llm_client.md

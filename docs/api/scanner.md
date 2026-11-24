@@ -2,7 +2,7 @@
 
 API Reference para escaneo recursivo de documentos.
 
-## Arquitectura
+## 1. Arquitectura y Diseño
 
 ```mermaid
 classDiagram
@@ -39,9 +39,15 @@ classDiagram
     ScanResult --> DocumentMetadata
 ```
 
-## API Pública
+## 2. API Reference
 
-### DocumentScanner
+### Autodoc
+
+*No aplica para este módulo.*
+
+### Contratos
+
+#### DocumentScanner
 
 ```python
 class DocumentScanner:
@@ -65,8 +71,6 @@ class DocumentScanner:
         ignore_patterns: Sequence[str] = (),                     # 1.3.0
     ) -> ScanResult
 ```
-
-Escanea carpetas recursivamente y calcula el SHA-256 de forma concurrente (hasta `max_concurrent_hashes` a la vez).
 
 | Parámetro | Tipo | Descripción |
 |---|---|---|
@@ -95,11 +99,7 @@ Escanea carpetas recursivamente y calcula el SHA-256 de forma concurrente (hasta
 > Corregido en 1.1.0: hasta esta versión, esta página documentaba un método `scan(paths, ignore_patterns)` y una
 > excepción `DocumentError` que nunca existieron; la firma real siempre fue `scan_folders`.
 
----
-
-## Contratos
-
-### Entrada
+#### Entrada
 
 | Parámetro | Validación | Impacto si falla |
 |---|---|---|
@@ -107,7 +107,7 @@ Escanea carpetas recursivamente y calcula el SHA-256 de forma concurrente (hasta
 | Carpeta debe ser directorio | Validación previa con `FolderValidator` | `InvalidPathError` (ídem) |
 | Extensiones soportadas | Validación en `constants.SUPPORTED_EXTENSIONS` | Documento ignorado |
 
-### Salida
+#### Salida
 
 ```python
 class DocumentMetadata(BaseModel):  # doc_organize.core.models
@@ -140,7 +140,7 @@ dos: se omite.
 Los enlaces simbólicos, y desde 1.1.0 las *junctions* de Windows, no se siguen: aparecen en el árbol como nodo opaco,
 sin recorrerlos ni hashearlos. Solo se resuelve la carpeta raíz indicada.
 
-### Metadatos de fichero (1.5.0)
+#### Metadatos de fichero (1.5.0)
 
 Salen del `stat` que el escáner ya hace para cada fichero; no leen su contenido. Lo que el sistema no da de forma
 fiable queda en `None` en lugar de aproximarse. Detalle y casos de uso en
@@ -156,7 +156,7 @@ fiable queda en `None` en lugar de aproximarse. Detalle y casos de uso en
 `owner_name` es un dato personal: no se guarda salvo que se pida (`ScanOptions.capture_owner=True`). En Windows cuesta
 una llamada al sistema por fichero (y una consulta al dominio por cuenta distinta); en POSIX solo traduce el UID.
 
-### DocumentMetadata desde la caché (1.1.0, G25)
+#### DocumentMetadata desde la caché (1.1.0, G25)
 
 ```python
 @classmethod
@@ -178,22 +178,30 @@ Las entradas escritas antes de 1.1.0 no tienen tamaño (`ValueError`); el siguie
 Antes de mover un duplicado conviene comprobar que el fichero sigue igual (tamaño y fecha), porque la caché puede ser
 antigua.
 
-## Dependencias
+## 3. Componentes y Clases
 
-| Dependencia | Propósito |
+| Clase | Responsabilidad |
 |---|---|
-| `core.constants.SUPPORTED_EXTENSIONS` | Matriz de extensiones válidas |
-| `core.constants.IGNORED_NAMES` | Nombres a ignorar (.git, __pycache__, etc.) |
-| `core.models.DocumentMetadata` | Modelo de documento |
-| `utils.hash_utils.hash_file()` | Cálculo de SHA-256 |
-| `utils.logging` | Logging |
+| `DocumentScanner` | Escanea carpetas recursivamente y calcula el SHA-256 de forma concurrente (hasta `max_concurrent_hashes` a la vez). |
+| `ScanResult` | Resultado de `scan_folders`: documentos, árbol, resumen por extensión y lo que no se pudo leer. |
+| `DocumentMetadata` | Metadatos de un documento descubierto; también se construye desde la caché con `from_cache_entry`. |
 
-## Rendimiento
+### Rendimiento
 
 - **Hashing concurrente**: `asyncio.gather` acotado por un `asyncio.Semaphore` de `max_concurrent_hashes` (8 por defecto)
 - **Memoria**: Carga metadatos en memoria (escalable hasta ~100k documentos)
 - **Disk I/O**: Lectura secuencial + paralelización solo de hash
 
-## Ejemplos Relacionados
+## 4. Dependencias y Requisitos
+
+| Dependencia | Propósito | Requerida | Comportamiento sin ella |
+|---|---|---|---|
+| `core.constants.SUPPORTED_EXTENSIONS` | Matriz de extensiones válidas | Sí | — |
+| `core.constants.IGNORED_NAMES` | Nombres a ignorar (.git, __pycache__, etc.) | Sí | — |
+| `core.models.DocumentMetadata` | Modelo de documento | Sí | — |
+| `utils.hash_utils.hash_file()` | Cálculo de SHA-256 | Sí | — |
+| `utils.logging` | Logging | Sí | — |
+
+## 5. Ejemplos Relacionados
 
 - [Escanear una carpeta](../examples/scanner-scan.md)

@@ -2,7 +2,7 @@
 
 API Reference para registro y gestión de proyectos.
 
-## Arquitectura
+## 1. Arquitectura y Diseño
 
 ```mermaid
 classDiagram
@@ -25,9 +25,15 @@ classDiagram
     ProjectRegistry --> Project
 ```
 
-## API Pública
+## 2. API Reference
 
-### ProjectRegistry
+### Autodoc
+
+*No aplica para este módulo.* La API se documenta a mano en «Contratos».
+
+### Contratos
+
+#### ProjectRegistry
 
 ```python
 class ProjectRegistry:
@@ -50,7 +56,7 @@ de `ProjectError`.
 Desde 1.0.0 no hay `tenant_id` (L-12): el nombre es único en todo el registro. Un `projects.json` antiguo con
 `tenant_id` se sigue leyendo (el campo se ignora y desaparece en la siguiente escritura).
 
-#### create_project
+##### create_project
 
 Crea nuevo proyecto (carpeta + registro).
 
@@ -78,7 +84,7 @@ Crea nuevo proyecto (carpeta + registro).
 
 ---
 
-#### list_projects
+##### list_projects
 
 Lista los proyectos del registro.
 
@@ -90,7 +96,7 @@ Lista los proyectos del registro.
 
 ---
 
-#### get_project
+##### get_project
 
 Recupera proyecto por nombre.
 
@@ -107,66 +113,7 @@ Recupera proyecto por nombre.
 
 ---
 
-## Contratos
-
-### Entrada
-
-| Parámetro | Validación | Impacto si falla |
-|---|---|---|
-| Nombre válido | `ProjectValidator.validate_name()` | `ProjectNameError` |
-| Nombre único | Búsqueda en registro | `ProjectAlreadyExistsError` |
-| Base location existe | Validación al crear | `ProjectError` |
-
-### Salida
-
-```python
-class Project(BaseModel):  # doc_organize.core.models
-    name: str
-    root_path: str    # ruta absoluta
-    created_at: str   # ISO 8601
-```
-
-## Registro de Proyectos
-
-**Ubicación**: `~/.doc_organize/projects.json`
-
-**Formato**:
-```json
-{
-  "projects": [
-    {
-      "name": "mi_proyecto",
-      "root_path": "/home/user/docs/mi_proyecto",
-      "created_at": "2024-01-15T10:30:00"
-    }
-  ]
-}
-```
-
-**Propiedades**:
-- Centralizado (fuera de cualquier proyecto)
-- Permite ubicaciones distintas por proyecto
-- Escritura atómica vía temp file + `os.replace()`
-- Locking async (`asyncio.Lock`) para concurrencia (rara)
-
-## Dependencias
-
-| Dependencia | Propósito |
-|---|---|
-| `core.constants.PROJECT_NAME_*` | Validación de nombres |
-| `core.models.Project` | Modelo |
-| `core.exceptions` | Excepciones (ProjectError, etc.) |
-| `utils.logging` | Logging |
-| `utils.path_utils.safe_path_join()` | Manipulación segura de rutas |
-| `validators.project_validator.ProjectValidator` | Validación |
-
-## Notas Internas
-
-- **Ruta absoluta**: Cada proyecto almacena `root_path` absoluta (permite `base_location` distinta por proyecto)
-- **Rollback automático**: Si creación falla después de crear carpeta, se borra (atomicidad)
-- **Case-insensitive**: Búsqueda por nombre ignora mayúsculas
-
-#### delete_project
+##### delete_project
 
 Elimina un proyecto por completo: borra `root_path` en disco y quita la entrada del registro.
 
@@ -186,7 +133,7 @@ y *junctions* se quitan sin tocar su destino.
 
 ---
 
-#### move_project_root
+##### move_project_root
 
 Mueve `root_path` de un proyecto a `<destination_parent>/<name>/`.
 
@@ -209,7 +156,47 @@ actualizado, revierte el movimiento antes de propagar el error.
 
 ---
 
-## Rutas de salida de un documento (`doc_organize.projects.layout`, 0.12.0)
+##### Entrada
+
+| Parámetro | Validación | Impacto si falla |
+|---|---|---|
+| Nombre válido | `ProjectValidator.validate_name()` | `ProjectNameError` |
+| Nombre único | Búsqueda en registro | `ProjectAlreadyExistsError` |
+| Base location existe | Validación al crear | `ProjectError` |
+
+##### Salida
+
+```python
+class Project(BaseModel):  # doc_organize.core.models
+    name: str
+    root_path: str    # ruta absoluta
+    created_at: str   # ISO 8601
+```
+
+##### Registro de Proyectos
+
+**Ubicación**: `~/.doc_organize/projects.json`
+
+**Formato**:
+```json
+{
+  "projects": [
+    {
+      "name": "mi_proyecto",
+      "root_path": "/home/user/docs/mi_proyecto",
+      "created_at": "2024-01-15T10:30:00"
+    }
+  ]
+}
+```
+
+**Propiedades**:
+- Centralizado (fuera de cualquier proyecto)
+- Permite ubicaciones distintas por proyecto
+- Escritura atómica vía temp file + `os.replace()`
+- Locking async (`asyncio.Lock`) para concurrencia (rara)
+
+#### Rutas de salida de un documento (`doc_organize.projects.layout`, 0.12.0)
 
 Funciones sin Docling: un consumidor que no convierte (p. ej. la API de doc_organize_web) calcula las mismas rutas
 que `DocumentConverter`, que las conserva como alias (`DocumentConverter.resolve_output_paths`/`resolve_images_dir`).
@@ -230,7 +217,7 @@ def relative_source_path(full_path: str, scan_roots: Sequence[str] = ()) -> str 
   mueve las salidas (usa `force`).
 - `relative_source_path` es el `source_path` del JSON de cada documento desde 0.12.0.
 
-## Raíz de salidas y raíz de estado (`ProjectLayout`)
+#### Raíz de salidas y raíz de estado (`ProjectLayout`)
 
 ```python
 @dataclass(frozen=True)
@@ -256,7 +243,7 @@ class ProjectLayout:
 | `scan_history_log` | estado | `historial_escaneo/SCAN_HISTORY.jsonl` |
 | `dedup_report_dir` | estado | `duplicados/` (`dedup_report`: `DEDUP_REPORT.json`; `dedup_history`: `DEDUP_HISTORY.jsonl`) |
 
-## Rutas del contexto y del sitio (`ProjectLayout`, 0.13.0)
+#### Rutas del contexto y del sitio (`ProjectLayout`, 0.13.0)
 
 Todas cuelgan de la raíz de salidas (`project.root_path`), también con un `state_root` aparte:
 
@@ -295,7 +282,7 @@ layout.reorganized_dir("organizado")    # <root>/organizado
 layout.reorganized_dir("site")          # InvalidPathError: reservado
 ```
 
-## ProjectHistoryCleaner
+#### ProjectHistoryCleaner
 
 ```python
 class ProjectHistoryCleaner:
@@ -311,11 +298,7 @@ proyecto sigue existiendo con el mismo nombre y ubicación. Con `state_root` (ra
 
 **Excepciones**: `ProjectError` si `root_path` no existe o algún elemento no se pudo borrar.
 
-## Ejemplos Relacionados
-
-- [Crear y listar proyectos](../examples/projects-registry.md)
-
-## ScannedFoldersStore
+#### ScannedFoldersStore
 
 ```python
 class ScannedFoldersStore:
@@ -343,3 +326,34 @@ class ScannedFolder(BaseModel):  # doc_organize.core.models
     added_at: str  # ISO 8601
     used: bool = False  # permanente una vez True
 ```
+
+## 3. Componentes y Clases
+
+| Clase / función | Responsabilidad |
+|---|---|
+| `ProjectRegistry` | Context manager para gestión de proyectos (registro + disco) |
+| `resolve_output_paths`, `resolve_images_dir`, `relative_source_path` | Rutas de salida de un documento, sin Docling (`doc_organize.projects.layout`) |
+| `ProjectLayout` | Rutas del proyecto: raíz de salidas y raíz de estado, contexto y sitio |
+| `ProjectHistoryCleaner` | Vacía el proyecto y lo deja como recién creado, sin tocar el registro |
+| `ScannedFoldersStore` | Lista persistente por proyecto de las carpetas guardadas para escanear |
+
+### Notas Internas
+
+- **Ruta absoluta**: Cada proyecto almacena `root_path` absoluta (permite `base_location` distinta por proyecto)
+- **Rollback automático**: Si creación falla después de crear carpeta, se borra (atomicidad)
+- **Case-insensitive**: Búsqueda por nombre ignora mayúsculas
+
+## 4. Dependencias y Requisitos
+
+| Dependencia | Propósito |
+|---|---|
+| `core.constants.PROJECT_NAME_*` | Validación de nombres |
+| `core.models.Project` | Modelo |
+| `core.exceptions` | Excepciones (ProjectError, etc.) |
+| `utils.logging` | Logging |
+| `utils.path_utils.safe_path_join()` | Manipulación segura de rutas |
+| `validators.project_validator.ProjectValidator` | Validación |
+
+## 5. Ejemplos Relacionados
+
+- [Crear y listar proyectos](../examples/projects-registry.md)

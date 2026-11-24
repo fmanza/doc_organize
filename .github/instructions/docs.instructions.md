@@ -52,8 +52,9 @@ Solo si hay términos de dominio específicos; si no, "No aplica para este módu
 ```
 
 **Nota FASE 5 (pendiente):** La sección `## 4. Criterios de Aceptación` está definida
-en el estándar pero su contenido se completará tras validación QA. Hasta entonces
-incluir únicamente el placeholder indicado.
+en el estándar pero su contenido se completará tras validación QA. Hasta entonces, la sección lleva el encabezado
+`## 4. Criterios de Aceptación` (sin la anotación «← PENDIENTE QA», que es solo de la plantilla) y una única línea:
+`*Pendiente de QA: esta sección se completará cuando el equipo QA valide los criterios.*`
 
 ### Reglas de lenguaje
 

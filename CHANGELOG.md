@@ -6,6 +6,31 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+### Added
+
+- **Tipos de la API pública que faltaban en `__all__`**: `VersionGroup`, `VersionMember`, `AgentStep`, `AgentToolCall`,
+  `AxisRulesReport`, `NearMiss`, `AuditFinding`, `LabelConfusion`, `OfflineIssue`, `EmbeddingIndexInfo`, `LlmResult`,
+  `legacy_variables` y `REDACTED`. Ya los devolvían funciones públicas (`detect_document_versions`, `AgentRun`,
+  `TaxonomyRulesReport`, `TaxonomyAudit`, `EvaluationReport`, `OfflineSiteReport`, `embedding_index_info`, `LlmClient`)
+  y la referencia de la API los documentaba.
+
+### Fixed
+
+- **Tipos para mypy y los IDE**: el bloque `TYPE_CHECKING` de `doc_organize/__init__.py` no incluía 36 nombres públicos
+  de 2.0 (`LlmClient`, los agentes, la evaluación, el sitio sin conexión…), que llegaban como `Any`. Ahora cubre todo
+  `_EXPORTS`, y `tests/unit/test_public_api.py` comprueba que coinciden.
+
+### Changed
+
+- **Jerarquía de capas (regla #6)** comprobada por un test (`test_dependencies_follow_the_level_hierarchy`), con las
+  excepciones aceptadas escritas en `architecture.instructions.md`. `security/` pasa a Nivel 1 y `diagnostics.py` a
+  Nivel 3. Se bajan de nivel tres piezas compartidas, sin cambiar ningún nombre público: el progreso de las
+  exportaciones (`export/_progress.py` → `core/progress.py`), el texto del perfil del proyecto
+  (`profile_prompt_text` y `render_profile_sections`, a `ai/profile_text.py`; siguen en `context.project_profile`) y la
+  validación de la carpeta reorganizada (a `core/output_folder.py`; sigue en `projects.layout`).
+- La referencia de la API ya no documenta funciones internas (`parse_version`, `classify_semantic`, `best_values`,
+  `entry_text`, `cosine`, `EmbeddingIndex`, `CREDENTIAL_RULES`).
+
 ## [2.2.0] - 2026-11-23
 
 Duplicados por contenido (`ContentDuplicateFinder`) con una tarea de IA propia, `dedup`, y qué modelo contesta en cada

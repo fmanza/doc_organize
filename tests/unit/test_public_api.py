@@ -68,14 +68,23 @@ def test_output_layout_and_read_only_cache_do_not_load_docling() -> None:
     assert result.stdout.strip() == "[]"
 
 
-def test_every_name_imported_for_type_checking_is_public() -> None:
-    """Lo que `__init__` importa bajo `TYPE_CHECKING` (para los IDE) tiene que estar también en `_EXPORTS`: si no, el IDE
-    lo ofrece pero `from doc_organize import X` falla (pasó en M4.1 con `AiSettings`)."""
+def test_type_checking_imports_match_the_public_api() -> None:
+    """El bloque `TYPE_CHECKING` de `__init__` (para mypy y los IDE) importa exactamente `_EXPORTS`, cada nombre desde su
+    módulo. Si sobra uno, el IDE lo ofrece pero `from doc_organize import X` falla (pasó en M4.1 con `AiSettings`); si
+    falta, mypy lo ve como `Any` (pasó con todo lo de 2.0: `LlmClient`, los agentes, la evaluación…)."""
     import ast
 
     from pathlib import Path
 
     tree = ast.parse(Path(doc_organize.__file__).read_text(encoding="utf-8"))
     block = next(node for node in tree.body if isinstance(node, ast.If) and getattr(node.test, "id", None) == "TYPE_CHECKING")
-    imported = {alias.asname or alias.name for node in ast.walk(block) if isinstance(node, ast.ImportFrom) for alias in node.names}
-    assert sorted(imported - set(doc_organize.__all__)) == []
+    imported = {alias.asname or alias.name: node.module for node in ast.walk(block) if isinstance(node, ast.ImportFrom) for alias in node.names}
+    assert imported == doc_organize._EXPORTS
+
+
+def test_every_public_name_is_listed_in_the_public_api_page() -> None:
+    """`docs/api/publica.md` (grupos de nombres) cita cada nombre de `__all__`: en 2.2.0 le faltaban 78."""
+    from pathlib import Path
+
+    page = (Path(doc_organize.__file__).parents[2] / "docs" / "api" / "publica.md").read_text(encoding="utf-8")
+    assert sorted(name for name in doc_organize._EXPORTS if f"`{name}`" not in page) == []

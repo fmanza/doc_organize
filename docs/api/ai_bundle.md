@@ -3,6 +3,39 @@
 El uso más habitual del contexto fuera de la web es dárselo a un chat o un agente de IA (un proyecto de Claude,
 NotebookLM, Copilot). `write_ai_context_bundle` escribe un ZIP pensado para subirlo tal cual.
 
+## 1. Arquitectura y Diseño
+
+```mermaid
+flowchart TD
+    IN["Project + Context"] --> W["write_ai_context_bundle"]
+    W --> ZIP["ZIP del paquete"]
+    ZIP --> L["llms.txt"]
+    ZIP --> D["documentos/#lt;dominio#gt;/#lt;tipo#gt;/#lt;carpeta#gt;/#lt;doc#gt;.md"]
+    ZIP --> C["context.json"]
+    ZIP --> F["llms-full.txt (opcional)"]
+    R["render_llms_txt"] --> L
+    R --> S["llms.txt del sitio<br/>(SiteGenerator.generate(llms_txt=True))"]
+```
+
+## 2. API Reference
+
+### Autodoc
+
+::: doc_organize.export.ai_bundle
+    options:
+      show_root_heading: false
+      members:
+        - write_ai_context_bundle
+        - AiBundleStats
+
+::: doc_organize.context.llms_txt
+    options:
+      show_root_heading: false
+      members:
+        - render_llms_txt
+
+### Contratos
+
 ```python
 import asyncio
 from doc_organize import write_ai_context_bundle
@@ -11,7 +44,7 @@ stats = await asyncio.to_thread(write_ai_context_bundle, "contexto_ia.zip", proj
 print(stats.documents, stats.redacted_documents, stats.sha256)
 ```
 
-## Qué lleva
+#### Qué lleva
 
 | Fichero | Contenido |
 |---|---|
@@ -22,7 +55,7 @@ print(stats.documents, stats.redacted_documents, stats.sha256)
 
 Las rutas de `documentos/` son las de la carpeta reorganizada (`resolve_organized_paths`): únicas y estables.
 
-## Opciones
+#### Opciones
 
 | Opción | Por defecto | Qué hace |
 |---|---|---|
@@ -42,21 +75,28 @@ cancelación como `write_project_zip`.
 encuentren los buscadores: es el índice para el modelo al que subes el paquete. Con muchos documentos, `llms-full.txt`
 supera el contexto de cualquier modelo: lo normal es subir la carpeta `documentos/` (o la de un dominio).
 
-## `llms.txt` en el sitio
+#### `llms.txt` en el sitio
 
 `SiteGenerator.generate(llms_txt=True)` deja el mismo `llms.txt` en la raíz del sitio, con enlaces a las páginas
 (`.html` en el sitio sin conexión) y sin credenciales si `redact_credentials`. `render_llms_txt` lo genera para
 cualquier destino.
 
-::: doc_organize.export.ai_bundle
-    options:
-      show_root_heading: false
-      members:
-        - write_ai_context_bundle
-        - AiBundleStats
+## 3. Componentes y Clases
 
-::: doc_organize.context.llms_txt
-    options:
-      show_root_heading: false
-      members:
-        - render_llms_txt
+| Clase / función | Responsabilidad |
+|---|---|
+| `write_ai_context_bundle` | Escribe el ZIP del paquete para IA en *streaming* (síncrona: desde async, con `asyncio.to_thread`) |
+| `AiBundleStats` | Resultado: `documents`, `redacted_documents`, `sha256`… |
+| `render_llms_txt` | Genera el `llms.txt` para cualquier destino (el paquete o el sitio) |
+
+## 4. Dependencias y Requisitos
+
+| Dependencia | Propósito |
+|---|---|
+| `doc_organize.context.llms_txt` | Entradas y texto de `llms.txt` |
+| `doc_organize.security.credentials.redact_credentials` | Redacción de credenciales (`redact=True`) |
+| `yaml` (PyYAML, extra `context`) | Front matter YAML de cada documento |
+
+## 5. Ejemplos Relacionados
+
+Pendiente — crear ejemplo en docs/examples/ai_bundle.md

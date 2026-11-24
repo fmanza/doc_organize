@@ -77,9 +77,9 @@ del revisor.
 - **Decisión desfasada u huérfana**: no se aplica; aparece en el contexto y vuelve a la cola de revisión.
 - **Agente que llega a un tope o se cancela**: termina con el motivo de parada y lo que tenga hasta entonces.
 
-## 4. Criterios de Aceptación      ← PENDIENTE QA — No añadir hasta validación
+## 4. Criterios de Aceptación
 
-*Esta sección se completará cuando el equipo QA valide los criterios.*
+*Pendiente de QA: esta sección se completará cuando el equipo QA valide los criterios.*
 
 ## 5. Glosario y Términos
 
