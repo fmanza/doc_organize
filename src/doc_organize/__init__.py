@@ -158,6 +158,38 @@ _EXPORTS: dict[str, str] = {
     "LlmResult": "doc_organize.ai.llm_client",
     "legacy_variables": "doc_organize.ai.settings",
     "REDACTED": "doc_organize.security.credentials",
+    # Lo que ya usaba doc_organize_web desde submódulos (2.4.0): excepciones, modelos, funciones y constantes
+    "AiError": "doc_organize.core.exceptions",
+    "AiAuthError": "doc_organize.core.exceptions",
+    "AiConnectionError": "doc_organize.core.exceptions",
+    "AiConfigurationError": "doc_organize.core.exceptions",
+    "UsageSourceError": "doc_organize.core.exceptions",
+    "UsageSourceAuthError": "doc_organize.core.exceptions",
+    "UsageSourceConnectionError": "doc_organize.core.exceptions",
+    "ContextNotFoundError": "doc_organize.core.exceptions",
+    "TaxonomyManifestError": "doc_organize.core.exceptions",
+    "TaxonomyTemplateError": "doc_organize.core.exceptions",
+    "ContextBuildRecord": "doc_organize.core.models",
+    "ContextChange": "doc_organize.core.models",
+    "UnclassifiedDocument": "doc_organize.core.models",
+    "LiteLLMUsageConfig": "doc_organize.core.models",
+    "DocumentProperties": "doc_organize.context.document_properties",
+    "read_document_properties": "doc_organize.context.document_properties",
+    "LiteLLMUsageClient": "doc_organize.ai.litellm_usage_client",
+    "draft_taxonomy": "doc_organize.ai.services",
+    "render_prompt_preview": "doc_organize.ai.services",
+    "compose_profile": "doc_organize.context.project_profile",
+    "compose_profile_text": "doc_organize.context.project_profile",
+    "parse_profile": "doc_organize.context.project_profile",
+    "PROJECT_PROFILE_FILE": "doc_organize.context.project_profile",
+    "render_taxonomy_manifest_markdown": "doc_organize.context.taxonomy_manifest",
+    "save_taxonomy_manifest": "doc_organize.context.taxonomy_manifest",
+    "select_document_sample": "doc_organize.context.taxonomy_manifest_sampler",
+    "load_context_history": "doc_organize.export.sources",
+    "write_context_history_xlsx": "doc_organize.export.xlsx_export",
+    "DECISIONS_FILE": "doc_organize.context.decisions",
+    "DEFAULT_REVIEW_LIMITS": "doc_organize.context.review_agent",
+    "DEFAULT_DESIGN_LIMITS": "doc_organize.context.taxonomy_agent",
     # Modelos
     "DocumentMetadata": "doc_organize.core.models",
     "ConversionResult": "doc_organize.core.models",
@@ -236,13 +268,16 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
     from doc_organize.ai.agents import AgentLimits, AgentRun, AgentRunner, AgentStep, AgentTool, AgentToolCall
     from doc_organize.ai.cache import AiResultCache, prune_ai_cache
     from doc_organize.ai.embeddings import EmbeddingIndexInfo, clear_embedding_index, embedding_index_info
+    from doc_organize.ai.litellm_usage_client import LiteLLMUsageClient
     from doc_organize.ai.llm_client import LlmClient, LlmResult
     from doc_organize.ai.prompts import PromptRegistry
+    from doc_organize.ai.services import draft_taxonomy, render_prompt_preview
     from doc_organize.ai.settings import legacy_variables, settings_from_env
     from doc_organize.cache.cache_manager import CacheManager
     from doc_organize.context.context_builder import ContextBuilder
     from doc_organize.context.context_registry import ContextRegistry
-    from doc_organize.context.decisions import ClassificationDecisionStore, gold_from_decisions
+    from doc_organize.context.decisions import DECISIONS_FILE, ClassificationDecisionStore, gold_from_decisions
+    from doc_organize.context.document_properties import DocumentProperties, read_document_properties
     from doc_organize.context.dry_run import DocumentChange, DryRunResult, dry_run_classify
     from doc_organize.context.evaluation import (
         AxisEvaluation,
@@ -258,13 +293,24 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
     from doc_organize.context.freshness import check_context_freshness
     from doc_organize.context.llms_txt import render_llms_txt
     from doc_organize.context.offline_site import OfflineIssue, OfflineSiteReport, SiteZipResult, check_site_offline, write_site_zip
+    from doc_organize.context.project_profile import PROJECT_PROFILE_FILE, compose_profile, compose_profile_text, parse_profile
     from doc_organize.context.reorganizer import Reorganizer, resolve_organized_paths
-    from doc_organize.context.review_agent import AuditFinding, ReviewAgent, ReviewProposal, ReviewResult, TaxonomyAudit, audit_taxonomy
+    from doc_organize.context.review_agent import (
+        DEFAULT_REVIEW_LIMITS,
+        AuditFinding,
+        ReviewAgent,
+        ReviewProposal,
+        ReviewResult,
+        TaxonomyAudit,
+        audit_taxonomy,
+    )
     from doc_organize.context.review_queue import ReviewItem, review_queue
     from doc_organize.context.site_generator import SiteGenerator, SiteResult
-    from doc_organize.context.taxonomy_agent import TaxonomyDesignAgent, TaxonomyDesignProposal
+    from doc_organize.context.taxonomy_agent import DEFAULT_DESIGN_LIMITS, TaxonomyDesignAgent, TaxonomyDesignProposal
     from doc_organize.context.taxonomy_check import AxisRulesReport, NearMiss, RulesCorpus, TaxonomyRulesReport, check_taxonomy_rules
     from doc_organize.context.taxonomy_front_matter import inspect_taxonomy_front_matter, migrate_manifest_v1
+    from doc_organize.context.taxonomy_manifest import render_taxonomy_manifest_markdown, save_taxonomy_manifest
+    from doc_organize.context.taxonomy_manifest_sampler import select_document_sample
     from doc_organize.context.taxonomy_template_registry import TaxonomyTemplateRegistry
     from doc_organize.context.taxonomy_templates import (
         list_builtin_templates,
@@ -276,9 +322,14 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
     from doc_organize.converter.converter import DocumentConverter
     from doc_organize.converter.ocr_scheduler import OCRScheduler
     from doc_organize.core.exceptions import (
+        AiAuthError,
+        AiConfigurationError,
+        AiConnectionError,
+        AiError,
         CacheError,
         CacheNotFoundError,
         ContextError,
+        ContextNotFoundError,
         ConversionError,
         DocOrganizeError,
         InvalidPathError,
@@ -289,6 +340,11 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         ProjectError,
         ProjectNotFoundError,
         SiteBuildError,
+        TaxonomyManifestError,
+        TaxonomyTemplateError,
+        UsageSourceAuthError,
+        UsageSourceConnectionError,
+        UsageSourceError,
     )
     from doc_organize.core.models import (
         AiSettings,
@@ -299,6 +355,8 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         Context,
         ContextBuildEvent,
         ContextBuildEventType,
+        ContextBuildRecord,
+        ContextChange,
         ContextDeleteEvent,
         ContextDeleteEventType,
         ConversionResult,
@@ -319,6 +377,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         EnvironmentReport,
         FreshnessReport,
         GpuStatus,
+        LiteLLMUsageConfig,
         OfficeStatus,
         Project,
         ScanErrorEntry,
@@ -334,6 +393,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
         TaxonomyEntry,
         TaxonomyFrontMatterReport,
         TaxonomyManifest,
+        UnclassifiedDocument,
         default_model_alias,
     )
     from doc_organize.core.progress import CancelToken, ProgressEvent
@@ -341,8 +401,8 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
     from doc_organize.dedup.deduplication import DeduplicationManager
     from doc_organize.diagnostics import AiEndpoint, check_environment
     from doc_organize.export.ai_bundle import AiBundleStats, write_ai_context_bundle
-    from doc_organize.export.sources import load_cache_entries, load_scan_error_history
-    from doc_organize.export.xlsx_export import write_cache_xlsx, write_context_documents_xlsx, write_scan_errors_xlsx
+    from doc_organize.export.sources import load_cache_entries, load_context_history, load_scan_error_history
+    from doc_organize.export.xlsx_export import write_cache_xlsx, write_context_documents_xlsx, write_context_history_xlsx, write_scan_errors_xlsx
     from doc_organize.export.zip_export import ExportStats, preview_project_zip, write_project_zip
     from doc_organize.projects.layout import (
         RESERVED_OUTPUT_FOLDER_NAMES,
