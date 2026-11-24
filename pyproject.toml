@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "doc_organize"
-version = "2.4.2"
+version = "2.5.0"
 description = "Sistema de extracción de contenido de documentos en Markdown y JSON documentación y organización."
 readme = "README.md"
 requires-python = ">=3.12"
