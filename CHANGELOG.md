@@ -6,6 +6,23 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+### Added
+
+- **API pública para doc_organize_web** (opción 2 de la revisión de la API): 31 nombres que la web importaba de
+  submódulos pasan a `__all__`, con sus tipos para mypy y los IDE.
+    - Excepciones: `AiError`, `AiAuthError`, `AiConnectionError`, `AiConfigurationError`, `UsageSourceError`,
+      `UsageSourceAuthError`, `UsageSourceConnectionError`, `ContextNotFoundError`, `TaxonomyManifestError`,
+      `TaxonomyTemplateError`.
+    - Modelos: `ContextBuildRecord`, `ContextChange`, `UnclassifiedDocument`, `DocumentProperties`,
+      `LiteLLMUsageConfig`.
+    - Funciones y clases: `read_document_properties`, `LiteLLMUsageClient`, `draft_taxonomy`, `render_prompt_preview`,
+      `parse_profile`, `compose_profile`, `compose_profile_text`, `render_taxonomy_manifest_markdown`,
+      `save_taxonomy_manifest`, `select_document_sample`, `load_context_history`, `write_context_history_xlsx`.
+    - Constantes: `DECISIONS_FILE`, `PROJECT_PROFILE_FILE`, `DEFAULT_DESIGN_LIMITS`, `DEFAULT_REVIEW_LIMITS`.
+
+  Siguen en su módulo. `clean_text` y `clean_keywords` (`doc_organize.utils.text_clean`) **no** pasan a la API
+  pública: son limpieza de texto genérica y la web tendrá su propia copia.
+
 ## [2.3.0] - 2026-11-24
 
 API pública completa y tipada: los tipos que ya devolvían las funciones públicas pasan a `__all__` y mypy y los IDE

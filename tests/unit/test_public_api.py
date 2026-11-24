@@ -88,3 +88,47 @@ def test_every_public_name_is_listed_in_the_public_api_page() -> None:
 
     page = (Path(doc_organize.__file__).parents[2] / "docs" / "api" / "publica.md").read_text(encoding="utf-8")
     assert sorted(name for name in doc_organize._EXPORTS if f"`{name}`" not in page) == []
+
+
+#: Lo que doc_organize_web importaba de submódulos hasta 2.3.0 (opción 2 de la revisión de la API, 2.4.0). Desde 2.4.0
+#: es API pública: quitar o renombrar cualquiera es un cambio incompatible (versión mayor).
+WEB_NAMES = (
+    "AiError",
+    "AiAuthError",
+    "AiConnectionError",
+    "AiConfigurationError",
+    "UsageSourceError",
+    "UsageSourceAuthError",
+    "UsageSourceConnectionError",
+    "ContextNotFoundError",
+    "TaxonomyManifestError",
+    "TaxonomyTemplateError",
+    "ContextBuildRecord",
+    "ContextChange",
+    "UnclassifiedDocument",
+    "LiteLLMUsageConfig",
+    "DocumentProperties",
+    "read_document_properties",
+    "LiteLLMUsageClient",
+    "draft_taxonomy",
+    "render_prompt_preview",
+    "legacy_variables",
+    "compose_profile",
+    "compose_profile_text",
+    "parse_profile",
+    "PROJECT_PROFILE_FILE",
+    "render_taxonomy_manifest_markdown",
+    "save_taxonomy_manifest",
+    "select_document_sample",
+    "load_context_history",
+    "write_context_history_xlsx",
+    "DECISIONS_FILE",
+    "DEFAULT_REVIEW_LIMITS",
+    "DEFAULT_DESIGN_LIMITS",
+)
+
+
+@pytest.mark.parametrize("name", WEB_NAMES)
+def test_names_used_by_doc_organize_web_are_public(name: str) -> None:
+    assert name in doc_organize.__all__
+    assert getattr(doc_organize, name) is not None
