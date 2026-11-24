@@ -284,4 +284,4 @@ siempre enteros.
 
 ## 5. Ejemplos Relacionados
 
-Pendiente — crear ejemplo en docs/examples/agents.md
+- [Ejemplo: Agentes que proponen sin aplicar](../examples/agents.md): comprueba un manifiesto con `check_taxonomy_rules` sin IA y ejecuta `TaxonomyDesignAgent` contra un proxy falso, que edita, deshace y prueba un borrador y devuelve una propuesta sin escribir nada en disco

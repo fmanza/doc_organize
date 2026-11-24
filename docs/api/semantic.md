@@ -103,4 +103,4 @@ Necesita la tarea `embed` en `AiSettings` (un modelo de embeddings en el proxy) 
 
 ## 5. Ejemplos Relacionados
 
-Pendiente — crear ejemplo en docs/examples/semantic.md
+- [Ejemplo: Clasificación semántica con embeddings](../examples/semantic.md): rellena ejes vacíos con embeddings de un proxy falso, muestra los ejemplos y la preselección que recibe la IA y reconstruye con el índice guardado sin pedir vectores

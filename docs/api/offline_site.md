@@ -176,4 +176,4 @@ código async, con `asyncio.to_thread`.
 
 ## 5. Ejemplos Relacionados
 
-Pendiente — crear ejemplo en docs/examples/offline_site.md
+- [Ejemplo: Sitio sin conexión](../examples/offline-site.md): construye el sitio de un contexto con `work_dir` sin tocar el proyecto, muestra la redacción y la neutralización, lo comprueba con `check_site_offline` y lo empaqueta con `write_site_zip` (y qué pasa si no pasa la comprobación).

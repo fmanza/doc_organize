@@ -42,15 +42,15 @@ de los clientes de este documento
 
 ## 2. Reglas de Negocio
 
-| Regla | Descripción |
-|---|---|
-| **Dos fuentes, dos clientes** | `LiteLLMUsageClient` y `GitHubCopilotUsageClient` no comparten config ni credenciales (ISP) |
-| **Contrato común** | Ambos exponen `get_usage()` invocable sin argumentos y devuelven `UsageSnapshot` |
-| **La clave propia no va en la URL** | Sin `key` (o con la misma clave de la cabecera), LiteLLM consulta la clave de la cabecera y no se envía `?key=`; con otra `key`, esa sí va en la URL (y en los logs): se recomienda pasar su hash SHA-256 |
-| **Una línea por consulta** | LiteLLM `/key/info` no desglosa por fecha ni modelo: el snapshot trae el spend acumulado de la clave, en USD |
-| **Coste puede ser `None`** | Copilot Pro no reporta coste en USD salvo overage de cuota — `UsageLineItem.cost_usd` queda `None` en el caso común |
-| **Sin lectura implícita de entorno** | Las configs no leen variables de entorno por sí solas; usa `litellm_usage_config_from_env()` (`DOC_ORGANIZE_LITELLM_BASE_URL`, `DOC_ORGANIZE_LITELLM_VIRTUAL_KEY`) / `github_copilot_usage_config_from_env()` explícitamente |
-| **Copilot avisa (2.1.0)** | Crear el cliente o la config de Copilot emite `DeprecationWarning` |
+| Regla | Descripción | Impacto si se viola |
+|---|---|---|
+| **Dos fuentes, dos clientes** | `LiteLLMUsageClient` y `GitHubCopilotUsageClient` no comparten config ni credenciales (ISP) | Cada cliente dependería de configuración y credenciales de otra fuente |
+| **Contrato común** | Ambos exponen `get_usage()` invocable sin argumentos y devuelven `UsageSnapshot` | Un agregador tendría que conocer cada fuente concreta para consultarla |
+| **La clave propia no va en la URL** | Sin `key` (o con la misma clave de la cabecera), LiteLLM consulta la clave de la cabecera y no se envía `?key=`; con otra `key`, esa sí va en la URL (y en los logs): se recomienda pasar su hash SHA-256 | La clave quedaría escrita en los logs y en los proxies intermedios |
+| **Una línea por consulta** | LiteLLM `/key/info` no desglosa por fecha ni modelo: el snapshot trae el spend acumulado de la clave, en USD | Se mostraría un desglose por fecha o modelo que LiteLLM no devuelve |
+| **Coste puede ser `None`** | Copilot Pro no reporta coste en USD salvo overage de cuota — `UsageLineItem.cost_usd` queda `None` en el caso común | Un coste inventado (0 USD) se confundiría con uso gratuito |
+| **Sin lectura implícita de entorno** | Las configs no leen variables de entorno por sí solas; usa `litellm_usage_config_from_env()` (`DOC_ORGANIZE_LITELLM_BASE_URL`, `DOC_ORGANIZE_LITELLM_VIRTUAL_KEY`) / `github_copilot_usage_config_from_env()` explícitamente | La librería usaría credenciales del entorno sin que el consumidor lo decida |
+| **Copilot avisa (2.1.0)** | Crear el cliente o la config de Copilot emite `DeprecationWarning` | El código que usa Copilot dejaría de funcionar en 3.0 sin aviso previo |
 
 ### Límites y Restricciones
 

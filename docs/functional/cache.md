@@ -18,13 +18,13 @@ Registrar SHA-256 y estado de conversión de cada documento para detectar:
 
 ## 2. Reglas de Negocio
 
-| Regla | Descripción |
-|---|---|
-| **WAL mode** | SQLite con Write-Ahead Log para concurrencia |
-| **Transaccional** | `save_entries()` es operación atómica |
-| **Clasificación local** | `get_changes()` no accede disco; cálculo en memoria |
-| **Única fuente de verdad** | SHA-256 = `utils.hash_utils.hash_file()` |
-| **Páginas ordenables y filtrables** | `load_cache_page` ordena por ruta, fecha, estado, tamaño, reintentos y, desde 1.6.0, tipo MIME, fecha de creación y propietario (sin distinguir mayúsculas); empate por ruta y vacíos al final. Desde 1.6.0 filtra por uno o varios tipos MIME, y `list_mime_types` da los tipos presentes con su recuento |
+| Regla | Descripción | Impacto si se viola |
+|---|---|---|
+| **WAL mode** | SQLite con Write-Ahead Log para concurrencia | Las lecturas se bloquearían mientras otro proceso escribe |
+| **Transaccional** | `save_entries()` es operación atómica | Un fallo a mitad dejaría la caché con solo parte de las entradas |
+| **Clasificación local** | `get_changes()` no accede disco; cálculo en memoria | Detectar cambios repetiría lecturas de disco innecesarias |
+| **Única fuente de verdad** | SHA-256 = `utils.hash_utils.hash_file()` | Dos cálculos de hash distintos harían pasar documentos sin cambios por modificados |
+| **Páginas ordenables y filtrables** | `load_cache_page` ordena por ruta, fecha, estado, tamaño, reintentos y, desde 1.6.0, tipo MIME, fecha de creación y propietario (sin distinguir mayúsculas); empate por ruta y vacíos al final. Desde 1.6.0 filtra por uno o varios tipos MIME, y `list_mime_types` da los tipos presentes con su recuento | Al paginar se repetirían o se saltarían documentos |
 
 ### Límites y Restricciones
 

@@ -29,19 +29,19 @@ Resolver moviendo documentos descartados a carpeta de duplicados (o copiándolos
 
 ## 2. Reglas de Negocio
 
-| Regla | Descripción |
-|---|---|
-| **Canónico = antiguo** | Conserva documento más antiguo por `modified_time`, y con la misma fecha la ruta menor (2.4.1) (propuesta, no aplicada sola, en grupos `fuzzy_name_match`, `same_content` y `semantic_content_match`) |
-| **Elección del usuario** | Si el grupo trae `user_choice`, se conserva ese documento en lugar del canónico |
-| **Replica estructura** | Duplicados se mueven a `duplicates_dir/original/path` |
-| **Auditable** | `DEDUP_REPORT.json` con timestamps y decisiones |
-| **Colisiones de nombres** | Si destino existe, añade sufijo con hash de 8 caracteres |
-| **Un grupo por documento** | La pasada fuzzy solo opera sobre documentos no agrupados ya por hash exacto o versión |
-| **Fuzzy = solo manual** | Los grupos `fuzzy_name_match` nunca se mueven desde "Buscar duplicados" (acción masiva) |
-| **Contenido = solo manual (2.2.0)** | Los grupos `same_content` y `semantic_content_match` tampoco: la acción masiva no busca por contenido |
-| **Grupos sin cadenas (2.2.0)** | Un documento entra en un grupo por contenido parecido solo si llega al umbral con **todos** sus miembros |
-| **Modelo propio para `dedup` (2.2.0)** | El contenido parecido no usa el modelo de `embed`: sin modelo propio para `dedup` falla con `AiConfigurationError` |
-| **Texto completo al modelo (2.2.0)** | A la tarea `dedup` va el texto completo de cada documento (con las credenciales redactadas): se recomienda un modelo local |
+| Regla | Descripción | Impacto si se viola |
+|---|---|---|
+| **Canónico = antiguo** | Conserva documento más antiguo por `modified_time`, y con la misma fecha la ruta menor (2.4.1) (propuesta, no aplicada sola, en grupos `fuzzy_name_match`, `same_content` y `semantic_content_match`) | Se apartaría la primera copia y se conservaría una posterior; sin un criterio fijo (antes de 2.4.1, con fechas iguales) la propuesta cambiaba entre ejecuciones |
+| **Elección del usuario** | Si el grupo trae `user_choice`, se conserva ese documento en lugar del canónico | Se movería el documento que la persona decidió conservar |
+| **Replica estructura** | Duplicados se mueven a `duplicates_dir/original/path` | No se sabría de dónde venía cada duplicado para devolverlo a su sitio |
+| **Auditable** | `DEDUP_REPORT.json` con timestamps y decisiones | No quedaría constancia de qué se movió ni por qué |
+| **Colisiones de nombres** | Si destino existe, añade sufijo con hash de 8 caracteres | Un duplicado sobrescribiría en silencio a otro con el mismo nombre |
+| **Un grupo por documento** | La pasada fuzzy solo opera sobre documentos no agrupados ya por hash exacto o versión | Un documento podría estar en dos grupos con decisiones contradictorias |
+| **Fuzzy = solo manual** | Los grupos `fuzzy_name_match` nunca se mueven desde "Buscar duplicados" (acción masiva) | Se moverían documentos distintos que solo se parecen en el nombre |
+| **Contenido = solo manual (2.2.0)** | Los grupos `same_content` y `semantic_content_match` tampoco: la acción masiva no busca por contenido | Se moverían documentos distintos que solo se parecen, p. ej. la misma plantilla con otros datos |
+| **Grupos sin cadenas (2.2.0)** | Un documento entra en un grupo por contenido parecido solo si llega al umbral con **todos** sus miembros | Se juntarían documentos que no se parecen entre sí (cadenas A~B~C) |
+| **Modelo propio para `dedup` (2.2.0)** | El contenido parecido no usa el modelo de `embed`: sin modelo propio para `dedup` falla con `AiConfigurationError` | El texto completo iría al modelo de embeddings del contexto y su gasto no se distinguiría |
+| **Texto completo al modelo (2.2.0)** | A la tarea `dedup` va el texto completo de cada documento (con las credenciales redactadas): se recomienda un modelo local | Contenido confidencial completo saldría hacia un modelo remoto |
 
 ### Límites y Restricciones
 

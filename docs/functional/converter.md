@@ -16,19 +16,19 @@ Transformar documentos (PDF, DOCX, etc.) a Markdown + JSON estructurado usando *
 
 ## 2. Reglas de Negocio
 
-| Regla | Descripción |
-|---|---|
-| **Dos fases** | Intento rápido primero; OCR solo si necesario |
-| **No bloquea** | Usa `asyncio.to_thread()` para I/O CPU-intensivo |
-| **Pool de convertidores** | Cachea por `(use_ocr, use_gpu, extract_images, use_picture_description)` para eficiencia |
-| **Errores capturados** | Los fallos de un documento no se relanzan: van en `ConversionResult` (salvo `ModelsNotAvailableError`, que es de configuración) |
-| **Formatos ampliados** | `SUPPORTED_EXTENSIONS` cubre además html/htm/xhtml, csv, odt/ods/odp, adoc/asciidoc/asc, epub, eml, txt (siempre activos, sin flag); audio/vídeo son opt-in vía `include_audio_video` (requieren el extra `[av]` + `ffmpeg`) |
-| **OCR de imágenes sueltas** | `use_ocr` gobierna también `InputFormat.IMAGE` (png/jpg/tiff/bmp), no solo PDF |
-| **Extracción de imágenes** | `extract_images=True` guarda las imágenes embebidas en `img/<stem>/` junto al `.md` y las referencia, en vez del placeholder `<!-- image -->`. Namespaced por documento: dos documentos en la misma carpeta no comparten imágenes |
-| **Descripción de imágenes (RAG)** | `use_picture_description=True` añade `image_descriptions` a los chunks del `.json` (modelo local `smolvlm`), solo para documentos PDF/imagen |
-| **`source_path` del `.json`** | Desde 0.12.0, ruta del documento relativa a la carpeta escaneada (`Informes/a.pdf`), sin rutas del servidor; `json_source_path="absolute"` (o `ScanOptions(json_source_path="absolute")`) guarda la ruta completa, como antes |
-| **Varias carpetas escaneadas** | La salida replica la ruta relativa a su carpeta. Con varias carpetas, `ScanOptions(root_name_in_output=True)` antepone el nombre de cada una (`2024/x/a.md`) para que no colisionen; sin ella, el escaneo avisa si dos documentos irían al mismo `.md` |
-| **Sin red** | `ScanOptions(artifacts_path=..., allow_model_downloads=False)`: Docling lee los modelos de esa carpeta y, si falta alguno, el escaneo para con `ModelsNotAvailableError` en vez de descargarlo |
+| Regla | Descripción | Impacto si se viola |
+|---|---|---|
+| **Dos fases** | Intento rápido primero; OCR solo si necesario | Se aplicaría OCR también a documentos que ya tienen texto |
+| **No bloquea** | Usa `asyncio.to_thread()` para I/O CPU-intensivo | La aplicación dejaría de responder mientras convierte |
+| **Pool de convertidores** | Cachea por `(use_ocr, use_gpu, extract_images, use_picture_description)` para eficiencia | Se volverían a cargar los modelos de Docling en cada documento |
+| **Errores capturados** | Los fallos de un documento no se relanzan: van en `ConversionResult` (salvo `ModelsNotAvailableError`, que es de configuración) | Un documento en uso o sin permiso abortaría el resto del lote |
+| **Formatos ampliados** | `SUPPORTED_EXTENSIONS` cubre además html/htm/xhtml, csv, odt/ods/odp, adoc/asciidoc/asc, epub, eml, txt (siempre activos, sin flag); audio/vídeo son opt-in vía `include_audio_video` (requieren el extra `[av]` + `ffmpeg`) | Los documentos en esos formatos no se convertirían |
+| **OCR de imágenes sueltas** | `use_ocr` gobierna también `InputFormat.IMAGE` (png/jpg/tiff/bmp), no solo PDF | Las imágenes escaneadas saldrían sin texto aunque se pida OCR |
+| **Extracción de imágenes** | `extract_images=True` guarda las imágenes embebidas en `img/<stem>/` junto al `.md` y las referencia, en vez del placeholder `<!-- image -->`. Namespaced por documento: dos documentos en la misma carpeta no comparten imágenes | Las imágenes de dos documentos de la misma carpeta se pisarían |
+| **Descripción de imágenes (RAG)** | `use_picture_description=True` añade `image_descriptions` a los chunks del `.json` (modelo local `smolvlm`), solo para documentos PDF/imagen | En otros formatos no se genera ninguna descripción: quien no mire `picture_description_applied` creería que el RAG tiene descripciones de imágenes que no existen |
+| **`source_path` del `.json`** | Desde 0.12.0, ruta del documento relativa a la carpeta escaneada (`Informes/a.pdf`), sin rutas del servidor; `json_source_path="absolute"` (o `ScanOptions(json_source_path="absolute")`) guarda la ruta completa, como antes | El `.json` revelaría rutas del servidor |
+| **Varias carpetas escaneadas** | La salida replica la ruta relativa a su carpeta. Con varias carpetas, `ScanOptions(root_name_in_output=True)` antepone el nombre de cada una (`2024/x/a.md`) para que no colisionen; sin ella, el escaneo avisa si dos documentos irían al mismo `.md` | Dos documentos de carpetas distintas se sobrescribirían en el mismo `.md` |
+| **Sin red** | `ScanOptions(artifacts_path=..., allow_model_downloads=False)`: Docling lee los modelos de esa carpeta y, si falta alguno, el escaneo para con `ModelsNotAvailableError` en vez de descargarlo | Docling descargaría modelos de Internet en un entorno que lo prohíbe |
 
 ### Límites y Restricciones
 

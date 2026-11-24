@@ -120,4 +120,4 @@ dominio. Ver [Historial del contexto](context.md#historial-del-contexto-150).
 
 ## 5. Ejemplos Relacionados
 
-Pendiente — crear ejemplo en docs/examples/export.md
+- [Exportar un proyecto a ZIP y Excel](../examples/export-project.md): `load_cache_entries`, vista previa y escritura del ZIP de un proyecto con su progreso, y Excel de la caché con `write_cache_xlsx`

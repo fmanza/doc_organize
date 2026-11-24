@@ -13,12 +13,12 @@ Mantener un registro centralizado (`~/.doc_organize/projects.json`) de proyectos
 
 ## 2. Reglas de Negocio
 
-| Regla | Descripción |
-|---|---|
-| **Nombres únicos** | En todo el registro; comprobación case-insensitive |
-| **Registro central** | `~/.doc_organize/projects.json` fuera de proyectos |
-| **Creación atómica** | Temp file + `os.replace()` |
-| **Locking async** | Poco frecuente (crear proyecto es rara) |
+| Regla | Descripción | Impacto si se viola |
+|---|---|---|
+| **Nombres únicos** | En todo el registro; comprobación case-insensitive | Dos proyectos con el mismo nombre (aunque cambien mayúsculas) serían indistinguibles al abrirlos |
+| **Registro central** | `~/.doc_organize/projects.json` fuera de proyectos | No habría un sitio único donde encontrar proyectos ubicados en carpetas distintas |
+| **Creación atómica** | Temp file + `os.replace()` | Un corte a mitad de escritura dañaría `projects.json` y con él todo el registro |
+| **Locking async** | Poco frecuente (crear proyecto es rara) | Dos altas simultáneas podrían perder una de ellas o duplicar un nombre |
 
 ### Límites y Restricciones
 

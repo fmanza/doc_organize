@@ -16,12 +16,12 @@ Detectar y prevenir datos inválidos **antes** de iniciar el escaneo o crear pro
 
 ## 2. Reglas de Negocio
 
-| Regla | Descripción |
-|---|---|
-| **Sin redundancia** | Si `/repo` y `/repo/docs` se seleccionan, solo `/repo` |
-| **Carpetas existentes** | Todas las rutas deben existir como directorios |
-| **Nombres normalizados** | Normalizados a NFC; sin caracteres `<>:"\\/\|?*` ni de control, máximo 100 caracteres, sin espacio al principio o al final y sin terminar en punto |
-| **Nombres únicos** | No duplicar nombres en el registro de proyectos |
+| Regla | Descripción | Impacto si se viola |
+|---|---|---|
+| **Sin redundancia** | Si `/repo` y `/repo/docs` se seleccionan, solo `/repo` | Los documentos de la subcarpeta se procesarían dos veces |
+| **Carpetas existentes** | Todas las rutas deben existir como directorios | El error aparecería a mitad de escaneo en lugar de antes de empezar |
+| **Nombres normalizados** | Normalizados a NFC; sin caracteres `<>:"\\/\|?*` ni de control, máximo 100 caracteres, sin espacio al principio o al final y sin terminar en punto | El nombre no serviría como carpeta en algún sistema, o un mismo nombre con acentos distintos contaría como dos |
+| **Nombres únicos** | No duplicar nombres en el registro de proyectos | Dos proyectos con el mismo nombre serían indistinguibles |
 
 ### Límites y Restricciones
 

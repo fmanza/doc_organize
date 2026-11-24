@@ -86,4 +86,4 @@ porque no depende del catálogo. Si el documento no está en ningún grupo, la d
 
 ## 5. Ejemplos Relacionados
 
-Pendiente — crear ejemplo en docs/examples/versions.md
+- [Ejemplo: Versiones de un documento](../examples/versions.md): qué agrupa `detect_document_versions` y qué no, `versions="current_only"` y `"mark"`, y la vigente decidida por una persona con `set_current_version`

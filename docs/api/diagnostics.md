@@ -104,4 +104,4 @@ como `warning` o `error` en el informe (ver «Comprobaciones»).
 
 ## 5. Ejemplos Relacionados
 
-Pendiente — crear ejemplo en docs/examples/diagnostics.md
+- [Diagnosticar el entorno](../examples/diagnostics-check.md): `check_environment` sin IA y con `check_ai` contra un proxy falso (`ok`, `warning` por `json_schema`, clave rechazada y embeddings)

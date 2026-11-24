@@ -99,4 +99,4 @@ cualquier destino.
 
 ## 5. Ejemplos Relacionados
 
-Pendiente — crear ejemplo en docs/examples/ai_bundle.md
+- [Ejemplo: Paquete para IA](../examples/ai-bundle.md): qué ficheros lleva el ZIP, la ficha y la redacción de un documento, y `render_llms_txt` con enlaces a otro destino
