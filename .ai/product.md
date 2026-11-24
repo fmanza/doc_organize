@@ -18,7 +18,7 @@ vuelve a importar FastAPI/Starlette/uvicorn/Jinja2/`python-multipart` o si reapa
 estructura de carpetas original ni duplicar trabajo entre ejecuciones, y dejarlos organizados y listos para personas
 y asistentes de IA.
 
-**Versión**: 2.2.0 (`pyproject.toml`) | **Python**: ≥3.12 (`requires-python`; classifiers 3.12–3.14) |
+**Versión**: 2.3.0 (`pyproject.toml`) | **Python**: ≥3.12 (`requires-python`; classifiers 3.12–3.14) |
 **API pública (SemVer)**: los nombres de `doc_organize.__all__` (= claves de `_EXPORTS` en
 `src/doc_organize/__init__.py`, importadas bajo demanda, PEP 562); ver `docs/api/publica.md`.
 
@@ -174,6 +174,7 @@ reflejar 2.x).
 - **2.0.1**: corrección de `detect_gpu_status` (exige `torch` con CUDA).
 - **2.1.0**: GitHub Copilot obsoleto; uso y coste de IA en LiteLLM.
 - **2.2.0**: duplicados por contenido y tarea de IA `dedup`.
+- **2.3.0**: API pública completa y tipada; jerarquía de capas comprobada por test.
 
 Detalle: `CHANGELOG.md`.
 
