@@ -6,6 +6,28 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+### Security
+
+- **Claves fuera de `repr()`**: `LiteLLMUsageConfig.virtual_key`, `GitHubCopilotUsageConfig.personal_access_token` y
+  `AiEndpoint.virtual_key` aparecían en `repr()`/`str()` y podían acabar en logs y trazas; ahora se declaran con
+  `repr=False`, como `AiSettings` y `TaskSettings`. `model_dump()` las sigue incluyendo. Un test recorre las clases de
+  `__all__` para que ningún campo de credenciales vuelva a mostrarse.
+
+### Fixed
+
+- **Decisiones huérfanas en la cola de revisión**: `review_queue` solo leía `Context.stale_decisions`; las decisiones de
+  documentos que ya no están (`orphan_decisions`) no aparecían en ningún sitio. Entran como `stale_decision` con el
+  detalle `missing_document` y sin `source_path` (sin motivo nuevo: los consumidores tienen una lista cerrada).
+- **Bloqueo del historial del contexto**: `append_context_build` esperaba como mucho 5 s por el bloqueo, y quien lo tiene
+  puede estar girando muchas copias una a una; en Windows o en una carpeta de red se agotaba (fallo intermitente en el
+  CI). Ahora espera hasta 30 s.
+
+### Documentation
+
+- `dry_run_classify` aplica por defecto las decisiones del proyecto (`decisions=False` si la referencia sale de ellas);
+  `doc_organize.context` exige el extra `[context]` también para `detect_document_versions`; `AgentRun.messages` guarda el
+  texto sin redactar.
+
 ## [2.4.1] - 2026-11-24
 
 Dos correcciones: el progreso final del escaneo llega con sus unidades y el documento que la deduplicación propone

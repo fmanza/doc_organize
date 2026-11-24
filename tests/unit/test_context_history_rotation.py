@@ -235,6 +235,21 @@ def test_concurrent_processes_rotating_lose_no_build(history: Path) -> None:
     assert sorted(record.built_at for record in records) == sorted(f"{w}-{i}" for w in range(writers) for i in range(count))
 
 
+def test_history_waits_longer_than_the_default_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """2.4.2: quien tiene el bloqueo puede estar girando muchas copias; 5 s no bastaban en Windows (CI intermitente)."""
+    real = context_history_module.exclusive_lock
+    timeouts: list[float] = []
+
+    def _spy(path: Path, **kwargs: float):
+        timeouts.append(kwargs.get("timeout", 5.0))
+        return real(path, **kwargs)
+
+    monkeypatch.setattr(context_history_module, "exclusive_lock", _spy)
+    asyncio.run(append_context_build(tmp_path / "CONTEXT_HISTORY.jsonl", _record(0)))
+
+    assert timeouts == [30.0]
+
+
 def test_symlinked_copies_are_neither_listed_nor_read(tmp_path: Path) -> None:
     history = tmp_path / "CONTEXT_HISTORY.jsonl"
     history.write_text("", encoding="utf-8")

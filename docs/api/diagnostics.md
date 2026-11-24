@@ -90,7 +90,7 @@ report = await check_environment(check_ai=True, ai_endpoints=[endpoint, embeddin
 | Clase / función | Responsabilidad |
 |---|---|
 | `check_environment` | Ejecuta las comprobaciones y devuelve un `EnvironmentReport` |
-| `AiEndpoint` | Un modelo de IA a comprobar con `check_ai`: dónde está, con qué clave y qué alias (`kind`: `chat` o `embedding`) |
+| `AiEndpoint` | Un modelo de IA a comprobar con `check_ai`: dónde está, con qué clave y qué alias (`kind`: `chat` o `embedding`). La clave no sale en el informe ni, desde 2.4.2, en su `repr()` |
 | `EnvironmentReport` / `EnvironmentCheck` | El informe (`checks`, `ok`) y cada comprobación (`name`, `status`, `detail`, `remedy`…) |
 
 ## 4. Dependencias y Requisitos

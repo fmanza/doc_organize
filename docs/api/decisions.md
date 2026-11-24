@@ -116,7 +116,7 @@ decisión a esa versión), el eje y el valor afectados, su confianza y una expli
 
 | Prioridad | `reason` | Cuándo |
 |---|---|---|
-| 0 | `stale_decision` | Una decisión no se aplicó (original o catálogo cambiados) |
+| 0 | `stale_decision` | Una decisión no se aplicó: original o catálogo cambiados (`stale_decisions`) o, desde 2.4.2, el documento ya no está (`orphan_decisions`, detalle `missing_document`, sin `source_path`) |
 | 1 | `unclassified` | Sin conversión, o con el eje que organiza en carpeta vacío |
 | 2 | `rules_ai_disagreement` | La IA propuso otro dominio que el que quedó |
 | 3 | `unverified_evidence` | La cita de la IA no aparece en el documento (su confianza quedó bajo el umbral) |

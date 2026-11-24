@@ -70,6 +70,9 @@ parámetros opcionales propios de su fuente sobre la firma común `get_usage()`.
 | `LiteLLMUsageConfig` | `base_url`, `virtual_key` (obligatorios); `timeout_s` (30.0), `retries`, `retry_backoff_s`, `rate_limit_retries`, `max_retry_wait_s` | `ValidationError` de Pydantic al construir |
 | `GitHubCopilotUsageConfig` (obsoleto) | `username`, `personal_access_token` (obligatorios); `timeout_s` (30.0), `retries`, `retry_backoff_s`, `rate_limit_retries`, `max_retry_wait_s` | `ValidationError` de Pydantic al construir |
 
+**Credenciales (2.4.2)**: `virtual_key` y `personal_access_token` no aparecen en `repr()` ni en `str()` (antes sí, y
+acababan en logs y trazas), como en `AiSettings`. `model_dump()` las sigue incluyendo: no registres su resultado.
+
 **Reintentos (0.14.0, L-3b)**: todas las `*Config` de `doc_organize.ai` tienen `retries` (`int >= 0`, por defecto `0`:
 sin reintentos, como hasta 0.13.0) y `retry_backoff_s` (`float >= 0`, por defecto `0.5`). Solo se reintenta un timeout
 o un error de red/transporte (`httpx.TransportError`), con espera `retry_backoff_s * 2**n` (0.5, 1, 2...). Al agotar

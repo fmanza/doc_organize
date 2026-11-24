@@ -71,7 +71,7 @@ def network_down(request: httpx.Request) -> httpx.Response:
 async def main() -> None:
     url = "https://proxy.invalid"
     config = LiteLLMUsageConfig(base_url=url, virtual_key="sk-equipo-calidad")
-    print(f"¿Clave en el repr de la config? {'sk-' in repr(config)}")  # ¡Sí! No registres la config
+    print(f"¿Clave en el repr de la config? {'sk-' in repr(config)}")  # no (2.4.2); model_dump() sí la lleva
 
     # 1) El gasto de la propia clave: sin `?key=`, la clave no va en la URL
     async with LiteLLMUsageClient(config, transport=httpx.MockTransport(fake_proxy)) as client:
@@ -115,9 +115,10 @@ if __name__ == "__main__":
 
 ## 3. Explicación del Código
 
-1. **La clave sí sale en el `repr` de la config**: a diferencia de `AiSettings`/`TaskSettings` (las de `LlmClient`),
-   `LiteLLMUsageConfig.virtual_key` es un campo normal de Pydantic y aparece en `repr(config)` y en `model_dump()`. No
-   registres ni muestres la config. Lo que el cliente escribe (mensajes de error y logs de reintento) no lleva la clave
+1. **La clave no sale en el `repr` de la config (2.4.2)**: `LiteLLMUsageConfig.virtual_key` se declara con
+   `repr=False`, como en `AiSettings`/`TaskSettings` (las de `LlmClient`); hasta 2.4.1 aparecía en `repr(config)`.
+   `model_dump()` la sigue incluyendo: no registres su resultado. Lo que el cliente escribe (mensajes de error y logs de
+   reintento) tampoco lleva la clave
 2. **Transporte**: `transport` es público para inyectar un transporte de `httpx`; sin él, el cliente habla con
    `base_url` por la red. `async with` cierra el cliente HTTP al salir
 3. **La propia clave**: `get_usage()` sin `key` manda la clave solo en `Authorization` y **no** añade `?key=`: LiteLLM
@@ -140,7 +141,7 @@ if __name__ == "__main__":
 
 ```bash
 $ python ai_usage_example.py 2>/dev/null
-¿Clave en el repr de la config? True
+¿Clave en el repr de la config? False
 source=litellm líneas=1 hoy=True
 sku=calidad quantity=12.3456 unit_type=usd cost_usd=12.3456 product=anthropic
 raw: max_budget=50.0

@@ -106,6 +106,9 @@ print(nuevo.evaluation.to_markdown())
 print(base.context.ai_stats.classification.prompt_tokens, nuevo.context.ai_stats.classification.prompt_tokens)
 ```
 
+- **Decisiones del proyecto**: como `build`, aplica por defecto las decisiones de las personas (`decisions=True`). Si la
+  referencia sale de esas decisiones (`gold_from_decisions`), pasa `decisions=False`: si no, la evaluación compara las
+  decisiones consigo mismas y siempre acierta.
 - Con `gold`, solo clasifica los documentos que están en la referencia (`only_gold=False` para todos): el presupuesto
   (`ai_max_documents`) se gasta en lo que se mide.
 - Por defecto no usa la caché de IA (`ai_cache=False`), para que las dos configuraciones hagan llamadas de verdad.

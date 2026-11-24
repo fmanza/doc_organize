@@ -110,6 +110,18 @@ def test_human_decisions_leave_the_queue() -> None:
     assert review_queue(context) == []
 
 
+def test_orphan_decisions_enter_the_queue_as_stale() -> None:
+    """2.4.2: una decisión de un documento que ya no está (`orphan_decisions`) también se revisa; mismo motivo que una
+    desfasada (la web tiene una lista cerrada de motivos) y el detalle `missing_document`."""
+    orphan = DecisionIssue(decision_id="d1", document_key="ENS/borrado.pdf", reason="missing_document")
+    context = _context({"calidad": []}, orphan_decisions=[orphan])
+
+    [item] = review_queue(context)
+
+    assert (item.reason, item.document_key, item.source_path, item.detail) == ("stale_decision", "ENS/borrado.pdf", None, "missing_document")
+    assert item.priority == REVIEW_PRIORITY["stale_decision"]
+
+
 def test_keys_use_the_given_roots() -> None:
     context = _context({"calidad": [_document("ENS/bajo.pdf", {"domains": [_value("calidad", 0.2)]})]})
 
