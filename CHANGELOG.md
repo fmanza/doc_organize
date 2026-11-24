@@ -6,6 +6,12 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [2.4.2] - 2026-11-24
+
+Seguridad y correcciones: las claves de `LiteLLMUsageConfig`, `GitHubCopilotUsageConfig` y `AiEndpoint` ya no salen en
+`repr()`, la cola de revisión muestra las decisiones de documentos que ya no están y el historial del contexto espera más
+por su bloqueo. Sin cambios de API ni de dependencias.
+
 ### Security
 
 - **Claves fuera de `repr()`**: `LiteLLMUsageConfig.virtual_key`, `GitHubCopilotUsageConfig.personal_access_token` y
