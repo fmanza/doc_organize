@@ -40,6 +40,8 @@ nav = [
     { "Exportación" = "functional/export.md" },
     { "Monitorización de uso IA" = "functional/ai_usage_monitoring.md" },
     { "Organización documental (dominios y contextos)" = "functional/context.md" },
+    { "Revisión y calidad de la clasificación" = "functional/revision_clasificacion.md" },
+    { "Diagnóstico del entorno" = "functional/diagnostics.md" },
   ] },
   { "API" = [
     { "Descripción general" = "api/index.md" },

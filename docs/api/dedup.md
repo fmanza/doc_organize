@@ -7,8 +7,10 @@ API Reference para detección y resolución de duplicados.
 ```mermaid
 classDiagram
     class DeduplicationManager {
-        -logger: Logger
+        +logger: Logger
         +find_duplicates(docs: list[DocumentMetadata], fuzzy_threshold: int | None) list[DuplicateGroup]
+        +move_group(group: DuplicateGroup, duplicates_dir: Path) tuple[int, int, list[str]]
+        +finalize_report(groups, duplicates_dir, exact_moved, version_resolved) DeduplicationReport
         +resolve_duplicates(groups: list[DuplicateGroup], duplicates_dir: Path) DeduplicationReport
     }
     
@@ -18,15 +20,20 @@ classDiagram
         +duplicates: list[DocumentMetadata]
         +reason: DuplicateReason
         +user_choice: DocumentMetadata | None
+        +similarity: float | None
+        +lexical_similarity: float | None
+        +contained: bool
     }
     
     class DeduplicationReport {
-        +timestamp: datetime
+        +timestamp: str
+        +mode: DedupMode
         +total_exact_duplicates: int
         +total_version_conflicts: int
-        +duplicates_folder_path: Path
-        +audit_json_path: Path
+        +duplicates_folder_path: str
+        +audit_json_path: str
         +groups: list[DuplicateGroup]
+        +failed_paths: list[str]
     }
     
     DeduplicationManager --> DuplicateGroup
@@ -70,7 +77,27 @@ class DeduplicationManager:
         conversions: Mapping[str, ConversionResult] | None = None,  # 2.2.0
         conversion_dir: Path | None = None,  # 2.2.0
     ) -> tuple[int, int, list[str]]
+
+    async def finalize_report(
+        self,
+        groups: list[DuplicateGroup],
+        duplicates_dir: Path,
+        exact_moved: int,
+        version_resolved: int,
+        started_at: datetime | None = None,
+        failed_paths: list[str] | None = None,
+        report_dir: Path | None = None,
+        mode: DedupMode = "move",
+    ) -> DeduplicationReport
+
+    @staticmethod
+    def check_duplicates_dir(duplicates_dir: Path) -> None  # InvalidPathError si es o pasa por un enlace
 ```
+
+`resolve_duplicates` es `move_group` (un grupo) en bucle más `finalize_report` (escribe `DEDUP_REPORT.json` y añade
+una línea a `DEDUP_HISTORY.jsonl`); `ScanCommand.deduplicate_streaming` usa las dos primitivas por separado para emitir
+progreso por grupo. `move_group` devuelve `(duplicados_exactos, otros_resueltos, rutas_fallidas)`: los grupos de
+nombre parecido y por contenido cuentan en el segundo valor.
 
 Con `io_retries > 0` (1.1.0, G11) cada copia de `mode="copy"` se reintenta ante un `OSError` transitorio; una copia a
 medias no se queda en `duplicados/`. Mover no se reintenta: un movimiento a medias entre volúmenes podría dejar el
@@ -120,6 +147,8 @@ Mueve documentos descartados a carpeta de duplicados.
 | `started_at` | `datetime \| None` | Inicio de la operación, para `duration_seconds` del informe |
 | `report_dir` | `Path \| None` | Carpeta de `DEDUP_REPORT.json`/`DEDUP_HISTORY.jsonl` (por defecto, `duplicates_dir`) |
 | `mode` | `"move" \| "copy" \| "report_only"` | Mover (por defecto), copiar sin tocar el origen o solo contar |
+| `conversions` | `Mapping[str, ConversionResult] \| None` | 2.2.0. Conversión de cada original por `full_path`: en modo `move`, el `.md`, el `.json` y las imágenes del descartado se mueven con él a `duplicados/Conversión/`; en `copy` y `report_only` no se tocan |
+| `conversion_dir` | `Path \| None` | 2.2.0. Carpeta de conversión cuya ruta relativa se replica bajo `duplicados/Conversión/` |
 | `relative_to` | `Path \| None` | Si se indica, se replica la ruta **relativa** a esta carpeta (`duplicados/2024/a.pdf`) en lugar de la absoluta (`duplicados/mnt/origen/2024/a.pdf`); un documento que no cuelgue de ella queda en `failed_paths` (desde 0.12.1) |
 
 | Retorno | Tipo | Descripción |
@@ -136,7 +165,7 @@ Mueve documentos descartados a carpeta de duplicados.
 
 **Excepciones**:
 - `InvalidPathError` — `duplicates_dir` es (o pasa por) un enlace simbólico (desde 0.12.1)
-- `ProjectError` — Errores críticos durante movimiento
+- Un fallo de E/S al mover un fichero no se lanza: la ruta va a `failed_paths` y el lote sigue
 
 ---
 
@@ -147,13 +176,12 @@ Mueve documentos descartados a carpeta de duplicados.
 | Parámetro | Validación | Impacto si falla |
 |---|---|---|
 | Documento con SHA-256 | Validación previa (Scanner) | Documento no se agrupa |
-| Carpeta existe | Validación en `resolve_duplicates()` | Error |
+| Carpeta de duplicados sin enlaces | `check_duplicates_dir()` en `resolve_duplicates()` (se crea si no existe, salvo `report_only`) | `InvalidPathError` |
 
 ### Salida
 
 ```python
-@dataclass
-class DuplicateGroup:
+class DuplicateGroup(BaseModel):  # doc_organize.core.models
     group_id: str
     canonical_doc: DocumentMetadata
     duplicates: list[DocumentMetadata]
@@ -163,14 +191,17 @@ class DuplicateGroup:
     lexical_similarity: float | None = None  # 2.2.0
     contained: bool = False  # 2.2.0
 
-@dataclass
-class DeduplicationReport:
-    timestamp: datetime
+class DeduplicationReport(BaseModel):  # doc_organize.core.models
+    timestamp: str                      # ISO 8601
+    mode: DedupMode = "move"            # "move" | "copy" | "report_only"
     total_exact_duplicates: int
     total_version_conflicts: int
-    duplicates_folder_path: Path
-    audit_json_path: Path
-    groups: list[DuplicateGroup]
+    duplicates_folder_path: str
+    audit_json_path: str
+    groups: list[DuplicateGroup] = []
+    started_at: str | None = None
+    duration_seconds: float | None = None
+    failed_paths: list[str] = []
 ```
 
 ## Dependencias
@@ -179,7 +210,7 @@ class DeduplicationReport:
 |---|---|
 | `core.constants.VERSION_SUFFIX_PATTERN` | Detecta sufijos de versión |
 | `core.models.DuplicateGroup`, `DeduplicationReport` | Modelos |
-| `core.exceptions.ProjectError` | Excepciones |
+| `core.exceptions.InvalidPathError` | `duplicates_dir` enlazado |
 | `utils.path_utils.ensure_no_symlinks()` | Rutas absolutas sin resolver ni seguir enlaces |
 | `utils.logging` | Logging |
 | `rapidfuzz.process.cdist`, `rapidfuzz.fuzz.WRatio`, `rapidfuzz.utils.default_process` | Matriz de scores de similitud de nombre (3ª pasada, vectorizado, con normalización previa) |
@@ -220,3 +251,4 @@ class DeduplicationReport:
 ## Ejemplos Relacionados
 
 - [Deduplicar documentos](../examples/dedup-resolve.md)
+- [Duplicados por contenido (2.2.0)](../examples/dedup-resolve.md#duplicados-por-contenido-220): ejemplo reproducible sin IA real

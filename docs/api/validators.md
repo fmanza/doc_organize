@@ -7,46 +7,57 @@ API Reference para validación de carpetas y nombres de proyecto.
 ```mermaid
 classDiagram
     class FolderValidator {
-        -logger: Logger
+        +logger: Logger
         +validate_folder_set(paths: list[str]) ValidationResult
     }
-    
+
     class ProjectValidator {
-        -logger: Logger
-        +validate_name(name: str) ValidationResult
-        +validate_and_normalize(name: str) str
+        +logger: Logger
+        +validate_name(name: str) ProjectNameValidation
     }
-    
+
     class ValidationResult {
         +is_valid: bool
         +warnings: list[str]
         +clean_paths: list[str]
     }
-    
+
+    class ProjectNameValidation {
+        +is_valid: bool
+        +warnings: list[str]
+        +normalized_name: str | None
+    }
+
     FolderValidator --> ValidationResult
-    ProjectValidator --> ValidationResult
+    ProjectValidator --> ProjectNameValidation
 ```
 
 ## API Pública
+
+Los dos validadores son síncronos (no leen contenido de ficheros) y están en `doc_organize.__all__`. Sus modelos de
+resultado (`ValidationResult`, `ProjectNameValidation`) viven en `doc_organize.core.models` y no se exportan en la raíz.
 
 ### FolderValidator
 
 ```python
 class FolderValidator:
+    def __init__(self) -> None
     def validate_folder_set(self, paths: list[str]) -> ValidationResult
 ```
 
-Valida un conjunto de carpetas y detecta redundancia.
+Valida un conjunto de carpetas y descarta las que son subcarpeta de otra.
 
 | Parámetro | Tipo | Descripción |
 |---|---|---|
-| `paths` | `list[str]` | Rutas absolutas o relativas a validar |
+| `paths` | `list[str]` | Rutas absolutas o relativas a validar (se expanden con `~` y se resuelven) |
 
-| Retorno | Tipo | Descripción |
+| Campo del retorno | Tipo | Descripción |
 |---|---|---|
-| `is_valid` | `bool` | `True` si todas las carpetas son válidas |
-| `warnings` | `list[str]` | Mensajes de redundancias detectadas |
-| `clean_paths` | `list[str]` | Rutas resueltas, sin subcarpetas |
+| `is_valid` | `bool` | `True` si todas existen y son carpetas; `False` solo si `paths` está vacía |
+| `warnings` | `list[str]` | Una línea por cada carpeta omitida por redundante |
+| `clean_paths` | `list[str]` | Rutas resueltas, sin las subcarpetas de otras de la lista |
+
+Con `paths` vacía devuelve `is_valid=False`, el aviso `"No se proporcionaron carpetas."` y `clean_paths=[]` (no lanza).
 
 **Excepciones**:
 - `InvalidPathError` — Si alguna ruta no existe o no es directorio
@@ -57,24 +68,23 @@ Valida un conjunto de carpetas y detecta redundancia.
 
 ```python
 class ProjectValidator:
-    def validate_name(self, name: str) -> ValidationResult
-    def validate_and_normalize(self, name: str) -> str
+    def __init__(self) -> None
+    def validate_name(self, name: str) -> ProjectNameValidation
 ```
 
-Valida y normaliza nombres de proyecto.
+Valida un nombre de proyecto: lo normaliza a NFC y devuelve el resultado. **No lanza excepciones**: un nombre no
+válido devuelve `is_valid=False` con el motivo en `warnings` y `normalized_name=None`.
 
-| Método | Descripción |
+#### Reglas del nombre
+
+| Regla | Motivo de rechazo |
 |---|---|
-| `validate_name(name: str) -> ValidationResult` | Comprueba si nombre es válido |
-| `validate_and_normalize(name: str) -> str` | Valida, normaliza (NFC) y retorna |
-
-**Restricciones de nombre**:
-- Max 255 caracteres
-- Sin caracteres `<>:"\\/\|?*`
-- No nombres reservados de Windows (CON, PRN, LPT1, etc.)
-
-**Excepciones**:
-- `InvalidNameError` — Si nombre incumple restricciones
+| No vacío tras `strip()` | `El nombre no puede estar vacío.` |
+| Sin espacios al principio ni al final | `El nombre no puede empezar ni terminar en espacio.` |
+| Máximo 100 caracteres (`PROJECT_NAME_MAX_LENGTH`) | `El nombre no puede superar los 100 caracteres.` |
+| No termina en punto ni es solo puntos | Mensaje específico de cada caso |
+| Sin `< > : " / \ \| ? *` ni caracteres de control | `El nombre contiene caracteres no permitidos…` |
+| No es un nombre reservado de Windows | `CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9` (con o sin extensión) |
 
 ## Contratos
 
@@ -84,16 +94,20 @@ Valida y normaliza nombres de proyecto.
 |---|---|---|
 | Ruta debe existir | Comprobación OS | `InvalidPathError` |
 | Ruta debe ser directorio | Comprobación OS | `InvalidPathError` |
-| Nombre no vacío | Comprobación de length | `InvalidNameError` |
+| Nombre de proyecto | Reglas de `ProjectValidator` | `is_valid=False` y motivo en `warnings` |
 
 ### Salida
 
 ```python
-@dataclass
-class ValidationResult:
+class ValidationResult(BaseModel):  # doc_organize.core.models
     is_valid: bool
-    warnings: list[str] = field(default_factory=list)
-    clean_paths: list[str] = field(default_factory=list)
+    warnings: list[str] = []
+    clean_paths: list[str]
+
+class ProjectNameValidation(BaseModel):  # doc_organize.core.models
+    is_valid: bool
+    warnings: list[str] = []
+    normalized_name: str | None = None  # NFC y sin espacios, solo si is_valid
 ```
 
 ## Dependencias
@@ -101,7 +115,8 @@ class ValidationResult:
 | Dependencia | Propósito |
 |---|---|
 | `pathlib.Path` | Manipulación de rutas (estándar) |
-| `doc_organize.core.exceptions` | Excepciones personalizadas |
+| `doc_organize.core.exceptions` | `InvalidPathError` (`FolderValidator`) |
+| `doc_organize.core.constants` | Longitud máxima, caracteres prohibidos y nombres reservados (`ProjectValidator`) |
 | `doc_organize.utils.path_utils.is_subpath()` | Detección de subcarpetas |
 | `doc_organize.utils.logging` | Logging |
 

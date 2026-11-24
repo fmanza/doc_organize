@@ -7,7 +7,7 @@ Variables de 2.0 (todas con el prefijo `DOC_ORGANIZE_LITELLM_`):
 |---|---|
 | `BASE_URL` | URL del LiteLLM Proxy (la misma que ya usaba `LiteLLMUsageClient`) |
 | `VIRTUAL_KEY` | Clave general |
-| `MODEL_<TAREA>` | Modelo de cada tarea (`CLASSIFY`, `ENRICH`, `TAXONOMY_DESIGN`, `AGENT`, `EMBED`); si falta, el alias recomendado `doc-organize-<tarea>` |
+| `MODEL_<TAREA>` | Modelo de cada tarea (`CLASSIFY`, `ENRICH`, `TAXONOMY_DESIGN`, `AGENT`, `EMBED`, `DEDUP`); si falta, el alias recomendado `doc-organize-<tarea>`. `DEDUP` (2.2.0) solo se activa con su modelo o su clave propios |
 | `VIRTUAL_KEY_<TAREA>` | Clave propia de una tarea (opcional, D12) |
 
 Las variables de 1.x (`DOC_ORGANIZE_LITELLM_<CLIENTE>_BASE_URL`, `_VIRTUAL_KEY`, `_MODEL` de clasificación, clasificación

@@ -258,7 +258,10 @@ class LlmClient:
         """Como `embed`, con el modelo pedido y el que dice la respuesta que contestó (2.2.0, para probar un modelo).
 
         Raises:
-            Como `embed`.
+            ValueError: `task` no es de embeddings.
+            AiAuthError: Como en `embed`.
+            AiConnectionError: Como en `embed`.
+            AiResponseError: Como en `embed`.
         """
         if task not in EMBEDDING_TASKS:
             raise ValueError(f"'{task}' no es una tarea de embeddings")

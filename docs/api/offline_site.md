@@ -83,8 +83,9 @@ polyfill de `ResizeObserver` para navegadores antiguos, y Mermaid si no estuvier
 
 ## Empaquetar el sitio para entregarlo
 
-`write_site_zip(destination, site_dir, *, project_name=)` empaqueta un sitio que pasa `check_site_offline` (si no,
-lanza `OfflineSiteError` con los problemas y no escribe nada):
+`write_site_zip(destination, site_dir, *, project_name="", on_progress=None, cancel_token=None) -> SiteZipResult`
+empaqueta un sitio que pasa `check_site_offline` (si no, lanza `OfflineSiteError` con los problemas y no escribe nada;
+`InvalidPathError` si `destination` está dentro de `site_dir`, `FileNotFoundError` si `site_dir` no existe):
 
 ```python
 import asyncio

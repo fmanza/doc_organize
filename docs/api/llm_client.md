@@ -16,17 +16,18 @@ async with LlmClient(settings) as client:
 ## Configuración
 
 `AiSettings`: un LiteLLM Proxy, una clave general y un modelo (y si se quiere una clave propia, D12) por **tarea**:
-`classify`, `enrich`, `taxonomy_design`, `agent`, `embed`. Una tarea sin configurar usa el alias recomendado
-`doc-organize-<tarea>`; los alias se recomiendan pero no se exigen. Cada respuesta tiene un tope de tokens
+`classify`, `enrich`, `taxonomy_design`, `agent`, `embed` y `dedup` (2.2.0, duplicados por contenido; `embed` y `dedup`
+son tareas de embeddings, `EMBEDDING_TASKS`). Una tarea sin configurar usa el alias recomendado `doc-organize-<tarea>`
+(con guiones: `doc-organize-taxonomy-design`); los alias se recomiendan pero no se exigen. Cada respuesta tiene un tope de tokens
 (`TaskSettings.max_tokens`; por defecto `DEFAULT_MAX_TOKENS`: 1024 en `classify`, 512 en `enrich`, 4096 en
-`taxonomy_design`) que corta las respuestas que se desbocan; una respuesta cortada no pasa la validación y cuenta como
+`taxonomy_design` y en `agent`) que corta las respuestas que se desbocan; una respuesta cortada no pasa la validación y cuenta como
 fallo.
 
 | Variable de entorno | Para qué |
 |---|---|
 | `DOC_ORGANIZE_LITELLM_BASE_URL` | URL del proxy |
 | `DOC_ORGANIZE_LITELLM_VIRTUAL_KEY` | Clave general |
-| `DOC_ORGANIZE_LITELLM_MODEL_<TAREA>` | Modelo de la tarea (`CLASSIFY`, `ENRICH`, `TAXONOMY_DESIGN`, `AGENT`, `EMBED`) |
+| `DOC_ORGANIZE_LITELLM_MODEL_<TAREA>` | Modelo de la tarea (`CLASSIFY`, `ENRICH`, `TAXONOMY_DESIGN`, `AGENT`, `EMBED`, `DEDUP`) |
 | `DOC_ORGANIZE_LITELLM_VIRTUAL_KEY_<TAREA>` | Clave propia de la tarea (opcional) |
 
 Las variables de 1.x (`DOC_ORGANIZE_LITELLM_CLASSIFICATION_*`, `_TAXONOMY_CLASSIFICATION_*`, `_ENRICHMENT_*`,
@@ -46,8 +47,9 @@ desactivada en silencio.
 - Errores: `AiAuthError` (clave rechazada), `AiConnectionError` (red o timeout), `AiResponseError` (respuesta no válida)
   y `AiError` (cualquier otro).
 
-`complete_with_tools` (una vuelta de conversación con herramientas, para los agentes) y `embed` (embeddings) siguen las
-mismas reglas.
+`complete_with_tools` (una vuelta de conversación con herramientas, para los agentes) y `embed(texts, *, task="embed")`
+(embeddings; `task="dedup"` para los duplicados por contenido, cualquier otra tarea lanza `ValueError`) siguen las
+mismas reglas. `embed_detailed` (2.2.0) devuelve además el modelo pedido y el que contestó (`EmbeddingResult`).
 
 ## Servicios por tarea
 
@@ -57,8 +59,8 @@ mismas reglas.
 | `enrich_document(llm, prompts, *, title, content, profile="")` | `enrich` | `DocumentEnrichmentResult` (descripción y hasta 8 palabras clave, limpias), a partir del extracto (hasta `MAX_CONTENT_CHARS`) entre delimitadores |
 | `draft_taxonomy(llm, prompts, documents)` | `taxonomy_design` | `TaxonomyManifestDraftResult` sin slugs repetidos, con descripciones y un perfil inicial (`profile`: contexto, reglas de desempate y glosario); `.to_manifest()` y `render_taxonomy_manifest_markdown` para revisarlo (el perfil va en las secciones del cuerpo) |
 
-Todos devuelven `LlmResult` (`value`, `model`, `response_format`, `usage`, `redacted`) y aceptan `on_redacted` para
-anotar lo redactado por documento. `ContextBuilder.build(llm=..., ai_scope="unclassified", enrich=True)` los usa por
+Todos devuelven `LlmResult` (`value`, `model`, `response_format`, `usage`, `redacted`, `cached`, `served_model`);
+`classify_document` y `enrich_document` aceptan además `on_redacted` para anotar lo redactado por documento. `ContextBuilder.build(llm=..., ai_scope="unclassified", enrich=True)` los usa por
 dentro. La clasificación envía el catálogo con nombres y descripciones, el perfil del proyecto y el extracto (ver
 abajo); el enriquecimiento, el perfil y un extracto más corto (4000 caracteres, como en 1.x).
 

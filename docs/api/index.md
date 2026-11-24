@@ -7,11 +7,12 @@ convención completa):
 - **Nivel 1 — Fundacional** (`core/`, `utils/`): sin dependencias del resto del
   paquete. Modelos, excepciones, constantes, hashing, validación de rutas.
 - **Nivel 2 — Servicios independientes** (`validators/`, `scanner/`, `converter/`,
-  `dedup/`, `cache/`, `projects/`): cada uno resuelve una responsabilidad
-  del dominio sin depender de los otros módulos de su mismo nivel. Solo dependen
-  de Nivel 1.
-- **Nivel 3 — Orquestación** (`scan/`, `export/`, `main.py`): coordinan los servicios
-  de Nivel 2 sin cambiar sus contratos. `scan/` y `export/` (ZIP y Excel de un proyecto, ver
+  `dedup/`, `cache/`, `projects/`, `ai/`): cada uno resuelve una responsabilidad
+  del dominio sin depender, en principio, de los otros módulos de su mismo nivel. `ai/` es el cliente único
+  de IA desde 2.0.0 (ver [Cliente único de IA](llm_client.md)).
+- **Nivel 3 — Orquestación** (`scan/`, `context/`, `export/`, `main.py`): coordinan los servicios
+  de Nivel 2 sin cambiar sus contratos. `scan/`, `context/` (contexto, taxonomía y sitio, ver
+  [Organización documental](context.md)) y `export/` (ZIP y Excel de un proyecto, ver
   [Exportación](export.md)) los comparten el CLI y doc_organize_web.
 
 Desde 1.0.0 la librería no incluye interfaz web ni autenticación (L-11): las da
@@ -25,7 +26,8 @@ graph TB
     subgraph L3["Nivel 3 — Orquestación"]
         CLI["main.py (CLI)"]
         ScanCmd["scan/ScanCommand"]
-        Export["export/ (ZIP y Excel)"]
+        Ctx["context/ (contexto y sitio)"]
+        Export["export/ (ZIP, Excel y paquete IA)"]
     end
 
     subgraph L2["Nivel 2 — Servicios independientes"]
@@ -35,6 +37,7 @@ graph TB
         Dedup["dedup/DeduplicationManager"]
         Cache["cache/CacheManager"]
         Projects["projects/ProjectRegistry"]
+        AI["ai/LlmClient"]
     end
 
     subgraph L1["Nivel 1 — Fundacional"]
@@ -47,6 +50,8 @@ graph TB
     Export --> Cache
     Export --> Projects
     CLI --> Projects
+    Ctx --> AI
+    Export --> Ctx
 
     ScanCmd --> Validators
     ScanCmd --> Scanner

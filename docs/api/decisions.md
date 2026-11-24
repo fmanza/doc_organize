@@ -46,6 +46,7 @@ Una decisión que no se puede aplicar no rompe la construcción: queda en el con
 | `stale_decisions` | `source_changed` | El original cambió desde la decisión (`source_sha256` distinto; sin huella, vale para cualquier versión) |
 | `stale_decisions` | `unknown_axis` / `unknown_value` | El eje o el valor ya no están en el catálogo, o un eje que organiza no tiene exactamente un valor |
 | `stale_decisions` | `no_manifest` | Construcción sin manifiesto |
+| `stale_decisions` | `not_versioned` | Un `set_current_version` sobre un documento que no está en ningún grupo de [versiones](versions.md) |
 | `orphan_decisions` | `missing_document` | El documento no está en la construcción (o no tiene conversión y la decisión no es `exclude`) |
 
 `Context.decisions_applied` cuenta las aplicadas y `Context.excluded_documents` lista los originales excluidos.
@@ -56,7 +57,7 @@ Una decisión que no se puede aplicar no rompe la construcción: queda en el con
 escritura atómica y bloqueo entre procesos. Una decisión nueva sustituye a las que decidían lo mismo, que pasan al
 historial (`revoked()`, con `revoke_reason="replaced"`). Un `confirm` o un `exclude` sustituyen todo lo del documento;
 un `set_axis`, lo del mismo eje y un `exclude`. Un `confirm` anterior se conserva y el `set_axis` gana en su eje.
-`revoke(id, author=, reason=)` retira una decisión.
+`revoke(decision_id, *, author=None, reason=None) -> bool` retira una decisión.
 
 ## Referencia a partir de decisiones
 
@@ -65,7 +66,7 @@ un `set_axis`, lo del mismo eje y un `exclude`. Un `confirm` anterior se conserv
 
 ## Cola de revisión
 
-`review_queue(context, *, roots=None)` dice qué documentos debería mirar una persona y por qué, sin cambiar nada. Cada
+`review_queue(context, *, roots=None, proposals=()) -> list[ReviewItem]` dice qué documentos debería mirar una persona y por qué, sin cambiar nada. Cada
 `ReviewItem` trae la clave del documento (la de las decisiones), la huella del original (`source_sha256`, para atar la
 decisión a esa versión), el eje y el valor afectados, su confianza y una explicación, ordenado por prioridad:
 

@@ -31,6 +31,9 @@ Las rutas de `documentos/` son las de la carpeta reorganizada (`resolve_organize
 | `include_text` | `True` | Con `False`, solo las fichas |
 | `max_file_chars` | `None` | Tope de caracteres del texto de cada documento (se avisa del corte) |
 | `max_full_chars` | `None` | Con un valor, añade `llms-full.txt` hasta ese tope |
+| `roots` | `None` | Raíces de escaneo para las rutas relativas de los originales (`source`); por defecto, la carpeta común |
+| `on_progress` | `None` | Recibe `ProgressEvent(operation="export")`, como `write_project_zip` |
+| `cancel_token` | `None` | Si se cancela, para entre dos documentos (`OperationCancelledError`; si el destino es una ruta, el fichero parcial se borra) |
 
 El ZIP es reproducible (mismo contexto y textos → mismo SHA-256) y se escribe en *streaming*, con progreso y
 cancelación como `write_project_zip`.

@@ -11,8 +11,12 @@ Disponible como biblioteca (`doc_organize.export`) y como subcomando del CLI (`d
 | ZIP | `Conversión/` completa (Markdown, JSON e imágenes), `cache_export.json` (todas las entradas de caché con su estado: nuevas, modificadas, sin cambios) y `duplicados/DEDUP_REPORT.json` si existe | Ninguno |
 | Excel de caché | Hoja `Cache`: archivo, carpeta, ruta, hash SHA-256 completo, estado, conversión y última actualización (UTC), ordenado por ruta | Extra `export` |
 | Excel de errores | Hoja `Estado actual` (documentos cuya última conversión falló y si alcanzaron el límite de reintentos) y hoja `Histórico` (un error por fila, agrupado por ejecución de escaneo) | Extra `export` |
+| Excel de documentos del contexto (2.0.0, solo biblioteca: `write_context_documents_xlsx`) | Hojas `Documentos` (cada documento con sus ejes y, si se agrupan versiones, su grupo, versión y si es la vigente), `Ejes` (documentos por valor del catálogo) y `Valores` (quién asignó cada valor, su confianza y su cita). Con `roots`, rutas relativas a la raíz de escaneo, sin rutas absolutas | Extra `export` |
+| Paquete para IA (2.0.0, solo biblioteca: `write_ai_context_bundle`) | ZIP para subir a un chat o agente: `llms.txt`, un `.md` por documento con front matter, `context.json` reducido sin rutas absolutas y, con tope, `llms-full.txt`. Credenciales redactadas y solo versiones vigentes por defecto; reproducible | Contexto construido |
 
 El ZIP no incluye logs ni la caché SQLite: es lo que el usuario consulta, no el estado interno.
+
+El ZIP del sitio sin conexión (`write_site_zip`) se describe en [Organización documental](context.md#seguridad-del-sitio).
 
 ## Flujo
 

@@ -1,12 +1,15 @@
 # ⚙️ Runtime & Environment — doc_organize
 
-> Reemplaza una versión anterior ("Python ≥3.12", "Docker Compose para tests con BD reales") de la
-> encarnación previa de este repositorio (una librería de motores de base de datos).
+> Reemplaza una versión anterior ("Docker Compose para tests con BD reales") de la encarnación previa de este
+> repositorio (una librería de motores de base de datos). Revisado contra `pyproject.toml`, `pytest.ini`,
+> `.github/workflows/` y `src/` de 2.2.0.
 
 ## Requisitos
 
-- Python **≥3.11** (`pyproject.toml`: `requires-python`; classifiers declaran 3.11–3.14)
-- Sin Docker ni servicios externos: los tests no dependen de bases de datos reales.
+- Python **≥3.12** (`pyproject.toml`: `requires-python`; classifiers declaran 3.12–3.14)
+- Sin Docker ni servicios externos para los tests: no dependen de bases de datos reales ni de un LiteLLM Proxy.
+- La IA (opcional) necesita un **LiteLLM Proxy** accesible; ver `docs/guides/litellm_proxy_setup.md` y
+  `deploy/litellm/`.
 
 ## Setup de desarrollo
 
@@ -17,18 +20,23 @@ python -m venv .venv
 source .venv/bin/activate        # Linux/macOS
 # .venv\Scripts\activate          # Windows
 
-pip install -e ".[dev,web,docs]"
+pip install -e ".[dev,docs]"     # CI de tests instala solo ".[dev]"
 ```
 
-- `dev`: pytest, ruff, mypy y el resto de herramientas de calidad.
-- `web`: FastAPI/Uvicorn/Jinja2 + `cryptography` (Fernet, cifrado de credenciales de IA en
-  `/admin/configuracion-ia`) — necesario para correr `tests/unit/test_web_*.py`.
-- `docs`: zensical + mkdocstrings-python — necesario para `zensical build` (desde 0.10.0, L-13b).
-- `ai`: `httpx` — clientes de IA (`ai/`, LiteLLM Proxy/GitHub Copilot Pro).
-- `context`: `pyyaml` — front matter de `taxonomy_manifest.md` y plantillas compartidas (`context/`).
+Extras declarados en `pyproject.toml`:
 
-El núcleo (`pip install doc_organize` sin extras) **no** instala `fastapi`/`uvicorn`/`jinja2` —
-verificado, es una condición de seguridad/tamaño explícita (`§11` del PLAN).
+- `dev`: build, pytest (+cov, asyncio), httpx, ruff (`<0.18`), mypy y stubs, openpyxl, black, matplotlib (fixtures
+  de PDF).
+- `docs`: zensical + mkdocstrings-python — para `zensical build` de la documentación del proyecto.
+- `ai`: `httpx` — `LlmClient` y clientes de uso (`ai/`).
+- `context`: `pyyaml` — front matter de `taxonomy_manifest.md` y plantillas (`context/`).
+- `export`: `openpyxl` — Excel de `doc_organize.export`.
+- `site`: `zensical` — sitio del contexto de un proyecto (`SiteGenerator`).
+- `ocr-gpu`: torch, torchvision, opencv-python, easyocr.
+- `av`: `docling[asr]` — audio y vídeo.
+
+No existe el extra `web` desde 1.0.0: el núcleo nunca instala `fastapi`/`uvicorn`/`jinja2`/`cryptography`
+(`tests/unit/test_library_architecture.py`).
 
 ## Comandos habituales
 
@@ -36,11 +44,12 @@ verificado, es una condición de seguridad/tamaño explícita (`§11` del PLAN).
 python -m ruff check src tests       # lint
 python -m ruff format src tests      # formato
 python -m mypy src                   # type-check
-python -m pytest                     # todos los tests
-python -m pytest -k "not slow"       # sin los tests de integración con Docling real (más lentos)
-python -m pytest --cov=src           # con cobertura
+python -m pytest                     # todos los tests (cobertura activada en pytest.ini)
+python -m pytest -m "not slow"       # sin los tests con Docling real (más lentos), como CI
+python -m pytest --doctest-modules src --no-cov -q   # doctests, como CI
+python -m build                      # paquete
 zensical serve                       # documentación local (http://127.0.0.1:8000)
-zensical build --strict              # sitio estático en ./site — comando de validación real de CI
+zensical build --strict              # sitio estático en ./site — validación de CI
 ```
 
 ## CLI de la aplicación (no confundir con los comandos de desarrollo de arriba)
@@ -48,31 +57,40 @@ zensical build --strict              # sitio estático en ./site — comando de 
 ```bash
 python -m doc_organize project create "Mi Proyecto" --location /ruta/a/workspaces
 python -m doc_organize project list
-python -m doc_organize scan --project "Mi Proyecto" --paths /ruta/a/documentos [--use-ocr] [--use-gpu]  # ya no deduplica
-python -m doc_organize deduplicate --project "Mi Proyecto" --paths /ruta/a/documentos  # accion aparte, a peticion del usuario
-python -m doc_organize web [--host 0.0.0.0] [--port 8000]
-# El tenant "default" y su usuario admin/admin se crean de fábrica al abrir auth.db por primera
-# vez (rediseño Tenant/Role/User, 2026-09-11) -- no hace falta lo de abajo para arrancar en
-# no-loopback, salvo que quieras un tenant propio en vez del de fábrica:
-python -m doc_organize tenant create "Mi Organización"
-python -m doc_organize user create alice --tenant mi-organizacion   # contraseña vía prompt interactivo
-python -m doc_organize user set-instance-admin alice --tenant mi-organizacion  # is_instance_admin
+python -m doc_organize scan --project "Mi Proyecto" --paths /ruta/a/documentos [--use-ocr] [--use-gpu] [--force]  # no deduplica
+python -m doc_organize deduplicate --project "Mi Proyecto" --paths /ruta/a/documentos  # acción aparte, a petición del usuario
+python -m doc_organize export zip --project "Mi Proyecto" -o proyecto.zip   # o --preview
+python -m doc_organize export cache-xlsx --project "Mi Proyecto" -o cache.xlsx
+python -m doc_organize export errors-xlsx --project "Mi Proyecto" -o errores.xlsx
+python -m doc_organize export context-xlsx --project "Mi Proyecto" -o contexto.xlsx
 ```
+
+`project` y `scan`/`deduplicate` aceptan `--registry-path` para usar otro `projects.json`. Los subcomandos `web`,
+`tenant` y `user` se retiraron en 1.0.0 (la web es doc_organize_web).
 
 ## CI real (`.github/workflows/`)
 
-- `tests.yml`: matriz `os: [ubuntu-latest, windows-latest]` × `python-version: [3.11, 3.12,
-  3.13, 3.14]` — `ruff check`, `mypy src`, `pytest --cov`.
-- `docs.yml`: `pip install -e ".[docs]"` + `zensical build --strict` (desde 0.10.0; ver `.ai/DECISIONS_LOG.md`
-  revisión 17, que sustituye a la 12).
+- `tests.yml`: matriz `os: [ubuntu-latest, windows-latest]` × `python-version: ["3.12", "3.13", "3.14"]` —
+  `pip install -e ".[dev]"`, `ruff check src/ tests/`, `mypy src`, doctests de `src`,
+  `pytest tests/ -m "not slow" --cov`.
+- `docs.yml`: Python 3.12, `pip install -e ".[docs]"` + `zensical build --strict`.
+- Además: `release.yml`, `docs-zip-release.yml` y `doc_agents.yml` (agentes de documentación).
 
 ## Variables de entorno
 
-Ninguna es obligatoria para el uso local (loopback). No existe `DOC_ORGANIZE_API_TOKEN` (retirado en
-la revisión 8 — autenticación es multi-usuario, no un token compartido). Para exponer la web fuera
-de loopback, ya no hace falta provisionar nada por CLI de antemano (rediseño Tenant/Role/User,
-2026-09-11): `AuthStore` crea de fábrica el tenant `default` + usuario `admin`/`admin` al primer
-arranque — pero esa cuenta no puede completar el login en modo no-loopback mientras conserve la
-contraseña de fábrica (cámbiala desde loopback primero, ver `docs/functional/access.md`).
-`DOC_ORGANIZE_SECRETS_KEY` (32 bytes en base64 urlsafe) es opcional: sin ella, el panel
-`/admin/configuracion-ia` sigue funcionando en modo "solo campos no-secretos".
+Ninguna es obligatoria para el uso local.
+
+| Variable | Uso |
+|---|---|
+| `DOC_ORGANIZE_LITELLM_BASE_URL` | URL del LiteLLM Proxy; sin ella, `settings_from_env()` devuelve `None` (IA desactivada) |
+| `DOC_ORGANIZE_LITELLM_VIRTUAL_KEY` | Clave general; obligatoria si hay `BASE_URL` |
+| `DOC_ORGANIZE_LITELLM_MODEL_<TAREA>` | Modelo por tarea (`CLASSIFY`, `ENRICH`, `TAXONOMY_DESIGN`, `AGENT`, `EMBED`, `DEDUP`); por defecto el alias `doc-organize-<tarea>` |
+| `DOC_ORGANIZE_LITELLM_VIRTUAL_KEY_<TAREA>` | Clave propia de una tarea (opcional) |
+| `DOC_ORGANIZE_LOG_LEVEL`, `DOC_ORGANIZE_LOG_DIR`, `DOC_ORGANIZE_ENV` | Logging (`utils/logging.py`) |
+| `DOC_ORGANIZE_DATE_FORMAT`, `DOC_ORGANIZE_TIMEZONE` | Formato de fecha mostrado (`utils/date_format.py`) |
+| `DOC_ORGANIZE_GITHUB_USERNAME`, `DOC_ORGANIZE_GITHUB_PAT` | Obsoletas desde 2.1.0 (`GitHubCopilotUsageClient`, se retira en 3.0) |
+
+Las variables de IA de 1.x (`DOC_ORGANIZE_LITELLM_<CLIENTE>_BASE_URL`, `..._ENRICHMENT_MODEL`…) ya no se leen: si
+alguna tiene valor, `settings_from_env()` lanza `AiConfigurationError` con la equivalencia
+(`docs/guides/migracion_2_0.md`). Ya no existen `DOC_ORGANIZE_API_TOKEN` ni `DOC_ORGANIZE_SECRETS_KEY` (eran de la web
+integrada, retirada en 1.0.0).

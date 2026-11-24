@@ -95,7 +95,7 @@ doc_organize (no desde otra terminal/Python que tengas a mano):
 ```
 
 **Causa más común: `torch` CPU-only en el entorno del servidor.**
-`pip install doc_organize[web,ocr-gpu]` (o `pip install torch` a secas) instala
+`pip install doc_organize[ocr-gpu]` (o `pip install torch` a secas) instala
 por defecto el build **CPU-only** de PyTorch — PyPI no publica los builds con
 CUDA bajo el nombre normal del paquete. Es fácil comprobarlo y confundirse
 porque `import torch` funciona igual de bien con o sin CUDA: solo
@@ -154,10 +154,10 @@ soportado por esas librerías, no de la lógica de `doc_organize`.
 
 Soluciones (de entorno, no de código):
 
-1. Crea el entorno virtual con **Python 3.11, 3.12 o 3.13** e instala `[av]`
-   ahí — el resto del proyecto no impone esta restricción, solo este extra.
+1. Crea el entorno virtual con **Python 3.12 o 3.13** (doc_organize exige 3.12+) e
+   instala `[av]` ahí — el resto del proyecto no impone esta restricción, solo este extra.
 2. Si no necesitas transcribir audio/vídeo, no instales `[av]` ni actives
-   `--include-audio-video` (CLI) / el checkbox equivalente (web). El resto de
+   `--include-audio-video` (CLI) / la opción equivalente de doc_organize_web. El resto de
    `doc_organize` (scan, convert, dedup, cache, OCR) funciona sin restricción
    en Python 3.14.
 
@@ -203,12 +203,12 @@ soffice --version
 
 ## Rutas de salida muy largas o error de ruta en Windows
 
-`DocumentConverter` replica la ruta **absoluta completa** del documento de origen
-bajo `Conversión/` (no solo el nombre de archivo). Con carpetas de entrada muy
-anidadas, la ruta de salida resultante puede acercarse al límite clásico de 260
-caracteres de Windows. Es una limitación conocida — evita escanear jerarquías de
-entrada extremadamente profundas hasta que se aborde (ver el PLAN de la Fase 1,
-`§14.2`, para el análisis de una corrección propuesta).
+`DocumentConverter` replica bajo `Conversión/` la jerarquía del documento
+**relativa a la carpeta escaneada** de la que cuelga (`resolve_output_paths`), no
+la ruta absoluta del disco de origen. Aun así, con carpetas de entrada muy
+anidadas o una carpeta de proyecto ya profunda, la ruta de salida puede acercarse
+al límite clásico de 260 caracteres de Windows. Escanea desde la carpeta más
+cercana a los documentos o crea el proyecto en una ruta corta.
 
 ## `zensical build --strict` falla por links rotos
 

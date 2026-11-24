@@ -2,6 +2,10 @@
 
 API Reference del paquete `doc_organize.ai` (extra `ai`, requiere `httpx`).
 
+Desde 2.1.0 el uso y el coste de IA se consultan en **LiteLLM** (`LiteLLMUsageClient`), que enruta todas las tareas de
+IA desde la 2.0. El cliente de GitHub Copilot sigue disponible pero está obsoleto y se retira en 3.0 (ver
+[GitHubCopilotUsageClient](#githubcopilotusageclient)).
+
 ## Arquitectura
 
 ```mermaid
@@ -92,8 +96,8 @@ Context manager async para consultar el spend de un LiteLLM Proxy externo (`GET 
 
 !!! warning "Obsoleto desde 2.1.0"
     `GitHubCopilotUsageClient`, `GitHubCopilotUsageConfig` y `github_copilot_usage_config_from_env()` emiten
-    `DeprecationWarning` y se retiran en 3.0. El uso y el coste de IA se consultan en LiteLLM
-    (`LiteLLMUsageClient`). Ver [Hacia 3.0](../guides/migracion_3_0.md).
+    `DeprecationWarning` y se retiran en 3.0, igual que `UsageSourceName.GITHUB_COPILOT`. El uso y el coste de IA se
+    consultan en LiteLLM (`LiteLLMUsageClient`). Ver [Hacia 3.0](../guides/migracion_3_0.md).
 
 ```python
 class GitHubCopilotUsageClient:
@@ -132,8 +136,8 @@ Context manager async para consultar el consumo de premium requests de Copilot P
 
 | Config | Campos | Impacto si falta |
 |---|---|---|
-| `LiteLLMUsageConfig` | `base_url`, `virtual_key`, `timeout_s`, `retries`, `retry_backoff_s` | `ValidationError` de Pydantic al construir |
-| `GitHubCopilotUsageConfig` | `username`, `personal_access_token`, `timeout_s`, `retries`, `retry_backoff_s` | `ValidationError` de Pydantic al construir |
+| `LiteLLMUsageConfig` | `base_url`, `virtual_key` (obligatorios); `timeout_s` (30.0), `retries`, `retry_backoff_s`, `rate_limit_retries`, `max_retry_wait_s` | `ValidationError` de Pydantic al construir |
+| `GitHubCopilotUsageConfig` (obsoleto) | `username`, `personal_access_token` (obligatorios); `timeout_s` (30.0), `retries`, `retry_backoff_s`, `rate_limit_retries`, `max_retry_wait_s` | `ValidationError` de Pydantic al construir |
 
 **Reintentos (0.14.0, L-3b)**: todas las `*Config` de `doc_organize.ai` tienen `retries` (`int >= 0`, por defecto `0`:
 sin reintentos, como hasta 0.13.0) y `retry_backoff_s` (`float >= 0`, por defecto `0.5`). Solo se reintenta un timeout
@@ -154,7 +158,7 @@ Ninguna config lee variables de entorno en su constructor. Usa las factories:
 from doc_organize.ai import litellm_usage_config_from_env, github_copilot_usage_config_from_env
 
 litellm_config = litellm_usage_config_from_env()          # DOC_ORGANIZE_LITELLM_BASE_URL / _VIRTUAL_KEY
-copilot_config = github_copilot_usage_config_from_env()   # DOC_ORGANIZE_GITHUB_USERNAME / _PAT
+copilot_config = github_copilot_usage_config_from_env()   # DOC_ORGANIZE_GITHUB_USERNAME / _PAT (obsoleto: DeprecationWarning)
 ```
 
 Ambas lanzan `ValueError` si falta alguna variable de entorno.
@@ -171,7 +175,7 @@ class UsageLineItem(BaseModel):
     cost_usd: float | None
 
 class UsageSnapshot(BaseModel):
-    source: UsageSourceName  # "litellm" | "github_copilot"
+    source: UsageSourceName  # "litellm" | "github_copilot" (este último, obsoleto: se retira en 3.0)
     period_start: str
     period_end: str
     items: list[UsageLineItem]

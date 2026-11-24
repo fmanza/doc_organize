@@ -48,11 +48,15 @@ class ScanCommand:
 
 `run` consume `run_streaming` y devuelve el resumen del evento `COMPLETED`. Si el escaneo se cancela, lanza
 `OperationCancelledError`. Los indicadores sueltos (`use_ocr`, `use_gpu`…) y `options` son excluyentes: pasa uno u
-otro.
+otro. Mezclarlos, o no pasar `options` ni `use_ocr` y `use_gpu`, lanza `TypeError`.
 
 `run_streaming` emite `STARTED`, `SCANNED`, un `FILE_STARTED`/`FILE_CONVERTED` por documento y, con OCR,
 `OCR_STARTED` y un `OCR_FILE_STARTED`/`OCR_PROCESSED` por documento. Termina con `COMPLETED` (resumen) o con
 `CANCELLED`.
+
+`deduplicate_streaming` emite `STARTED`, `DUPLICATES_FOUND` (`groups_found`, `warnings`), un
+`GROUP_STARTED`/`GROUP_RESOLVED` por grupo y termina con `COMPLETED` (los campos de `DeduplicationSummary`) o con
+`CANCELLED` (para entre grupos; los ya movidos quedan en `DEDUP_REPORT.json`).
 
 ## ScanOptions
 
@@ -175,24 +179,43 @@ el disco. Con `force`, son las que se han borrado por estar excluidas.
 ```python
 @dataclass
 class ScanSummary:
-    scanned: int
-    new: int
-    modified: int
-    unchanged: int
-    converted: int
-    conversion_errors: int
-    ocr_required: int
-    ocr_processed: int
-    error_retries: int
-    error_retries_capped: int
-    duration_seconds: float
-    discovery_duration_seconds: float
-    total_conversion_seconds: float
+    scanned: int = 0
+    new: int = 0
+    modified: int = 0
+    unchanged: int = 0
+    converted: int = 0
+    conversion_errors: int = 0
+    ocr_required: int = 0
+    ocr_processed: int = 0
+    error_retries: int = 0
+    error_retries_capped: int = 0
+    duration_seconds: float = 0.0
+    discovery_duration_seconds: float = 0.0
+    total_conversion_seconds: float = 0.0
     io_errors: int = 0                # 1.1.0: ficheros que no se pudieron leer (G11)
     remaining: int = 0                # 1.1.0: conversiones pendientes por max_documents (G38)
     stopped_reason: str | None = None # 1.1.0: "max_documents" o None
     excluded_cached: int = 0          # 1.3.0: entradas de la caché bajo exclusiones o patrones (G41)
+
+    def render(self) -> str           # resumen legible, el que imprime el CLI
 ```
 
 El evento `COMPLETED` lleva estos campos en `data` (`dataclasses.asdict`). Los campos nuevos se añaden siempre,
 con sus valores por defecto si no aplican.
+
+## DeduplicationSummary
+
+```python
+@dataclass
+class DeduplicationSummary:
+    groups_found: int = 0
+    moved: int = 0
+    duration_seconds: float = 0.0
+    warnings: list[str] = field(default_factory=list)
+    failed_paths: list[str] = field(default_factory=list)
+
+    def render(self) -> str
+```
+
+Resumen del evento `COMPLETED` de `deduplicate_streaming` (mismos campos que su `data`):
+`DeduplicationSummary(**event.data)`.

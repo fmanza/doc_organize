@@ -51,7 +51,8 @@ tarea en `TaskSettings` ([ajustes por tarea](../api/llm_client.md#ajustes-por-ta
 | `SampledDocument` en `doc_organize.ai.taxonomy_manifest_draft_client` | `doc_organize.ai.SampledDocument` |
 | `ContextBuilder(ai_redact_credentials=)`, `LiteLLMTaxonomyManifestDraftConfig.redact_credentials` | `AiSettings.redact_credentials` (la redacción la hace `LlmClient` con todo lo que sale) |
 
-`LiteLLMUsageClient` y `GitHubCopilotUsageClient` no cambian.
+`LiteLLMUsageClient` y `GitHubCopilotUsageClient` no cambian en 2.0. GitHub Copilot quedó obsoleto en 2.1.0 y se
+retira en 3.0: ver [Hacia 3.0](migracion_3_0.md).
 
 Borrador de taxonomía, antes y ahora:
 

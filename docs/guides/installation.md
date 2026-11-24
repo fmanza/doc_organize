@@ -29,10 +29,27 @@ paquetes de la distro (p.ej. `apt-get install -y libgomp1` en Debian/Ubuntu; ver
 pip install doc_organize[export]
 ```
 
-Añade `openpyxl` para `export cache-xlsx` y `export errors-xlsx` (y las funciones
-`write_cache_xlsx`/`write_scan_errors_xlsx` de `doc_organize.export`). El ZIP
-(`export zip`) no necesita ningún extra. Sin `openpyxl`, el Excel falla con
-`MissingDependencyError` y el mensaje indica qué instalar.
+Añade `openpyxl` para `export cache-xlsx`, `export errors-xlsx` y `export context-xlsx` (y las funciones
+`write_cache_xlsx`/`write_scan_errors_xlsx`/`write_context_documents_xlsx` de `doc_organize.export`, además de
+`load_gold_xlsx` para evaluar contra una referencia). El ZIP (`export zip`) no necesita ningún extra. Sin `openpyxl`,
+el Excel falla con `MissingDependencyError` y el mensaje indica qué instalar.
+
+## Contexto documental, IA y sitio navegable (opcionales)
+
+```bash
+pip install doc_organize[context]   # pyyaml: manifiestos de taxonomía, plantillas y prompts
+pip install doc_organize[ai]        # httpx: LlmClient contra un LiteLLM Proxy
+pip install doc_organize[site]      # zensical: SiteGenerator construye el sitio del contexto
+```
+
+- `context`: lo necesita el contexto documental (`ContextBuilder`, manifiestos y plantillas de taxonomía) y los
+  prompts de la IA.
+- `ai`: el cliente único de IA (`LlmClient`) para clasificar, describir, los agentes y los embeddings, incluida la
+  búsqueda de [duplicados por contenido parecido](duplicados_por_contenido.md). Requiere un LiteLLM Proxy: ver
+  [Desplegar un LiteLLM Proxy](litellm_proxy_setup.md). La IA siempre es opcional; sin ella, el contexto se
+  clasifica por reglas.
+- `site`: `zensical`, que `SiteGenerator` ejecuta para construir el sitio navegable del contexto. Sin él, la
+  construcción del sitio falla con `SiteBuildError`.
 
 ## Interfaz web
 
@@ -233,7 +250,7 @@ python -m ruff check src tests       # lint
 python -m ruff format src tests      # formato
 python -m mypy src                   # type-check
 python -m pytest                     # todos los tests
-python -m pytest -k "not slow"       # sin los tests de integración con Docling real
+python -m pytest -m "not slow"       # sin los tests lentos (integración con Docling real)
 zensical serve                         # documentación local (http://127.0.0.1:8000)
 zensical build --strict                         # sitio estático en ./site
 ```

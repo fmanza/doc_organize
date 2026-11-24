@@ -14,8 +14,10 @@ classDiagram
         +count_entries(search, relative_to, conversion_status, mime_type) int
         +load_cache_page(limit, offset, search, relative_to, conversion_status, order_by, descending, mime_type) list[CacheEntry]
         +list_mime_types(search, relative_to, conversion_status) list[tuple[str, int]]
-        +get_changes(cache: dict, current_docs: list) tuple
-        +save_entries(entries: list[CacheEntry]) void
+        +get_changes(cache: dict, current_docs: list) tuple[list[str], list[str], list[str]]
+        +save_entries(entries: list[CacheEntry]) None
+        +clear() None
+        +compute_hash(file_path: str) str
     }
     
     class CacheEntry {
@@ -36,8 +38,8 @@ classDiagram
 ```python
 class CacheManager:
     def __init__(self, db_path: str | Path = "cache.db", *, read_only: bool = False) -> None
-    async def __aenter__(self) -> 'CacheManager'
-    async def __aexit__(self, *args) -> None
+    async def __aenter__(self) -> Self
+    async def __aexit__(self, *exc_info: object) -> None
     
     async def load_cache(self) -> dict[str, CacheEntry]
     
@@ -74,13 +76,16 @@ class CacheManager:
     def get_changes(
         self,
         cache: dict[str, CacheEntry],
-        current_docs: list[DocumentMetadata]
-    ) -> tuple[list, list, list]
+        current_docs: list[DocumentMetadata],
+    ) -> tuple[list[str], list[str], list[str]]
     
     async def save_entries(
         self,
         entries: list[CacheEntry]
     ) -> None
+
+    async def clear(self) -> None                          # vacía cache_entries (forzar rescan)
+    async def compute_hash(self, file_path: str) -> str    # delega en utils.hash_utils.hash_file()
 ```
 
 Context manager para gestión de caché SQLite (WAL mode).
@@ -193,7 +198,7 @@ desplegable del filtro por tipo de una lista, sin leer la caché entera. Admite 
 tipos = await cache.list_mime_types(relative_to="/mnt/datos/2024")  # [("application/pdf", 1520), ("text/plain", 40)]
 ```
 
-**Operación**:
+**Operación de `load_cache_page`**:
 - Con `order_by="file_path"`: `SELECT ... ORDER BY file_path LIMIT ? OFFSET ?`, con el mismo filtro `search` que
   `count_entries`
 - Con otra columna: se ordenan solo las claves (`rowid`) en una subconsulta con los mismos filtros y se leen las filas
@@ -217,9 +222,9 @@ Clasifica documentos en new, modified, unchanged.
 
 | Retorno | Tipo | Descripción |
 |---|---|---|
-| `new` | `list[DocumentMetadata]` | Documentos nuevos (no en caché) |
-| `modified` | `list[DocumentMetadata]` | Documentos cuyo SHA-256 cambió |
-| `unchanged` | `list[DocumentMetadata]` | Documentos sin cambios |
+| `new_files` | `list[str]` | Rutas (`full_path`) de documentos nuevos (no en caché) |
+| `modified_files` | `list[str]` | Rutas de documentos cuyo SHA-256 cambió |
+| `unchanged_files` | `list[str]` | Rutas de documentos sin cambios |
 
 **Clasificación**:
 1. Si `file_path` no en caché → `new`
@@ -241,7 +246,14 @@ Guarda/actualiza entradas en caché (upsert transaccional).
 - Retorna cuando transacción está confirmada
 
 **Excepciones**:
-- `CacheError` — Errores de base de datos
+- `CacheError` — Errores de base de datos, o caché abierta con `read_only=True`
+
+---
+
+#### clear (Async)
+
+Vacía `cache_entries` por completo (no es un upsert): la siguiente `get_changes()` trata todos los documentos como
+nuevos. Lanza `CacheError` en solo lectura.
 
 ---
 

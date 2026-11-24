@@ -117,10 +117,15 @@ Si no existe ningún ejemplo del módulo:
 
 ---
 
-## Arquetipo 3 — Guías (`docs/` raíz)
+## Arquetipo 3 — Guías (`docs/guides/`)
 
 **Audiencia**: usuarios finales que instalan, configuran o aprenden a usar el sistema.
 Alineado con el marco Diátaxis: orientado a tareas (How-To) o aprendizaje (Tutorial).
+
+**Ubicación**: siempre en `docs/guides/`, nunca en la raíz de `docs/` (ver `.github/SHARED_INSTRUCTIONS.md`).
+Incluye instalación (`installation.md`), inicio rápido (`quick_start.md`), resolución de problemas
+(`troubleshooting.md`), guías de una funcionalidad transversal (p. ej. `duplicados_por_contenido.md`) y guías
+de migración entre versiones mayores (`migracion_*.md`, obligatorias con cambios incompatibles).
 
 ### Estructura obligatoria (en este orden)
 
@@ -235,7 +240,8 @@ Fecha de última revisión.
 **Audiencia**: cualquier visitante que llega a la documentación por primera vez.
 Para las páginas de entrada de nivel raíz del `nav` — **Inicio**, **Instalación** y **Arquitectura del sistema**.
 
-**Prompt**: `.github/prompts/landing_doc.prompt.md` (tres variantes A/B/C, 5 secciones cada una).
+**Estructura**: tres variantes A/B/C, 5 secciones cada una. Hoy solo existe la Variante A (`docs/index.md`); la
+instalación es la guía `docs/guides/installation.md` (Arquetipo 3) y no hay página de arquitectura publicada.
 
 ### Estructura obligatoria (según variante)
 
@@ -247,7 +253,7 @@ Para las páginas de entrada de nivel raíz del `nav` — **Inicio**, **Instalac
 ## 4. Mapa de la Documentación
 ## 5. Compatibilidad y Soporte
 
-# Variante B — Instalación (docs/INSTALLATION.md)
+# Variante B — Instalación (docs/guides/installation.md)
 ## 1. Requisitos Previos
 ## 2. Instalación del Paquete
 ## 3. Extras Opcionales (p.ej. `[export]`, `[ocr-gpu]`)
@@ -271,8 +277,9 @@ anclando cada ítem a un mecanismo real del código.
 Variante C documenta la **visión global del sistema** (`docs/ARCHITECTURE.md`). Ambas conviven bajo la
 sección `Arquitectura` del nav.
 
-**Distinción con el Arquetipo 3**: el Arquetipo 3 cubre guías genéricas (async, drivers, troubleshooting);
-la Variante B es específica de instalación del paquete y drivers.
+**Distinción con el Arquetipo 3**: el Arquetipo 3 cubre las guías de `docs/guides/` (inicio rápido, troubleshooting,
+migraciones, funcionalidades transversales); la Variante B es específica de la instalación del paquete y sus extras, y
+se mantiene en `docs/guides/installation.md`.
 
 `docs/legacy-versions.md` permanece exento de arquetipo.
 
@@ -283,10 +290,12 @@ la Variante B es específica de instalación del paquete y drivers.
 El proyecto usa **Zensical** con el tema **Zensical** como generador estático.
 
 - Toda documentación generada debe tener su entrada en `zensical.toml` en el `nav`.
-- La navegación tiene **exactamente 8 secciones top-level**:
-  `Inicio`, `Instalación`, `Documentación Funcional`, `Referencia Técnica`, `Guías`, `Ejemplos`,
-  `Arquitectura`, `Historia y Planes`.
-- No añadir secciones top-level adicionales.
+- La navegación tiene **5 secciones top-level** (ver `nav` en `zensical.toml`):
+  `Inicio`, `Guías`, `Funcionalidad`, `API`, `Ejemplos`. La instalación va dentro de `Guías`.
+- No añadir secciones top-level adicionales sin acordarlo (excepción prevista: `Normativa`, solo si el proyecto
+  llegara a tener normativa de referencia).
+- `docs/historico/` queda fuera del `nav` a propósito (documentos de la web retirada en 1.0.0); se enlaza desde las
+  guías que lo necesitan.
 - No añadir plugins sin justificación documentada.
 
 ### Agrupación en subsecciones por área
@@ -309,30 +318,27 @@ subsecciones** (no listas planas).
 - Un documento que no encaje en ningún grupo puede agruparse bajo un rótulo propio
   (p. ej. `Manejo de Excepciones`).
 - La agrupación es **solo de navegación**: los ficheros `.md` siguen planos en sus carpetas
-  (`docs/`, `docs/examples/`, `docs/functional/`, `docs/api/`); ver Arquetipo 4 y §6 de
-  `DOCUMENTATION_STANDARD.md`.
+  (`docs/guides/`, `docs/examples/`, `docs/functional/`, `docs/api/`); ver Arquetipo 4 y §6 de
+  `DOCUMENTATION_STANDARD.md`. Hoy las secciones del `nav` son listas planas; agrupar en subsecciones es opcional
+  cuando crezcan.
 
 ```yaml
+# Esquema (en zensical.toml se escribe como TOML: nav = [ { "Inicio" = "index.md" }, ... ])
 nav:
   - Inicio: index.md
-  - Instalación: INSTALLATION.md
-  - Documentación Funcional:
-      - [Área]:
-          - [Nombre módulo]: functional/[nombre-modulo].md
-  - Referencia Técnica:
-      - Índice de Referencia: api/intro.md
-      - [Área]:
-          - [Nombre módulo]: api/[nombre-modulo].md
   - Guías:
-      - [Tema]:
-          - [Nombre guía]: [nombre-guia].md
+      - Instalación: guides/installation.md
+      - Inicio rápido: guides/quick_start.md
+      - [Nombre guía]: guides/[nombre-guia].md
+  - Funcionalidad:
+      - Descripción general: functional/index.md
+      - [Nombre módulo]: functional/[nombre-modulo].md
+  - API:
+      - Descripción general: api/index.md
+      - API pública y compatibilidad: api/publica.md
+      - [Nombre módulo]: api/[nombre-modulo].md
   - Ejemplos:
-      - [Área]:
-          - [Nombre ejemplo]: examples/[nombre-ejemplo].md
-  - Arquitectura:
-      - [ADR-NNN]: adr/[adr-nombre].md
-  - Historia y Planes:
-      - Roadmap: ROADMAP.md
+      - [Nombre ejemplo]: examples/[nombre-ejemplo].md
 ```
 
 ## Detección de lenguaje y autodoc
@@ -534,9 +540,9 @@ Etiquetas en español. Solo incluye componentes presentes en el código real.
 
 Para generar o actualizar la documentación completa del proyecto:
 
-1. **Inventario**: lista todos los módulos en `src/` y clasifica qué arquetipo necesita cada documento (`docs/functional/` → Arquetipo 1, `docs/api/` → Arquetipo 2, guías raíz `docs/` → Arquetipo 3, `docs/examples/` → Arquetipo 4, ADR `docs/adr/` → Arquetipo 5, páginas raíz `index.md`/`INSTALLATION.md`/`ARCHITECTURE.md` → Arquetipo 6).
+1. **Inventario**: lista todos los módulos en `src/` y clasifica qué arquetipo necesita cada documento (`docs/functional/` → Arquetipo 1, `docs/api/` → Arquetipo 2, guías `docs/guides/` → Arquetipo 3, `docs/examples/` → Arquetipo 4, ADR `docs/adr/` → Arquetipo 5 (hoy no hay ninguno vigente; el único histórico está en `docs/historico/`), `docs/index.md` → Arquetipo 6).
 2. **Orden de generación**: empieza por módulos base (`_base.py`, contratos) antes que servicios; los servicios antes que las CLIs y la capa web.
-3. **Generación por arquetipo**: aplica el prompt correspondiente (`functional_doc`, `technical_doc`, `guide_doc`, `example_doc`, `architecture_doc` o `landing_doc`) a cada archivo.
+3. **Generación por arquetipo**: aplica la estructura del arquetipo correspondiente de este fichero a cada documento (los antiguos prompts `.github/prompts/*_doc.prompt.md` se retiraron en 1.0.0).
 4. **zensical.toml**: actualiza la sección `nav` con todas las entradas nuevas o modificadas.
 5. **Consistencia**: usa el mismo tono, nivel de detalle y estructura en todos los archivos del mismo arquetipo.
 

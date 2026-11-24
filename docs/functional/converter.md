@@ -65,7 +65,7 @@ sequenceDiagram
 ❌ No crea carpetas de destino (usuario debe crearlas)  
 ❌ No verifica permisos de escritura anticipadamente  
 ❌ `extract_images`/`use_picture_description` no tienen efecto en documentos DOCX/XLSX/PPTX/HTML/etc. (pipeline sin esos pasos) — se aceptan sin error, pero no producen imágenes/descripciones  
-❌ Audio/vídeo (`include_audio_video`) requieren el extra `[av]` (Whisper) y el binario `ffmpeg` del sistema; sin ellos, el escaneo se rechaza con un mensaje explícito antes de empezar (CLI) o el checkbox aparece deshabilitado (web)  
+❌ Audio/vídeo (`include_audio_video`) requieren el extra `[av]` (Whisper) y el binario `ffmpeg` del sistema; sin ellos, el escaneo se rechaza con un mensaje explícito antes de empezar (una interfaz puede consultarlo antes con `detect_av_status()`)  
 
 ## Casos Especiales
 
