@@ -18,12 +18,12 @@ Inventariar todos los documentos en una carpeta (respetando extensiones soportad
 
 ## 2. Reglas de Negocio
 
-| Regla | Descripción |
-|---|---|
-| **Extensiones soportadas** | Matriz definida en `constants.SUPPORTED_EXTENSIONS` |
-| **Ignorar nombres** | `.git/`, `__pycache__/`, `.DS_Store`, más las rutas excluidas y los patrones de nombre que indique el usuario (`exclude_paths`, `ignore_patterns`, 1.3.0) |
-| **Hash determinista** | Mismo archivo = mismo SHA-256 siempre |
-| **Concurrencia segura** | Hashing paralelo sin bloqueos en archivos |
+| Regla | Descripción | Impacto si se viola |
+|---|---|---|
+| **Extensiones soportadas** | Matriz definida en `constants.SUPPORTED_EXTENSIONS` | Se intentaría convertir ficheros que no se saben procesar |
+| **Ignorar nombres** | `.git/`, `__pycache__/`, `.DS_Store`, más las rutas excluidas y los patrones de nombre que indique el usuario (`exclude_paths`, `ignore_patterns`, 1.3.0) | Se escanearían ficheros internos del sistema o carpetas que el usuario quiso dejar fuera |
+| **Hash determinista** | Mismo archivo = mismo SHA-256 siempre | Documentos sin cambios parecerían modificados y no se detectarían los duplicados exactos |
+| **Concurrencia segura** | Hashing paralelo sin bloqueos en archivos | La aplicación dejaría de responder mientras calcula hashes de ficheros grandes |
 
 ### Límites y Restricciones
 

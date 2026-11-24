@@ -976,4 +976,4 @@ Los cuatro clientes de 1.x (`DomainClassificationClient`, `TaxonomyClassificatio
 ## 5. Ejemplos Relacionados
 
 - [Desplegar un LiteLLM Proxy](../guides/litellm_proxy_setup.md) (Sub-fase B)
-- Pendiente — crear ejemplo en docs/examples/context-build.md
+- [Ejemplo: Construir el contexto](../examples/context-build.md): `ContextBuilder.build` por reglas con un manifiesto pequeño sobre documentos ya convertidos, sin Docling ni IA; muestra dominios, el valor `sin-clasificar` y un documento sin clasificar

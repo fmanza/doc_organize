@@ -190,4 +190,4 @@ en `user`: el prefijo es el mismo entre documentos y el proveedor puede cachearl
 
 ## 5. Ejemplos Relacionados
 
-Pendiente — crear ejemplo en docs/examples/llm_client.md
+- [Ejemplo: Cliente de IA sin red](../examples/llm-client.md): `AiSettings`/`TaskSettings` y `LlmClient` sobre `httpx.MockTransport`, con una llamada de `embed` y una de `complete_json`, la redacción de credenciales y `LlmResult`

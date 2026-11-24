@@ -266,4 +266,4 @@ Resumen del evento `COMPLETED` de `deduplicate_streaming` (mismos campos que su 
 
 ## 5. Ejemplos Relacionados
 
-- Pendiente — crear ejemplo en docs/examples/scan.md
+- [Escanear y convertir con ScanCommand](../examples/scan-command.md): escaneo con `ScanOptions`, progreso con `ProgressEvent` y `ScanSummary` en tres pasadas (nuevos, sin cambios y modificado)

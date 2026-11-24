@@ -73,6 +73,12 @@ nav = [
     { "Deduplicación" = "examples/dedup-resolve.md" },
     { "Cache" = "examples/cache-changes.md" },
     { "Projects" = "examples/projects-registry.md" },
+    { "Escaneo (ScanCommand)" = "examples/scan-command.md" },
+    { "Contexto" = "examples/context-build.md" },
+    { "Exportación" = "examples/export-project.md" },
+    { "Paquete para IA" = "examples/ai-bundle.md" },
+    { "Cliente de IA" = "examples/llm-client.md" },
+    { "Diagnóstico" = "examples/diagnostics-check.md" },
   ] },
 ]
 

@@ -24,16 +24,16 @@ El ZIP del sitio sin conexión (`write_site_zip`) se describe en [Organización 
 
 ## 2. Reglas de Negocio
 
-| Regla | Descripción |
-|---|---|
-| **Rutas explícitas** | Las rutas salen de un `ProjectLayout` (raíz de salidas y, si está aparte, raíz del estado) o se indican sueltas; nunca del registro de proyectos |
-| **Varias cachés** | Un proyecto puede tener una caché por carpeta de origen: se cargan todas y se exportan juntas. Una caché que no existe se omite y no se crea |
-| **Vista previa exacta** | La vista previa (ficheros y bytes sin comprimir) recorre lo mismo que el ZIP y genera el mismo `cache_export.json`; coincide con el ZIP mientras el proyecto no cambie entre las dos operaciones |
-| **Streaming** | El ZIP se escribe directamente en el destino, fichero a fichero y por bloques de 1 MiB: sirve para proyectos de ~100 000 documentos y ~1 TB sin cargar nada entero en memoria ni crear temporales |
-| **Orden estable** | Ficheros en orden alfabético por carpeta, entradas de caché por ruta |
-| **Fórmulas neutralizadas** | En el Excel, un texto que empieza por `=`, `+`, `-`, `@`, tabulador o retorno de carro se escribe con un `'` delante, para que Excel o LibreOffice no lo ejecuten como fórmula. Se quitan los caracteres de control que el formato no admite |
-| **Enlaces simbólicos** | No se siguen: un enlace dentro de `Conversión/` no puede meter en el ZIP ficheros de fuera |
-| **Progreso y cancelación** | Igual que el escaneo: `on_progress` recibe `ProgressEvent(operation="export")` y un `CancelToken` para la exportación entre dos bloques o dos filas. Al cancelar se borra el fichero parcial |
+| Regla | Descripción | Impacto si se viola |
+|---|---|---|
+| **Rutas explícitas** | Las rutas salen de un `ProjectLayout` (raíz de salidas y, si está aparte, raíz del estado) o se indican sueltas; nunca del registro de proyectos | La exportación dependería del registro y no serviría a consumidores con otra organización de carpetas |
+| **Varias cachés** | Un proyecto puede tener una caché por carpeta de origen: se cargan todas y se exportan juntas. Una caché que no existe se omite y no se crea | Faltarían en la exportación los documentos de algunas carpetas de origen |
+| **Vista previa exacta** | La vista previa (ficheros y bytes sin comprimir) recorre lo mismo que el ZIP y genera el mismo `cache_export.json`; coincide con el ZIP mientras el proyecto no cambie entre las dos operaciones | El usuario decidiría exportar con un tamaño que no es el real |
+| **Streaming** | El ZIP se escribe directamente en el destino, fichero a fichero y por bloques de 1 MiB: sirve para proyectos de ~100 000 documentos y ~1 TB sin cargar nada entero en memoria ni crear temporales | Un proyecto grande agotaría la memoria o el disco temporal |
+| **Orden estable** | Ficheros en orden alfabético por carpeta, entradas de caché por ruta | Dos exportaciones del mismo proyecto saldrían en distinto orden y costaría compararlas |
+| **Fórmulas neutralizadas** | En el Excel, un texto que empieza por `=`, `+`, `-`, `@`, tabulador o retorno de carro se escribe con un `'` delante, para que Excel o LibreOffice no lo ejecuten como fórmula. Se quitan los caracteres de control que el formato no admite | Abrir el Excel podría ejecutar una fórmula maliciosa escondida en un nombre de fichero |
+| **Enlaces simbólicos** | No se siguen: un enlace dentro de `Conversión/` no puede meter en el ZIP ficheros de fuera | Un enlace podría colar en el ZIP ficheros de fuera del proyecto |
+| **Progreso y cancelación** | Igual que el escaneo: `on_progress` recibe `ProgressEvent(operation="export")` y un `CancelToken` para la exportación entre dos bloques o dos filas. Al cancelar se borra el fichero parcial | Al cancelar quedaría un ZIP o Excel a medias en el destino |
 
 ## 3. Casos de Uso
 
