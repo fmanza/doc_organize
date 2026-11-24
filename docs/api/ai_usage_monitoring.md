@@ -140,7 +140,14 @@ Context manager async para consultar el spend de un LiteLLM Proxy externo (`GET 
 
 | Retorno | Tipo | Descripción |
 |---|---|---|
-| | `UsageSnapshot` | Snapshot con una única `UsageLineItem` (spend acumulado, `unit_type="usd"`) |
+| | `UsageSnapshot` | Snapshot con una única `UsageLineItem` (spend acumulado, `unit_type="usd"`, `product="litellm"`) |
+
+**Producto y periodo (2.5.0)**: `product` es `"litellm"` (hasta 2.4.x, siempre `"anthropic"`): el proxy encamina a
+cualquier proveedor y `/key/info` no dice a cuál. El spend es **acumulado**, así que `period_start` es desde cuándo
+cuenta: el último reinicio del presupuesto (`budget_reset_at - budget_duration`, con duraciones `30s`, `30m`, `12h`/`12hr`,
+`1d` o `2w`) o, si la clave no reinicia su presupuesto o su duración no se entiende (`1mo`, con un aviso en el log), su
+creación (`created_at`); sin esas fechas, hoy. `period_end` y la fecha de la línea son hoy. Hasta 2.4.x el periodo
+era siempre de hoy a hoy.
 
 **Operación**:
 - Sin `key` (o con la misma clave del Bearer): `GET {base_url}/key/info`, `Authorization: Bearer {config.virtual_key}`.

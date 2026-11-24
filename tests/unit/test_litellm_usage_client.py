@@ -117,3 +117,49 @@ async def test_get_usage_auth_error_message_has_no_key() -> None:
         with pytest.raises(UsageSourceAuthError) as exc_info:
             await client.get_usage()
     assert "sk-test-key" not in str(exc_info.value)
+
+
+# --- Producto y periodo (2.5.0) ----------------------------------------------------------------------------------------
+
+
+async def _snapshot(info: dict):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"key": "sk-test-key", "info": {"spend": 2.0, **info}})
+
+    async with LiteLLMUsageClient(_CONFIG, transport=_transport(handler)) as client:
+        return await client.get_usage()
+
+
+@pytest.mark.asyncio
+async def test_product_is_litellm_whatever_the_model() -> None:
+    """LiteLLM encamina a cualquier proveedor: `/key/info` no dice cuál, así que no se inventa `anthropic`."""
+    snapshot = await _snapshot({"models": ["gpt-4o", "llama3"]})
+
+    assert snapshot.items[0].product == "litellm"
+
+
+@pytest.mark.parametrize(
+    ("info", "start"),
+    [
+        ({"created_at": "2026-09-01T10:00:00Z"}, "2026-09-01"),  # sin presupuesto que se reinicie: desde que existe
+        ({"created_at": "2026-09-01T10:00:00Z", "budget_duration": "30d", "budget_reset_at": "2026-12-01T00:00:00+00:00"}, "2026-11-01"),
+        ({"budget_duration": "1d", "budget_reset_at": "2026-11-25T00:00:00Z"}, "2026-11-24"),
+        ({"budget_duration": "12hr", "budget_reset_at": "2026-11-25T06:00:00Z"}, "2026-11-24"),
+        ({"created_at": "2026-09-01T10:00:00Z", "budget_duration": "1mo", "budget_reset_at": "2026-12-01T00:00:00Z"}, "2026-09-01"),
+    ],
+    ids=["created_at", "budget-30d", "budget-1d", "budget-12hr", "duration-not-understood"],
+)
+@pytest.mark.asyncio
+async def test_period_starts_when_the_spend_started_counting(info: dict, start: str) -> None:
+    """El gasto de `/key/info` es acumulado: desde el último reinicio del presupuesto o, si no, desde que se creó la clave."""
+    snapshot = await _snapshot(info)
+
+    assert snapshot.period_start == start
+    assert snapshot.period_end == snapshot.items[0].date  # hasta hoy
+
+
+@pytest.mark.asyncio
+async def test_period_without_dates_is_today_as_before() -> None:
+    snapshot = await _snapshot({"created_at": "no es una fecha"})
+
+    assert snapshot.period_start == snapshot.period_end == snapshot.items[0].date

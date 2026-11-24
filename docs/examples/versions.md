@@ -112,6 +112,16 @@ async def main() -> None:
         context = await builder.build(project, documents, scan_roots=roots, versions="current_only")
         print(f"  Con current_only, superadas: {sorted(Path(p).name for p in context.superseded_documents)}")
 
+        # 4) Entre formatos (2.5.0): Plan_rev2.pdf y Plan_rev3.docx forman grupo; la rev3 también existe en PDF
+        documents.append(converted(root, "calidad/Plan_rev3.pdf"))
+        context = await builder.build(project, documents, scan_roots=roots, versions="current_only", version_across_extensions=True)
+        print(f"\nversion_across_extensions={context.versions_across_extensions}, decisiones aplicadas={context.decisions_applied}")
+        show_groups(context)
+        print(f"  Superadas: {sorted(Path(p).name for p in context.superseded_documents)}")
+        print(f"  Desfasadas: {[(d.document_key, d.reason) for d in context.stale_decisions]}")
+        planes = sorted(Path(d.source_path).name for domain in context.domains for d in domain.documents if "Plan" in d.source_path)
+        print(f"  En el contexto: {planes}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -125,8 +135,8 @@ if __name__ == "__main__":
 2. **Orden numérico**: `1.10` es mayor que `1.9`, así que la vigente propuesta es `Manual_Calidad_v1.10.docx`
    (`VersionGroup.current`, `VersionMember.is_current`). La clave del grupo es la carpeta y el nombre sin el marcador,
    normalizados, más la extensión
-3. **Extensiones**: `Plan_rev2.pdf` y `Plan_rev3.docx` solo se agrupan con `across_extensions=True`.
-   `ContextBuilder.build` no tiene esa opción: en la construcción no forman grupo
+3. **Extensiones**: `Plan_rev2.pdf` y `Plan_rev3.docx` solo se agrupan con `across_extensions=True`; en la
+   construcción, con `version_across_extensions=True` (2.5.0, paso 7)
 4. **`versions="current_only"`**: solo la vigente se clasifica y se publica; las demás quedan en
    `Context.superseded_documents`. En `Context.version_groups` la clave del grupo es relativa a la raíz de escaneo y el
    grupo sale `confirmada=False`, así que la cola de revisión lo pide (`unconfirmed_version`, prioridad 5)
@@ -136,6 +146,10 @@ if __name__ == "__main__":
    `stale_decisions` con `not_versioned`
 6. **`versions="mark"`**: todas las versiones se clasifican y cada documento del grupo lleva `version`,
    `version_group` e `is_current`. Con `current_only`, tras la decisión, la superada es la `1.10` y no la `1.9`
+7. **Entre formatos (2.5.0)**: con `version_across_extensions=True` el plan forma grupo aunque cambie el formato, así
+   que la decisión sobre `Plan_rev3.docx` ya se aplica y deja de estar desfasada. La `rev3` existe también en PDF: la
+   misma versión en varios formatos es vigente entera, así que con `current_only` solo sale `Plan_rev2.pdf` y los dos
+   formatos de la `rev3` siguen en el contexto
 
 ## 4. Ejecución y Pruebas
 
@@ -160,6 +174,13 @@ versions=mark, decisiones aplicadas=1
   Manual_Calidad_v1.9.docx: versión=1.9 vigente=True
   Pendientes en la cola: []
   Con current_only, superadas: ['Manual_Calidad_v1.10.docx', 'Manual_Calidad_v1.2.docx']
+
+version_across_extensions=True, decisiones aplicadas=2
+  calidad/manual calidad: versiones=['1.2', '1.9', '1.10'] vigente=Manual_Calidad_v1.9.docx confirmada=True
+  calidad/plan: versiones=['2', '3', '3'] vigente=Plan_rev3.docx confirmada=True
+  Superadas: ['Manual_Calidad_v1.10.docx', 'Manual_Calidad_v1.2.docx', 'Plan_rev2.pdf']
+  Desfasadas: [('calidad/Acta_2024.docx', 'not_versioned')]
+  En el contexto: ['Plan_rev3.docx', 'Plan_rev3.pdf']
 ```
 
 La salida es determinista: el primer bloque usa rutas ficticias (`/entrada/...`) y el resto no imprime rutas

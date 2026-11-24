@@ -196,6 +196,7 @@ class Context(BaseModel):
     orphan_decisions: list[DecisionIssue]  # 2.0.0
     excluded_documents: list[str]        # 2.0.0
     versions_mode: Literal["all", "mark", "current_only"]  # 2.0.0 (ver versions.md)
+    versions_across_extensions: bool     # 2.5.0: si las versiones se agruparon entre formatos
     version_groups: list[DocumentVersionGroup]  # 2.0.0
     superseded_documents: list[str]      # 2.0.0
     ai_provenance: list[PromptProvenance]  # 2.0.0: prompt y modelo por tarea (antes ai_classification_model...)
@@ -312,6 +313,7 @@ class ContextBuilder:
         ai_examples: int = 3,                           # 2.0.0
         example_exclusions: Sequence[str] = (),         # 2.0.0
         versions: Literal["all", "mark", "current_only"] = "all",  # 2.0.0
+        version_across_extensions: bool = False,        # 2.5.0
         on_progress: ProgressCallback | None = None,
         cancel_token: CancelToken | None = None,
         ai_max_failures: int | None = None,             # 0.14.0
@@ -342,6 +344,7 @@ Orquesta Sub-fase A (reglas, siempre) + Sub-fase B (IA, opt-in) y persiste el `C
 | `example_exclusions` | `Sequence[str]` | (2.0.0) Originales (o claves) que nunca sirven de ejemplo; al evaluar, la referencia |
 | `scan_roots` | `Sequence[str] \| None` | (2.0.0) Raíces de escaneo para las claves de los documentos en las decisiones; por defecto, la carpeta común de los originales |
 | `versions` | `"all" \| "mark" \| "current_only"` | (2.0.0) Versiones de un mismo documento: `all` (por defecto, como 1.x), `mark` (marca versión y vigente) o `current_only` (solo la vigente entra en el contexto). Ver [Versiones de un documento](versions.md) |
+| `version_across_extensions` | `bool` | (2.5.0) Agrupar versiones aunque cambie el formato (`.docx` con `.pdf`); por defecto no. Ver [Entre formatos](versions.md) |
 | `ai_max_failures` | `int \| None` | (0.14.0, L-3a) Detiene una fase de IA tras este número de errores de conexión **seguidos** (`AiPhaseStats.stopped = "connection"`). `None`: nunca para por eso. `< 1` → `ValueError` |
 | `ai_max_documents` | `int \| None` | (0.14.0, L-3b) Tope de documentos enviados en cada fase de IA; al alcanzarlo con documentos pendientes, para con `"budget"`. `None`: sin tope. `< 0` → `ValueError` |
 | `persist` | `bool` | (2.0.0) `False`: devuelve el contexto sin guardarlo ni añadirlo al histórico. Ver [Clasificación de prueba](evaluation.md#clasificacion-de-prueba) |

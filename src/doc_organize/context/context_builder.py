@@ -375,6 +375,7 @@ class ContextBuilder:
         decisions: bool | Sequence[ClassificationDecision] = True,
         scan_roots: Sequence[str] | None = None,
         versions: VersionsMode = "all",
+        version_across_extensions: bool = False,
         semantic: bool = False,
         semantic_threshold: float = DEFAULT_SEMANTIC_THRESHOLD,
         ai_examples: int = DEFAULT_AI_EXAMPLES,
@@ -438,6 +439,8 @@ class ContextBuilder:
                 `"mark"` (cada documento lleva `version`, `version_group` e `is_current`) o `"current_only"` (solo la
                 vigente se clasifica, se publica y va a la IA; las demás quedan en `Context.superseded_documents`). La
                 vigente es la versión más alta o la que decidió una persona (`set_current_version`).
+            version_across_extensions: Agrupar versiones aunque cambie el formato (`Manual_v2.docx` con `Manual_v3.pdf`,
+                2.5.0); por defecto no. La misma versión en varios formatos cuenta entera como vigente.
             on_progress: Recibe un `ProgressEvent` (`operation="context_build"`, fase `classification` o `enrichment`)
                 tras cada documento de una fase de IA (L-2). Un fallo del callback se registra y no para la construcción.
             cancel_token: Si se cancela, la construcción para entre documentos con `OperationCancelledError`, **sin**
@@ -472,7 +475,7 @@ class ContextBuilder:
         cache = ai_cache if isinstance(ai_cache, AiResultCache) else (AiResultCache(project.root_path) if ai_cache and llm is not None else None)
         human_decisions = await self._load_decisions(project, decisions)
         semantic_stats = AiPhaseStats()
-        version_outcome = resolve_versions(documents, versions, human_decisions, roots=scan_roots)
+        version_outcome = resolve_versions(documents, versions, human_decisions, roots=scan_roots, across_extensions=version_across_extensions)
         if version_outcome.superseded:
             superseded = set(version_outcome.superseded)
             documents = [document for document in documents if document.source_path not in superseded]
@@ -582,6 +585,7 @@ class ContextBuilder:
             orphan_decisions=decision_outcome.orphan + version_outcome.orphan,
             excluded_documents=decision_outcome.excluded,
             versions_mode=versions,
+            versions_across_extensions=version_across_extensions,
             version_groups=version_outcome.groups,
             superseded_documents=version_outcome.superseded,
             unclassified_documents=[document.source_path for document in unclassified],
