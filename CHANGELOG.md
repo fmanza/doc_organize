@@ -6,6 +6,11 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-11-24
+
+Versiones de un documento aunque cambie el formato y el periodo real del gasto de LiteLLM. Versión menor: un parámetro
+nuevo con valor por defecto y dos cambios de comportamiento (ver «Changed»); sin dependencias nuevas.
+
 ### Added
 
 - **Versiones entre formatos**: `ContextBuilder.build(..., version_across_extensions=True)` agrupa versiones aunque cambie
