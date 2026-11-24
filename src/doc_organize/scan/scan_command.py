@@ -287,7 +287,10 @@ class _ProgressTracker:
             return
         phase = self._PHASES.get(event, self._phase)
         if phase != self._phase:
-            self._phase, self._processed, self._total = phase, 0, None
+            # `done` cierra con las unidades de la última fase (2.4.1): el COMPLETED del escaneo trae el resumen, no
+            # un total, y antes llegaba como `0/None`.
+            carried = self._total if phase == "done" else None
+            self._phase, self._processed, self._total = phase, 0, carried
         total = data.get("to_process", data.get("groups_found", data.get("total")))
         if isinstance(total, int):
             self._total = total
@@ -295,7 +298,9 @@ class _ProgressTracker:
         if event in ("file_converted", "ocr_processed", "group_resolved"):
             self._processed += 1
         if event == "completed":
-            self._processed = self._total or self._processed
+            if self._total is None:
+                self._total = self._processed
+            self._processed = self._total
         try:
             self._callback(
                 ProgressEvent(

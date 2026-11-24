@@ -44,6 +44,17 @@ def test_exact_duplicate_keeps_oldest_as_canonical(manager: DeduplicationManager
     assert [d.full_path for d in group.duplicates] == [newer.full_path]
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+def test_canonical_tie_on_modified_time_is_broken_by_path(manager: DeduplicationManager, reverse: bool) -> None:
+    """2.4.1: con la misma fecha se conserva la ruta menor, sea cual sea el orden de entrada (como `same_content`)."""
+    docs = [_doc("/repo/b/informe.pdf", "same-hash", 1.0), _doc("/repo/a/informe.pdf", "same-hash", 1.0)]
+
+    groups = manager.find_duplicates(list(reversed(docs)) if reverse else docs)
+
+    assert groups[0].canonical_doc.full_path == "/repo/a/informe.pdf"
+    assert [d.full_path for d in groups[0].duplicates] == ["/repo/b/informe.pdf"]
+
+
 def test_version_conflict_detected_by_suffix(manager: DeduplicationManager) -> None:
     v1 = _doc("/repo/report_v1.pdf", "hash-v1", modified_time=1.0)
     v2 = _doc("/repo/report_v2.pdf", "hash-v2", modified_time=2.0)

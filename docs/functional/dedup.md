@@ -31,7 +31,7 @@ Resolver moviendo documentos descartados a carpeta de duplicados (o copiándolos
 
 | Regla | Descripción |
 |---|---|
-| **Canónico = antiguo** | Conserva documento más antiguo por `modified_time` (propuesta, no aplicada sola, en grupos `fuzzy_name_match`, `same_content` y `semantic_content_match`) |
+| **Canónico = antiguo** | Conserva documento más antiguo por `modified_time`, y con la misma fecha la ruta menor (2.4.1) (propuesta, no aplicada sola, en grupos `fuzzy_name_match`, `same_content` y `semantic_content_match`) |
 | **Elección del usuario** | Si el grupo trae `user_choice`, se conserva ese documento en lugar del canónico |
 | **Replica estructura** | Duplicados se mueven a `duplicates_dir/original/path` |
 | **Auditable** | `DEDUP_REPORT.json` con timestamps y decisiones |

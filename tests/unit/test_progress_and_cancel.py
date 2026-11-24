@@ -78,6 +78,20 @@ async def test_scan_reports_progress_with_units(tmp_path: Path, source: Path, fa
 
 
 @pytest.mark.asyncio
+async def test_scan_done_event_closes_with_the_last_phase_units(tmp_path: Path, source: Path, fake_conversion: list[str]) -> None:
+    """2.4.1: `done` llega con `processed == total` (antes `0/None`), como al terminar una exportación."""
+    layout = ProjectLayout(tmp_path / "p")
+    first: list[ProgressEvent] = []
+    again: list[ProgressEvent] = []
+
+    [_ async for _ in _scan(layout, source, on_progress=first.append)]
+    [_ async for _ in _scan(layout, source, on_progress=again.append)]
+
+    assert (first[-1].phase, first[-1].processed, first[-1].total) == ("done", 4, 4)
+    assert (again[-1].phase, again[-1].processed, again[-1].total) == ("done", 0, 0)
+
+
+@pytest.mark.asyncio
 async def test_failing_progress_callback_does_not_stop_scan(tmp_path: Path, source: Path, fake_conversion: list[str]) -> None:
     def _boom(_: ProgressEvent) -> None:
         raise RuntimeError("callback roto")
