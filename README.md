@@ -18,7 +18,8 @@ tipo de material, que organizan carpetas, y los que solo etiquetan, como el marc
 quiere, con embeddings e IA a través de un LiteLLM Proxy; reorganiza una copia en carpetas y genera un sitio navegable
 con Zensical, también para verlo sin conexión, y un paquete para subir a un chat o agente de IA.
 
-> **2.4.1**: el progreso final del escaneo llega con sus unidades y el canónico de la deduplicación no depende del orden
+> **2.4.2**: las claves de las configuraciones de uso y de diagnóstico ya no salen en `repr()`, y la cola de revisión
+> muestra las decisiones de documentos que ya no están. **2.4.1**: el progreso final del escaneo llega con sus unidades y el canónico de la deduplicación no depende del orden
 > del escaneo. **2.4.0**: API pública para lo que usaba doc_organize_web (excepciones, modelos y funciones del contexto; ver
 > [API pública](docs/api/publica.md)). **2.3.0**: API pública completa y tipada (los tipos que ya devolvía, ahora en `__all__`; ver
 > [API pública](docs/api/publica.md)). **2.2.0**: duplicados por **contenido** (`ContentDuplicateFinder`) sobre el Markdown ya convertido: mismo texto
@@ -125,7 +126,7 @@ python scripts/build_docs_zip.py
 **Verificación de integridad:**
 ```bash
 sha256sum -c doc_organize-docs-*.zip.sha256
-# Output: doc_organize-docs-2.4.1.zip: OK
+# Output: doc_organize-docs-2.4.2.zip: OK
 ```
 
 ## Estructura del proyecto
