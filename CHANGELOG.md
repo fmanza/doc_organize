@@ -6,6 +6,13 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-11-24
+
+API pública completa y tipada: los tipos que ya devolvían las funciones públicas pasan a `__all__` y mypy y los IDE
+ven el tipo de todos los nombres públicos. La jerarquía de capas la comprueba un test. Versión menor: no hay cambios
+incompatibles ni dependencias nuevas. La documentación se ha revisado entera contra el código (ejemplos ejecutados,
+`publica.md` con todo `__all__` y páginas con la estructura numerada de su arquetipo).
+
 ### Added
 
 - **Tipos de la API pública que faltaban en `__all__`**: `VersionGroup`, `VersionMember`, `AgentStep`, `AgentToolCall`,
