@@ -4,7 +4,22 @@ Un corpus real tiene `Manual_Calidad_v1.2.docx`, `Manual_Calidad_v1.3.docx` y `M
 documento en tres versiones. La deduplicación solo une ficheros idénticos; sin esto, las tres se clasifican, se publican
 y se envían a la IA como documentos distintos.
 
-## Detección
+## 1. Arquitectura y Diseño
+
+```mermaid
+flowchart TD
+    A[source_paths] --> B[detect_document_versions]
+    B --> C[VersionGroup: miembros y versión más alta]
+    C --> D["ContextBuilder.build(versions=)"]
+    D -->|all| E[Cada fichero es un documento]
+    D -->|mark| F[Todos se clasifican con version, version_group e is_current]
+    D -->|current_only| G[Solo la vigente; el resto en superseded_documents]
+    H["ClassificationDecision(action=set_current_version)"] --> D
+    D --> I[Context.version_groups]
+    I -->|vigente sin confirmar| J[Cola de revisión: unconfirmed_version]
+```
+
+### Detección
 
 `detect_document_versions(source_paths, *, across_extensions=False) -> list[VersionGroup]` es **conservadora**: un
 grupo mal hecho junta documentos distintos, así que ante la duda no agrupa.
@@ -21,27 +36,9 @@ grupo mal hecho junta documentos distintos, así que ante la duda no agrupa.
 
 Sobre los 213 nombres de CALIDAD_VD: un grupo, correcto, y ningún falso positivo (puerta de M7).
 
-## En la construcción
+## 2. API Reference
 
-`ContextBuilder.build(..., versions=)`:
-
-| `versions` | Qué hace |
-|---|---|
-| `"all"` (por defecto) | Como 1.x: cada fichero es un documento |
-| `"mark"` | Todos se clasifican; cada uno lleva `version`, `version_group` e `is_current` |
-| `"current_only"` | Solo la vigente se clasifica, se publica y va a la IA; las demás quedan en `Context.superseded_documents` |
-
-`Context.version_groups` lista los grupos (`DocumentVersionGroup`: miembros, versiones, vigente y si una persona la
-confirmó) y `Context.versions_mode`, el modo. En el historial, un documento que sale por ser una versión antigua es
-`superseded`, no `removed`.
-
-## La vigente la decide una persona
-
-La versión más alta no siempre es la vigente (un borrador `v3` sin aprobar). Una decisión
-`ClassificationDecision(action="set_current_version", document_key=...)` la fija; se aplica también sin manifiesto,
-porque no depende del catálogo. Si el documento no está en ningún grupo, la decisión queda en `stale_decisions` con
-`not_versioned`. Hasta que alguien confirma la vigente, el grupo aparece en la
-[cola de revisión](decisions.md#cola-de-revision) con `unconfirmed_version`.
+### Autodoc
 
 ::: doc_organize.context.versions
     options:
@@ -56,3 +53,37 @@ porque no depende del catálogo. Si el documento no está en ningún grupo, la d
       show_root_heading: false
       members:
         - DocumentVersionGroup
+
+### Contratos
+
+#### En la construcción
+
+`ContextBuilder.build(..., versions=)`:
+
+| `versions` | Qué hace |
+|---|---|
+| `"all"` (por defecto) | Como 1.x: cada fichero es un documento |
+| `"mark"` | Todos se clasifican; cada uno lleva `version`, `version_group` e `is_current` |
+| `"current_only"` | Solo la vigente se clasifica, se publica y va a la IA; las demás quedan en `Context.superseded_documents` |
+
+`Context.version_groups` lista los grupos (`DocumentVersionGroup`: miembros, versiones, vigente y si una persona la
+confirmó) y `Context.versions_mode`, el modo. En el historial, un documento que sale por ser una versión antigua es
+`superseded`, no `removed`.
+
+## 3. Componentes y Clases
+
+### La vigente la decide una persona
+
+La versión más alta no siempre es la vigente (un borrador `v3` sin aprobar). Una decisión
+`ClassificationDecision(action="set_current_version", document_key=...)` la fija; se aplica también sin manifiesto,
+porque no depende del catálogo. Si el documento no está en ningún grupo, la decisión queda en `stale_decisions` con
+`not_versioned`. Hasta que alguien confirma la vigente, el grupo aparece en la
+[cola de revisión](decisions.md#cola-de-revision) con `unconfirmed_version`.
+
+## 4. Dependencias y Requisitos
+
+*No aplica para este módulo.*
+
+## 5. Ejemplos Relacionados
+
+Pendiente — crear ejemplo en docs/examples/versions.md

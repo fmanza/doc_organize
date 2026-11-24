@@ -1,10 +1,35 @@
 # Exportación — Referencia Técnica
 
-`doc_organize.export` (desde la 0.11.0, tarea L-7). Usa `cache/`, `projects/layout` y, desde 1.5.0,
-`context.context_history` para el historial del contexto; esto último carga el paquete `doc_organize.context` (y con él
-`httpx`), pero no Docling. Funcionalidad: [Exportación](../functional/export.md).
+`doc_organize.export` (desde la 0.11.0, tarea L-7): exporta las cachés y los históricos de un proyecto a ZIP y Excel,
+y el contexto a Excel y al paquete para IA. Funcionalidad: [Exportación](../functional/export.md).
 
-## API pública
+## 1. Arquitectura y Diseño
+
+```mermaid
+flowchart TD
+    DB[("cache.db (una o varias)")] --> LCE["load_cache_entries"]
+    LCE --> ZIP["preview_project_zip / write_project_zip"]
+    LCE --> XC["write_cache_xlsx"]
+    LCE --> XE["write_scan_errors_xlsx"]
+    LSE["load_scan_error_history<br/>(SCAN_ERRORS_HISTORY.jsonl)"] --> XE
+    LCH["load_context_history<br/>(CONTEXT_HISTORY.jsonl)"] --> XH["write_context_history_xlsx"]
+    CTX["Context"] --> XD["write_context_documents_xlsx"]
+    CTX --> AI["write_ai_context_bundle"]
+```
+
+## 2. API Reference
+
+### Autodoc
+
+::: doc_organize.export.sources
+
+::: doc_organize.export.zip_export
+
+::: doc_organize.export.xlsx_export
+
+### Contratos
+
+#### API pública
 
 | Nombre | Firma | Devuelve |
 |---|---|---|
@@ -32,7 +57,7 @@
   para la exportación. El callback corre en el hilo que escribe: con `asyncio.to_thread`, para tocar el event loop
   hay que usar `loop.call_soon_threadsafe`.
 
-## Uso desde un consumidor async
+#### Uso desde un consumidor async
 
 ```python
 import asyncio
@@ -52,7 +77,7 @@ async def exportar(destino: Path, token: CancelToken) -> None:
     await asyncio.to_thread(write_project_zip, destino, entries, layout=layout, cancel_token=token)
 ```
 
-## Formato del ZIP
+#### Formato del ZIP
 
 | Nombre en el ZIP | Origen |
 |---|---|
@@ -62,7 +87,7 @@ async def exportar(destino: Path, token: CancelToken) -> None:
 
 Compresión `ZIP_DEFLATED`; ZIP64 automático para ficheros de más de 2 GiB.
 
-## Excel
+#### Excel
 
 `openpyxl` en modo `write_only`, importado al escribir. Ese modo guarda el XML de cada hoja en un temporal del
 sistema hasta `save()`; si la escritura se cancela o falla, se borran en el momento. Cabeceras exportadas como
@@ -75,10 +100,24 @@ cambios) y `Cambios` (una fila por documento: `Entra`, `Sale` o `Cambia`, domini
 y quién lo clasificó). Un dominio vacío es que el documento no estaba en ese lado; `(sin clasificar)`, que estaba sin
 dominio. Ver [Historial del contexto](context.md#historial-del-contexto-150).
 
-## Referencia generada
+## 3. Componentes y Clases
 
-::: doc_organize.export.sources
+| Módulo | Responsabilidad |
+|---|---|
+| `doc_organize.export.sources` | Lee las entradas de las cachés y los históricos (`load_cache_entries`, `load_scan_error_history`, `load_context_history`) |
+| `doc_organize.export.zip_export` | ZIP del proyecto (`preview_project_zip`, `write_project_zip`, `ExportStats`) |
+| `doc_organize.export.xlsx_export` | Excel de la caché, de los errores de escaneo, del historial del contexto y de los documentos del contexto |
+| `doc_organize.export.ai_bundle` | Paquete del contexto para IA; ver [Paquete para IA](ai_bundle.md) |
 
-::: doc_organize.export.zip_export
+## 4. Dependencias y Requisitos
 
-::: doc_organize.export.xlsx_export
+| Dependencia | Propósito |
+|---|---|
+| `doc_organize.cache` | Leer las cachés (`cache/`) |
+| `doc_organize.projects.layout` | Rutas del proyecto (`projects/layout`) |
+| `doc_organize.context.context_history` | Historial del contexto (desde 1.5.0); carga el paquete `doc_organize.context` (y con él `httpx`), pero no Docling |
+| `openpyxl` (extra `export`) | Excel; se importa al escribir y, si falta, `MissingDependencyError`. El ZIP no lo necesita |
+
+## 5. Ejemplos Relacionados
+
+Pendiente — crear ejemplo en docs/examples/export.md

@@ -6,7 +6,7 @@ Desde 2.1.0 el uso y el coste de IA se consultan en **LiteLLM** (`LiteLLMUsageCl
 IA desde la 2.0. El cliente de GitHub Copilot sigue disponible pero está obsoleto y se retira en 3.0 (ver
 [GitHubCopilotUsageClient](#githubcopilotusageclient)).
 
-## Arquitectura
+## 1. Arquitectura y Diseño
 
 ```mermaid
 classDiagram
@@ -49,7 +49,71 @@ classDiagram
 clientes hereda de él, lo cumplen estructuralmente (ISP) — cada uno añade solo los
 parámetros opcionales propios de su fuente sobre la firma común `get_usage()`.
 
-## API Pública
+### Notas Internas
+
+- **Testing sin red real**: ambos constructores aceptan `transport: httpx.AsyncBaseTransport | None` para inyectar `httpx.MockTransport` en tests (`tests/unit/test_litellm_usage_client.py`, `tests/unit/test_github_copilot_usage_client.py`) — sin dependencias externas, mismo criterio que el resto de la suite.
+- **`UsageSource` es estructural, no por herencia**: cualquier tercer cliente futuro (Bedrock, Vertex, ...) solo necesita implementar `get_usage()` invocable sin argumentos; campos específicos de una fuente van en `UsageSnapshot.raw`, nunca como campo top-level nuevo no opcional (evita romper `UsageSnapshot` para consumidores existentes).
+- **Sin proxying de inferencia**: deliberado — ver PLAN/AUDIT_PLAN de la sesión 2026-09-07. Si en el futuro se añade `chat_completion()`, debe ir en una clase/módulo aparte para no violar ISP sobre los consumidores que solo necesitan `get_usage()`.
+
+## 2. API Reference
+
+### Autodoc
+
+*No aplica para este módulo.*
+
+### Contratos
+
+#### Entrada
+
+| Config | Campos | Impacto si falta |
+|---|---|---|
+| `LiteLLMUsageConfig` | `base_url`, `virtual_key` (obligatorios); `timeout_s` (30.0), `retries`, `retry_backoff_s`, `rate_limit_retries`, `max_retry_wait_s` | `ValidationError` de Pydantic al construir |
+| `GitHubCopilotUsageConfig` (obsoleto) | `username`, `personal_access_token` (obligatorios); `timeout_s` (30.0), `retries`, `retry_backoff_s`, `rate_limit_retries`, `max_retry_wait_s` | `ValidationError` de Pydantic al construir |
+
+**Reintentos (0.14.0, L-3b)**: todas las `*Config` de `doc_organize.ai` tienen `retries` (`int >= 0`, por defecto `0`:
+sin reintentos, como hasta 0.13.0) y `retry_backoff_s` (`float >= 0`, por defecto `0.5`). Solo se reintenta un timeout
+o un error de red/transporte (`httpx.TransportError`), con espera `retry_backoff_s * 2**n` (0.5, 1, 2...). Al agotar
+los reintentos se lanza la misma `*ConnectionError` de siempre. Ojo: reintentar un `POST` de clasificación que hizo
+timeout puede cobrarse dos veces si el proxy sí lo recibió.
+
+**429 y 503 (2.0.0, D5)**: `rate_limit_retries` (por defecto `3`) reintentos ante una respuesta 429 (límite de
+peticiones) o 503 (servicio saturado). Se espera lo que pida `Retry-After` (segundos o fecha HTTP) o, si no lo trae,
+`retry_backoff_s * 2**n`; cada espera tiene un tope de `max_retry_wait_s` (por defecto 60 s). La espera es **compartida**
+por todas las llamadas del mismo cliente: con `ContextBuilder(ai_concurrency=4)`, mientras dura nadie más envía. Al
+agotarlos se lanza el `*Error` de siempre. `rate_limit_retries=0` deja el comportamiento de 1.x. Ninguna otra respuesta
+HTTP se reintenta (ni 401/403, ni 500).
+
+Ninguna config lee variables de entorno en su constructor. Usa las factories:
+
+```python
+from doc_organize.ai import litellm_usage_config_from_env, github_copilot_usage_config_from_env
+
+litellm_config = litellm_usage_config_from_env()          # DOC_ORGANIZE_LITELLM_BASE_URL / _VIRTUAL_KEY
+copilot_config = github_copilot_usage_config_from_env()   # DOC_ORGANIZE_GITHUB_USERNAME / _PAT (obsoleto: DeprecationWarning)
+```
+
+Ambas lanzan `ValueError` si falta alguna variable de entorno.
+
+#### Salida
+
+```python
+class UsageLineItem(BaseModel):
+    date: str
+    product: str
+    sku: str | None
+    quantity: float
+    unit_type: str
+    cost_usd: float | None
+
+class UsageSnapshot(BaseModel):
+    source: UsageSourceName  # "litellm" | "github_copilot" (este último, obsoleto: se retira en 3.0)
+    period_start: str
+    period_end: str
+    items: list[UsageLineItem]
+    raw: dict[str, Any]
+```
+
+## 3. Componentes y Clases
 
 ### LiteLLMUsageClient
 
@@ -128,75 +192,15 @@ Context manager async para consultar el consumo de premium requests de Copilot P
 
 **Excepciones**: igual que `LiteLLMUsageClient.get_usage()`.
 
----
+## 4. Dependencias y Requisitos
 
-## Contratos
+| Dependencia | Propósito | Requerida | Comportamiento sin ella |
+|---|---|---|---|
+| `httpx` (extra `ai`) | Cliente HTTP async de ambos clientes | Sí | `doc_organize.ai` no se puede importar |
+| `core.models.UsageLineItem`, `UsageSnapshot`, `UsageSourceName`, `LiteLLMUsageConfig`, `GitHubCopilotUsageConfig` | Modelos Pydantic v2 | Sí (interna) | — |
+| `core.exceptions.UsageSourceError`, `UsageSourceAuthError`, `UsageSourceConnectionError` | Excepciones | Sí (interna) | — |
+| `utils.logging` | Logging | Sí (interna) | — |
 
-### Entrada
+## 5. Ejemplos Relacionados
 
-| Config | Campos | Impacto si falta |
-|---|---|---|
-| `LiteLLMUsageConfig` | `base_url`, `virtual_key` (obligatorios); `timeout_s` (30.0), `retries`, `retry_backoff_s`, `rate_limit_retries`, `max_retry_wait_s` | `ValidationError` de Pydantic al construir |
-| `GitHubCopilotUsageConfig` (obsoleto) | `username`, `personal_access_token` (obligatorios); `timeout_s` (30.0), `retries`, `retry_backoff_s`, `rate_limit_retries`, `max_retry_wait_s` | `ValidationError` de Pydantic al construir |
-
-**Reintentos (0.14.0, L-3b)**: todas las `*Config` de `doc_organize.ai` tienen `retries` (`int >= 0`, por defecto `0`:
-sin reintentos, como hasta 0.13.0) y `retry_backoff_s` (`float >= 0`, por defecto `0.5`). Solo se reintenta un timeout
-o un error de red/transporte (`httpx.TransportError`), con espera `retry_backoff_s * 2**n` (0.5, 1, 2...). Al agotar
-los reintentos se lanza la misma `*ConnectionError` de siempre. Ojo: reintentar un `POST` de clasificación que hizo
-timeout puede cobrarse dos veces si el proxy sí lo recibió.
-
-**429 y 503 (2.0.0, D5)**: `rate_limit_retries` (por defecto `3`) reintentos ante una respuesta 429 (límite de
-peticiones) o 503 (servicio saturado). Se espera lo que pida `Retry-After` (segundos o fecha HTTP) o, si no lo trae,
-`retry_backoff_s * 2**n`; cada espera tiene un tope de `max_retry_wait_s` (por defecto 60 s). La espera es **compartida**
-por todas las llamadas del mismo cliente: con `ContextBuilder(ai_concurrency=4)`, mientras dura nadie más envía. Al
-agotarlos se lanza el `*Error` de siempre. `rate_limit_retries=0` deja el comportamiento de 1.x. Ninguna otra respuesta
-HTTP se reintenta (ni 401/403, ni 500).
-
-Ninguna config lee variables de entorno en su constructor. Usa las factories:
-
-```python
-from doc_organize.ai import litellm_usage_config_from_env, github_copilot_usage_config_from_env
-
-litellm_config = litellm_usage_config_from_env()          # DOC_ORGANIZE_LITELLM_BASE_URL / _VIRTUAL_KEY
-copilot_config = github_copilot_usage_config_from_env()   # DOC_ORGANIZE_GITHUB_USERNAME / _PAT (obsoleto: DeprecationWarning)
-```
-
-Ambas lanzan `ValueError` si falta alguna variable de entorno.
-
-### Salida
-
-```python
-class UsageLineItem(BaseModel):
-    date: str
-    product: str
-    sku: str | None
-    quantity: float
-    unit_type: str
-    cost_usd: float | None
-
-class UsageSnapshot(BaseModel):
-    source: UsageSourceName  # "litellm" | "github_copilot" (este último, obsoleto: se retira en 3.0)
-    period_start: str
-    period_end: str
-    items: list[UsageLineItem]
-    raw: dict[str, Any]
-```
-
-## Dependencias
-
-| Dependencia | Propósito |
-|---|---|
-| `httpx` (extra `ai`) | Cliente HTTP async de ambos clientes |
-| `core.models.UsageLineItem`, `UsageSnapshot`, `UsageSourceName`, `LiteLLMUsageConfig`, `GitHubCopilotUsageConfig` | Modelos Pydantic v2 |
-| `core.exceptions.UsageSourceError`, `UsageSourceAuthError`, `UsageSourceConnectionError` | Excepciones |
-| `utils.logging` | Logging |
-
-## Notas Internas
-
-- **Testing sin red real**: ambos constructores aceptan `transport: httpx.AsyncBaseTransport | None` para inyectar `httpx.MockTransport` en tests (`tests/unit/test_litellm_usage_client.py`, `tests/unit/test_github_copilot_usage_client.py`) — sin dependencias externas, mismo criterio que el resto de la suite.
-- **`UsageSource` es estructural, no por herencia**: cualquier tercer cliente futuro (Bedrock, Vertex, ...) solo necesita implementar `get_usage()` invocable sin argumentos; campos específicos de una fuente van en `UsageSnapshot.raw`, nunca como campo top-level nuevo no opcional (evita romper `UsageSnapshot` para consumidores existentes).
-- **Sin proxying de inferencia**: deliberado — ver PLAN/AUDIT_PLAN de la sesión 2026-09-07. Si en el futuro se añade `chat_completion()`, debe ir en una clase/módulo aparte para no violar ISP sobre los consumidores que solo necesitan `get_usage()`.
-
-## Ejemplos Relacionados
-
-*Pendiente — sin consumidor real todavía que ejemplificar (ver Alcance en la documentación funcional).*
+Pendiente — crear ejemplo en docs/examples/ai_usage_monitoring.md (sin consumidor real todavía que ejemplificar; ver Alcance en la documentación funcional).

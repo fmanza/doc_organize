@@ -2,7 +2,7 @@
 
 API Reference para gestión de caché transaccional.
 
-## Arquitectura
+## 1. Arquitectura y Diseño
 
 ```mermaid
 classDiagram
@@ -31,9 +31,15 @@ classDiagram
     CacheManager --> CacheEntry
 ```
 
-## API Pública
+## 2. API Reference
 
-### CacheManager
+### Autodoc
+
+*No aplica para este módulo.* La API de `CacheManager` se documenta a mano en «Contratos».
+
+### Contratos
+
+#### CacheManager
 
 ```python
 class CacheManager:
@@ -90,7 +96,7 @@ class CacheManager:
 
 Context manager para gestión de caché SQLite (WAL mode).
 
-#### Solo lectura (`read_only=True`, desde 0.12.0)
+##### Solo lectura (`read_only=True`, desde 0.12.0)
 
 Para leer la caché que escribe otro proceso (p. ej. la API de doc_organize_web mientras el worker escanea):
 
@@ -106,7 +112,7 @@ async with CacheManager(layout.cache_db, read_only=True) as cache:
     total = await cache.count_entries("informe", relative_to="/mnt/datos/2024", conversion_status=ConversionStatus.ERROR)
 ```
 
-#### load_cache
+##### load_cache
 
 Carga todas las entradas del caché en memoria.
 
@@ -120,7 +126,7 @@ Carga todas las entradas del caché en memoria.
 
 ---
 
-#### count_entries (Async)
+##### count_entries (Async)
 
 Cuenta entradas de `cache_entries`, opcionalmente filtradas por `search`.
 
@@ -142,7 +148,7 @@ Cuenta entradas de `cache_entries`, opcionalmente filtradas por `search`.
 
 ---
 
-#### load_cache_page (Async)
+##### load_cache_page (Async)
 
 Lee una página de `cache_entries`, ordenada por `file_path` (o por `order_by`, desde 1.2.0) para paginación estable.
 
@@ -186,18 +192,6 @@ async with CacheManager(project / "cache.db", read_only=True) as cache:
     pdfs = await cache.load_cache_page(50, 0, mime_type="application/pdf", order_by="created_time", descending=True)
 ```
 
----
-
-#### list_mime_types (Async, 1.6.0)
-
-Tipos MIME presentes en la caché con su número de entradas, de más a menos (y por tipo si empatan). Pensado para el
-desplegable del filtro por tipo de una lista, sin leer la caché entera. Admite `search`, `relative_to` y
-`conversion_status` como `count_entries`. Las entradas sin tipo no aparecen; una caché anterior a 1.5.0 devuelve `[]`.
-
-```python
-tipos = await cache.list_mime_types(relative_to="/mnt/datos/2024")  # [("application/pdf", 1520), ("text/plain", 40)]
-```
-
 **Operación de `load_cache_page`**:
 - Con `order_by="file_path"`: `SELECT ... ORDER BY file_path LIMIT ? OFFSET ?`, con el mismo filtro `search` que
   `count_entries`
@@ -211,7 +205,19 @@ tipos = await cache.list_mime_types(relative_to="/mnt/datos/2024")  # [("applica
 
 ---
 
-#### get_changes (Síncrono)
+##### list_mime_types (Async, 1.6.0)
+
+Tipos MIME presentes en la caché con su número de entradas, de más a menos (y por tipo si empatan). Pensado para el
+desplegable del filtro por tipo de una lista, sin leer la caché entera. Admite `search`, `relative_to` y
+`conversion_status` como `count_entries`. Las entradas sin tipo no aparecen; una caché anterior a 1.5.0 devuelve `[]`.
+
+```python
+tipos = await cache.list_mime_types(relative_to="/mnt/datos/2024")  # [("application/pdf", 1520), ("text/plain", 40)]
+```
+
+---
+
+##### get_changes (Síncrono)
 
 Clasifica documentos en new, modified, unchanged.
 
@@ -233,7 +239,7 @@ Clasifica documentos en new, modified, unchanged.
 
 ---
 
-#### save_entries (Async)
+##### save_entries (Async)
 
 Guarda/actualiza entradas en caché (upsert transaccional).
 
@@ -250,23 +256,21 @@ Guarda/actualiza entradas en caché (upsert transaccional).
 
 ---
 
-#### clear (Async)
+##### clear (Async)
 
 Vacía `cache_entries` por completo (no es un upsert): la siguiente `get_changes()` trata todos los documentos como
 nuevos. Lanza `CacheError` en solo lectura.
 
 ---
 
-## Contratos
-
-### Entrada
+#### Entrada
 
 | Parámetro | Validación | Impacto si falla |
 |---|---|---|
 | Base de datos accesible | Validación al abrir | `CacheError` |
 | Documento con SHA-256 | Validación previa (Scanner) | Entrada incompleta en caché |
 
-### Salida
+#### Salida
 
 ```python
 class CacheEntry(BaseModel):
@@ -293,7 +297,7 @@ reconvertirlos.
 lo que no cambió (`ScanOptions.reuse_unchanged_hashes`). Un `CacheEntry` serializado antes de 1.1.0 (sin
 `size_bytes`) se sigue leyendo.
 
-## Schema SQLite
+#### Schema SQLite
 
 ```sql
 CREATE TABLE cache_entries (
@@ -322,7 +326,28 @@ columnas se leen como `None`.
 > Corregido en 1.1.0: hasta esta versión, esta página listaba también `PRAGMA synchronous=NORMAL`, que el código nunca
 > ha fijado, y omitía las columnas `error_message` y `error_retry_count`.
 
-## Dependencias
+## 3. Componentes y Clases
+
+| Clase | Responsabilidad |
+|---|---|
+| `CacheManager` | Context manager para gestión de caché SQLite (WAL mode): carga, pagina, clasifica cambios y guarda entradas de `cache_entries` |
+| `CacheEntry` | Modelo de una entrada de la caché (ver «Salida») |
+
+### Notas Internas
+
+- **No computa SHA-256**: Delega en `utils.hash_utils.hash_file()`
+- **Clasificación local**: `get_changes()` es operación en memoria (CPU, no disco)
+- **Limpieza manual**: Entradas obsoletas persisten hasta limpieza manual
+- **Escala**: Soporta ~100k-1M entradas sin problemas de rendimiento
+
+### Exportación a Excel
+
+`doc_organize.export.write_cache_xlsx()` (subcomando `export cache-xlsx`, extra `export`) escribe un Excel con
+**todas** las entradas de una o varias `cache.db`, ordenadas por `file_path`. Los valores que empiezan por un carácter
+disparador de fórmula (`=`, `+`, `-`, `@`) se neutralizan para evitar inyección de fórmulas al abrir el fichero en
+Excel o LibreOffice. Ver [Exportación](export.md).
+
+## 4. Dependencias y Requisitos
 
 | Dependencia | Propósito |
 |---|---|
@@ -332,20 +357,6 @@ columnas se leen como `None`.
 | `utils.hash_utils.hash_file()` | Única fuente de verdad para SHA-256 |
 | `utils.logging` | Logging |
 
-## Notas Internas
-
-- **No computa SHA-256**: Delega en `utils.hash_utils.hash_file()`
-- **Clasificación local**: `get_changes()` es operación en memoria (CPU, no disco)
-- **Limpieza manual**: Entradas obsoletas persisten hasta limpieza manual
-- **Escala**: Soporta ~100k-1M entradas sin problemas de rendimiento
-
-## Exportación a Excel
-
-`doc_organize.export.write_cache_xlsx()` (subcomando `export cache-xlsx`, extra `export`) escribe un Excel con
-**todas** las entradas de una o varias `cache.db`, ordenadas por `file_path`. Los valores que empiezan por un carácter
-disparador de fórmula (`=`, `+`, `-`, `@`) se neutralizan para evitar inyección de fórmulas al abrir el fichero en
-Excel o LibreOffice. Ver [Exportación](export.md).
-
-## Ejemplos Relacionados
+## 5. Ejemplos Relacionados
 
 - [Detectar cambios con caché](../examples/cache-changes.md)

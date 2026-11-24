@@ -4,6 +4,61 @@ El sitio del contexto normalmente se ve dentro de la web, que lo sirve aislado (
 no tiene cuenta (un auditor, un cliente), `SiteGenerator.generate(offline=True)` construye un sitio que se abre desde
 el disco (doble clic en `index.html`) y no pide nada a terceros.
 
+## 1. Arquitectura y Diseño
+
+```mermaid
+flowchart TD
+    Gen["SiteGenerator.generate(offline=True)"] --> Copy{"work_dir?"}
+    Copy -->|sí| WorkCopy["Copia de la carpeta reorganizada en work_dir"]
+    Copy -->|no| InPlace["Carpeta reorganizada del proyecto"]
+    WorkCopy --> Neutralize["Redacción de credenciales y neutralize_untrusted_markdown"]
+    InPlace --> Neutralize
+    Neutralize --> Build["zensical build: plugin offline + Mermaid e iframe-worker empaquetados"]
+    Build --> Site["site/"]
+    Site --> Check["check_site_offline → OfflineSiteReport"]
+    Check -->|ok| Zip["write_site_zip → SiteZipResult"]
+```
+
+### Qué cambia con `offline=True`
+
+- **Plugin `offline` de Zensical**: enlaces a ficheros (`.../pagina.html`, no a carpetas) e índice de búsqueda en
+  JavaScript (`search.js`), que es lo que funciona desde `file://`.
+- **Nada de terceros**: Mermaid (`mermaid@12.2.0`) y el shim `iframe-worker` (`1.0.4`) van empaquetados en la librería
+  (licencia MIT; versión e integridad en `src/doc_organize/context/site_assets/README.md`) y se copian al sitio. Sin
+  ellos, el tema los descargaría de unpkg.com.
+- **Contenido de terceros neutralizado, siempre** (D6): ver [Contenido no confiable (D6)](#contenido-no-confiable-d6).
+- **Sin originales ni conversión**: junto a cada página, `Reorganizer` deja el original y el `.json` de la
+  conversión, que no se pueden redactar (el `.json` lleva el texto completo). Con `offline=True` el sitio no los
+  publica (`exclude_docs` de Zensical): solo van las páginas, sus imágenes, `llms.txt` y los recursos empaquetados.
+  `include_originals=True` los vuelve a incluir; `include_originals=False` los quita también del sitio normal.
+
+Igual que la redacción de credenciales, solo cambia la copia de la carpeta reorganizada; la conversión
+(`Conversión/`) y los originales no se tocan. Un `generate()` normal después quita los recursos empaquetados y la
+configuración sin conexión, pero las páginas ya neutralizadas siguen así hasta que se reorganice de nuevo.
+
+## 2. API Reference
+
+### Autodoc
+
+::: doc_organize.security.untrusted_markdown
+    options:
+      show_root_heading: false
+      members:
+        - neutralize_untrusted_markdown
+        - NeutralizeResult
+
+::: doc_organize.context.offline_site
+    options:
+      show_root_heading: false
+      members:
+        - check_site_offline
+        - OfflineSiteReport
+        - OfflineIssue
+        - write_site_zip
+        - SiteZipResult
+
+### Contratos
+
 ```python
 from doc_organize import SiteGenerator, check_site_offline
 
@@ -14,24 +69,26 @@ if not report.ok:
     print("\n".join(report.problems()))
 ```
 
-## Qué cambia con `offline=True`
+| Función/Clase | Firma simplificada | Descripción | Retorna |
+|---|---|---|---|
+| `SiteGenerator.generate` | `generate(project, context, *, offline=True, llms_txt=False, work_dir=None, include_originals=None, ...)` | Sitio que se abre desde el disco | `SiteResult` (`offline`, `neutralized`, `neutralized_counts`) |
+| `neutralize_untrusted_markdown` | `neutralize_untrusted_markdown(text)` | Deja una página sin nada activo; idempotente | `NeutralizeResult` |
+| `check_site_offline` | `check_site_offline(site_dir)` | Revisa un `site/` ya construido | `OfflineSiteReport` (`ok`, `problems()`, `script_references`) |
+| `write_site_zip` | `write_site_zip(destination, site_dir, *, project_name="", on_progress=None, cancel_token=None)` | Empaqueta un sitio que pasa `check_site_offline`; síncrona | `SiteZipResult` (`sha256`, `zip_size_bytes`) |
 
-- **Plugin `offline` de Zensical**: enlaces a ficheros (`.../pagina.html`, no a carpetas) e índice de búsqueda en
-  JavaScript (`search.js`), que es lo que funciona desde `file://`.
-- **Nada de terceros**: Mermaid (`mermaid@12.2.0`) y el shim `iframe-worker` (`1.0.4`) van empaquetados en la librería
-  (licencia MIT; versión e integridad en `src/doc_organize/context/site_assets/README.md`) y se copian al sitio. Sin
-  ellos, el tema los descargaría de unpkg.com.
-- **Contenido de terceros neutralizado, siempre** (D6): ver abajo.
-- **Sin originales ni conversión**: junto a cada página, `Reorganizer` deja el original y el `.json` de la
-  conversión, que no se pueden redactar (el `.json` lleva el texto completo). Con `offline=True` el sitio no los
-  publica (`exclude_docs` de Zensical): solo van las páginas, sus imágenes, `llms.txt` y los recursos empaquetados.
-  `include_originals=True` los vuelve a incluir; `include_originals=False` los quita también del sitio normal.
+**Errores y casos especiales**
 
-Igual que la redacción de credenciales, solo cambia la copia de la carpeta reorganizada; la conversión
-(`Conversión/`) y los originales no se tocan. Un `generate()` normal después quita los recursos empaquetados y la
-configuración sin conexión, pero las páginas ya neutralizadas siguen así hasta que se reorganice de nuevo.
+| Excepción | Cuándo |
+|---|---|
+| `OfflineSiteError` | `write_site_zip` con un sitio que no pasa `check_site_offline` (trae los problemas; no escribe nada) |
+| `InvalidPathError` | `write_site_zip` con `destination` dentro de `site_dir` |
+| `FileNotFoundError` | `write_site_zip` con un `site_dir` que no existe |
 
-## Construir aparte (`work_dir`)
+`work_dir` no se admite junto con `site_dir`.
+
+## 3. Componentes y Clases
+
+### Construir aparte (`work_dir`)
 
 Para entregar el sitio sin cambiar el que ya se sirve (por ejemplo, desde la web), pasa una carpeta de trabajo fuera
 del proyecto, vacía o que no exista:
@@ -45,7 +102,7 @@ Se copia ahí la carpeta reorganizada (sin enlaces simbólicos) y en esa copia s
 `zensical.toml` y el sitio; el proyecto queda igual (ni páginas, ni `zensical.toml`, ni `site/`). No se admite junto
 con `site_dir`. Borrar `work_dir` después es cosa de quien llama.
 
-## Contenido no confiable (D6)
+### Contenido no confiable (D6)
 
 Los `.md` salen de documentos de terceros, y Zensical deja pasar tal cual el HTML que llevan. Abierto desde el disco no
 hay CSP que lo aísle: un `<script>` podría leer el índice de búsqueda (todo el texto del corpus) y enviarlo fuera.
@@ -66,7 +123,7 @@ Es idempotente. `SiteResult.neutralized` dice qué páginas cambiaron y `neutral
 `script-src` (lo que le quita casi todo el valor frente al HTML incrustado) y no se ha podido comprobar en Edge, Chrome
 y Firefox con `file://`. La protección es la neutralización.
 
-## Comprobar el sitio antes de entregarlo
+### Comprobar el sitio antes de entregarlo
 
 `check_site_offline(site_dir)` revisa un `site/` ya construido:
 
@@ -81,7 +138,7 @@ información, las URLs de terceros que hay dentro del JavaScript del tema: el te
 funciones que este sitio no activa (Pyodide y ACE para bloques de código ejecutables, la galería de imágenes, el
 polyfill de `ResizeObserver` para navegadores antiguos, y Mermaid si no estuviera ya cargado).
 
-## Empaquetar el sitio para entregarlo
+### Empaquetar el sitio para entregarlo
 
 `write_site_zip(destination, site_dir, *, project_name="", on_progress=None, cancel_token=None) -> SiteZipResult`
 empaqueta un sitio que pasa `check_site_offline` (si no, lanza `OfflineSiteError` con los problemas y no escribe nada;
@@ -109,19 +166,14 @@ el mismo `site/` (comprobado con Zensical 0.1.1) y, por tanto, el mismo ZIP. Esc
 (`ProgressEvent(operation="export")`) y cancelación (`CancelToken`) como `write_project_zip`; es síncrona: desde
 código async, con `asyncio.to_thread`.
 
-::: doc_organize.security.untrusted_markdown
-    options:
-      show_root_heading: false
-      members:
-        - neutralize_untrusted_markdown
-        - NeutralizeResult
+## 4. Dependencias y Requisitos
 
-::: doc_organize.context.offline_site
-    options:
-      show_root_heading: false
-      members:
-        - check_site_offline
-        - OfflineSiteReport
-        - OfflineIssue
-        - write_site_zip
-        - SiteZipResult
+| Dependencia | Propósito | Requerida | Comportamiento sin ella |
+|---|---|---|---|
+| `zensical` (extra `site`), plugin `offline` | Construir el sitio con enlaces a ficheros y búsqueda en JavaScript | Sí, para construir | `SiteBuildError` (ver [SiteGenerator](context.md#sitegenerator-0130-l-8)) |
+| Mermaid `12.2.0` e `iframe-worker` `1.0.4` | Empaquetados en la librería y copiados al sitio | Incluidos | El tema los descargaría de unpkg.com |
+| Python 3.10+ (en el equipo del destinatario) | `start_server.py`, si el navegador limita la búsqueda desde `file://` | No | El sitio se abre igual con doble clic en `sitio/index.html` |
+
+## 5. Ejemplos Relacionados
+
+Pendiente — crear ejemplo en docs/examples/offline_site.md

@@ -4,6 +4,48 @@ Para saber si un cambio de reglas, prompt, perfil o modelo mejora la clasificaci
 **referencia**: unos documentos etiquetados a mano con el valor correcto de cada eje. `evaluate_classification` compara
 un contexto con ella, eje a eje.
 
+## 1. Arquitectura y Diseño
+
+```mermaid
+flowchart TD
+    Xlsx["load_gold_xlsx(referencia.xlsx)"] --> Gold["GoldStandard"]
+    Manual["GoldStandard(labels=[GoldLabel(...)])"] --> Gold
+    Ctx["Context (ContextRegistry.load_context)"] --> Eval["evaluate_classification"]
+    Gold --> Eval
+    Eval --> Report["EvaluationReport → AxisEvaluation por eje"]
+    Dry["dry_run_classify"] -->|"build(persist=False)"| Trial["Contexto sin guardar"]
+    Trial --> Eval
+    Dry --> Result["DryRunResult: context, evaluation, changes"]
+```
+
+## 2. API Reference
+
+### Autodoc
+
+::: doc_organize.context.dry_run
+    options:
+      show_root_heading: false
+      members:
+        - dry_run_classify
+        - DryRunResult
+        - DocumentChange
+
+::: doc_organize.context.evaluation
+    options:
+      show_root_heading: false
+      members:
+        - evaluate_classification
+        - load_gold_xlsx
+        - GoldStandard
+        - GoldLabel
+        - EvaluationReport
+        - AxisEvaluation
+        - LabelConfusion
+        - document_keys
+        - common_root
+
+### Contratos
+
 ```python
 from doc_organize import ContextRegistry, evaluate_classification, load_gold_xlsx
 
@@ -13,7 +55,7 @@ report = evaluate_classification(context, gold)
 print(report.to_markdown())
 ```
 
-## La referencia
+#### La referencia
 
 `load_gold_xlsx(path, *, columns=None, sheet="Referencia", document_column="documento")` lee un Excel con una fila por
 documento:
@@ -27,7 +69,7 @@ documento:
 Necesita el extra `export` (`openpyxl`). También se puede construir a mano: `GoldStandard(labels=[GoldLabel(document=...,
 axes={"domains": ["calidad"]})])`.
 
-## Las métricas
+#### Las métricas
 
 `EvaluationReport.axes` tiene un `AxisEvaluation` por eje etiquetado, sobre los documentos etiquetados que están en el
 contexto (`matched`; los que no, en `missing_documents`):
@@ -44,7 +86,9 @@ Las claves del contexto se calculan con `roots` (raíces de escaneo) o, por defe
 originales, así que una referencia hecha con las rutas del contenedor de la web (`/mnt/...`) vale con un contexto del
 equipo y al revés.
 
-## Clasificación de prueba
+## 3. Componentes y Clases
+
+### Clasificación de prueba
 
 `dry_run_classify(project, documents, *, gold=None, only_gold=True, roots=None, builder=None, ai_cache=False,
 baseline=None, **opciones_de_build) -> DryRunResult` construye el
@@ -85,24 +129,12 @@ for cambio in prueba.changes:
 Las claves de los documentos son su ruta relativa a la raíz de escaneo (`document_keys`): pasa como `roots` las mismas
 raíces que a `build(scan_roots=)` para que no cambien con el corpus.
 
-::: doc_organize.context.dry_run
-    options:
-      show_root_heading: false
-      members:
-        - dry_run_classify
-        - DryRunResult
-        - DocumentChange
+## 4. Dependencias y Requisitos
 
-::: doc_organize.context.evaluation
-    options:
-      show_root_heading: false
-      members:
-        - evaluate_classification
-        - load_gold_xlsx
-        - GoldStandard
-        - GoldLabel
-        - EvaluationReport
-        - AxisEvaluation
-        - LabelConfusion
-        - document_keys
-        - common_root
+| Dependencia | Propósito | Requerida | Comportamiento sin ella |
+|---|---|---|---|
+| `openpyxl` (extra `export`) | Leer la referencia con `load_gold_xlsx` | No | `load_gold_xlsx` lanza `MissingDependencyError`; la referencia se puede construir a mano con `GoldStandard` |
+
+## 5. Ejemplos Relacionados
+
+Pendiente — crear ejemplo en docs/examples/evaluation.md

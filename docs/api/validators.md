@@ -2,7 +2,7 @@
 
 API Reference para validación de carpetas y nombres de proyecto.
 
-## Arquitectura
+## 1. Arquitectura y Diseño
 
 ```mermaid
 classDiagram
@@ -32,20 +32,24 @@ classDiagram
     ProjectValidator --> ProjectNameValidation
 ```
 
-## API Pública
+## 2. API Reference
+
+### Autodoc
+
+*No aplica para este módulo.*
+
+### Contratos
 
 Los dos validadores son síncronos (no leen contenido de ficheros) y están en `doc_organize.__all__`. Sus modelos de
 resultado (`ValidationResult`, `ProjectNameValidation`) viven en `doc_organize.core.models` y no se exportan en la raíz.
 
-### FolderValidator
+#### FolderValidator
 
 ```python
 class FolderValidator:
     def __init__(self) -> None
     def validate_folder_set(self, paths: list[str]) -> ValidationResult
 ```
-
-Valida un conjunto de carpetas y descarta las que son subcarpeta de otra.
 
 | Parámetro | Tipo | Descripción |
 |---|---|---|
@@ -64,7 +68,7 @@ Con `paths` vacía devuelve `is_valid=False`, el aviso `"No se proporcionaron ca
 
 ---
 
-### ProjectValidator
+#### ProjectValidator
 
 ```python
 class ProjectValidator:
@@ -72,10 +76,10 @@ class ProjectValidator:
     def validate_name(self, name: str) -> ProjectNameValidation
 ```
 
-Valida un nombre de proyecto: lo normaliza a NFC y devuelve el resultado. **No lanza excepciones**: un nombre no
-válido devuelve `is_valid=False` con el motivo en `warnings` y `normalized_name=None`.
+**No lanza excepciones**: un nombre no válido devuelve `is_valid=False` con el motivo en `warnings` y
+`normalized_name=None`.
 
-#### Reglas del nombre
+##### Reglas del nombre
 
 | Regla | Motivo de rechazo |
 |---|---|
@@ -86,9 +90,7 @@ válido devuelve `is_valid=False` con el motivo en `warnings` y `normalized_name
 | Sin `< > : " / \ \| ? *` ni caracteres de control | `El nombre contiene caracteres no permitidos…` |
 | No es un nombre reservado de Windows | `CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9` (con o sin extensión) |
 
-## Contratos
-
-### Entrada
+#### Entrada
 
 | Parámetro | Validación | Impacto si falla |
 |---|---|---|
@@ -96,7 +98,7 @@ válido devuelve `is_valid=False` con el motivo en `warnings` y `normalized_name
 | Ruta debe ser directorio | Comprobación OS | `InvalidPathError` |
 | Nombre de proyecto | Reglas de `ProjectValidator` | `is_valid=False` y motivo en `warnings` |
 
-### Salida
+#### Salida
 
 ```python
 class ValidationResult(BaseModel):  # doc_organize.core.models
@@ -110,16 +112,26 @@ class ProjectNameValidation(BaseModel):  # doc_organize.core.models
     normalized_name: str | None = None  # NFC y sin espacios, solo si is_valid
 ```
 
-## Dependencias
+## 3. Componentes y Clases
 
-| Dependencia | Propósito |
+| Clase | Responsabilidad |
 |---|---|
-| `pathlib.Path` | Manipulación de rutas (estándar) |
-| `doc_organize.core.exceptions` | `InvalidPathError` (`FolderValidator`) |
-| `doc_organize.core.constants` | Longitud máxima, caracteres prohibidos y nombres reservados (`ProjectValidator`) |
-| `doc_organize.utils.path_utils.is_subpath()` | Detección de subcarpetas |
-| `doc_organize.utils.logging` | Logging |
+| `FolderValidator` | Valida un conjunto de carpetas y descarta las que son subcarpeta de otra. |
+| `ProjectValidator` | Valida un nombre de proyecto: lo normaliza a NFC y devuelve el resultado. |
+| `ValidationResult` | Resultado de `FolderValidator.validate_folder_set` (`doc_organize.core.models`). |
+| `ProjectNameValidation` | Resultado de `ProjectValidator.validate_name` (`doc_organize.core.models`). |
 
-## Ejemplos Relacionados
+## 4. Dependencias y Requisitos
+
+| Dependencia | Propósito | Requerida | Comportamiento sin ella |
+|---|---|---|---|
+| `pathlib.Path` | Manipulación de rutas (estándar) | Sí | — |
+| `doc_organize.core.exceptions` | `InvalidPathError` (`FolderValidator`) | Sí | — |
+| `doc_organize.core.constants` | Longitud máxima, caracteres prohibidos y nombres reservados (`ProjectValidator`) | Sí | — |
+| `doc_organize.utils.path_utils.is_subpath()` | Detección de subcarpetas | Sí | — |
+| `doc_organize.utils.logging` | Logging | Sí | — |
+
+## 5. Ejemplos Relacionados
 
 - [Validar carpetas antes de escanear](../examples/validators-scan.md)
+- [Crear y listar proyectos](../examples/projects-registry.md): usa `ProjectValidator` para validar el nombre

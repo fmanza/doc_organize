@@ -3,7 +3,30 @@
 `ScanCommand` orquesta escaneo, caché y conversión (Nivel 3). Lo comparten el CLI y
 [doc_organize_web](https://github.com/fmanza/doc_organize_web). Las opciones van en `ScanOptions`.
 
-## ScanCommand
+## 1. Arquitectura y Diseño
+
+```mermaid
+flowchart TD
+    Caller["CLI / doc_organize_web"] --> SC[ScanCommand]
+    SC --> FV[FolderValidator]
+    SC --> DS[DocumentScanner]
+    SC --> CM[CacheManager]
+    SC --> DC[DocumentConverter]
+    SC --> OCR[OCRScheduler]
+    SC -->|deduplicate_streaming| DM[DeduplicationManager]
+    SC --> EV["ScanEvent / DedupEvent"]
+    EV --> SUM["ScanSummary / DeduplicationSummary"]
+```
+
+## 2. API Reference
+
+### Autodoc
+
+*No aplica para este módulo.*
+
+### Contratos
+
+#### ScanCommand
 
 ```python
 class ScanCommand:
@@ -58,7 +81,7 @@ otro. Mezclarlos, o no pasar `options` ni `use_ocr` y `use_gpu`, lanza `TypeErro
 `GROUP_STARTED`/`GROUP_RESOLVED` por grupo y termina con `COMPLETED` (los campos de `DeduplicationSummary`) o con
 `CANCELLED` (para entre grupos; los ya movidos quedan en `DEDUP_REPORT.json`).
 
-## ScanOptions
+#### ScanOptions
 
 Modelo inmutable (`frozen`, `extra="forbid"`). Con los valores por defecto, un escaneo de 1.1.0 se comporta como uno
 de 1.0.
@@ -86,7 +109,7 @@ de 1.0.
 | `ignore_patterns` | `list[str]` | `[]` | **1.3.0.** Patrones `fnmatch` de nombre (fichero o carpeta) que no se recorren, sin distinguir mayúsculas |
 | `capture_owner` | `bool` | `False` | **1.5.0.** Guardar la cuenta propietaria de cada documento (`owner_name`); ver [Metadatos de fichero](scanner.md#metadatos-de-fichero-150) |
 
-### Escaneos por tramos (`max_documents`, G38)
+#### Escaneos por tramos (`max_documents`, G38)
 
 Cada conversión de Docling cuenta una vez: la primera pasada de un documento y su pasada de OCR cuentan por separado.
 Al llegar al límite, el escaneo:
@@ -110,13 +133,13 @@ while True:
 Si cada tramo se lanza en un proceso nuevo (como el worker de doc_organize_web), la memoria de cada tramo se devuelve
 al sistema al terminar ese proceso. Ver [Memoria en escaneos largos](../guides/troubleshooting.md#memoria-en-escaneos-largos).
 
-### Cancelación (`cancel_token`)
+#### Cancelación (`cancel_token`)
 
 El escaneo para **entre documentos**, también en la fase de OCR desde 1.1.0. El documento en curso termina. Lo ya
 convertido, y lo ya procesado con OCR, se guarda en la caché; el resto de candidatos de OCR sigue `ocr_pending`. El
 último evento es `CANCELLED`. Hasta 1.0.1, cancelar durante el OCR descartaba los documentos ya procesados en ese lote.
 
-### Carpetas de red (`io_retries`, `document_timeout_s`, `reuse_unchanged_hashes`, G11)
+#### Carpetas de red (`io_retries`, `document_timeout_s`, `reuse_unchanged_hashes`, G11)
 
 - **Reintentos**: listar una carpeta, leer los metadatos de un fichero y calcular su hash se repiten hasta
   `io_retries` veces ante un `OSError` transitorio. Se espera `io_retry_backoff_s`, luego el doble, y así
@@ -138,7 +161,7 @@ convertido, y lo ya procesado con OCR, se guarda en la caché; el resto de candi
 - **Enlaces**: los enlaces simbólicos, y desde 1.1.0 las *junctions* de Windows, no se siguen. Solo se resuelve la
   carpeta raíz indicada.
 
-### Exclusiones (`exclude_paths`, `ignore_patterns`, G41)
+#### Exclusiones (`exclude_paths`, `ignore_patterns`, G41)
 
 Desde 1.3.0, un escaneo puede dejar fuera subcarpetas o ficheros concretos y nombres que encajan con un patrón:
 
@@ -174,7 +197,7 @@ Con `force` siguen protegidos los documentos de carpetas o ficheros que no se pu
 encajan con un patrón (en algún tramo de su ruta bajo la carpeta escaneada); se calcula desde la caché, sin recorrer
 el disco. Con `force`, son las que se han borrado por estar excluidas.
 
-## ScanSummary
+#### ScanSummary
 
 ```python
 @dataclass
@@ -203,7 +226,7 @@ class ScanSummary:
 El evento `COMPLETED` lleva estos campos en `data` (`dataclasses.asdict`). Los campos nuevos se añaden siempre,
 con sus valores por defecto si no aplican.
 
-## DeduplicationSummary
+#### DeduplicationSummary
 
 ```python
 @dataclass
@@ -219,3 +242,28 @@ class DeduplicationSummary:
 
 Resumen del evento `COMPLETED` de `deduplicate_streaming` (mismos campos que su `data`):
 `DeduplicationSummary(**event.data)`.
+
+## 3. Componentes y Clases
+
+| Clase | Responsabilidad |
+|---|---|
+| `ScanCommand` | Orquesta escaneo, caché y conversión (`run`, `run_streaming`) y la deduplicación por grupos (`deduplicate_streaming`). |
+| `ScanOptions` | Opciones del escaneo: modelo inmutable que sustituye a los indicadores sueltos de `run`. |
+| `ScanSummary` | Resumen del escaneo; viaja en `data` del evento `COMPLETED` y `render()` da el texto que imprime el CLI. |
+| `DeduplicationSummary` | Resumen del evento `COMPLETED` de `deduplicate_streaming`. |
+
+## 4. Dependencias y Requisitos
+
+| Dependencia | Propósito | Requerida | Comportamiento sin ella |
+|---|---|---|---|
+| `validators.FolderValidator` | Valida las carpetas y las guarda en `folders_json` | Sí | — |
+| `scanner.DocumentScanner` | Recorrido y hash de los documentos | Sí | — |
+| `cache.CacheManager` | Caché del escaneo (`cache_db`) | Sí | — |
+| `converter.DocumentConverter`, `OCRScheduler` | Conversión y segunda pasada de OCR | Sí | — |
+| `dedup.DeduplicationManager` | Grupos de duplicados de `deduplicate_streaming` | Sí | — |
+| `core.progress` (`CancelToken`, `ProgressCallback`) | Cancelación y progreso | Sí | — |
+| `core.exceptions.OperationCancelledError` | Cancelación en `run` | Sí | — |
+
+## 5. Ejemplos Relacionados
+
+- Pendiente — crear ejemplo en docs/examples/scan.md

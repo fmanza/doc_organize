@@ -2,7 +2,7 @@
 
 API Reference para conversión de documentos.
 
-## Arquitectura
+## 1. Arquitectura y Diseño
 
 ```mermaid
 classDiagram
@@ -34,9 +34,15 @@ classDiagram
     OCRScheduler --> DocumentConverter
 ```
 
-## API Pública
+## 2. API Reference
 
-### DocumentConverter
+### Autodoc
+
+*No aplica para este módulo.*
+
+### Contratos
+
+#### DocumentConverter
 
 ```python
 class DocumentConverter:
@@ -74,8 +80,6 @@ los modelos solo de esa carpeta (descargados antes con `docling-tools models dow
 PDF/imagen se inicializa el pipeline y, si falta un modelo, se lanza `ModelsNotAvailableError` (se propaga: no es un
 fallo de un documento). Word, Excel, HTML… no usan modelos y no se comprueban.
 
-Context manager para conversión de documentos.
-
 | Parámetro | Tipo | Descripción |
 |---|---|---|
 | `source_doc` | `DocumentMetadata` | Documento a convertir |
@@ -109,7 +113,7 @@ Context manager para conversión de documentos.
 
 ---
 
-### OCRScheduler
+#### OCRScheduler
 
 ```python
 class OCRScheduler:
@@ -133,8 +137,6 @@ class OCRScheduler:
     ) -> list[ConversionResult]
 ```
 
-Reconvierte batch de documentos con OCR.
-
 | Parámetro | Tipo | Descripción |
 |---|---|---|
 | `docs` | `list[DocumentMetadata]` | Documentos que requieren OCR |
@@ -153,11 +155,7 @@ Reconvierte batch de documentos con OCR.
 |---|---|---|
 | | `list[ConversionResult]` | Un resultado por documento procesado, en el orden de `docs`. Con `cancel_token` o `max_documents` puede tener menos elementos que `docs`: los que faltan son los del final, sin procesar |
 
----
-
-## Contratos
-
-### Entrada
+#### Entrada
 
 | Parámetro | Validación | Impacto si falla |
 |---|---|---|
@@ -165,7 +163,7 @@ Reconvierte batch de documentos con OCR.
 | Documento legible y formato soportado | Docling | `success=False` y `error` en el resultado |
 | Tiempo por documento | `timeout_s` | `success=False` con la causa del límite |
 
-### Salida
+#### Salida
 
 ```python
 class ConversionResult(BaseModel):  # doc_organize.core.models
@@ -181,19 +179,15 @@ class ConversionResult(BaseModel):  # doc_organize.core.models
     picture_description_applied: bool = False
 ```
 
-## Dependencias
+## 3. Componentes y Clases
 
-| Dependencia | Propósito |
+| Clase | Responsabilidad |
 |---|---|
-| `docling` | Conversión principal (DocumentConverter) |
-| `docling.InputFormat`, `EasyOcrOptions`, `PdfPipelineOptions`, `smolvlm_picture_description` | Configuración de Docling |
-| `docling_core.types.doc.base.ImageRefMode` | Modo de referencia de imágenes al exportar Markdown |
-| `docling_core.types.doc.document.PictureItem`, `PictureDescriptionData` | Extracción de descripciones de imagen para el `.json` |
-| `core.models.ConversionResult`, `DocumentMetadata` | Modelos |
-| `core.exceptions.ConversionError`, `ModelsNotAvailableError` | Excepciones |
-| `utils.logging` | Logging |
+| `DocumentConverter` | Context manager para conversión de documentos. |
+| `OCRScheduler` | Reconvierte batch de documentos con OCR. |
+| `ConversionResult` | Resultado de cada conversión (`doc_organize.core.models`). |
 
-## Notas Internas
+### Notas Internas
 
 - **Pool de convertidores**: Cachea por `(use_ocr, use_gpu, extract_images, use_picture_description)` para evitar reinicialización
 - **Non-blocking**: Usa `asyncio.to_thread()` para I/O CPU-intensivo
@@ -206,6 +200,18 @@ class ConversionResult(BaseModel):  # doc_organize.core.models
 - **Espacios/puntos finales en nombres de origen**: `resolve_output_paths` aplica `rstrip(" .")` a cada segmento de la ruta mirroreada (carpetas intermedias y `stem` final). Windows quita esos caracteres solo del último componente de una ruta al crearla, pero no al referenciarlo después como componente intermedio — un `stem` como `"Anti SPAM correo Virtual Desk "` (con espacio final) generaba una carpeta `img/<stem>/` sin el espacio, y una escritura posterior dentro de ella buscaba el nombre con espacio, inexistente (`[Errno 2] No such file or directory`)
 - **Mensaje de error vacío**: si la excepción capturada en `convert_document()` no lleva mensaje (`str(exc) == ""`), `ConversionResult.error` usa un texto de respaldo (`"{TipoDeExcepcion} sin mensaje de error"`) en vez de quedar en blanco; el traceback completo igualmente se registra en el log (`exc_info=True`). Para `MemoryError` (sin mensaje propio por diseño de Python) se usa un mensaje específico con el tamaño del documento (`source_doc.size_bytes`) en vez del fallback genérico
 
-## Ejemplos Relacionados
+## 4. Dependencias y Requisitos
+
+| Dependencia | Propósito | Requerida | Comportamiento sin ella |
+|---|---|---|---|
+| `docling` | Conversión principal (DocumentConverter) | Sí | — |
+| `docling.InputFormat`, `EasyOcrOptions`, `PdfPipelineOptions`, `smolvlm_picture_description` | Configuración de Docling | Sí | — |
+| `docling_core.types.doc.base.ImageRefMode` | Modo de referencia de imágenes al exportar Markdown | Sí | — |
+| `docling_core.types.doc.document.PictureItem`, `PictureDescriptionData` | Extracción de descripciones de imagen para el `.json` | Sí | — |
+| `core.models.ConversionResult`, `DocumentMetadata` | Modelos | Sí | — |
+| `core.exceptions.ConversionError`, `ModelsNotAvailableError` | Excepciones | Sí | — |
+| `utils.logging` | Logging | Sí | — |
+
+## 5. Ejemplos Relacionados
 
 - [Convertir documentos a Markdown](../examples/converter-convert.md)

@@ -1,17 +1,33 @@
 # Projects — Registro y Gestión de Proyectos
 
-Crear, listar y abrir proyectos locales registrados.
+## 1. Descripción General
 
-## Objetivo
+Crear, listar y abrir proyectos locales registrados.
 
 Mantener un registro centralizado (`~/.doc_organize/projects.json`) de proyectos creados por el usuario, cada uno con su propia carpeta y configuración.
 
-## Precondiciones
+### Precondiciones
 
 - Usuario debe tener permisos de escritura en `~/.doc_organize/`
 - Nombre de proyecto válido (verificado por `ProjectValidator`)
 
-## Flujo Principal
+## 2. Reglas de Negocio
+
+| Regla | Descripción |
+|---|---|
+| **Nombres únicos** | En todo el registro; comprobación case-insensitive |
+| **Registro central** | `~/.doc_organize/projects.json` fuera de proyectos |
+| **Creación atómica** | Temp file + `os.replace()` |
+| **Locking async** | Poco frecuente (crear proyecto es rara) |
+
+### Límites y Restricciones
+
+❌ No verifica si la carpeta destino existe (asume que la crea)  
+❌ No valida que el disco tenga espacio  
+
+## 3. Casos de Uso
+
+### Flujo principal
 
 ```mermaid
 sequenceDiagram
@@ -39,32 +55,14 @@ sequenceDiagram
 4. **Rollback**: Si falla, borra carpeta creada
 5. **Listar**: Lee `projects.json` sin verificar existencia física
 
-## Reglas de Negocio
-
-| Regla | Descripción |
-|---|---|
-| **Nombres únicos** | En todo el registro; comprobación case-insensitive |
-| **Registro central** | `~/.doc_organize/projects.json` fuera de proyectos |
-| **Creación atómica** | Temp file + `os.replace()` |
-| **Locking async** | Poco frecuente (crear proyecto es rara) |
-
-## Límites y Restricciones
-
-❌ No verifica si la carpeta destino existe (asume que la crea)  
-❌ No valida que el disco tenga espacio  
-
-## Casos Especiales
+### Flujos alternativos y de error
 
 - **Carpeta ya existe**: Falla si intenta crear
 - **Nombre duplicado**: Lanza `ProjectAlreadyExistsError`
 - **Nombre inválido**: Lanza `ProjectNameError`
 - **Carpeta no creada**: Rollback automático
 
-## Criterios de Aceptación
-
-*Pendiente de validación QA*
-
-## Lista persistente de carpetas de escaneo
+### Lista persistente de carpetas de escaneo
 
 `ScannedFoldersStore` guarda, por proyecto (`<root_path>/scanned_folders.json`),
 qué carpetas se han añadido para escanear — distinto del registro central
@@ -77,20 +75,20 @@ qué carpetas se han añadido para escanear — distinto del registro central
   pueden eliminarse de la lista — una vez usada, queda marcada `used=True` de
   forma permanente, como historial de qué se ha escaneado.
 
-## Gestión destructiva de un proyecto
+### Gestión destructiva de un proyecto
 
 `ProjectRegistry.delete_project()`, `ProjectRegistry.move_project_root()` y `ProjectHistoryCleaner.clear()` borran,
 mueven o vacían un proyecto entero (ver [Projects — API](../api/projects.md)). La confirmación del usuario y el bloqueo
 mientras hay un escaneo en curso son responsabilidad del consumidor (doc_organize_web los implementa).
 
-## Descarga de export del proyecto (ZIP)
+### Descarga de export del proyecto (ZIP)
 
 `write_project_zip()` (subcomando `export zip`) escribe un ZIP con `Conversión/`, `cache_export.json`
 y `duplicados/DEDUP_REPORT.json` (si existe). `preview_project_zip()` (`export zip --preview`) estima
 antes el tamaño y el número de ficheros sobre el estado actual del proyecto; es informativa: si el
 proyecto cambia entre la estimación y la escritura, puede no coincidir. Ver [Exportación](export.md).
 
-## Detección de GPU (entorno, no permisos)
+### Detección de GPU (entorno, no permisos)
 
 `detect_gpu_status()` detecta si el entorno donde corre doc_organize tiene
 soporte de GPU para OCR acelerado (`torch` compilado con CUDA + `torch.cuda.is_available()`)
@@ -99,3 +97,11 @@ activo. Es una detección puramente de entorno software — no depende de rol ni
 usuario. Desde 2.0.1, un `torch` solo CPU (el que instala Docling por defecto) cuenta como «sin soporte de GPU en
 este proceso», no como un problema de drivers. Forma parte también del [diagnóstico del entorno](diagnostics.md) — ver
 [Resolución de problemas](../guides/troubleshooting.md#ocr-muy-lento-en-documentos-grandes).
+
+## 4. Criterios de Aceptación
+
+*Pendiente de QA: esta sección se completará cuando el equipo QA valide los criterios.*
+
+## 5. Glosario y Términos
+
+*No aplica para este módulo.*

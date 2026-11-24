@@ -1,9 +1,11 @@
 # Deduplicación — Detección y Resolución de Duplicados
 
+## 1. Descripción General
+
 Detecta duplicados exactos, conflictos de versión y, desde 2.2.0, documentos con el mismo contenido o un contenido
 parecido; resuelve moviendo (o copiando) los descartados a una carpeta aparte.
 
-## Objetivo
+### Objetivo
 
 Identificar:
 1. **Duplicados exactos**: Mismo SHA-256 (archivo idéntico en dos lugares)
@@ -18,14 +20,38 @@ Identificar:
 Resolver moviendo documentos descartados a carpeta de duplicados (o copiándolos, o solo informando: ver
 [Modos de resolución](#modos-de-resolucion)).
 
-## Precondiciones
+### Precondiciones
 
 - Documentos escaneados (con SHA-256 calculado)
 - Carpeta destino para duplicados debe existir o ser creada
 - Solo para los duplicados por contenido: documentos ya convertidos (su Markdown en `Conversión/`) y, para el
   contenido parecido, un modelo de embeddings propio para la tarea `dedup` (`DOC_ORGANIZE_LITELLM_MODEL_DEDUP`)
 
-## Flujo Principal
+## 2. Reglas de Negocio
+
+| Regla | Descripción |
+|---|---|
+| **Canónico = antiguo** | Conserva documento más antiguo por `modified_time` (propuesta, no aplicada sola, en grupos `fuzzy_name_match`, `same_content` y `semantic_content_match`) |
+| **Elección del usuario** | Si el grupo trae `user_choice`, se conserva ese documento en lugar del canónico |
+| **Replica estructura** | Duplicados se mueven a `duplicates_dir/original/path` |
+| **Auditable** | `DEDUP_REPORT.json` con timestamps y decisiones |
+| **Colisiones de nombres** | Si destino existe, añade sufijo con hash de 8 caracteres |
+| **Un grupo por documento** | La pasada fuzzy solo opera sobre documentos no agrupados ya por hash exacto o versión |
+| **Fuzzy = solo manual** | Los grupos `fuzzy_name_match` nunca se mueven desde "Buscar duplicados" (acción masiva) |
+| **Contenido = solo manual (2.2.0)** | Los grupos `same_content` y `semantic_content_match` tampoco: la acción masiva no busca por contenido |
+| **Grupos sin cadenas (2.2.0)** | Un documento entra en un grupo por contenido parecido solo si llega al umbral con **todos** sus miembros |
+| **Modelo propio para `dedup` (2.2.0)** | El contenido parecido no usa el modelo de `embed`: sin modelo propio para `dedup` falla con `AiConfigurationError` |
+| **Texto completo al modelo (2.2.0)** | A la tarea `dedup` va el texto completo de cada documento (con las credenciales redactadas): se recomienda un modelo local |
+
+### Límites y Restricciones
+
+❌ No elimina archivos (mueve, copia o solo informa)  
+❌ No verifica espacio en destino  
+❌ No sigue symlinks  
+
+## 3. Casos de Uso
+
+### Flujo principal
 
 ```mermaid
 sequenceDiagram
@@ -117,29 +143,7 @@ se resuelven con `move_group()`. En modo `copy` el original se queda en su sitio
 contexto lo volvería a incluir; `exclude_from_context()` guarda por cada descartado una decisión `exclude` (solo se
 aplica al construir con manifiesto de taxonomía). Guía completa: [Duplicados por contenido](../guides/duplicados_por_contenido.md).
 
-## Reglas de Negocio
-
-| Regla | Descripción |
-|---|---|
-| **Canónico = antiguo** | Conserva documento más antiguo por `modified_time` (propuesta, no aplicada sola, en grupos `fuzzy_name_match`, `same_content` y `semantic_content_match`) |
-| **Elección del usuario** | Si el grupo trae `user_choice`, se conserva ese documento en lugar del canónico |
-| **Replica estructura** | Duplicados se mueven a `duplicates_dir/original/path` |
-| **Auditable** | `DEDUP_REPORT.json` con timestamps y decisiones |
-| **Colisiones de nombres** | Si destino existe, añade sufijo con hash de 8 caracteres |
-| **Un grupo por documento** | La pasada fuzzy solo opera sobre documentos no agrupados ya por hash exacto o versión |
-| **Fuzzy = solo manual** | Los grupos `fuzzy_name_match` nunca se mueven desde "Buscar duplicados" (acción masiva) |
-| **Contenido = solo manual (2.2.0)** | Los grupos `same_content` y `semantic_content_match` tampoco: la acción masiva no busca por contenido |
-| **Grupos sin cadenas (2.2.0)** | Un documento entra en un grupo por contenido parecido solo si llega al umbral con **todos** sus miembros |
-| **Modelo propio para `dedup` (2.2.0)** | El contenido parecido no usa el modelo de `embed`: sin modelo propio para `dedup` falla con `AiConfigurationError` |
-| **Texto completo al modelo (2.2.0)** | A la tarea `dedup` va el texto completo de cada documento (con las credenciales redactadas): se recomienda un modelo local |
-
-## Límites y Restricciones
-
-❌ No elimina archivos (mueve, copia o solo informa)  
-❌ No verifica espacio en destino  
-❌ No sigue symlinks  
-
-## Casos Especiales
+### Flujos alternativos y de error
 
 - **Grupo único**: Documento conservado (sin mover)
 - **Destino existe**: Renombra con sufijo de hash
@@ -147,6 +151,17 @@ aplica al construir con manifiesto de taxonomía). Guía completa: [Duplicados p
 - **Documento demasiado corto o sin conversión** (contenido): no se compara, queda en `not_compared`
 - **Fallo al mover la conversión** (modo `move` con `conversions`): su ruta queda como fallida; el original ya se movió
 
-## Criterios de Aceptación
+## 4. Criterios de Aceptación
 
-*Pendiente de validación QA*
+*Pendiente de QA: esta sección se completará cuando el equipo QA valide los criterios.*
+
+## 5. Glosario y Términos
+
+| Término | Definición |
+|---|---|
+| Duplicado exacto | Mismo SHA-256: archivo idéntico en dos lugares |
+| Conflicto de versión | Mismo nombre base, SHA-256 distinto: versiones diferentes del mismo documento |
+| Similitud aproximada de nombre | Nombres de archivo parecidos (score ≥ `fuzzy_threshold`%); nunca se resuelve sola |
+| Mismo contenido | El mismo texto normalizado (sin formato, mayúsculas ni puntuación) en ficheros distintos |
+| Contenido parecido | Similitud por embeddings con la tarea de IA `dedup`; incluye un documento contenido en otro |
+| Documento canónico | El que se conserva de cada grupo: el más antiguo, salvo elección del usuario (`user_choice`) |

@@ -4,6 +4,31 @@
 construcción del sitio: falta un extra, Zensical fuera del rango probado, no hay GPU para el OCR, faltan los modelos de
 docling o un modelo de IA no responde.
 
+## 1. Arquitectura y Diseño
+
+```mermaid
+flowchart TD
+    CE["check_environment()"] --> LOC["python, docling, docling-models, extra:export,<br/>extra:site, gpu, libreoffice, extra:av"]
+    LOC --> Q{"check_ai?"}
+    Q -- no --> R["EnvironmentReport"]
+    Q -- sí --> EP["ai_endpoints o variables de entorno"]
+    EP --> AI["ai:nombre por modelo:<br/>chat (json_schema) o embedding (/embeddings)"]
+    AI --> R
+```
+
+## 2. API Reference
+
+### Autodoc
+
+::: doc_organize.diagnostics
+    options:
+      show_root_heading: false
+      members:
+        - check_environment
+        - AiEndpoint
+
+### Contratos
+
 ```python
 import asyncio
 
@@ -15,7 +40,7 @@ for check in report.checks:
 print("Sin errores" if report.ok else "Hay errores")
 ```
 
-## Comprobaciones
+#### Comprobaciones
 
 | `name` | Qué comprueba | Si falla |
 |---|---|---|
@@ -35,7 +60,7 @@ Cada `EnvironmentCheck` trae `name`, `status` (`ok`, `warning` o `error`), `deta
 embeddings, `dimension` (2.2.0). `report.ok` es `False` si alguna comprobación dio `error`; los `warning` no cuentan. Los detalles no llevan rutas ni
 claves. Sin `check_ai` no se usa la red y nada toca ningún proyecto.
 
-## Modelos de IA (`check_ai=True`)
+#### Modelos de IA (`check_ai=True`)
 
 Una llamada por modelo con **texto sintético** (nunca nada de un documento) pidiendo la salida `json_schema` estricta:
 
@@ -60,9 +85,23 @@ embeddings = AiEndpoint(name="embed", base_url="http://localhost:4000", virtual_
 report = await check_environment(check_ai=True, ai_endpoints=[endpoint, embeddings])
 ```
 
-::: doc_organize.diagnostics
-    options:
-      show_root_heading: false
-      members:
-        - check_environment
-        - AiEndpoint
+## 3. Componentes y Clases
+
+| Clase / función | Responsabilidad |
+|---|---|
+| `check_environment` | Ejecuta las comprobaciones y devuelve un `EnvironmentReport` |
+| `AiEndpoint` | Un modelo de IA a comprobar con `check_ai`: dónde está, con qué clave y qué alias (`kind`: `chat` o `embedding`) |
+| `EnvironmentReport` / `EnvironmentCheck` | El informe (`checks`, `ok`) y cada comprobación (`name`, `status`, `detail`, `remedy`…) |
+
+## 4. Dependencias y Requisitos
+
+| Dependencia | Propósito |
+|---|---|
+| `httpx` | Llamadas a los modelos de IA con `check_ai=True` |
+
+Lo que el módulo comprueba (docling, extras, GPU, LibreOffice, Zensical) no es requisito para ejecutarlo: si falta, sale
+como `warning` o `error` en el informe (ver «Comprobaciones»).
+
+## 5. Ejemplos Relacionados
+
+Pendiente — crear ejemplo en docs/examples/diagnostics.md

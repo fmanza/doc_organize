@@ -57,9 +57,9 @@ sequenceDiagram
   este proceso» en lugar de pedir revisar los drivers.
 - **Sin sitio de prueba**: con `build_site=False` no se construye el sitio mínimo.
 
-## 4. Criterios de Aceptación      ← PENDIENTE QA — No añadir hasta validación
+## 4. Criterios de Aceptación
 
-*Esta sección se completará cuando el equipo QA valide los criterios.*
+*Pendiente de QA: esta sección se completará cuando el equipo QA valide los criterios.*
 
 ## 5. Glosario y Términos
 
