@@ -88,8 +88,9 @@ if __name__ == "__main__":
 3. **Progreso**: `on_progress` recibe un `ProgressEvent` por evento del escaneo: fase `started`, `conversion` (con
    `total` = documentos a convertir, `processed` = convertidos y `current` = el documento que empieza) y `done`. Un
    fallo del callback se registra y no para el escaneo. El orden entre documentos no está garantizado, por eso el
-   ejemplo los ordena antes de imprimirlos. El `done` final llega con `processed=0` y `total=None`: el resumen está en
-   el valor que devuelve `run()`
+   ejemplo los ordena antes de imprimirlos. El `done` final cierra con las unidades de la última fase
+   (`processed == total`; `0/0` si no había nada que convertir, desde 2.4.1); el resumen completo está en el valor que
+   devuelve `run()`
 4. **Resultado**: `run()` devuelve el `ScanSummary` del evento `COMPLETED` (si se cancela con un `CancelToken`, lanza
    `OperationCancelledError`). `stopped_reason` es `None` cuando el escaneo terminó todo (no se pasó `max_documents`)
 5. **Salida**: Cada documento deja un `.md` y un `.json` bajo la carpeta de salida, replicando su ruta relativa a la
@@ -111,7 +112,7 @@ Primer escaneo:
   [scan] conversion: 0/2
   [scan] conversion: 1/2
   [scan] conversion: 2/2
-  [scan] done: 0/None
+  [scan] done: 2/2
   escaneados=2 nuevos=2 modificados=0 sin_cambios=0 convertidos=2 errores=0 ocr=0 parado=None
   documentos en curso: ['actas/enero.html', 'actas/febrero.html']
   ['actas/enero.json', 'actas/enero.md', 'actas/febrero.json', 'actas/febrero.md']
