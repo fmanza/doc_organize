@@ -6,6 +6,12 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-11-24
+
+API pública para lo que doc_organize_web importaba de submódulos: excepciones, modelos del contexto, perfil, manifiesto,
+historial y constantes. Versión menor: no hay cambios incompatibles ni dependencias nuevas, y los nombres siguen también
+en su módulo.
+
 ### Added
 
 - **API pública para doc_organize_web** (opción 2 de la revisión de la API): 31 nombres que la web importaba de
