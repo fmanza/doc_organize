@@ -228,6 +228,10 @@ completar las migraciones internas de LiteLLM.
 alias de la tarea (`doc-organize-<tarea>`, o el que hayas configurado): repite el paso 3
 incluyendo ese alias en `"models"`.
 
+**`"bge-m3" does not support generate` al probar desde la web**: estás usando un modelo de
+**embeddings** como si fuera de chat. `bge-m3` (alias `doc-organize-dedup`/`doc-organize-embed`) debe consultarse por
+`/embeddings`, no por `/chat/completions`.
+
 **Clasificaciones que se cortan con `stopped = "connection"`**: varias llamadas seguidas superaron el timeout o el
 proxy no respondió. Con modelos locales, revisa `num_ctx` y el timeout (ver [Modelos locales](#modelos-locales-ollama)).
 

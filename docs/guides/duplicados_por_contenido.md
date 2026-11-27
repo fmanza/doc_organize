@@ -64,6 +64,9 @@ En el proxy, `bge-m3` con Ollama (multilingüe, buen rendimiento en español, ha
     num_ctx: 8192   # sin esto, Ollama corta a 4096 tokens
 ```
 
+Si al probar la conexión aparece `"... does not support generate"` (por ejemplo, con `bge-m3`), ese alias se está
+probando como **chat** (`/chat/completions`). Para `dedup` debe usarse como **embeddings** (`/embeddings`).
+
 `check_environment(check_ai=True)` prueba el modelo de `dedup`, dice qué modelo contesta detrás del alias
 (`served_model`) y la dimensión de los vectores, y **avisa si corta el texto** antes de unas 1.500 palabras. En ese
 caso, sube `num_ctx` o usa bloques más pequeños (`chunk_words`).
