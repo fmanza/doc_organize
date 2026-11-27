@@ -63,6 +63,22 @@ def test_saved_partition_is_reused(bench: ModuleType, tmp_path: Path) -> None:
     assert again == first
 
 
+def test_saved_partition_refuses_a_grown_reference(bench: ModuleType, tmp_path: Path) -> None:
+    """Filas añadidas a la referencia después de partir no pueden quedar fuera de los dos tramos sin avisar."""
+    bench._partition(_gold({f"d{i}.pdf": "calidad" for i in range(6)}), tmp_path, "domains", seed=1)
+
+    with pytest.raises(SystemExit, match="no están en la partición"):
+        bench._partition(_gold({f"d{i}.pdf": "calidad" for i in range(7)}), tmp_path, "domains", seed=1)
+
+
+@pytest.mark.parametrize("bad", [["--path-map", "/mnt/documentation"], ["--column", "domains"]])
+def test_malformed_mappings_are_rejected(bench: ModuleType, tmp_path: Path, bad: list[str]) -> None:
+    base = ["run", "--project-root", str(tmp_path), "--gold", str(tmp_path / "r.xlsx"), "--config", "c.toml", "--out", str(tmp_path / "o")]
+
+    with pytest.raises(SystemExit):
+        bench.main(base + bad)
+
+
 def test_cohen_kappa(bench: ModuleType) -> None:
     assert bench._cohen_kappa([("a", "a"), ("b", "b")]) == 1.0
     # acuerdo observado 0,5 y esperado 0,5 → kappa 0

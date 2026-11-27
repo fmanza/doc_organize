@@ -23,7 +23,7 @@ La referencia y los informes contienen nombres de documentos reales: `--out` tie
 Uso (desde la raíz del repo, con el `.venv`):
 
     python scripts/benchmark/run.py run --project-root <raíz del proyecto> --gold <referencia.xlsx> \
-        --config scripts/benchmark/configs/reglas_v1.toml --config scripts/benchmark/configs/ablacion_palabra_completa.toml \
+        --config scripts/benchmark/configs/reglas_v1.toml --config scripts/benchmark/configs/ablacion_whole_word.toml \
         --out <carpeta fuera del repo> [--split all|holdout|calibrate] [--repeat N] [--seed S] \
         [--path-map /mnt/documentation=C:/Desarrollo/documentation]
 
@@ -211,6 +211,15 @@ def _partition(gold: GoldStandard, out: Path, axis: str, seed: int) -> dict[str,
     path = out / "particion.json"
     if path.exists():
         saved: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        # Una referencia ampliada después de partir dejaría sus filas nuevas fuera de los dos tramos sin avisar; y
+        # repartir de nuevo mezclaría documentos ya vistos en el tramo bloqueado. Lo decide una persona, no el script.
+        new = sorted({label.document for label in gold.labels} - set(saved["holdout"]) - set(saved["calibrate"]))
+        if new:
+            sys.exit(
+                f"{path}: la referencia tiene {len(new)} documento(s) que no están en la partición guardada "
+                f"(p. ej. {', '.join(new[:3])}). Usa otra carpeta --out para una partición nueva o añádelos a mano a "
+                "«calibrate» (nunca a «holdout» después de haberlo mirado)."
+            )
         return saved
     split = _stratified_split(gold, axis, holdout=1 / 3, folds=5, seed=seed)
     path.write_text(json.dumps(split, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -391,7 +400,9 @@ async def _run(args: argparse.Namespace) -> None:
         "runs": [],
     }
     contexts: dict[str, list[Context]] = {}
-    for config in configs:
+    for loaded in configs:
+        # Con repeticiones, la caché de IA devolvería la misma respuesta y el ruido saldría 0 (§9.3.7): sin caché.
+        config = {**loaded, "ai_cache": False} if args.repeat > 1 else loaded
         for repetition in range(args.repeat):
             print(f"[benchmark] {config['name']} ({repetition + 1}/{args.repeat}) sobre {len(documents)} documentos…", flush=True)
             context, seconds = await _dry_run(project, documents, gold, roots, config)
@@ -484,6 +495,8 @@ def _report(
         )
         verdict = "pasa la puerta" if comparison.non_inferior and comparison.improved else "no pasa la puerta"
         lines += ["", f"## {config['name']} frente a {baseline} ({verdict})", "", comparison.to_markdown()]
+        if args.repeat > 1:
+            lines.append("\nComparación con la primera repetición de cada configuración; el ruido, arriba.")
         if comparison.unpaired:
             lines.append(f"\n{len(comparison.unpaired)} documentos sin parear.")
     models = {run.model_for_task("classify") for runs in contexts.values() for run in runs if run.model_for_task("classify")}
@@ -610,6 +623,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args.command == "run":
         if args.repeat < 1:
             parser.error("--repeat debe ser al menos 1")
+        if args.path_map is not None and "=" not in args.path_map:
+            parser.error("--path-map tiene la forma prefijo_contenedor=prefijo_local")
+        if any("=" not in item or not item.partition("=")[2] for item in args.column):
+            parser.error("--column tiene la forma eje=columna")
         asyncio.run(_run(args))
     elif args.command == "blind-sheet":
         _blind_sheet(args)
