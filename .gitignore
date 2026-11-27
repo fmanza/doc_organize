@@ -76,3 +76,11 @@ doc_old/
 .env
 deploy/litellm/.env
 deploy/litellm/config.yaml
+
+# Benchmark de clasificación (2.6.0): la referencia y los informes llevan nombres de documentos reales.
+# run.py ya rechaza --out dentro del repo; esto es una segunda barrera.
+scripts/benchmark/out/
+scripts/benchmark/**/*.xlsx
+scripts/benchmark/**/informe.md
+scripts/benchmark/**/run.json
+scripts/benchmark/**/particion.json

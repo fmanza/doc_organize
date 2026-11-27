@@ -63,6 +63,14 @@ _EXPORTS: dict[str, str] = {
     "DocumentChange": "doc_organize.context.dry_run",
     "document_keys": "doc_organize.context.evaluation",
     "common_root": "doc_organize.context.evaluation",
+    # Medir la clasificación (2.6.0, F0 de precisión del contexto)
+    "compare_classifications": "doc_organize.context.evaluation",
+    "ClassificationComparison": "doc_organize.context.evaluation",
+    "AxisComparison": "doc_organize.context.evaluation",
+    "MetricComparison": "doc_organize.context.evaluation",
+    "ValueMetrics": "doc_organize.context.evaluation",
+    "ConfidenceBin": "doc_organize.context.evaluation",
+    "UNCLASSIFIED_SLUG": "doc_organize.core.constants",
     # Decisiones de personas (2.0.0, F6)
     "ClassificationDecision": "doc_organize.core.models",
     "ClassificationDecisionStore": "doc_organize.context.decisions",
@@ -280,12 +288,18 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
     from doc_organize.context.document_properties import DocumentProperties, read_document_properties
     from doc_organize.context.dry_run import DocumentChange, DryRunResult, dry_run_classify
     from doc_organize.context.evaluation import (
+        AxisComparison,
         AxisEvaluation,
+        ClassificationComparison,
+        ConfidenceBin,
         EvaluationReport,
         GoldLabel,
         GoldStandard,
         LabelConfusion,
+        MetricComparison,
+        ValueMetrics,
         common_root,
+        compare_classifications,
         document_keys,
         evaluate_classification,
         load_gold_xlsx,
@@ -321,6 +335,7 @@ if TYPE_CHECKING:  # pragma: no cover - solo para analizadores estáticos (mypy,
     from doc_organize.context.versions import VersionGroup, VersionMember, detect_document_versions
     from doc_organize.converter.converter import DocumentConverter
     from doc_organize.converter.ocr_scheduler import OCRScheduler
+    from doc_organize.core.constants import UNCLASSIFIED_SLUG
     from doc_organize.core.exceptions import (
         AiAuthError,
         AiConfigurationError,
