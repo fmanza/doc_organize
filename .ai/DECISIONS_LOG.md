@@ -298,3 +298,21 @@ mkdocstrings. En 2026-10-31 se verificó empíricamente (zensical 0.0.74 + mkdoc
 doc_organize_web ya publica con Zensical y el usuario pidió alinear ambos repos en la 0.10.0.
 **Impacto actual**: `zensical build --strict` es el comando de validación. El sitio de **contexto** de los proyectos
 (`context/mkdocs_generator.py`, `MkDocsGenerator`) sigue generando un sitio mkdocs y no se toca en esta versión.
+
+## Revisión 18 — Sin fine-tuning por proyecto; medir antes de cambiar la clasificación (2.6.0)
+
+**Decisión**: (1) No se reentrena ni se ajusta (fine-tuning, LoRA) el modelo de lenguaje por proyecto. La adaptación por
+proyecto se hace con contexto (catálogo, perfil), ejemplos recuperados de decisiones de personas y, cuando haya
+suficientes decisiones, un clasificador ligero sobre los embeddings ya guardados. (2) Ningún cambio que altere la
+clasificación por defecto entra sin pasar el protocolo de `docs/guides/medir_clasificacion.md` (comparación pareada,
+no inferioridad de −3 puntos, tramo bloqueado y, para cambiar valores por defecto, un segundo corpus).
+**Razón**: con decenas de documentos por proyecto, la literatura revisada no muestra ventaja del ajuste fino sobre
+ejemplos en el prompt o un clasificador ligero, y el coste (servir un adaptador por proyecto, reentrenar al cambiar el
+catálogo, datos personales dentro de los pesos) es alto. Sobre la medición: la referencia de CALIDAD_VD tiene 150
+documentos (±7 puntos) y las mejoras de la 2.0 (+0,7 a +2 puntos) no se distinguían del ruido.
+**Reabrir si**: un proyecto acumula cientos de decisiones por valor y el clasificador ligero se estanca por debajo del
+LLM, o el modelo de `classify` deja de ser intercambiable por proyecto.
+**Impacto actual**: 2.6.0 añade la medición (`compare_classifications`, métricas por valor, `scripts/benchmark/`) sin
+cambiar ninguna clasificación. Detalle: `.ai/sessions/2026-11-27-precision-contexto/{ANALISIS_MEJORAS,PLAN}.md`
+(§8.2 y §9 del análisis).
+

@@ -59,11 +59,19 @@ Motivos de la cola de revisión: decisión desfasada, sin clasificar, la IA y la
 que no aparece en el documento, confianza baja, grupo de versiones cuya vigente no ha confirmado nadie y propuesta
 del revisor.
 
+«Sin clasificar» se marca por eje: el de carpeta (dominio) vacío y, desde 2.6.0, también el de subcarpeta (tipo de
+material) vacío aunque el dominio tenga valor, salvo que el dominio lo decidiera una persona. Antes, un tipo de material
+sin clasificar con dominio asignado no aparecía en ningún sitio.
+
 ### Flujos alternativos y de error
 
 - **Comparar alternativas antes de adoptarlas** (`dry_run_classify`): se construye un contexto de prueba con otras
   reglas, otro prompt, otro perfil u otro modelo; con una referencia solo se clasifican sus documentos y se devuelve
   su evaluación. Con un contexto de base, dice qué documentos cambian de valor y en qué eje.
+- **Decidir si la alternativa mejora de verdad** (`compare_classifications`, 2.6.0): diferencia de exactitud documento a
+  documento con su intervalo de confianza (bootstrap pareado) y la prueba de McNemar; una alternativa se adopta solo si
+  no empeora ningún eje más allá del margen y mejora alguno. Protocolo y benchmark en
+  [Medir la clasificación](../guides/medir_clasificacion.md).
 - **Referencia a partir de las decisiones** (`gold_from_decisions`) o de un Excel etiquetado (`load_gold_xlsx`, extra
   `export`).
 - **Auditar la taxonomía sin IA** (`audit_taxonomy`): estadísticas por eje y propuestas (entradas vacías o dominantes,

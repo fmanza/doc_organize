@@ -562,7 +562,8 @@ class ContextBuilder:
                 slug=slug,
                 name=manifest_domains_by_slug[slug].name if slug in manifest_domains_by_slug else slug.replace("-", " ").title(),
                 description=manifest_domains_by_slug[slug].description if slug in manifest_domains_by_slug else None,
-                status=DomainStatus.CONFIRMED if has_predefined_catalog else DomainStatus.DRAFT,
+                # El marcador «sin-clasificar» no es un dominio del catálogo: nunca se da por confirmado (2.6.0).
+                status=DomainStatus.CONFIRMED if has_predefined_catalog and slug != _UNCLASSIFIED_SLUG else DomainStatus.DRAFT,
                 predefined=has_predefined_catalog,
                 documents=domain_documents,
             )

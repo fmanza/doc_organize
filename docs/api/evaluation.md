@@ -41,6 +41,12 @@ flowchart TD
         - EvaluationReport
         - AxisEvaluation
         - LabelConfusion
+        - ValueMetrics
+        - ConfidenceBin
+        - compare_classifications
+        - ClassificationComparison
+        - AxisComparison
+        - MetricComparison
         - document_keys
         - common_root
 
@@ -81,6 +87,43 @@ contexto (`matched`; los que no, en `missing_documents`):
 | `precision` / `recall` | Por valores: asignados que son correctos / correctos que se asignaron |
 | `accuracy_by_classified_by` | Exactitud según quién clasificó el eje (`rules`, `ai`, `human`, `semantic`; `unclassified` si quedó vacío), con `labelled_by_classified_by` |
 | `confusions` | Los 10 errores más frecuentes: valor de la referencia → valor asignado (`ninguno` = vacío) |
+| `selective_accuracy` (2.6.0) | Exactitud solo sobre los documentos con algún valor: una abstención no cuenta como error. Con `coverage`, el punto riesgo-cobertura |
+| `per_value` (2.6.0) | Por valor (`ValueMetrics`): documentos en la referencia (`support`), asignados, aciertos, precisión, recall y F1 |
+| `macro_f1` (2.6.0) | Media del F1 de los valores con `support > 0` (los que solo se asignaron salen en `per_value` pero no cuentan). Con clases desequilibradas dice más que la exactitud; con `support` pequeño es inestable |
+| `confusion_matrix` (2.6.0) | Referencia → asignado → documentos, aciertos incluidos |
+| `accuracy_by_confidence` (2.6.0) | Exactitud por fase y tramo de confianza del primer valor (`CONFIDENCE_BIN_EDGES`: 0-0,5, 0,5-0,6… 0,9-1,0). Por fase porque un 0,6 de las reglas, de la semántica y de la IA no significan lo mismo |
+
+`report.to_markdown(detail=True)` añade una tabla por valor de cada eje.
+
+#### Comparar dos clasificaciones (2.6.0)
+
+Con 150 documentos y una exactitud del 25 %, el intervalo de confianza de **una** exactitud es de ±7 puntos: comparar dos
+evaluaciones sueltas no dice si un cambio mejora. `compare_classifications` empareja cada documento etiquetado en las
+dos clasificaciones y remuestrea documentos (bootstrap) para dar el intervalo de la **diferencia**:
+
+```python
+from doc_organize import compare_classifications, dry_run_classify
+
+base = await dry_run_classify(project, documents, gold=gold, taxonomy_manifest=manifest, decisions=False)
+nuevo = await dry_run_classify(project, documents, gold=gold, taxonomy_manifest=otro_manifest, decisions=False)
+comparacion = compare_classifications(base.context, nuevo.context, gold, margin=0.03, seed=0)
+print(comparacion.to_markdown())
+if comparacion.non_inferior and comparacion.improved:
+    ...  # no empeora ningún eje más de 3 puntos y mejora alguno
+```
+
+| Campo de `AxisComparison` | Qué es |
+|---|---|
+| `paired` | Documentos etiquetados en el eje presentes en las dos (los demás, en `ClassificationComparison.unpaired`) |
+| `accuracy`, `selective_accuracy`, `coverage` | `MetricComparison`: valor en cada una, diferencia (`candidate - baseline`) e intervalo (`ci_low`, `ci_high`) por percentiles |
+| `discordant_baseline_only` / `discordant_candidate_only` | Documentos que solo acierta una de las dos |
+| `p_value_mcnemar` | Prueba de McNemar bilateral (binomial exacta hasta 1000 discordantes) |
+| `non_inferior` | `ci_low` de la exactitud ≥ `-margin` |
+| `improved` | `ci_low` de la exactitud > 0 |
+
+Es determinista: misma entrada y `seed`, mismo resultado. Pasa las mismas `roots` que a `dry_run_classify` si las dos
+clasificaciones no tienen exactamente los mismos documentos. El protocolo completo (tramo reservado, ablaciones, ruido de
+la IA) está en [Medir la clasificación](../guides/medir_clasificacion.md).
 
 Las claves del contexto se calculan con `roots` (raíces de escaneo) o, por defecto, con la carpeta común de todos los
 originales, así que una referencia hecha con las rutas del contenedor de la web (`/mnt/...`) vale con un contexto del

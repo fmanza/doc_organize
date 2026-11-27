@@ -1,0 +1,9 @@
+# Reglas v1 + IA en lo que las reglas dejan sin clasificar (como M10). Necesita DOC_ORGANIZE_LITELLM_BASE_URL y
+# DOC_ORGANIZE_LITELLM_VIRTUAL_KEY en el entorno. Sin caché de IA: cada ejecución hace llamadas de verdad.
+name = "reglas-v1-ia"
+template = "../../../src/doc_organize/context/taxonomy_templates_builtin/sgi-integrado.md"
+threshold = 0.5
+ai_scope = "unclassified"
+decisions = false
+ai_cache = false
+# classify_model = "qwen2.5-coder:14b"   # alias de LiteLLM; por defecto DOC_ORGANIZE_LITELLM_MODEL_CLASSIFY

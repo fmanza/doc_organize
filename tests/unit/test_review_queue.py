@@ -68,9 +68,11 @@ def test_every_reason_in_priority_order() -> None:
         {
             "calidad": [
                 _document("ok.pdf", {"domains": [_value("calidad")], "material_types": [_value("manual")], "topics": [_value("iso", 0.8)]}),
-                _document("bajo.pdf", {"domains": [_value("calidad", 0.4)], "topics": [_value("iso", 0.6)]}),  # 0.6 < 0.7 del eje
-                _document("cita.pdf", {"domains": [_value("calidad", 0.49, "ai", verified=False)]}),
-                _document("ia.pdf", {"domains": [_value("calidad")]}, ai_domain="seguridad", ai_confidence=0.7),
+                _document(
+                    "bajo.pdf", {"domains": [_value("calidad", 0.4)], "material_types": [_value("manual")], "topics": [_value("iso", 0.6)]}
+                ),  # 0.6 < 0.7 del eje
+                _document("cita.pdf", {"domains": [_value("calidad", 0.49, "ai", verified=False)], "material_types": [_value("manual")]}),
+                _document("ia.pdf", {"domains": [_value("calidad")], "material_types": [_value("manual")]}, ai_domain="seguridad", ai_confidence=0.7),
             ],
             "sin-clasificar": [_document("vacio.pdf", {"domains": [], "material_types": []}, ai_domain="seguridad")],
         },
@@ -94,6 +96,33 @@ def test_every_reason_in_priority_order() -> None:
     assert items[1].detail == "incomplete_artifacts"
     assert items[3].detail == "La IA propuso «seguridad»" and items[3].confidence == 0.7
     assert items[4].detail == "cita"
+
+
+def test_empty_subfolder_axis_is_unclassified_even_with_a_domain() -> None:
+    """P6.6 (2.6.0): un tipo de material vacío con dominio asignado también va a la cola; antes no lo veía nadie."""
+    context = _context(
+        {
+            "calidad": [
+                _document("sin-tipo.pdf", {"domains": [_value("calidad")]}),
+                _document("tipo-vacio.pdf", {"domains": [_value("calidad")], "material_types": []}),
+                _document("completo.pdf", {"domains": [_value("calidad")], "material_types": [_value("manual")]}),
+            ],
+            "sin-clasificar": [_document("nada.pdf", {"domains": [], "material_types": []})],
+        }
+    )
+
+    assert _summary(review_queue(context)) == [
+        ("unclassified", "nada.pdf", "domains", None),  # sin dominio: un solo elemento, el del eje de carpeta
+        ("unclassified", "sin-tipo.pdf", "material_types", None),
+        ("unclassified", "tipo-vacio.pdf", "material_types", None),
+    ]
+
+
+def test_empty_subfolder_axis_is_not_queued_without_a_subfolder_axis() -> None:
+    context = _context({"calidad": [_document("a.pdf", {"domains": [_value("calidad")]})]})
+    context.taxonomy_axes = [axis for axis in context.taxonomy_axes if axis.organizes != "subfolder"]
+
+    assert review_queue(context) == []
 
 
 def test_human_decisions_leave_the_queue() -> None:
@@ -123,7 +152,7 @@ def test_orphan_decisions_enter_the_queue_as_stale() -> None:
 
 
 def test_keys_use_the_given_roots() -> None:
-    context = _context({"calidad": [_document("ENS/bajo.pdf", {"domains": [_value("calidad", 0.2)]})]})
+    context = _context({"calidad": [_document("ENS/bajo.pdf", {"domains": [_value("calidad", 0.2)], "material_types": [_value("manual")]})]})
 
     [item] = review_queue(context, roots=["/mnt"])
 

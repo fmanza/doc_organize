@@ -350,4 +350,4 @@ deduplicación desde 0.12.1:
 | Tipo de material de origen | Segundo eje del modo manifiesto (p. ej. Normativa, Procedimiento, Política, Evidencia); sustituye a la extensión del fichero como `<tipo>` |
 | Manifiesto de taxonomía | `taxonomy_manifest.md` del proyecto: front matter YAML con el catálogo de ejes más prosa libre solo para lectura humana |
 | Plantilla de manifiesto | Manifiesto reutilizable entre proyectos, fuera de cualquier `project.root_path` |
-| `sin-clasificar` | Placeholder que recibe, en un eje, un documento que no alcanza el umbral en ese eje |
+| `sin-clasificar` | Placeholder que recibe, en un eje, un documento que no alcanza el umbral en ese eje. Es la constante pública `UNCLASSIFIED_SLUG`; su dominio tiene `Domain.is_placeholder` y nace en estado `borrador` (2.6.0; antes `confirmado`, como un dominio del catálogo) |

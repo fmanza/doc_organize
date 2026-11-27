@@ -7,7 +7,8 @@ decidió (`classified_by="human"`) no vuelve a la cola, salvo que su decisión h
 | Motivo | Cuándo |
 |---|---|
 | `stale_decision` | Una decisión no se aplicó (el original o el catálogo cambiaron) |
-| `unclassified` | Sin clasificar: sin conversión, o con el eje que organiza en carpeta vacío |
+| `unclassified` | Sin clasificar: sin conversión, o con el eje que organiza en carpeta vacío; desde 2.6.0 también con el de
+subcarpeta vacío (p. ej. tipo de material) aunque el de carpeta tenga valor |
 | `rules_ai_disagreement` | La IA propuso otro dominio que las reglas |
 | `unverified_evidence` | La cita de la IA no aparece en el documento (D10) |
 | `low_confidence` | Un valor por debajo del umbral de su eje |
@@ -103,6 +104,7 @@ def review_queue(context: Context, *, roots: Sequence[str] | None = None, propos
     keys = document_keys([document.source_path for _, document in documents] + [detail.source_path for detail in context.unclassified_details], roots)
     axes = {axis.key: axis for axis in context.taxonomy_axes}
     folder = next((axis for axis in context.taxonomy_axes if axis.organizes == "folder"), None)
+    subfolder = next((axis for axis in context.taxonomy_axes if axis.organizes == "subfolder"), None)
     path_by_key = {key: path for path, key in keys.items()}
 
     items = [
@@ -129,7 +131,7 @@ def review_queue(context: Context, *, roots: Sequence[str] | None = None, propos
     for detail in context.unclassified_details:
         items.append(_item("unclassified", keys[detail.source_path], detail.source_path, axis=folder.key if folder else None, detail=detail.reason))
     for domain_slug, document in documents:
-        items.extend(_document_items(document, domain_slug, keys[document.source_path], axes, folder, context.ai_fallback_threshold))
+        items.extend(_document_items(document, domain_slug, keys[document.source_path], axes, folder, subfolder, context.ai_fallback_threshold))
     for proposal in proposals:
         axis = next(iter(proposal.axes), None)
         items.append(
@@ -157,6 +159,7 @@ def _document_items(
     key: str,
     axes: dict[str, TaxonomyAxis],
     folder: TaxonomyAxis | None,
+    subfolder: TaxonomyAxis | None,
     default_threshold: float,
 ) -> list[ReviewItem]:
     items: list[ReviewItem | None] = []
@@ -176,6 +179,12 @@ def _document_items(
                     detail=f"La IA propuso «{document.ai_domain}»",
                 )
             )
+        # 2.6.0 (P6.6): el eje de subcarpeta vacío con el de carpeta resuelto era un error que no veía nadie. Si el de
+        # carpeta también está vacío, basta con el elemento de arriba; si lo decidió una persona, ya miró el documento
+        # (y una decisión puede dejar la subcarpeta vacía a propósito).
+        decided = any(value.classified_by == "human" for value in domain_values)
+        if domain_values and not decided and subfolder is not None and not document.classification.axes.get(subfolder.key):
+            items.append(_item("unclassified", key, document.source_path, axis=subfolder.key))
     for axis_key, values in document.classification.axes.items():
         axis = axes.get(axis_key)
         threshold = axis.threshold if axis is not None and axis.threshold is not None else default_threshold

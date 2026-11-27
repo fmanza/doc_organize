@@ -1139,6 +1139,17 @@ class Domain(BaseModel):
     predefined: bool = Field(default=False, description="Si el dominio fue predefinido por el usuario (catálogo) o descubierto automáticamente")
     documents: list[DomainDocument] = Field(default_factory=list, description="Documentos clasificados en este dominio")
 
+    @property
+    def is_placeholder(self) -> bool:
+        """Si es el dominio marcador `UNCLASSIFIED_SLUG` («sin-clasificar»): reúne los documentos cuyo eje de carpeta
+        no llegó al umbral. No es un dominio del catálogo; desde 2.6.0 nace en `DomainStatus.DRAFT`.
+
+        Example:
+            >>> Domain(slug="sin-clasificar", name="Sin Clasificar").is_placeholder
+            True
+        """
+        return self.slug == UNCLASSIFIED_SLUG
+
 
 AiClassificationStopReason = Literal["auth", "connection", "budget"]
 """Motivo por el que `ContextBuilder.build()` detuvo una fase de IA (`AiPhaseStats.stopped`, L-3a/L-3b)."""

@@ -1,0 +1,9 @@
+# Configuración de partida: solo reglas v1, como una construcción por defecto con plantilla.
+# `template`: ruta (relativa a este fichero o absoluta) de la plantilla o manifiesto de taxonomía con el que se midió.
+# Cámbiala por la plantilla del proyecto (en M10: la de usuario «taxonomia-multi-dimensional-normas-gobernanza-2»).
+name = "reglas-v1"
+template = "../../../src/doc_organize/context/taxonomy_templates_builtin/sgi-integrado.md"
+threshold = 0.5
+ai_scope = "off"
+semantic = false
+decisions = false   # lo decidido por personas siempre «acierta»: fuera de la medición

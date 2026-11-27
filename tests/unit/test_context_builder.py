@@ -10,6 +10,7 @@ import pytest
 from doc_organize.context.context_builder import ContextBuilder
 from doc_organize.core.models import (
     ConversionResult,
+    DomainStatus,
     Project,
     TaxonomyEntry,
     TaxonomyManifest,
@@ -351,6 +352,24 @@ async def test_build_with_manifest_placeholder_domain_keeps_slug_derived_name(tm
     assert context.domains[0].slug == "sin-clasificar"
     assert context.domains[0].name == "Sin Clasificar"
     assert context.domains[0].description is None
+
+
+@pytest.mark.asyncio
+async def test_build_with_manifest_placeholder_domain_is_draft_not_confirmed(tmp_path):
+    """2.6.0 (W1): el marcador no es un dominio del catálogo; la web lo mostraba como «Confirmado». Los dominios del
+    catálogo siguen naciendo confirmados."""
+    project = _make_project(tmp_path)
+    receta = _make_document(tmp_path, "varios", "receta", "Receta de cocina con ingredientes y horno")
+    norma = _make_document(tmp_path, "seguridad", "norma", "Ciberseguridad normativa ciberseguridad normativa")
+    manifest = two_axis_manifest(
+        domains=[TaxonomyEntry(slug="ciberseguridad", name="Ciberseguridad")],
+        material_types=[TaxonomyEntry(slug="normativa", name="Normativa")],
+    )
+
+    context = await ContextBuilder().build(project, [receta, norma], taxonomy_manifest=manifest, threshold=0.5)
+
+    status = {domain.slug: (domain.status, domain.is_placeholder) for domain in context.domains}
+    assert status == {"sin-clasificar": (DomainStatus.DRAFT, True), "ciberseguridad": (DomainStatus.CONFIRMED, False)}
 
 
 @pytest.mark.asyncio

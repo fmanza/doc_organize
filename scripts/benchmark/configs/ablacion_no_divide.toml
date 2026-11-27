@@ -1,0 +1,8 @@
+# Ablación de v1 (F0, §9.3.5): un solo cambio respecto a reglas-v1. Ver scripts/benchmark/README.md.
+name = "ablacion-no_divide"
+template = "../../../src/doc_organize/context/taxonomy_templates_builtin/sgi-integrado.md"
+threshold = 0.5
+ai_scope = "off"
+decisions = false
+ablation = "no_divide"
+no_divide_k = 2.0   # nota = min(1, aciertos / k): con k = 2, un término encontrado ya llega a 0,5

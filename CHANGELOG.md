@@ -6,6 +6,37 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+Medir la clasificación antes de cambiarla (F0 del análisis de precisión del contexto). Versión menor: API nueva, campos
+nuevos con valor por defecto y dos cambios de comportamiento acotados (ver «Changed» y «Fixed»); ninguna clasificación
+cambia y sin dependencias nuevas.
+
+### Added
+
+- **Métricas por valor** en `AxisEvaluation`: `per_value` (`ValueMetrics`: soporte, asignados, aciertos, precisión,
+  recall y F1), `macro_f1`, `selective_accuracy` (exactitud sobre lo asignado: una abstención no es un error),
+  `confusion_matrix` completa y `accuracy_by_confidence` (`ConfidenceBin`, por fase y tramo de confianza).
+  `EvaluationReport.to_markdown(detail=True)` añade la tabla por valor.
+- **`compare_classifications(baseline, candidate, gold)`**: diferencia pareada documento a documento con intervalo de
+  confianza (bootstrap determinista con `seed`), prueba de McNemar y veredicto de no inferioridad (`margin`) y mejora
+  (`ClassificationComparison`, `AxisComparison`, `MetricComparison`).
+- **`UNCLASSIFIED_SLUG`** en la API pública y la propiedad **`Domain.is_placeholder`**: un consumidor ya no tiene que
+  conocer el slug `sin-clasificar`.
+- **`scripts/benchmark/`** (repositorio, no se empaqueta): benchmark reproducible con partición fija, ablaciones del
+  puntuador v1, IA sobre toda la referencia, repeticiones, informe Markdown, hoja para etiquetar a ciegas y kappa.
+- Guía [Medir la clasificación](docs/guides/medir_clasificacion.md) con el protocolo.
+
+### Changed
+
+- **El dominio marcador `sin-clasificar` nace en `DomainStatus.DRAFT`** (estado `borrador`), también con plantilla o
+  manifiesto; antes era `CONFIRMED`, como un dominio del catálogo, y doc_organize_web lo mostraba como «Confirmado».
+  Ningún otro código de la librería lee el estado: no cambia la clasificación, la reorganización ni el sitio.
+
+### Fixed
+
+- **Cola de revisión**: un documento con el eje de subcarpeta (tipo de material) vacío y el de carpeta con valor genera
+  un elemento `unclassified` en ese eje (salvo que el dominio lo decidiera una persona). Hasta ahora ese error no salía
+  en ninguna parte; la cola tendrá más elementos `unclassified` en proyectos con manifiesto.
+
 ## [2.5.0] - 2026-11-24
 
 Versiones de un documento aunque cambie el formato y el periodo real del gasto de LiteLLM. Versión menor: un parámetro

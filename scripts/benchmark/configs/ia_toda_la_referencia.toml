@@ -1,0 +1,9 @@
+# IA sobre TODOS los documentos de la referencia (§9.3.6): mide la IA sin depender de los ~38 que hoy le llegan.
+# El script usa umbral 1,01 (ninguna regla llega) y ai_scope="unclassified"; aborta si la IA no vio todos.
+# Solo mide dominio y tipo de material: en este modo los ejes que etiquetan quedan vacíos.
+name = "ia-toda-la-referencia"
+template = "../../../src/doc_organize/context/taxonomy_templates_builtin/sgi-integrado.md"
+ai_all = true
+decisions = false
+ai_cache = false
+# classify_model = "<modelo generalista>"
