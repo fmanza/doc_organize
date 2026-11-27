@@ -458,7 +458,7 @@ def compare_classifications(
         keys = sorted(set(rows_before[axis]) & set(rows_after[axis]))
         if keys:
             pairs = [(rows_before[axis][key], rows_after[axis][key]) for key in keys]
-            rng = random.Random(f"{seed}:{axis}")  # noqa: S311 - remuestreo del bootstrap, no criptografía
+            rng = random.Random(f"{seed}:{axis}")  # remuestreo del bootstrap, no criptografía
             axes[axis] = _axis_comparison(axis, pairs, rng, resamples, margin, confidence_level)
     return ClassificationComparison(
         axes=axes,

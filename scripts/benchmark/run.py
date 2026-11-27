@@ -185,7 +185,7 @@ def _ablated(ablations: Sequence[str], no_divide_k: float) -> Iterator[None]:
 
 def _stratified_split(gold: GoldStandard, axis: str, holdout: float, folds: int, seed: int) -> dict[str, Any]:
     """Tramo bloqueado (~`holdout`, estratificado por el valor de `axis` en la referencia) y `folds` pliegues del resto."""
-    rng = random.Random(seed)  # noqa: S311 - partición reproducible, no criptografía
+    rng = random.Random(seed)  # partición reproducible, no criptografía
     strata: dict[str, list[str]] = {}
     for label in sorted(gold.labels, key=lambda item: item.document):
         strata.setdefault(", ".join(sorted(label.axes.get(axis, []))) or NONE_LABEL, []).append(label.document)
@@ -523,7 +523,7 @@ def _blind_sheet(args: argparse.Namespace) -> None:
 
     out = _safe_out(args.out)
     rows = [row for row in _sheet_rows(args.gold) if _key_of(row)]
-    rng = random.Random(args.seed)  # noqa: S311 - muestra reproducible
+    rng = random.Random(args.seed)  # muestra reproducible
     strata: dict[str, list[dict[str, Any]]] = {}
     for row in sorted(rows, key=_key_of):
         strata.setdefault(str(row.get(args.stratify_column) or NONE_LABEL).strip(), []).append(row)
