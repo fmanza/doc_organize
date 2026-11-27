@@ -18,7 +18,7 @@ vuelve a importar FastAPI/Starlette/uvicorn/Jinja2/`python-multipart` o si reapa
 estructura de carpetas original ni duplicar trabajo entre ejecuciones, y dejarlos organizados y listos para personas
 y asistentes de IA.
 
-**Versión**: 2.5.0 (`pyproject.toml`) | **Python**: ≥3.12 (`requires-python`; classifiers 3.12–3.14) |
+**Versión**: 2.6.0 (`pyproject.toml`) | **Python**: ≥3.12 (`requires-python`; classifiers 3.12–3.14) |
 **API pública (SemVer)**: los nombres de `doc_organize.__all__` (= claves de `_EXPORTS` en
 `src/doc_organize/__init__.py`, importadas bajo demanda, PEP 562); ver `docs/api/publica.md`.
 
@@ -178,6 +178,7 @@ reflejar 2.x).
 - **2.4.0**: API pública para lo que doc_organize_web importaba de submódulos.
 - **2.4.1**: progreso final del escaneo con unidades; canónico de la deduplicación estable ante empates de fecha.
 - **2.4.2**: claves fuera de `repr()`; decisiones huérfanas en la cola de revisión; bloqueo del historial con más margen.
+- **2.6.0**: medir la clasificación (métricas por valor, `compare_classifications`, benchmark); marcador `sin-clasificar` en borrador; la cola marca el tipo de material vacío.
 - **2.5.0**: versiones entre formatos (`version_across_extensions`); periodo y producto reales del gasto de LiteLLM.
 
 Detalle: `CHANGELOG.md`.

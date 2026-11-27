@@ -4,7 +4,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 Este proyecto sigue [SemVer](https://semver.org/lang/es/) desde v0.2.0 (sin
 releases publicados antes de esa versión).
 
-## [Unreleased]
+## [2.6.0] - 2026-11-27
 
 Medir la clasificación antes de cambiarla (F0 del análisis de precisión del contexto). Versión menor: API nueva, campos
 nuevos con valor por defecto y dos cambios de comportamiento acotados (ver «Changed» y «Fixed»); ninguna clasificación
