@@ -82,3 +82,35 @@ repetición; la partida reproduce exactamente la medición anterior: 0,53 y 0,79
 
 Conclusión: retocar descripciones no basta y no se adopta. La siguiente prueba sería llevar la regla de etiquetado al
 perfil del proyecto (reglas de desempate, que la IA lee aparte del catálogo), medida igual.
+
+## Regla de etiquetado en el perfil del proyecto
+
+La misma regla llevada a «Reglas de desempate» del perfil (que la IA recibe aparte del catálogo), con la plantilla
+original. qwen2.5:14b con `ai_scope="all"`, calibración (100 documentos).
+
+**v1** (tres líneas: qué es `cumplimiento-legal`, qué va a `mejora-medicion` y qué es `politica`), 2 repeticiones
+idénticas en dominio:
+
+- Dominio 0,61, F1 macro 0,49 → 0,63 (diferencia +0,14, IC [0,03, 0,21]).
+- Tipo 0,79-0,80, pero F1 macro 0,64 → 0,54-0,55 en las dos repeticiones: el modelo aplica la línea de
+  `mejora-medicion` también al tipo y deja de asignar `registro-evidencia` (0 veces) y casi todo `informe-auditoria`.
+  No pasa la puerta.
+
+**v2** (v1 más una línea: «la regla de `mejora-medicion` es solo del dominio»), pareada con la partida en la misma
+ejecución:
+
+| Eje | Exactitud | Diferencia, IC 95 % | F1 macro | Diferencia, IC 95 % | Puerta |
+|---|---|---|---|---|---|
+| Dominio | 0,53 → 0,59 | +0,06 [−0,03, 0,15] | 0,49 → 0,61 | +0,12 [−0,01, 0,19] | no inferior, sin mejora |
+| Tipo | 0,79 → 0,79 | 0,00 [−0,07, 0,07] | 0,64 → 0,65 | +0,01 [−0,10, 0,14] | no pasa (no inferioridad) |
+
+- `mejora-medicion` pasa de no asignarse nunca a 4 aciertos de 9; `informe-auditoria` y `registro-evidencia` vuelven.
+- `politica` sigue de más (13 frente a 5 en la referencia, como la partida).
+- La cola de revisión sube de 14 a 23 elementos (todos `unverified_evidence`).
+- En las 25 filas revisadas por personas: dominio 0,48 → 0,60, tipo 0,76 → 0,84.
+
+Conclusión: **mejor o igual en todos los ejes en el punto, sin demostrar**. Con 100 documentos el intervalo del tipo
+(±0,07) no puede probar la no inferioridad de −0,03 con una diferencia de 0, y el tramo bloqueado (50) sería más ancho.
+No cambia ningún valor por defecto de la librería. Se adopta como **perfil propio del proyecto medido**
+(`.doc_organize/profile.md`, fuera del repositorio; se revierte borrándolo). Demostrarlo requiere ampliar la
+referencia o el segundo corpus (Revisión 18).
