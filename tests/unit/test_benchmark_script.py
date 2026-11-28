@@ -17,6 +17,7 @@ from openpyxl import Workbook, load_workbook
 
 from doc_organize import GoldLabel, GoldStandard
 from doc_organize.context import domain_classifier
+from doc_organize.core.models import Context, ConversionResult, Domain, DomainDocument, UnclassifiedDocument
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "benchmark" / "run.py"
 
@@ -139,6 +140,50 @@ def test_example_configs_load_and_point_to_a_template(bench: ModuleType, config:
 
     assert loaded["template"].is_file()
     assert set(loaded["ablation"]) <= set(bench.ABLATIONS)
+
+
+def _built(classified: int, sent: int) -> Context:
+    documents = [
+        DomainDocument(source_path=f"/mnt/e/ENS/d{i}.pdf", markdown_path="x.md", json_path="x.json", title="t", document_type="pdf", confidence=0.5)
+        for i in range(classified)
+    ]
+    context = Context(
+        project_name="p",
+        created_at="2026-11-28T00:00:00+00:00",
+        updated_at="2026-11-28T00:00:00+00:00",
+        domains=[Domain(slug="calidad", name="Calidad", documents=documents)] if documents else [],
+    )
+    context.ai_stats.classification.sent = sent
+    return context
+
+
+def _requested(count: int) -> list[ConversionResult]:
+    return [ConversionResult(source_path=f"/mnt/e/ENS/d{i}.pdf", json_path="x.json", success=True) for i in range(count)]
+
+
+def test_scan_roots_use_the_whole_saved_context_not_the_subset(bench: ModuleType) -> None:
+    """Todos los documentos del tramo en una subcarpeta: su carpeta común sería `/mnt/e/ENS` y las claves no casarían."""
+    every = ["/mnt/e/ENS/a.pdf", "/mnt/e/ISO/b.pdf"]
+
+    assert bench._scan_roots(every, []) == ["/mnt/e"]
+    assert bench._scan_roots(every, ["/mnt"]) == ["/mnt"]
+    assert bench._scan_roots(["/mnt/e/ENS/a.pdf"], []) is None
+
+
+def test_a_dry_run_missing_documents_is_not_measured(bench: ModuleType) -> None:
+    assert bench._incomplete(_built(3, 0), _requested(3), ai_all=False) is None
+    assert "solo tiene 0 de 3" in bench._incomplete(_built(0, 0), _requested(3), ai_all=False)
+
+
+def test_ai_all_with_nothing_classified_is_not_a_pass(bench: ModuleType) -> None:
+    """Antes «enviados = clasificados» pasaba con 0 = 0."""
+    assert bench._incomplete(_built(3, 3), _requested(3), ai_all=True) is None
+    assert "no llegó a todos" in bench._incomplete(_built(3, 2), _requested(3), ai_all=True)
+    empty = _built(0, 0)
+    empty.unclassified_details = [
+        UnclassifiedDocument(source_path=f"/mnt/e/ENS/d{i}.pdf", document_type="pdf", reason="below_threshold") for i in range(3)
+    ]
+    assert "no llegó a todos" in bench._incomplete(empty, _requested(3), ai_all=True)
 
 
 def test_strata_missing_from_the_saved_context_are_reported(bench: ModuleType) -> None:

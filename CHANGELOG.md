@@ -25,6 +25,13 @@ Versión menor: campos nuevos con valor por defecto y un cambio de comportamient
   dominio de 0,25 a 0,07, y con la puerta de 2.6.0 «mejoraba». Una comparación que pasaba la puerta puede dejar de
   pasarla; ninguna que no la pasaba empieza a pasarla.
 
+### Fixed
+
+- **`scripts/benchmark/run.py`** (repositorio): sin `--root`, las claves salen de la carpeta común de **todo** el
+  contexto guardado, no del tramo medido (si todos sus documentos colgaban de una subcarpeta, `dry_run_classify` los
+  descartaba todos); y la medición se aborta si la construcción en seco no tiene todos los documentos pedidos o si «IA
+  sobre toda la referencia» no clasificó todos los legibles (antes pasaba con 0 enviados = 0 clasificados).
+
 ## [2.6.0] - 2026-11-27
 
 Medir la clasificación antes de cambiarla (F0 del análisis de precisión del contexto). Versión menor: API nueva, campos
