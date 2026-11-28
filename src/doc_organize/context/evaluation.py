@@ -205,8 +205,10 @@ class EvaluationReport(BaseModel):
             for axis in self.axes.values():
                 lines += [
                     "",
-                    f"**{axis.axis}**: exactitud sobre lo asignado {_cell(axis.selective_accuracy)} · F1 macro {_cell(axis.macro_f1)}"
-                    f" · siempre «{axis.majority_value or '—'}» (mayoría) {_cell(axis.majority_accuracy)}",
+                    (
+                        f"**{axis.axis}**: exactitud sobre lo asignado {_cell(axis.selective_accuracy)} · F1 macro {_cell(axis.macro_f1)}"
+                        f" · siempre «{axis.majority_value or '—'}» (mayoría) {_cell(axis.majority_accuracy)}"
+                    ),
                     "",
                     "| Valor | Referencia | Asignados | Aciertos | Precisión | Recall | F1 |",
                     "|---|---|---|---|---|---|---|",
@@ -315,8 +317,10 @@ class ClassificationComparison(BaseModel):
         """
         level = round(self.confidence_level * 100)
         lines = [
-            f"| Eje | Pareados | Partida | Candidata | Diferencia | IC {level} % | F1 macro (partida → candidata) | Dif. F1 macro, IC | "
-            f"Mayoría | McNemar p | No inferior (−{self.margin}) | Mejora |",
+            (
+                f"| Eje | Pareados | Partida | Candidata | Diferencia | IC {level} % | F1 macro (partida → candidata) | Dif. F1 macro, IC | "
+                f"Mayoría | McNemar p | No inferior (−{self.margin}) | Mejora |"
+            ),
             "|---|---|---|---|---|---|---|---|---|---|---|---|",
         ]
         for axis in self.axes.values():
