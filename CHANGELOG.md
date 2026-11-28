@@ -6,6 +6,8 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-11-28
+
 La IA puede clasificar todos los documentos (P3, tras el cierre de F0) y la puerta de `compare_classifications` deja de
 aceptar candidatas degeneradas (lo destapó la primera medición real de F0). Versión menor: un valor nuevo de `AiScope`,
 campos nuevos con valor por defecto y un cambio de comportamiento en la puerta (ver «Changed»). Ninguna clasificación

@@ -40,7 +40,7 @@ Cada release incluye un archivo SHA256 para validar que el ZIP no fue alterado:
 # Descargar ambos archivos (ZIP + .sha256)
 # Verificar integridad
 sha256sum -c doc_organize-docs-*.zip.sha256
-# Salida esperada: doc_organize-docs-2.6.0.zip: OK
+# Salida esperada: doc_organize-docs-2.7.0.zip: OK
 ```
 
 ### En Windows
@@ -115,7 +115,7 @@ start index.html
 `scripts/build_docs_zip.py` añade una línea a `dist/CHECKSUMS.txt` en cada build, así que en local acumula el histórico. El que se publica en cada Release sale de un `dist/` recién creado por CI y solo trae la línea de esa build:
 
 ```
-a1b2c3d4e5f6...  doc_organize-docs-2.6.0.zip  (2026-11-24T12:34:56.789123)
+a1b2c3d4e5f6...  doc_organize-docs-2.7.0.zip  (2026-11-24T12:34:56.789123)
 b2c3d4e5f6a7...  doc_organize-docs-2.1.0.zip  (2026-11-22T10:20:30.123456)
 ```
 
