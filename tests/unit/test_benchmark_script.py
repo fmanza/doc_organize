@@ -186,6 +186,20 @@ def test_ai_all_with_nothing_classified_is_not_a_pass(bench: ModuleType) -> None
     assert "no llegó a todos" in bench._incomplete(empty, _requested(3), ai_all=True)
 
 
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        ({"ai_all": True}, (True, 0.5, "all")),
+        ({"ai_all": True, "threshold": 0.6}, (True, 0.6, "all")),
+        ({"ai_all_legacy": True}, (True, 1.01, "unclassified")),
+        ({"ai_scope": "missing_axes"}, (False, 0.5, "missing_axes")),
+        ({}, (False, 0.5, "off")),
+    ],
+)
+def test_ai_all_uses_the_real_scope_and_the_trick_only_on_request(bench: ModuleType, config: dict, expected: tuple) -> None:
+    assert bench._scope(config) == expected
+
+
 def test_strata_missing_from_the_saved_context_are_reported(bench: ModuleType) -> None:
     """La reponderación solo vale con el contexto del que se sacó la muestra: si sus estratos no están, se avisa."""
     from collections import Counter

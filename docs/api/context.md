@@ -119,6 +119,8 @@ class DomainDocument(BaseModel):
     classified_by: str  # "rules" | "ai" (el dominio; quién asignó cada eje, en classification)
     rules_domain: str | None              # 1.5.0: propuesta de las reglas, aunque decidiera la IA
     rules_confidence: float | None        # 1.5.0
+    rules_material_type: str | None       # 2.7.0: tipo que asignaron las reglas, aunque lo sustituyera la IA
+    rules_material_type_confidence: float | None  # 2.7.0
     ai_domain: str | None                 # 1.5.0: propuesta de la IA, aplicada o no
     ai_confidence: float | None           # 1.5.0: si se preguntó a la IA
     ai_reasoning: str | None              # 1.5.0
@@ -215,9 +217,10 @@ class AiPhaseStats(BaseModel):  # 2.0.0
     completion_tokens: int
     response_format: Literal["json_schema", "json_object"] | None
     cached: int                  # resueltos con la caché de resultados, sin llamar al modelo
+    replaced: int                # 2.7.0: ejes en que la IA sustituyó un valor distinto de las reglas (ai_scope="all")
 
 class AiStats(BaseModel):  # 2.0.0
-    scope: Literal["off", "unclassified", "missing_axes"]
+    scope: Literal["off", "unclassified", "missing_axes", "all"]  # "all": 2.7.0
     enrich: bool
     classification: AiPhaseStats
     enrichment: AiPhaseStats
@@ -301,7 +304,7 @@ class ContextBuilder:
         taxonomy_template_name: str | None = None,
         output_folder_name: str = "organizado",
         llm: LlmClient | None = None,                   # 2.0.0
-        ai_scope: Literal["off", "unclassified", "missing_axes"] = "off",  # 2.0.0
+        ai_scope: Literal["off", "unclassified", "missing_axes", "all"] = "off",  # 2.0.0; "all": 2.7.0
         enrich: bool = False,                           # 2.0.0
         prompts: PromptRegistry | None = None,          # 2.0.0
         ai_cache: bool | AiResultCache = True,          # 2.0.0
@@ -332,7 +335,7 @@ Orquesta Sub-fase A (reglas, siempre) + Sub-fase B (IA, opt-in) y persiste el `C
 | `taxonomy_manifest` | `TaxonomyManifest \| None` | Manifiesto de taxonomía (ver [TaxonomyManifest](#taxonomymanifest-manifiesto-de-taxonomia)): clasificación por ejes |
 | `taxonomy_template_name` | `str \| None` | Plantilla de la que proviene `taxonomy_manifest`, si es de una plantilla (informativo, `Context.taxonomy_template_name`) |
 | `llm` | `LlmClient \| None` | (2.0.0) Cliente único de IA. Sin él no se llama a ninguna IA |
-| `ai_scope` | `"off" \| "unclassified" \| "missing_axes"` | (2.0.0) `"unclassified"`: la IA clasifica lo que las reglas dejaron sin clasificar en algún eje organizador (la Sub-fase B de 1.x). `"missing_axes"` (con manifiesto): además, los documentos con algún eje que solo etiqueta vacío (también los de `rules: false`). Una llamada por documento con solo los ejes que le faltan; la IA **solo rellena ejes vacíos**, nunca cambia lo que decidieron las reglas. Se guarda en `Context.ai_stats.scope` |
+| `ai_scope` | `"off" \| "unclassified" \| "missing_axes" \| "all"` | (2.0.0) `"unclassified"`: la IA clasifica lo que las reglas dejaron sin clasificar en algún eje organizador (la Sub-fase B de 1.x). `"missing_axes"` (con manifiesto): además, los documentos con algún eje que solo etiqueta vacío (también los de `rules: false`). Una llamada por documento con solo los ejes que le faltan; con estos dos alcances la IA **solo rellena ejes vacíos**, nunca cambia lo que decidieron las reglas. `"all"` (2.7.0, con manifiesto; sin él, `ValueError`): **todos** los documentos van a la IA en los dos ejes organizadores y lo que responde **sustituye** lo de las reglas; su propuesta queda en `rules_domain` y `rules_material_type`, y las sustituciones en `ai_stats.classification.replaced`. Los ejes que solo etiquetan no se piden. Lo que decidió una persona no se pregunta con ningún alcance. Se guarda en `Context.ai_stats.scope` |
 | `enrich` | `bool` | (2.0.0) Describir con IA los documentos que no declaran descripción o palabras clave. Ver [Autor, descripción y palabras clave](#autor-descripcion-y-palabras-clave-150) |
 | `prompts` | `PromptRegistry \| None` | (2.0.0) Prompts de cada tarea; por defecto, los de `<raíz>/.doc_organize/prompts/` o los empaquetados |
 | `ai_cache` | `bool \| AiResultCache` | (2.0.0) Caché de resultados de IA (por defecto, la del proyecto): reconstruir sin cambios no llama al modelo. Ver [Caché de resultados](llm_client.md#cache-de-resultados) |
@@ -357,7 +360,7 @@ toda la fase. Al detenerse (`"auth"`, `"connection"` o `"budget"`), los document
 quedan sin clasificar (o en `sin-clasificar`); siguen emitiendo su evento de progreso, el `cancel_token` se sigue
 comprobando entre ellos y el contexto se construye y persiste con normalidad. Desde 2.0.0 los recuentos van en
 `Context.ai_stats` (`classification`, `enrichment` y `semantic_classification`: `sent`, `assigned`, `failed`, `stopped`,
-`prompt_tokens`, `completion_tokens`, `response_format`, `cached`), con `sent = assigned + failed + enviados sin asignación`. Una respuesta del
+`prompt_tokens`, `completion_tokens`, `response_format`, `cached` y, desde 2.7.0, `replaced`), con `sent = assigned + failed + enviados sin asignación`. Una respuesta del
 servidor (incluido un 5xx) corta la racha de errores de conexión.
 
 **Reglas**: el catálogo de la Sub-fase B es `candidate_domains` si se dio uno, o los
@@ -380,6 +383,7 @@ Cada `DomainDocument` guarda cómo se llegó a su dominio, y el `Context`, con q
 |---|---|
 | `DomainDocument.rules_domain`, `rules_confidence` | Lo que propusieron las reglas (Sub-fase A), **también cuando no alcanzó el umbral y decidió la IA**. En modo de un eje se recalcula para los documentos que clasifica la IA |
 | `DomainDocument.ai_domain`, `ai_confidence`, `ai_reasoning` | Dominio que propuso la IA, su confianza y su justificación (hasta 500 caracteres), si se le preguntó por el documento; `None` si no. En modo manifiesto se guardan aunque las reglas ya hubieran decidido el dominio y la IA solo resolviera el tipo de material: entonces `ai_domain` puede no coincidir con el dominio del documento |
+| `DomainDocument.rules_material_type`, `rules_material_type_confidence` | (2.7.0, modo manifiesto) Tipo de material que asignaron las reglas, **también cuando después lo sustituyó la IA** (`ai_scope="all"`); `None` si las reglas no lo asignaron o el contexto es anterior |
 | `DomainDocument.material_type_confidence` | Score del eje de tipo de material, de quien lo decidió (reglas o IA); `None` sin manifiesto |
 | `Context.ai_provenance` | (2.0.0) Prompt (id, versión, origen, SHA-256) y modelo de cada tarea de IA que llegó a enviar algún documento; `context.model_for_task("classify")` da el modelo. Antes `ai_classification_model`/`ai_enrichment_model` |
 | `Context.built_with_version` | Versión de doc_organize que construyó el contexto. Las reglas son código, así que esta versión las identifica |

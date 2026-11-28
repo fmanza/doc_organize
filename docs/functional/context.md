@@ -43,7 +43,7 @@ descripción. La revisión por personas, la evaluación contra una referencia y 
 |---|---|---|
 | **Fuente de clasificación** | El `.json` de conversión (`chunks`/`title`), nunca el `.md` — ya troceado por sección, sin reparsear Markdown | Se volvería a trocear el Markdown que la conversión ya dejó troceado por sección |
 | **Nunca inventa dominios** | Con catálogo predefinido, un documento solo se asigna a un dominio de ese catálogo — ni las reglas ni la IA crean uno nuevo | Aparecerían dominios fuera del catálogo acordado |
-| **IA es fallback, nunca primera pasada** | Sub-fase B solo se intenta con documentos que la Sub-fase A deja por debajo del umbral de confianza, y opt-in explícito (`ai_scope="unclassified"`, o `"missing_axes"` para rellenar también los ejes que solo etiquetan; por defecto `"off"`). La IA solo rellena ejes vacíos | Se enviarían a la IA documentos ya clasificados, con más coste y riesgo de cambiar lo decidido por las reglas |
+| **IA es fallback, nunca primera pasada** | Sub-fase B solo se intenta con documentos que la Sub-fase A deja por debajo del umbral de confianza, y opt-in explícito (`ai_scope="unclassified"`, o `"missing_axes"` para rellenar también los ejes que solo etiquetan; por defecto `"off"`). La IA solo rellena ejes vacíos. **Excepción (2.7.0)**: con `ai_scope="all"` (opt-in, con manifiesto) la IA clasifica todos los documentos en los ejes organizadores y sustituye a las reglas, porque en F0 acertó entre 2,5 y 4 veces más que ellas; la propuesta de las reglas queda guardada por eje | Se enviarían a la IA documentos ya clasificados, con más coste y riesgo de cambiar lo decidido por las reglas |
 | **Las personas mandan (2.0.0)** | Con manifiesto, las decisiones de personas (`decisions.json`) se aplican tras las reglas y antes de la semántica y la IA; la que no se puede aplicar queda en `Context.stale_decisions`/`orphan_decisions` | Una reconstrucción desharía el trabajo de revisión |
 | **Semántica opcional (2.0.0)** | Con `semantic=True` y manifiesto, los ejes vacíos se rellenan por parecido con embeddings (`classified_by="semantic"`), antes de la IA | Se llamaría a la IA por ejes que los embeddings podían rellenar sin ella |
 | **Versiones (2.0.0)** | `versions="all"` (por defecto) no cambia nada; `"mark"` marca versión y vigente; `"current_only"` solo clasifica, publica y envía a la IA la vigente (la más alta o la que decidió una persona); con `version_across_extensions` (2.5.0) agrupa también entre formatos y la misma versión en varios formatos es vigente entera | Versiones antiguas pasarían por la IA y se publicarían como vigentes |
@@ -190,6 +190,14 @@ confianza nunca se sobreescribe, aunque la IA sugiera algo distinto para ese eje
 la misma respuesta. Con `ai_scope="missing_axes"`, la IA también rellena los ejes que solo etiquetan (marcos
 normativos, temas...) que quedaron vacíos, con la misma regla: nunca cambia lo que ya tiene valor. Cada valor de la IA
 lleva su cita; si la cita no está en el documento, el valor queda por debajo del umbral para revisarlo.
+
+Con `ai_scope="all"` (2.7.0) **todos** los documentos van a la IA, en el dominio y el tipo de material, y lo que
+responde sustituye lo que asignaron las reglas (salvo lo que decidió una persona, que no se pregunta). Lo que
+proponían las reglas queda en `rules_domain` y `rules_material_type`, y `ai_stats.classification.replaced` cuenta los
+ejes en que la IA lo cambió. La cola de revisión no avisa de esas discrepancias: con las reglas acertando poco, serían
+casi todo el corpus; sí recibe, como siempre, los valores de la IA con confianza baja o cita no verificada. Cuesta una
+llamada por documento (con un modelo local, del orden de 20 s por documento); la caché evita repetirlas al
+reconstruir sin cambios. Con un modelo externo, el corpus entero sale del equipo.
 
 Si no existe `taxonomy_manifest.md`, todo el comportamiento (clasificación de un
 eje, `<tipo>`=extensión, nav plano por dominio) queda exactamente igual que antes.
