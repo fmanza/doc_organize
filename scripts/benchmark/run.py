@@ -65,7 +65,7 @@ from doc_organize import (
     settings_from_env,
 )
 from doc_organize.context import domain_classifier
-from doc_organize.context.evaluation import NONE_LABEL, document_keys
+from doc_organize.context.evaluation import NONE_LABEL, common_root, document_keys
 from doc_organize.core.models import Context, ConversionResult
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -141,7 +141,7 @@ def _ablated(ablations: Sequence[str], no_divide_k: float) -> Iterator[None]:
         return
     original_scores, original_best = domain_classifier.catalog_scores, domain_classifier.score_catalog
     fold = domain_classifier.fold_accents
-    bonus = domain_classifier._PATH_SIGNAL_BONUS  # noqa: SLF001 - herramienta de medición
+    bonus = domain_classifier._PATH_SIGNAL_BONUS  # herramienta de medición: usa un interno
 
     def catalog_scores(
         catalog: list[str], haystack: str, folder_slug: str, extra_keywords: dict[str, list[str]] | None = None
@@ -293,18 +293,50 @@ async def _dry_run(
                     project, documents, gold=gold, roots=roots, llm=llm, ai_cache=bool(config.get("ai_cache", False)), **options
                 )
     seconds = time.perf_counter() - start
-    if ai_all:
-        classified = sum(len(domain.documents) for domain in result.context.domains)
-        stats = result.context.ai_stats.classification
-        if stats.stopped or stats.sent + stats.cached != classified:
-            sys.exit(
-                f"{config['name']}: «IA sobre toda la referencia» no llegó a todos ({stats.sent} enviados + {stats.cached} de caché de "
-                f"{classified}; parada: {stats.stopped}). No se mide: revisa el proxy, ai_max_documents o el umbral."
-            )
+    problem = _incomplete(result.context, documents, ai_all)
+    if problem:
+        sys.exit(f"{config['name']}: {problem} No se mide.")
     return result.context, seconds
 
 
-# --- vistas de la referencia (§9.3.1) --------------------------------------------------------------------------------
+def _incomplete(context: Context, documents: Sequence[ConversionResult], ai_all: bool) -> str | None:
+    """Por qué la clasificación en seco no cubre todos los documentos pedidos, o `None` si los cubre.
+
+    Una medición sobre menos documentos de los pedidos no avisa sola: la evaluación solo ve lo que hay. Y con `ai_all`,
+    «enviados = clasificados» se cumple también con 0 = 0.
+    """
+    classified = sum(len(domain.documents) for domain in context.domains)
+    built = classified + len(context.unclassified_details)
+    if built < len(documents):
+        return (
+            f"la construcción en seco solo tiene {built} de {len(documents)} documentos (¿las claves no casan con la "
+            "referencia? pasa --root con la raíz de escaneo)."
+        )
+    if not ai_all:
+        return None
+    readable = sum(1 for document in documents if document.success)
+    stats = context.ai_stats.classification
+    if stats.stopped or classified < readable or stats.sent + stats.cached != classified:
+        return (
+            f"«IA sobre toda la referencia» no llegó a todos ({stats.sent} enviados + {stats.cached} de caché de {classified} "
+            f"clasificados y {readable} legibles; parada: {stats.stopped}). Revisa el proxy, ai_max_documents o el umbral."
+        )
+    return None
+
+
+def _scan_roots(source_paths: Sequence[str], given: Sequence[str]) -> list[str] | None:
+    """Las raíces para las claves: las de `--root` o la carpeta común de **todo** el contexto guardado.
+
+    Calcularla sobre los documentos de un tramo no sirve: si todos cuelgan de la misma subcarpeta, su carpeta común es
+    más profunda que la raíz de escaneo, las claves dejan de casar con la referencia y `dry_run_classify` los descarta.
+    """
+    if given:
+        return list(given)
+    root = common_root(source_paths)
+    return [root] if root else None
+
+
+# --- vistas de la referencia (§9.3.1)--------------------------------------------------------------------------------
 
 
 def _views(gold: GoldStandard, rows: list[dict[str, Any]], reviewed_column: str, reviewed_value: str) -> dict[str, GoldStandard]:
@@ -325,7 +357,7 @@ def _reweighted_accuracy(
     roots: Sequence[str] | None,
 ) -> float | None:
     """Exactitud de `axis` reponderada por estratos: cada documento pesa `N_estrato / n_estrato` (corpus / muestra)."""
-    from doc_organize.context.evaluation import _rows, _scored_predictions  # noqa: PLC2701 - herramienta de medición
+    from doc_organize.context.evaluation import _rows, _scored_predictions  # herramienta de medición: usa internos
 
     stratum_of = {_key_of(row): str(row.get(stratum_column) or "").strip() or UNCLASSIFIED_SLUG for row in rows}
     rows_by_key = _rows(_scored_predictions(context, roots), gold.by_document()).get(axis, {})
@@ -351,7 +383,7 @@ def _git_commit() -> str | None:
     import subprocess
 
     try:
-        result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True, check=True, timeout=10)  # noqa: S607
+        result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True, check=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
         return None
     return result.stdout.strip() or None
@@ -382,10 +414,12 @@ async def _run(args: argparse.Namespace) -> None:
     saved = await ContextRegistry().load_context(project)
     path_map = tuple(args.path_map.split("=", 1)) if args.path_map else None
     documents = _documents(saved, path_map)  # type: ignore[arg-type]
-    roots = args.root or None
+    roots = _scan_roots([document.source_path for document in documents], args.root)
     keys = document_keys([document.source_path for document in documents], roots)
     labelled = {label.document for label in gold.labels}
     documents = [document for document in documents if keys[document.source_path] in labelled]
+    if not documents:
+        sys.exit("Ningún documento del contexto guardado está en la referencia: revisa --project-root, --root y la hoja.")
     population = _population(saved)
 
     record: dict[str, Any] = {
@@ -450,8 +484,10 @@ def _report(
     lines = [
         "# Benchmark de clasificación",
         "",
-        f"doc_organize {__version__} · tramo `{args.split}` · {len(gold.labels)} documentos etiquetados · semilla {args.seed} · "
-        f"{args.repeat} repetición(es)",
+        (
+            f"doc_organize {__version__} · tramo `{args.split}` · {len(gold.labels)} documentos etiquetados · semilla {args.seed} · "
+            f"{args.repeat} repetición(es)"
+        ),
         "",
         "> Privado: contiene nombres de documentos reales. No subir al repositorio.",
     ]
@@ -473,8 +509,11 @@ def _report(
                 if missing:
                     lines += [
                         "",
-                        f"> **No fiable**: {len(missing)} estrato(s) de la muestra no están en el contexto guardado ({', '.join(missing[:10])}). "
-                        "La reponderación solo vale con el contexto del que se sacó la muestra; si se reconstruyó, ignórala.",
+                        (
+                            f"> **No fiable**: {len(missing)} estrato(s) de la muestra no están en el contexto guardado "
+                            f"({', '.join(missing[:10])}). La reponderación solo vale con el contexto del que se sacó la muestra; "
+                            "si se reconstruyó, ignórala."
+                        ),
                     ]
                 lines += _small_support_warning(evaluate_classification(context, view_gold, roots=roots))
     if args.repeat > 1:
