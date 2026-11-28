@@ -316,3 +316,34 @@ LLM, o el modelo de `classify` deja de ser intercambiable por proyecto.
 cambiar ninguna clasificación. Detalle: `.ai/sessions/2026-11-27-precision-contexto/{ANALISIS_MEJORAS,PLAN}.md`
 (§8.2 y §9 del análisis).
 
+
+## Revisión 19 — Modelo de `classify` en el despliegue local: qwen2.5:14b, sin cambiar la recomendación (2026-11-28)
+
+**Decisión**: (1) En el despliegue local de LiteLLM (`deploy/litellm/config.yaml`, no versionado), el alias
+`doc-organize-classify` pasa de `qwen2.5-coder:14b` a `qwen2.5:14b`, con `num_ctx` 12288 y `temperature` 0, los mismos
+parámetros que en la medición. (2) La librería no cambia de modelo recomendado ni ningún valor por defecto: el cambio
+no pasa la puerta en el tramo bloqueado.
+**Medición** (F0, `scripts/benchmark/run.py`, IA sobre toda la referencia, 2 repeticiones sin caché, ruido ≤ 0,02):
+
+| Tramo | Eje | coder-14b | qwen2.5:14b | Diferencia, IC 95 % | Mayoría | Puerta |
+|---|---|---|---|---|---|---|
+| calibración (100) | dominio | 0,46 | 0,53 | +0,07 [0,01, 0,14] | 0,35 | pasa |
+| calibración (100) | tipo | 0,67 | 0,79 | +0,12 [0,04, 0,19] | 0,55 | pasa |
+| bloqueado (50) | dominio | 0,46 | 0,60 | +0,14 [0,00, 0,28] | 0,34 | no inferior, sin mejora |
+| bloqueado (50) | tipo | 0,68 | 0,72 | +0,04 [−0,10, 0,18] | 0,48 | no pasa |
+
+Referencia con kappa 0,63 (dominio) y 0,60 (tipo) frente a un etiquetado a ciegas de 50 documentos. Reglas sin IA: 0,20
+en los dos ejes, por debajo de la mayoría.
+**Alternativas descartadas**: qwen3.5:9b, el mejor en dominio en calibración (0,64; +0,18 [0,09, 0,27]) y el más rápido
+(11 s/documento), pero no inferior en tipo (−0,01 [−0,11, 0,10]; asigna `politica` 23 veces frente a 5). Mantener
+coder-14b: peor en las dos particiones y los dos ejes, y el más lento (36 s/documento frente a 20).
+**Razón**: el cambio local es reversible y todos los datos van a su favor; el tramo bloqueado de 50 documentos solo
+detecta efectos muy grandes, y la Revisión 18 exige un segundo corpus para cambiar valores por defecto.
+**Reabrir si**: un segundo corpus o una referencia ampliada (≥ 150 documentos en el tramo bloqueado) confirma o
+contradice la mejora; o se corrige `politica` en qwen3.5:9b. Ningún modelo asigna nunca `mejora-medicion` (9
+documentos en la referencia): revisar la plantilla o el prompt antes de comparar más modelos.
+**Impacto actual**: solo el despliegue local. Los informes (con nombres de documentos) están fuera del repositorio.
+En el mismo despliegue, `doc-organize-taxonomy-design` y `doc-organize-agent` pasan a `qwen3.8:27b` (32k): coder-14b
+entra en bucle como agente (MEDICION_M8) y qwen3.8:27b es el único con ediciones medidas (MEDICION_M10). Antes,
+LiteLLM repartía cada alias entre una entrada de `config.yaml` y otra de su base de datos con modelos distintos; se
+borraron las de la base de datos.
