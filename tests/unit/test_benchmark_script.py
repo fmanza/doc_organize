@@ -186,6 +186,31 @@ def test_ai_all_with_nothing_classified_is_not_a_pass(bench: ModuleType) -> None
     assert "no llegó a todos" in bench._incomplete(empty, _requested(3), ai_all=True)
 
 
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        ({"ai_all": True}, (True, 0.5, "all")),
+        ({"ai_all": True, "threshold": 0.6}, (True, 0.6, "all")),
+        ({"ai_all_legacy": True}, (True, 1.01, "unclassified")),
+        ({"ai_scope": "missing_axes"}, (False, 0.5, "missing_axes")),
+        ({}, (False, 0.5, "off")),
+    ],
+)
+def test_ai_all_uses_the_real_scope_and_the_trick_only_on_request(bench: ModuleType, config: dict, expected: tuple) -> None:
+    assert bench._scope(config) == expected
+
+
+def test_the_report_counts_the_review_queue_by_reason(bench: ModuleType) -> None:
+    context = _built(2, 2)
+    context.ai_stats.classification.replaced = 3
+    context.unclassified_details = [UnclassifiedDocument(source_path="/mnt/e/ENS/x.pdf", document_type="pdf", reason="below_threshold")]
+
+    line = bench._queue_line(context, ["/mnt/e"])
+
+    assert line.startswith("Cola de revisión: ") and "para 3 documentos" in line and "unclassified 1" in line
+    assert line.endswith("ejes sustituidos por la IA: 3")
+
+
 def test_strata_missing_from_the_saved_context_are_reported(bench: ModuleType) -> None:
     """La reponderación solo vale con el contexto del que se sacó la muestra: si sus estratos no están, se avisa."""
     from collections import Counter

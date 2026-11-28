@@ -110,6 +110,8 @@ class _AiRun:
     response_format: ResponseFormat | None = None
     #: Documentos resueltos con la caché de resultados (no cuentan en `sent` ni consumen presupuesto).
     cached: int = 0
+    #: Ejes organizadores en que la IA sustituyó un valor distinto de las reglas (`ai_scope="all"`, 2.7.0).
+    replaced: int = 0
     #: Recuento por documento y regla de lo redactado, compartido por todas las fases de IA de una construcción.
     credential_ledger: dict[str, Counter[str]] | None = None
 
@@ -168,6 +170,7 @@ class _AiRun:
             completion_tokens=self.completion_tokens,
             response_format=self.response_format,
             cached=self.cached,
+            replaced=self.replaced,
         )
 
 
@@ -408,8 +411,12 @@ class ContextBuilder:
             llm: Cliente de IA (`LlmClient`). Sin él no se llama a ninguna IA.
             ai_scope: Qué documentos clasifica la IA (se guarda en `Context.ai_stats.scope`): `"off"` (por defecto),
                 ninguno; `"unclassified"`, los que las reglas dejaron sin clasificar en algún eje organizador;
-                `"missing_axes"` (con manifiesto), además los que tienen vacío algún eje que solo etiqueta. La IA solo
-                rellena ejes vacíos: nunca cambia lo que decidieron las reglas.
+                `"missing_axes"` (con manifiesto), además los que tienen vacío algún eje que solo etiqueta. Con estos
+                alcances la IA solo rellena ejes vacíos: nunca cambia lo que decidieron las reglas. `"all"` (2.7.0, con
+                manifiesto): todos los documentos, en los dos ejes organizadores, y la IA **sustituye** lo que asignaron
+                las reglas (su propuesta queda en `rules_domain`/`rules_material_type`, y las sustituciones en
+                `AiPhaseStats.replaced`); los ejes que solo etiquetan no se piden. Todo el corpus va a la IA. Con
+                cualquier alcance, lo que decidió una persona no se pregunta ni se cambia.
             enrich: Describir con IA (tarea `enrich`) los documentos clasificados que no declaran descripción o palabras
                 clave; solo se rellena lo que falta (`DomainDocument.ai_filled`). El autor nunca sale de la IA.
             prompts: Prompts de cada tarea; por defecto, los del proyecto (`<raíz>/.doc_organize/prompts/`) o los
@@ -468,6 +475,8 @@ class ContextBuilder:
             raise ValueError("ai_max_documents debe ser >= 0 (o None)")
         if (ai_scope != "off" or enrich or semantic) and llm is None:
             raise ValueError("ai_scope, enrich y semantic necesitan un cliente de IA (llm)")
+        if ai_scope == "all" and taxonomy_manifest is None:
+            raise ValueError('ai_scope="all" necesita un manifiesto de taxonomía (taxonomy_manifest)')
         if not 0.0 <= semantic_threshold <= 1.0:
             raise ValueError(f"semantic_threshold debe estar entre 0 y 1, no {semantic_threshold}")
         checkpoint(cancel_token)
@@ -776,6 +785,8 @@ class ContextBuilder:
                 classified_by="rules",
                 rules_domain=rules_domain,
                 rules_confidence=domain_score,
+                rules_material_type=material_slug if material_slug != _UNCLASSIFIED_SLUG else None,
+                rules_material_type_confidence=material_score if material_slug != _UNCLASSIFIED_SLUG else None,
                 material_type_confidence=material_score,
                 classification=DocumentClassification(axes=axes),
             )
@@ -851,6 +862,8 @@ class ContextBuilder:
           dominio y/o en el de tipo de material (la Sub-fase B de 1.x).
         - `scope="missing_axes"`: además, los que tienen **vacío** algún eje que solo etiqueta (también los de
           `rules: false`).
+        - `scope="all"` (2.7.0): todos, en los dos ejes organizadores, y lo que responde la IA **sustituye** lo de las
+          reglas (`_apply_manifest_ai`). Es la única excepción a «nunca sustituye».
 
         Una llamada por documento con los ejes que le faltan (los dos organizadores si falta alguno, para conservar la
         propuesta de la IA en `ai_domain`). Solo se aplica a lo que estaba vacío: nunca sustituye lo que decidieron las
@@ -866,7 +879,7 @@ class ContextBuilder:
 
         def missing(domain_slug: str, document: DomainDocument) -> list[str]:
             keys = []
-            if domain_slug == _UNCLASSIFIED_SLUG or document.material_type == _UNCLASSIFIED_SLUG:
+            if scope == "all" or domain_slug == _UNCLASSIFIED_SLUG or document.material_type == _UNCLASSIFIED_SLUG:
                 keys += [folder.key, subfolder.key]
             if scope == "missing_axes":
                 keys += [axis.key for axis in manifest.tag_axes if not document.classification.axes.get(axis.key)]
@@ -927,7 +940,7 @@ class ContextBuilder:
         results = await self._run_ai_phase(list(zip(pending, hits, strict=True)), call, ai_run, on_progress, lambda item: item[0][1].source_path)
         for (old_domain_slug, document, _keys), answer in zip(pending, results, strict=True):
             if answer is not None:
-                self._apply_manifest_ai(document, old_domain_slug, answer, classified, manifest, ai_run, threshold)
+                self._apply_manifest_ai(document, old_domain_slug, answer, classified, manifest, ai_run, threshold, replace=scope == "all")
 
         # Poda buckets que quedaron vacíos (p.ej. todo "sin-clasificar" se resolvió a otros
         # dominios) — sin esto, `build()` crearía un `Domain` fantasma sin documentos.
@@ -1067,28 +1080,40 @@ class ContextBuilder:
         manifest: TaxonomyManifest,
         run: _AiRun,
         threshold: float = _DEFAULT_THRESHOLD,
+        *,
+        replace: bool = False,
     ) -> None:
-        """Aplica la respuesta de la IA a `document` y a `classified`, solo en los ejes que estaban vacíos: mueve el
-        documento de bucket si el eje de dominio cambió, o lo muta in-place si cambió otro. Lo que cambia queda en
-        `document.classification` con `classified_by="ai"` y su cita."""
+        """Aplica la respuesta de la IA a `document` y a `classified`, solo en los ejes que estaban vacíos (o en los
+        organizadores pedidos, con `replace`, `ai_scope="all"`): mueve el documento de bucket si el eje de dominio
+        cambió, o lo muta in-place si cambió otro. Lo que cambia queda en `document.classification` con
+        `classified_by="ai"` y su cita; con `replace`, cada eje en que sustituye un valor distinto de las reglas suma
+        en `run.replaced`."""
         folder, subfolder = manifest.folder_axis, manifest.subfolder_axis
         axes = document.classification.axes
+
+        def replaced(key: str, new_slug: str) -> bool:
+            return any(value.classified_by == "rules" and value.slug != new_slug for value in axes.get(key, []))
+
         changed = False
         domain = answer.axes.get(folder.key)
         if domain is not None:
             document.ai_domain = domain.slug
             document.ai_confidence = domain.confidence
             document.ai_reasoning = answer.reasoning
-            if old_domain_slug == _UNCLASSIFIED_SLUG and domain.choices:
+            if (replace or old_domain_slug == _UNCLASSIFIED_SLUG) and domain.choices:
                 value = _ai_value(domain.choices[0], folder, threshold, slugify=DomainClassifier._slugify)
+                if replace and old_domain_slug != _UNCLASSIFIED_SLUG and replaced(folder.key, value.slug):
+                    run.replaced += 1
                 classified[old_domain_slug] = [candidate for candidate in classified[old_domain_slug] if candidate is not document]
                 document.confidence = value.confidence
                 classified.setdefault(value.slug, []).append(document)
                 axes[folder.key] = [value]
                 changed = True
         material = answer.axes.get(subfolder.key)
-        if material is not None and document.material_type == _UNCLASSIFIED_SLUG and material.choices:
+        if material is not None and (replace or document.material_type == _UNCLASSIFIED_SLUG) and material.choices:
             value = _ai_value(material.choices[0], subfolder, threshold, slugify=DomainClassifier._slugify)
+            if replace and document.material_type != _UNCLASSIFIED_SLUG and replaced(subfolder.key, value.slug):
+                run.replaced += 1
             document.material_type = value.slug
             document.material_type_name = value.name if value.name != value.slug else None
             document.material_type_confidence = value.confidence

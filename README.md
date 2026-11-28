@@ -18,7 +18,8 @@ tipo de material, que organizan carpetas, y los que solo etiquetan, como el marc
 quiere, con embeddings e IA a través de un LiteLLM Proxy; reorganiza una copia en carpetas y genera un sitio navegable
 con Zensical, también para verlo sin conexión, y un paquete para subir a un chat o agente de IA.
 
-> **2.6.0**: medir la clasificación antes de cambiarla (métricas por valor, `compare_classifications` y benchmark
+> **2.7.0**: la IA puede clasificar todos los documentos (`ai_scope="all"`) y sustituir a las reglas, y la puerta de
+> `compare_classifications` exige F1 macro y superar la línea base de mayoría. **2.6.0**: medir la clasificación antes de cambiarla (métricas por valor, `compare_classifications` y benchmark
 > reproducible); el marcador `sin-clasificar` nace en borrador. **2.5.0**: versiones de un documento aunque cambie el formato (`version_across_extensions`) y periodo real del
 > gasto de LiteLLM. **2.4.2**: las claves de las configuraciones de uso y de diagnóstico ya no salen en `repr()`, y la cola de revisión
 > muestra las decisiones de documentos que ya no están. **2.4.1**: el progreso final del escaneo llega con sus unidades y el canónico de la deduplicación no depende del orden
@@ -128,7 +129,7 @@ python scripts/build_docs_zip.py
 **Verificación de integridad:**
 ```bash
 sha256sum -c doc_organize-docs-*.zip.sha256
-# Output: doc_organize-docs-2.6.0.zip: OK
+# Output: doc_organize-docs-2.7.0.zip: OK
 ```
 
 ## Estructura del proyecto

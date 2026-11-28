@@ -1016,6 +1016,16 @@ class DomainDocument(BaseModel):
     rules_confidence: float | None = Field(
         default=None, ge=0.0, le=1.0, description="Score de las reglas para `rules_domain` (1.5.0); None si el contexto es anterior"
     )
+    rules_material_type: str | None = Field(
+        default=None,
+        description=(
+            "Tipo de material que asignaron las reglas (modo manifiesto, 2.7.0), aunque después lo sustituyera la IA "
+            '(`ai_scope="all"`); None si las reglas no lo asignaron o el contexto es anterior'
+        ),
+    )
+    rules_material_type_confidence: float | None = Field(
+        default=None, ge=0.0, le=1.0, description="Score de las reglas para `rules_material_type` (2.7.0); None si no lo asignaron"
+    )
     ai_domain: str | None = Field(
         default=None,
         description=(
@@ -1154,10 +1164,11 @@ class Domain(BaseModel):
 AiClassificationStopReason = Literal["auth", "connection", "budget"]
 """Motivo por el que `ContextBuilder.build()` detuvo una fase de IA (`AiPhaseStats.stopped`, L-3a/L-3b)."""
 
-AiScope = Literal["off", "unclassified", "missing_axes"]
+AiScope = Literal["off", "unclassified", "missing_axes", "all"]
 """Qué documentos van a la IA para clasificarse (`ContextBuilder.build(ai_scope=)`, 2.0.0): ninguno; los que las reglas
-dejaron sin clasificar en algún eje organizador (`unclassified`, la Sub-fase B de 1.x); o además los que tienen vacío
-algún eje que solo etiqueta (`missing_axes`, opt-in: más documentos van a la IA)."""
+dejaron sin clasificar en algún eje organizador (`unclassified`, la Sub-fase B de 1.x); además los que tienen vacío
+algún eje que solo etiqueta (`missing_axes`, opt-in: más documentos van a la IA); o todos, en los ejes organizadores,
+sustituyendo lo que asignaron las reglas (`all`, 2.7.0, solo con manifiesto: todo el corpus va a la IA)."""
 
 
 class AiPhaseStats(BaseModel):
@@ -1176,6 +1187,8 @@ class AiPhaseStats(BaseModel):
             llamada que respondió.
         cached (int): Documentos resueltos con la caché de resultados (`AiResultCache`), sin llamar al modelo; no
             cuentan en `sent` ni consumen `ai_max_documents`.
+        replaced (int): Ejes organizadores en los que la IA sustituyó un valor distinto que habían asignado las reglas
+            (`ai_scope="all"`, 2.7.0); 0 con los demás alcances.
     """
 
     sent: int = Field(default=0, ge=0)
@@ -1186,6 +1199,7 @@ class AiPhaseStats(BaseModel):
     completion_tokens: int = Field(default=0, ge=0)
     response_format: Literal["json_schema", "json_object"] | None = None
     cached: int = Field(default=0, ge=0, description="Documentos resueltos con la caché de resultados, sin llamar al modelo (2.0.0)")
+    replaced: int = Field(default=0, ge=0, description='Ejes en que la IA sustituyó un valor distinto de las reglas (`ai_scope="all"`, 2.7.0)')
 
 
 class AiStats(BaseModel):

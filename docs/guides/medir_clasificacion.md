@@ -41,7 +41,7 @@ al 95 % es de **±7 puntos**. Una mejora de 1 o 2 puntos entre dos evaluaciones 
    exactitud alta puede no aportar nada.
 5. **Ablación.** Un cambio por ejecución; las combinaciones, solo para confirmar.
 6. **IA sobre toda la referencia.** Para medir un cambio de prompt o de modelo, mandar a la IA todos los documentos, no
-   solo los que las reglas dejan sin clasificar.
+   solo los que las reglas dejan sin clasificar (`ai_scope="all"` desde 2.7.0).
 7. **Ruido de la IA.** Repetir 2-3 veces la configuración base sin caché; si la variación es comparable al efecto, no
    se decide.
 8. **Ejemplos y decisiones por pliegues.** Si una configuración usa decisiones o ejemplos, en cada pliegue sirven de

@@ -6,10 +6,25 @@ releases publicados antes de esa versión).
 
 ## [Unreleased]
 
-La puerta de `compare_classifications` deja de aceptar candidatas degeneradas (lo destapó la primera medición real de F0).
-Versión menor: campos nuevos con valor por defecto y un cambio de comportamiento (ver «Changed»).
+## [2.7.0] - 2026-11-28
+
+La IA puede clasificar todos los documentos (P3, tras el cierre de F0) y la puerta de `compare_classifications` deja de
+aceptar candidatas degeneradas (lo destapó la primera medición real de F0). Versión menor: un valor nuevo de `AiScope`,
+campos nuevos con valor por defecto y un cambio de comportamiento en la puerta (ver «Changed»). Ninguna clasificación
+cambia si no se pide `ai_scope="all"`.
 
 ### Added
+
+- **`ai_scope="all"`** en `ContextBuilder.build` y `dry_run_classify` (con manifiesto; sin él, `ValueError`): la IA
+  clasifica todos los documentos en el dominio y el tipo de material y **sustituye** lo que asignaron las reglas. Lo
+  decidido por personas no se pregunta. En F0 (100 documentos, `qwen2.5:14b`), 0,53 en dominio y 0,79 en tipo frente
+  a 0,20 y 0,20 de las reglas. La cola de revisión no avisa de cada discrepancia con las reglas. Todo el corpus va al
+  modelo: una llamada por documento.
+- **Propuesta de las reglas por eje**: `DomainDocument.rules_material_type` y `rules_material_type_confidence` (como
+  `rules_domain` en el dominio), con cualquier alcance.
+- **`AiPhaseStats.replaced`**: ejes en que la IA sustituyó un valor distinto de las reglas (`ai_scope="all"`).
+- **Benchmark** (`scripts/benchmark/`, repositorio): `ai_all` usa `ai_scope="all"`; el truco de 2.6.0 (umbral 1,01) sigue
+  disponible como `ai_all_legacy` para comparar con lo medido antes.
 
 - **Línea base de mayoría**: `AxisEvaluation.majority_value` y `majority_accuracy` (exactitud de asignar siempre el
   valor más frecuente); `AxisComparison.majority_value`, `majority_accuracy` y `above_majority`.

@@ -48,7 +48,8 @@ Salida en `--out`: `informe.md` (métricas en las tres vistas de la referencia, 
 | `template` | — (obligatoria) | Plantilla o manifiesto de taxonomía (ruta relativa al `.toml` o absoluta) |
 | `threshold` | `0.5` | Umbral de las reglas |
 | `ai_scope` | `"off"` | `"unclassified"` o `"missing_axes"` para usar la IA (necesita LiteLLM en el entorno) |
-| `ai_all` | `false` | IA sobre **todos** los documentos de la referencia (umbral 1,01; aborta si la IA no los vio todos) |
+| `ai_all` | `false` | IA sobre **todos** los documentos de la referencia (`ai_scope="all"`, 2.7.0; aborta si la IA no los vio todos) |
+| `ai_all_legacy` | `false` | Lo mismo con el truco de 2.6.0 (umbral 1,01 y `ai_scope="unclassified"`), para comparar con mediciones anteriores |
 | `classify_model` | entorno | Alias de LiteLLM para `classify` |
 | `ai_cache` | `false` | Usar la caché de resultados de IA |
 | `semantic`, `semantic_threshold` | `false`, librería | Fase semántica |

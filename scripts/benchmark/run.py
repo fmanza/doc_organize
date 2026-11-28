@@ -62,6 +62,7 @@ from doc_organize import (
     dry_run_classify,
     load_gold_xlsx,
     parse_taxonomy_template,
+    review_queue,
     settings_from_env,
 )
 from doc_organize.context import domain_classifier
@@ -69,9 +70,9 @@ from doc_organize.context.evaluation import NONE_LABEL, common_root, document_ke
 from doc_organize.core.models import Context, ConversionResult
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-#: Umbral que ningún valor de reglas alcanza (notas 0-1): con `ai_scope="unclassified"` manda **todos** los documentos a
-#: la IA en dominio y tipo, que en esos ejes no está limitada por el umbral (`context_builder._apply_manifest_ai`). Los
-#: ejes que etiquetan quedan vacíos en ese modo (sí se filtran por umbral): medir solo dominio y tipo.
+#: Solo con `ai_all_legacy` (mediciones de 2.6.0): umbral que ningún valor de reglas alcanza (notas 0-1), para que
+#: `ai_scope="unclassified"` mande **todos** los documentos a la IA en dominio y tipo. Desde 2.7.0, `ai_all` usa
+#: `ai_scope="all"` con el umbral normal; el truco se conserva para comparar con lo medido antes.
 AI_ALL_THRESHOLD = 1.01
 ABLATIONS = ("whole_word", "no_divide", "head_only", "tie_abstain")
 #: Caracteres de título + comienzo que mira la ablación `head_only` (como `TAG_AXIS_TEXT_CHARS` en los ejes que etiquetan).
@@ -266,13 +267,13 @@ async def _dry_run(
     project: Project, documents: list[ConversionResult], gold: GoldStandard, roots: Sequence[str] | None, config: Mapping[str, Any]
 ) -> tuple[Context, float]:
     manifest = parse_taxonomy_template(Path(config["template"]).read_text(encoding="utf-8"), source="plantilla")
-    ai_all = bool(config.get("ai_all", False))
+    ai_all, threshold, ai_scope = _scope(config)
     options: dict[str, Any] = {
         "taxonomy_manifest": manifest,
-        "threshold": AI_ALL_THRESHOLD if ai_all else float(config.get("threshold", 0.5)),
+        "threshold": threshold,
         "decisions": bool(config.get("decisions", False)),  # W5: lo decidido por personas siempre «acierta»
         "semantic": bool(config.get("semantic", False)),
-        "ai_scope": "unclassified" if ai_all else config.get("ai_scope", "off"),
+        "ai_scope": ai_scope,
     }
     if "semantic_threshold" in config:
         options["semantic_threshold"] = float(config["semantic_threshold"])
@@ -297,6 +298,28 @@ async def _dry_run(
     if problem:
         sys.exit(f"{config['name']}: {problem} No se mide.")
     return result.context, seconds
+
+
+def _queue_line(context: Context, roots: Sequence[str] | None) -> str:
+    """Cuánto trabajo deja la configuración en la cola de revisión, por motivo, y cuántos ejes sustituyó la IA."""
+    reasons = Counter(item.reason for item in review_queue(context, roots=roots))
+    detail = ", ".join(f"{reason} {count}" for reason, count in sorted(reasons.items())) or "vacía"
+    documents = sum(len(domain.documents) for domain in context.domains) + len(context.unclassified_details)
+    return (
+        f"Cola de revisión: {sum(reasons.values())} elementos para {documents} documentos ({detail}) · "
+        f"ejes sustituidos por la IA: {context.ai_stats.classification.replaced}"
+    )
+
+
+def _scope(config: dict[str, Any]) -> tuple[bool, float, str]:
+    """Si la configuración manda la IA sobre todos los documentos, y con qué umbral y alcance."""
+    legacy = bool(config.get("ai_all_legacy", False))
+    if legacy:
+        return True, AI_ALL_THRESHOLD, "unclassified"
+    threshold = float(config.get("threshold", 0.5))
+    if config.get("ai_all", False):
+        return True, threshold, "all"
+    return False, threshold, str(config.get("ai_scope", "off"))
 
 
 def _incomplete(context: Context, documents: Sequence[ConversionResult], ai_all: bool) -> str | None:
@@ -516,6 +539,7 @@ def _report(
                         ),
                     ]
                 lines += _small_support_warning(evaluate_classification(context, view_gold, roots=roots))
+                lines += ["", _queue_line(context, roots)]
     if args.repeat > 1:
         lines += ["", "## Ruido entre repeticiones (exactitud)", "", "| Configuración | Eje | Mínima | Máxima | Rango |", "|---|---|---|---|---|"]
         for config in configs:
