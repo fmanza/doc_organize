@@ -173,9 +173,17 @@ def test_identical_classifications_are_non_inferior_but_not_better() -> None:
     assert (comparison.non_inferior, comparison.improved) == (True, False)
 
 
+def _assigned(correct: list[str], assigned: list[str]) -> tuple[Context, GoldStandard]:
+    """Un contexto que asigna `assigned[i]` al documento `i`, cuya etiqueta correcta es `correct[i]`."""
+    documents = [_document(f"d{i}.pdf", [value]) for i, value in enumerate(assigned)]
+    labels = [GoldLabel(document=f"d{i}.pdf", axes={"domains": [value]}) for i, value in enumerate(correct)]
+    return _context(*documents), GoldStandard(labels=labels)
+
+
 def test_clear_improvement_excludes_zero_and_mcnemar_is_exact() -> None:
-    baseline, gold = _contexts_with_hits([False] * 10)
-    candidate, _ = _contexts_with_hits([True] * 10)
+    correct = ["calidad", "riesgos"] * 5
+    baseline, gold = _assigned(correct, ["otro"] * 10)
+    candidate, _ = _assigned(correct, correct)
 
     comparison = compare_classifications(baseline, candidate, gold)
 
@@ -183,7 +191,58 @@ def test_clear_improvement_excludes_zero_and_mcnemar_is_exact() -> None:
     assert domains.accuracy.difference == 1.0 and domains.accuracy.ci_low == 1.0
     assert (domains.discordant_baseline_only, domains.discordant_candidate_only) == (0, 10)
     assert domains.p_value_mcnemar == round(2 / 2**10, 4)
+    assert (domains.majority_value, domains.majority_accuracy, domains.above_majority) == ("calidad", 0.5, True)
+    assert (domains.macro_f1.baseline, domains.macro_f1.candidate) == (0.0, 1.0)
     assert (comparison.non_inferior, comparison.improved) == (True, True)
+
+
+def test_always_the_majority_value_is_not_an_improvement() -> None:
+    """2.7.0: subir la exactitud hasta «asignar siempre lo más frecuente» no pasa la puerta (la ablación `no_divide` de
+    F0 lo hacía: 89 de 100 documentos al valor mayoritario)."""
+    correct = ["calidad"] * 6 + ["riesgos"] * 4
+    baseline, gold = _assigned(correct, ["otro"] * 10)
+    candidate, _ = _assigned(correct, ["calidad"] * 10)
+
+    domains = compare_classifications(baseline, candidate, gold).axes["domains"]
+
+    assert domains.accuracy.ci_low is not None and domains.accuracy.ci_low > 0  # sí mejora la exactitud…
+    assert (domains.majority_accuracy, domains.above_majority, domains.improved) == (0.6, False, False)  # …pero no aporta
+
+
+def test_dropping_rare_values_is_not_non_inferior() -> None:
+    """2.7.0: ganar exactitud dejando de asignar los valores poco frecuentes hunde el F1 macro: no es no inferior."""
+    correct = ["calidad"] * 80 + ["riesgos"] * 20
+    baseline, gold = _assigned(correct, ["calidad"] * 40 + ["otro"] * 40 + ["riesgos"] * 20)
+    candidate, _ = _assigned(correct, ["calidad"] * 100)
+
+    domains = compare_classifications(baseline, candidate, gold).axes["domains"]
+
+    assert domains.accuracy.difference == 0.2  # 0,6 → 0,8
+    assert domains.accuracy.ci_low is not None and domains.accuracy.ci_low >= -0.03  # por exactitud sería no inferior
+    assert domains.macro_f1.difference is not None and domains.macro_f1.difference < -0.3
+    assert domains.non_inferior is False
+
+
+def test_macro_f1_noise_alone_does_not_block_non_inferiority() -> None:
+    """El F1 macro entra por su valor: el mismo F1 con otra distribución de errores no tumba la no inferioridad."""
+    # 400 documentos; cada clasificación falla un «calidad» y un «riesgos», distintos: misma exactitud y mismo F1
+    correct = ["calidad"] * 320 + ["riesgos"] * 80
+    baseline, gold = _assigned(correct, ["otro"] + ["calidad"] * 319 + ["otro"] + ["riesgos"] * 79)
+    candidate, _ = _assigned(correct, ["calidad"] * 319 + ["otro"] + ["riesgos"] * 79 + ["otro"])
+
+    domains = compare_classifications(baseline, candidate, gold).axes["domains"]
+
+    assert domains.macro_f1.difference == 0.0 and domains.accuracy.difference == 0.0
+    assert domains.non_inferior is True
+
+
+def test_evaluation_reports_the_majority_baseline() -> None:
+    context, gold = _assigned(["calidad", "calidad", "calidad", "riesgos"], ["calidad"] * 4)
+
+    axis = evaluate_classification(context, gold).axes["domains"]
+
+    assert (axis.majority_value, axis.majority_accuracy) == ("calidad", 0.75)
+    assert "siempre «calidad» (mayoría) 0.75" in EvaluationReport(axes={"domains": axis}).to_markdown(detail=True)
 
 
 def test_a_worse_candidate_is_not_non_inferior() -> None:
