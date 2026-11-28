@@ -66,6 +66,19 @@ La regla de F0 era: «si la IA sobre todo el corpus gana claramente, se adelanta
 
 ## Plantilla con descripciones corregidas
 
-En curso al escribir esta nota: qwen2.5:14b con la plantilla actual frente a una copia (fuera del repositorio) con las
-descripciones de `cumplimiento-legal`, `mejora-medicion` y `politica` reescritas según la regla de etiquetado. El
-resultado se añadirá aquí.
+qwen2.5:14b con la plantilla actual frente a una copia (fuera del repositorio) con las descripciones de
+`cumplimiento-legal`, `mejora-medicion` y `politica` reescritas según la regla de etiquetado (calibración, 1
+repetición; la partida reproduce exactamente la medición anterior: 0,53 y 0,79).
+
+| Eje | Actual | Corregida | Diferencia, IC 95 % | F1 macro | Puerta |
+|---|---|---|---|---|---|
+| Dominio | 0,53 | 0,58 | +0,05 [−0,02, 0,12] | 0,49 → 0,54 | no inferior, sin mejora |
+| Tipo | 0,79 | 0,77 | −0,02 [−0,07, 0,02] | 0,65 → 0,65 | no pasa |
+
+- `politica` mejora (asignada 7 veces frente a 11, con 5 en la referencia).
+- `mejora-medicion` apenas: 1 de 9.
+- `cumplimiento-legal` sigue de más (55 frente a 35): el modelo no aplica «una guía de aplicación va al dominio de su
+  tema» solo con leerlo en la descripción.
+
+Conclusión: retocar descripciones no basta y no se adopta. La siguiente prueba sería llevar la regla de etiquetado al
+perfil del proyecto (reglas de desempate, que la IA lee aparte del catálogo), medida igual.
