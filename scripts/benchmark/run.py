@@ -62,6 +62,7 @@ from doc_organize import (
     dry_run_classify,
     load_gold_xlsx,
     parse_taxonomy_template,
+    review_queue,
     settings_from_env,
 )
 from doc_organize.context import domain_classifier
@@ -299,6 +300,17 @@ async def _dry_run(
     return result.context, seconds
 
 
+def _queue_line(context: Context, roots: Sequence[str] | None) -> str:
+    """Cuánto trabajo deja la configuración en la cola de revisión, por motivo, y cuántos ejes sustituyó la IA."""
+    reasons = Counter(item.reason for item in review_queue(context, roots=roots))
+    detail = ", ".join(f"{reason} {count}" for reason, count in sorted(reasons.items())) or "vacía"
+    documents = sum(len(domain.documents) for domain in context.domains) + len(context.unclassified_details)
+    return (
+        f"Cola de revisión: {sum(reasons.values())} elementos para {documents} documentos ({detail}) · "
+        f"ejes sustituidos por la IA: {context.ai_stats.classification.replaced}"
+    )
+
+
 def _scope(config: dict[str, Any]) -> tuple[bool, float, str]:
     """Si la configuración manda la IA sobre todos los documentos, y con qué umbral y alcance."""
     legacy = bool(config.get("ai_all_legacy", False))
@@ -527,6 +539,7 @@ def _report(
                         ),
                     ]
                 lines += _small_support_warning(evaluate_classification(context, view_gold, roots=roots))
+                lines += ["", _queue_line(context, roots)]
     if args.repeat > 1:
         lines += ["", "## Ruido entre repeticiones (exactitud)", "", "| Configuración | Eje | Mínima | Máxima | Rango |", "|---|---|---|---|---|"]
         for config in configs:
