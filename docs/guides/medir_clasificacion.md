@@ -35,8 +35,10 @@ al 95 % es de **±7 puntos**. Una mejora de 1 o 2 puntos entre dos evaluaciones 
 3. **Métricas.** Por eje: exactitud, F1 macro, exactitud sobre lo asignado y cobertura (una abstención no es un
    error: va a la cola de revisión), y confusiones por pareja.
 4. **Comparación.** Siempre pareada sobre los mismos documentos (`compare_classifications`): **no inferioridad** = el
-   límite inferior del intervalo de la diferencia no baja de −3 puntos en ningún eje; **mejora** = el intervalo excluye
-   el 0.
+   límite inferior del intervalo de la diferencia de exactitud no baja de −3 puntos en ningún eje y el F1 macro no baja
+   más de 3 puntos; **mejora** = el intervalo de la exactitud excluye el 0 y la candidata supera la línea base de
+   «asignar siempre el valor más frecuente» (2.7.0). Mirar siempre esa línea base: con clases desequilibradas, una
+   exactitud alta puede no aportar nada.
 5. **Ablación.** Un cambio por ejecución; las combinaciones, solo para confirmar.
 6. **IA sobre toda la referencia.** Para medir un cambio de prompt o de modelo, mandar a la IA todos los documentos, no
    solo los que las reglas dejan sin clasificar.

@@ -4,6 +4,27 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 Este proyecto sigue [SemVer](https://semver.org/lang/es/) desde v0.2.0 (sin
 releases publicados antes de esa versión).
 
+## [Unreleased]
+
+La puerta de `compare_classifications` deja de aceptar candidatas degeneradas (lo destapó la primera medición real de F0).
+Versión menor: campos nuevos con valor por defecto y un cambio de comportamiento (ver «Changed»).
+
+### Added
+
+- **Línea base de mayoría**: `AxisEvaluation.majority_value` y `majority_accuracy` (exactitud de asignar siempre el
+  valor más frecuente); `AxisComparison.majority_value`, `majority_accuracy` y `above_majority`.
+- **F1 macro en la comparación**: `AxisComparison.macro_f1` (`MetricComparison` con intervalo por bootstrap).
+  `ClassificationComparison.to_markdown()` añade las columnas de F1 macro y de mayoría, y
+  `EvaluationReport.to_markdown(detail=True)` la línea base.
+
+### Changed
+
+- **`AxisComparison.non_inferior`** exige además que el F1 macro no baje más de `margin` (por su valor, no por su
+  intervalo), y **`improved`** que la candidata supere la línea base de mayoría. En F0, la ablación `no_divide` asignaba
+  el valor mayoritario a casi todo: subía la exactitud de tipo de 0,20 a 0,54 (mayoría: 0,55) y hundía el F1 macro de
+  dominio de 0,25 a 0,07, y con la puerta de 2.6.0 «mejoraba». Una comparación que pasaba la puerta puede dejar de
+  pasarla; ninguna que no la pasaba empieza a pasarla.
+
 ## [2.6.0] - 2026-11-27
 
 Medir la clasificación antes de cambiarla (F0 del análisis de precisión del contexto). Versión menor: API nueva, campos

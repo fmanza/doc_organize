@@ -144,6 +144,10 @@ class AxisEvaluation(BaseModel):
             valores se juntan como en `confusions` y `NONE_LABEL` es el eje vacío (2.6.0).
         accuracy_by_confidence (list[ConfidenceBin]): Exactitud por fase y tramo de confianza del primer valor asignado
             (`CONFIDENCE_BIN_EDGES`); solo tramos con documentos (2.6.0).
+        majority_value (str | None): El valor (o combinación de valores) más frecuente en la referencia; `NONE_LABEL`
+            si lo más frecuente es el eje vacío (2.7.0).
+        majority_accuracy (float | None): Exactitud de asignar siempre `majority_value`: la línea base que una
+            clasificación tiene que superar para aportar algo (2.7.0).
     """
 
     axis: str
@@ -161,6 +165,8 @@ class AxisEvaluation(BaseModel):
     per_value: list[ValueMetrics] = Field(default_factory=list)
     confusion_matrix: dict[str, dict[str, int]] = Field(default_factory=dict)
     accuracy_by_confidence: list[ConfidenceBin] = Field(default_factory=list)
+    majority_value: str | None = None
+    majority_accuracy: float | None = None
 
 
 class EvaluationReport(BaseModel):
@@ -182,7 +188,8 @@ class EvaluationReport(BaseModel):
         """Una tabla con las métricas de cada eje (para pegar en un informe).
 
         Args:
-            detail: Añadir, por eje, la exactitud sobre lo asignado, el F1 macro y una tabla por valor (2.6.0).
+            detail: Añadir, por eje, la exactitud sobre lo asignado, el F1 macro, la línea base de mayoría (2.7.0) y una
+                tabla por valor (2.6.0).
 
         Example:
             >>> print(EvaluationReport(axes={"domains": AxisEvaluation(axis="domains", labelled=2, accuracy=0.5, coverage=1.0)}).to_markdown())
@@ -198,7 +205,10 @@ class EvaluationReport(BaseModel):
             for axis in self.axes.values():
                 lines += [
                     "",
-                    f"**{axis.axis}**: exactitud sobre lo asignado {_cell(axis.selective_accuracy)} · F1 macro {_cell(axis.macro_f1)}",
+                    (
+                        f"**{axis.axis}**: exactitud sobre lo asignado {_cell(axis.selective_accuracy)} · F1 macro {_cell(axis.macro_f1)}"
+                        f" · siempre «{axis.majority_value or '—'}» (mayoría) {_cell(axis.majority_accuracy)}"
+                    ),
                     "",
                     "| Valor | Referencia | Asignados | Aciertos | Precisión | Recall | F1 |",
                     "|---|---|---|---|---|---|---|",
@@ -239,10 +249,18 @@ class AxisComparison(BaseModel):
         coverage (MetricComparison): Fracción con algún valor asignado.
         discordant_baseline_only (int): Documentos que solo acierta la de partida (McNemar).
         discordant_candidate_only (int): Documentos que solo acierta la candidata (McNemar).
+        macro_f1 (MetricComparison): F1 macro (media del F1 de los valores de la referencia) (2.7.0).
         p_value_mcnemar (float): Prueba de McNemar bilateral sobre la exactitud (binomial exacta hasta 1000 pares
             discordantes; aproximación normal con corrección de continuidad por encima). 1,0 sin discordantes.
-        non_inferior (bool): El límite inferior del intervalo de la diferencia de exactitud no baja de `-margin`.
-        improved (bool): El intervalo de la diferencia de exactitud excluye el 0 por arriba.
+        majority_value (str | None): El valor más frecuente de la referencia en los documentos pareados (2.7.0).
+        majority_accuracy (float | None): Exactitud de asignar siempre `majority_value` (2.7.0).
+        above_majority (bool): La exactitud de la candidata supera la de `majority_value` (2.7.0).
+        non_inferior (bool): El límite inferior del intervalo de la diferencia de exactitud no baja de `-margin` y
+            (desde 2.7.0) la diferencia de F1 macro tampoco: una candidata que gana exactitud dejando de asignar los
+            valores poco frecuentes no es no inferior. El F1 macro se compara por su valor, no por su intervalo, que con
+            valores de pocos documentos es demasiado ancho para decidir (`macro_f1.ci_low` sale en el informe).
+        improved (bool): El intervalo de la diferencia de exactitud excluye el 0 por arriba y (desde 2.7.0) la
+            candidata supera la línea base de mayoría: subir hacia «asignar siempre lo más frecuente» no es mejorar.
     """
 
     axis: str
@@ -250,9 +268,13 @@ class AxisComparison(BaseModel):
     accuracy: MetricComparison = Field(default_factory=MetricComparison)
     selective_accuracy: MetricComparison = Field(default_factory=MetricComparison)
     coverage: MetricComparison = Field(default_factory=MetricComparison)
+    macro_f1: MetricComparison = Field(default_factory=MetricComparison)
     discordant_baseline_only: int = 0
     discordant_candidate_only: int = 0
     p_value_mcnemar: float = 1.0
+    majority_value: str | None = None
+    majority_accuracy: float | None = None
+    above_majority: bool = False
     non_inferior: bool = False
     improved: bool = False
 
@@ -261,7 +283,8 @@ class ClassificationComparison(BaseModel):
     """Resultado de `compare_classifications` (2.6.0).
 
     La puerta de una fase (`.ai/sessions/2026-11-27-precision-contexto/ANALISIS_MEJORAS.md` §9.3) es
-    `non_inferior and improved`: no empeora ningún eje más allá de `margin` y mejora alguno.
+    `non_inferior and improved`: no empeora ningún eje más allá de `margin` (ni en exactitud ni en F1 macro) y mejora
+    alguno por encima de la línea base de mayoría (2.7.0).
 
     Attributes:
         axes (dict[str, AxisComparison]): Por eje etiquetado, ordenados por clave.
@@ -284,24 +307,31 @@ class ClassificationComparison(BaseModel):
     improved: bool = False
 
     def to_markdown(self) -> str:
-        """Una tabla con la diferencia de exactitud de cada eje y su intervalo (para pegar en un informe).
+        """Una tabla con la diferencia de exactitud y de F1 macro de cada eje, sus intervalos y la línea base de mayoría
+        (para pegar en un informe).
 
         Example:
             >>> comparison = ClassificationComparison(axes={"domains": AxisComparison(axis="domains", paired=3)}, margin=0.03)
             >>> print(comparison.to_markdown().splitlines()[2])
-            | domains | 3 | — | — | — | — | 1.0 | no | no |
+            | domains | 3 | — | — | — | — | — | — | — | 1.0 | no | no |
         """
         level = round(self.confidence_level * 100)
         lines = [
-            f"| Eje | Pareados | Partida | Candidata | Diferencia | IC {level} % | McNemar p | No inferior (−{self.margin}) | Mejora |",
-            "|---|---|---|---|---|---|---|---|---|",
+            (
+                f"| Eje | Pareados | Partida | Candidata | Diferencia | IC {level} % | F1 macro (partida → candidata) | Dif. F1 macro, IC | "
+                f"Mayoría | McNemar p | No inferior (−{self.margin}) | Mejora |"
+            ),
+            "|---|---|---|---|---|---|---|---|---|---|---|---|",
         ]
         for axis in self.axes.values():
-            accuracy = axis.accuracy
-            interval = "—" if accuracy.ci_low is None else f"[{accuracy.ci_low}, {accuracy.ci_high}]"
+            accuracy, f1 = axis.accuracy, axis.macro_f1
+            f1_pair = "—" if f1.baseline is None and f1.candidate is None else f"{_cell(f1.baseline)} → {_cell(f1.candidate)}"
+            f1_difference = "—" if f1.difference is None else f"{f1.difference} {_interval(f1)}"
+            majority = "—" if axis.majority_value is None else f"«{axis.majority_value}» {_cell(axis.majority_accuracy)}"
             lines.append(
                 f"| {axis.axis} | {axis.paired} | {_cell(accuracy.baseline)} | {_cell(accuracy.candidate)} | {_cell(accuracy.difference)} | "
-                f"{interval} | {axis.p_value_mcnemar} | {_yes(axis.non_inferior)} | {_yes(axis.improved)} |"
+                f"{_interval(accuracy)} | {f1_pair} | {f1_difference} | {majority} | {axis.p_value_mcnemar} | {_yes(axis.non_inferior)} | "
+                f"{_yes(axis.improved)} |"
             )
         return "\n".join(lines)
 
@@ -571,6 +601,7 @@ def _axis_metrics(axis: str, multiple: bool, rows: list[_Row]) -> AxisEvaluation
     confusions = Counter((_joined(row.correct), _joined(row.assigned)) for row, hit in zip(rows, hits, strict=True) if not hit)
     per_value = _per_value(rows)
     supported = [metrics.f1 for metrics in per_value if metrics.support]
+    majority_value, majority_accuracy = _majority(rows)
     return AxisEvaluation(
         axis=axis,
         multiple=multiple,
@@ -589,7 +620,23 @@ def _axis_metrics(axis: str, multiple: bool, rows: list[_Row]) -> AxisEvaluation
         per_value=per_value,
         confusion_matrix=_confusion_matrix(rows),
         accuracy_by_confidence=_confidence_bins(rows),
+        majority_value=majority_value,
+        majority_accuracy=majority_accuracy,
     )
+
+
+def _majority(rows: list[_Row]) -> tuple[str | None, float | None]:
+    """El valor más frecuente de la referencia (como `_joined`) y la exactitud de asignarlo siempre."""
+    counts = Counter(_joined(row.correct) for row in rows)
+    if not counts:
+        return None, None
+    value, count = min(counts.items(), key=lambda item: (-item[1], item[0]))  # empate: el primero por orden alfabético
+    return value, _ratio(count, len(rows))
+
+
+def _macro_f1(rows: list[_Row]) -> float | None:
+    supported = [metrics.f1 for metrics in _per_value(rows) if metrics.support]
+    return sum(supported) / len(supported) if supported else None
 
 
 def _per_value(rows: list[_Row]) -> list[ValueMetrics]:
@@ -642,7 +689,7 @@ def _axis_comparison(
     axis: str, pairs: list[tuple[_Row, _Row]], rng: random.Random, resamples: int, margin: float, confidence_level: float
 ) -> AxisComparison:
     """La comparación de un eje: estimaciones puntuales, intervalos por bootstrap pareado y McNemar."""
-    metrics = {"accuracy": _accuracy, "selective_accuracy": _selective_accuracy, "coverage": _coverage}
+    metrics = {"accuracy": _accuracy, "selective_accuracy": _selective_accuracy, "coverage": _coverage, "macro_f1": _macro_f1}
     samples: dict[str, list[float]] = {name: [] for name in metrics}
     indexes = range(len(pairs))
     for _ in range(resamples):
@@ -665,18 +712,26 @@ def _axis_comparison(
         )
     baseline_only = sum(1 for before, after in pairs if before.hit and not after.hit)
     candidate_only = sum(1 for before, after in pairs if after.hit and not before.hit)
-    low = compared["accuracy"].ci_low
+    low, f1_difference = compared["accuracy"].ci_low, compared["macro_f1"].difference
+    majority_value, majority_accuracy = _majority([pair[0] for pair in pairs])  # la referencia es la misma en los dos
+    above_majority = _above(compared["accuracy"].candidate, majority_accuracy)
     return AxisComparison(
         axis=axis,
         paired=len(pairs),
         accuracy=compared["accuracy"],
         selective_accuracy=compared["selective_accuracy"],
         coverage=compared["coverage"],
+        macro_f1=compared["macro_f1"],
         discordant_baseline_only=baseline_only,
         discordant_candidate_only=candidate_only,
         p_value_mcnemar=_mcnemar(baseline_only, candidate_only),
-        non_inferior=low is not None and low >= -margin,
-        improved=low is not None and low > 0,
+        majority_value=majority_value,
+        majority_accuracy=majority_accuracy,
+        above_majority=above_majority,
+        # El F1 macro, por su valor y no por su intervalo: con valores de pocos documentos el intervalo es tan ancho
+        # (±0,08 con 100 documentos en F0) que ninguna candidata pasaría; basta para atrapar el colapso a un valor.
+        non_inferior=low is not None and low >= -margin and f1_difference is not None and f1_difference >= -margin,
+        improved=low is not None and low > 0 and above_majority,
     )
 
 
@@ -721,6 +776,14 @@ def _rounded(value: float | None) -> float | None:
 
 def _cell(value: float | None) -> str:
     return "—" if value is None else str(value)
+
+
+def _above(value: float | None, baseline: float | None) -> bool:
+    return value is not None and baseline is not None and value > baseline
+
+
+def _interval(metric: MetricComparison) -> str:
+    return "—" if metric.ci_low is None else f"[{metric.ci_low}, {metric.ci_high}]"
 
 
 def _yes(flag: bool) -> str:
