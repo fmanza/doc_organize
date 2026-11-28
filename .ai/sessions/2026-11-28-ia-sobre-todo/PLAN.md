@@ -149,3 +149,18 @@ reglas por eje, `missing`, `_apply_manifest_ai`, validación) y tests → L3 ben
 `zensical build --strict`.
 
 **Rama**: `feat/ia-sobre-todo` desde `develop` (PR con `--base develop`).
+
+---
+
+## Resultado de C1 (2026-11-28)
+
+qwen2.5:14b, calibración (100 documentos), 1 repetición, `ai_scope="all"` real frente al truco del umbral de 2.6.0:
+
+| Eje | Truco (2.6.0) | `ai_scope="all"` | Diferencia | Dentro de ±0,02 |
+|---|---|---|---|---|
+| Dominio | 0,53 (F1 0,49) | 0,53 (F1 0,48) | 0,00 | sí |
+| Tipo | 0,79 (F1 0,65) | 0,78 (F1 0,63) | −0,01 | sí |
+
+**C1 cumplida.** Cola de revisión (riesgo abierto en AUDIT_CODE): 16 elementos para 100 documentos, todos
+`unverified_evidence`; ningún `low_confidence` ni `rules_ai_disagreement`. La IA sustituyó 146 de los 200 ejes
+organizadores que habían asignado las reglas. La cola no se inunda.
